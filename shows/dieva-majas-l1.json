@@ -492,10 +492,10 @@
       "profile": "generic-led-strip-rgb-3-ch",
       "universe": 1,
       "address": 221,
-      "x": 0.862,
-      "y": 0.062,
+      "x": 0.844,
+      "y": 0.1,
       "w": 0.215,
-      "h": 0.0
+      "h": 0
     },
     {
       "id": "b8",
@@ -596,8 +596,6 @@
       "id": "front-lights-silti-3200k",
       "name": "Silti 3200K",
       "group": "front-lights",
-      "fade": 3,
-      "swatch": "#ffb46b",
       "layers": [
         {
           "kind": "static",
@@ -606,14 +604,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ffb46b"
     },
     {
       "id": "front-lights-neitrali-5600k",
       "name": "Neitrāli 5600K",
       "group": "front-lights",
-      "fade": 3,
-      "swatch": "#ffeedd",
       "layers": [
         {
           "kind": "static",
@@ -622,14 +620,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ffeedd"
     },
     {
       "id": "front-lights-vesi-6500k",
       "name": "Vēsi 6500K",
       "group": "front-lights",
-      "fade": 3,
-      "swatch": "#fffaf6",
       "layers": [
         {
           "kind": "static",
@@ -638,14 +636,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#fffaf6"
     },
     {
       "id": "front-lights-silti-50",
       "name": "Silti 50%",
       "group": "front-lights",
-      "fade": 3,
-      "swatch": "#ffb46b",
       "layers": [
         {
           "kind": "static",
@@ -654,14 +652,14 @@
           },
           "intensity": 0.5
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ffb46b"
     },
     {
       "id": "front-lights-off",
       "name": "Izslēgts",
       "group": "front-lights",
-      "fade": 3,
-      "swatch": "#000000",
       "layers": [
         {
           "kind": "static",
@@ -670,14 +668,14 @@
           },
           "intensity": 0
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#000000"
     },
     {
       "id": "key-lights-silti-balts",
       "name": "Silti balts",
       "group": "key-lights",
-      "fade": 3,
-      "swatch": "#ffaa5a",
       "layers": [
         {
           "kind": "static",
@@ -687,14 +685,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ffaa5a"
     },
     {
       "id": "key-lights-vesi-balts",
       "name": "Vēsi balts",
       "group": "key-lights",
-      "fade": 3,
-      "swatch": "#dcebff",
       "layers": [
         {
           "kind": "static",
@@ -704,14 +702,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#dcebff"
     },
     {
       "id": "key-lights-sarkans",
       "name": "Sarkans",
       "group": "key-lights",
-      "fade": 3,
-      "swatch": "#ff0000",
       "layers": [
         {
           "kind": "static",
@@ -721,14 +719,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ff0000"
     },
     {
       "id": "key-lights-oranzs",
       "name": "Oranžs",
       "group": "key-lights",
-      "fade": 3,
-      "swatch": "#ff5a00",
       "layers": [
         {
           "kind": "static",
@@ -738,14 +736,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ff5a00"
     },
     {
       "id": "key-lights-dzeltens",
       "name": "Dzeltens",
       "group": "key-lights",
-      "fade": 3,
-      "swatch": "#ffc800",
       "layers": [
         {
           "kind": "static",
@@ -755,14 +753,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ffc800"
     },
     {
       "id": "key-lights-zals",
       "name": "Zaļš",
       "group": "key-lights",
-      "fade": 3,
-      "swatch": "#00ff00",
       "layers": [
         {
           "kind": "static",
@@ -772,14 +770,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#00ff00"
     },
     {
       "id": "key-lights-tirkizs",
       "name": "Tirkīzs",
       "group": "key-lights",
-      "fade": 3,
-      "swatch": "#00ffc8",
       "layers": [
         {
           "kind": "static",
@@ -789,14 +787,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#00ffc8"
     },
     {
       "id": "key-lights-zils",
       "name": "Zils",
       "group": "key-lights",
-      "fade": 3,
-      "swatch": "#0000ff",
       "layers": [
         {
           "kind": "static",
@@ -806,14 +804,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#0000ff"
     },
     {
       "id": "key-lights-violets",
       "name": "Violets",
       "group": "key-lights",
-      "fade": 3,
-      "swatch": "#8c00ff",
       "layers": [
         {
           "kind": "static",
@@ -823,14 +821,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#8c00ff"
     },
     {
       "id": "key-lights-roza",
       "name": "Rozā",
       "group": "key-lights",
-      "fade": 3,
-      "swatch": "#ff008c",
       "layers": [
         {
           "kind": "static",
@@ -840,14 +838,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ff008c"
     },
     {
       "id": "key-lights-off",
       "name": "Izslēgts",
       "group": "key-lights",
-      "fade": 3,
-      "swatch": "#000000",
       "layers": [
         {
           "kind": "static",
@@ -856,14 +854,14 @@
           },
           "intensity": 0
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#000000"
     },
     {
       "id": "background-silti-balts",
       "name": "Silti balts",
       "group": "background",
-      "fade": 3,
-      "swatch": "#ffaa5a",
       "layers": [
         {
           "kind": "static",
@@ -873,14 +871,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ffaa5a"
     },
     {
       "id": "background-vesi-balts",
       "name": "Vēsi balts",
       "group": "background",
-      "fade": 3,
-      "swatch": "#dcebff",
       "layers": [
         {
           "kind": "static",
@@ -890,14 +888,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#dcebff"
     },
     {
       "id": "background-sarkans",
       "name": "Sarkans",
       "group": "background",
-      "fade": 3,
-      "swatch": "#ff0000",
       "layers": [
         {
           "kind": "static",
@@ -907,14 +905,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ff0000"
     },
     {
       "id": "background-oranzs",
       "name": "Oranžs",
       "group": "background",
-      "fade": 3,
-      "swatch": "#ff5a00",
       "layers": [
         {
           "kind": "static",
@@ -924,14 +922,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ff5a00"
     },
     {
       "id": "background-dzeltens",
       "name": "Dzeltens",
       "group": "background",
-      "fade": 3,
-      "swatch": "#ffc800",
       "layers": [
         {
           "kind": "static",
@@ -941,14 +939,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ffc800"
     },
     {
       "id": "background-zals",
       "name": "Zaļš",
       "group": "background",
-      "fade": 3,
-      "swatch": "#00ff00",
       "layers": [
         {
           "kind": "static",
@@ -958,14 +956,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#00ff00"
     },
     {
       "id": "background-tirkizs",
       "name": "Tirkīzs",
       "group": "background",
-      "fade": 3,
-      "swatch": "#00ffc8",
       "layers": [
         {
           "kind": "static",
@@ -975,14 +973,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#00ffc8"
     },
     {
       "id": "background-zils",
       "name": "Zils",
       "group": "background",
-      "fade": 3,
-      "swatch": "#0000ff",
       "layers": [
         {
           "kind": "static",
@@ -992,14 +990,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#0000ff"
     },
     {
       "id": "background-violets",
       "name": "Violets",
       "group": "background",
-      "fade": 3,
-      "swatch": "#8c00ff",
       "layers": [
         {
           "kind": "static",
@@ -1009,14 +1007,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#8c00ff"
     },
     {
       "id": "background-roza",
       "name": "Rozā",
       "group": "background",
-      "fade": 3,
-      "swatch": "#ff008c",
       "layers": [
         {
           "kind": "static",
@@ -1026,14 +1024,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ff008c"
     },
     {
       "id": "background-off",
       "name": "Izslēgts",
       "group": "background",
-      "fade": 3,
-      "swatch": "#000000",
       "layers": [
         {
           "kind": "static",
@@ -1042,14 +1040,14 @@
           },
           "intensity": 0
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#000000"
     },
     {
       "id": "drum-cage-silti-balts",
       "name": "Silti balts",
       "group": "drum-cage",
-      "fade": 3,
-      "swatch": "#ffaa5a",
       "layers": [
         {
           "kind": "static",
@@ -1059,14 +1057,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ffaa5a"
     },
     {
       "id": "drum-cage-vesi-balts",
       "name": "Vēsi balts",
       "group": "drum-cage",
-      "fade": 3,
-      "swatch": "#dcebff",
       "layers": [
         {
           "kind": "static",
@@ -1076,14 +1074,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#dcebff"
     },
     {
       "id": "drum-cage-sarkans",
       "name": "Sarkans",
       "group": "drum-cage",
-      "fade": 3,
-      "swatch": "#ff0000",
       "layers": [
         {
           "kind": "static",
@@ -1093,14 +1091,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ff0000"
     },
     {
       "id": "drum-cage-oranzs",
       "name": "Oranžs",
       "group": "drum-cage",
-      "fade": 3,
-      "swatch": "#ff5a00",
       "layers": [
         {
           "kind": "static",
@@ -1110,14 +1108,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ff5a00"
     },
     {
       "id": "drum-cage-dzeltens",
       "name": "Dzeltens",
       "group": "drum-cage",
-      "fade": 3,
-      "swatch": "#ffc800",
       "layers": [
         {
           "kind": "static",
@@ -1127,14 +1125,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ffc800"
     },
     {
       "id": "drum-cage-zals",
       "name": "Zaļš",
       "group": "drum-cage",
-      "fade": 3,
-      "swatch": "#00ff00",
       "layers": [
         {
           "kind": "static",
@@ -1144,14 +1142,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#00ff00"
     },
     {
       "id": "drum-cage-tirkizs",
       "name": "Tirkīzs",
       "group": "drum-cage",
-      "fade": 3,
-      "swatch": "#00ffc8",
       "layers": [
         {
           "kind": "static",
@@ -1161,14 +1159,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#00ffc8"
     },
     {
       "id": "drum-cage-zils",
       "name": "Zils",
       "group": "drum-cage",
-      "fade": 3,
-      "swatch": "#0000ff",
       "layers": [
         {
           "kind": "static",
@@ -1178,14 +1176,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#0000ff"
     },
     {
       "id": "drum-cage-violets",
       "name": "Violets",
       "group": "drum-cage",
-      "fade": 3,
-      "swatch": "#8c00ff",
       "layers": [
         {
           "kind": "static",
@@ -1195,14 +1193,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#8c00ff"
     },
     {
       "id": "drum-cage-roza",
       "name": "Rozā",
       "group": "drum-cage",
-      "fade": 3,
-      "swatch": "#ff008c",
       "layers": [
         {
           "kind": "static",
@@ -1212,14 +1210,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ff008c"
     },
     {
       "id": "drum-cage-off",
       "name": "Izslēgts",
       "group": "drum-cage",
-      "fade": 3,
-      "swatch": "#000000",
       "layers": [
         {
           "kind": "static",
@@ -1228,14 +1226,14 @@
           },
           "intensity": 0
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#000000"
     },
     {
       "id": "b8-side-bar-silti-balts",
       "name": "Silti balts",
       "group": "b8-side-bar",
-      "fade": 3,
-      "swatch": "#ffaa5a",
       "layers": [
         {
           "kind": "static",
@@ -1245,14 +1243,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ffaa5a"
     },
     {
       "id": "b8-side-bar-vesi-balts",
       "name": "Vēsi balts",
       "group": "b8-side-bar",
-      "fade": 3,
-      "swatch": "#dcebff",
       "layers": [
         {
           "kind": "static",
@@ -1262,14 +1260,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#dcebff"
     },
     {
       "id": "b8-side-bar-sarkans",
       "name": "Sarkans",
       "group": "b8-side-bar",
-      "fade": 3,
-      "swatch": "#ff0000",
       "layers": [
         {
           "kind": "static",
@@ -1279,14 +1277,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ff0000"
     },
     {
       "id": "b8-side-bar-oranzs",
       "name": "Oranžs",
       "group": "b8-side-bar",
-      "fade": 3,
-      "swatch": "#ff5a00",
       "layers": [
         {
           "kind": "static",
@@ -1296,14 +1294,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ff5a00"
     },
     {
       "id": "b8-side-bar-dzeltens",
       "name": "Dzeltens",
       "group": "b8-side-bar",
-      "fade": 3,
-      "swatch": "#ffc800",
       "layers": [
         {
           "kind": "static",
@@ -1313,14 +1311,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ffc800"
     },
     {
       "id": "b8-side-bar-zals",
       "name": "Zaļš",
       "group": "b8-side-bar",
-      "fade": 3,
-      "swatch": "#00ff00",
       "layers": [
         {
           "kind": "static",
@@ -1330,14 +1328,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#00ff00"
     },
     {
       "id": "b8-side-bar-tirkizs",
       "name": "Tirkīzs",
       "group": "b8-side-bar",
-      "fade": 3,
-      "swatch": "#00ffc8",
       "layers": [
         {
           "kind": "static",
@@ -1347,14 +1345,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#00ffc8"
     },
     {
       "id": "b8-side-bar-zils",
       "name": "Zils",
       "group": "b8-side-bar",
-      "fade": 3,
-      "swatch": "#0000ff",
       "layers": [
         {
           "kind": "static",
@@ -1364,14 +1362,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#0000ff"
     },
     {
       "id": "b8-side-bar-violets",
       "name": "Violets",
       "group": "b8-side-bar",
-      "fade": 3,
-      "swatch": "#8c00ff",
       "layers": [
         {
           "kind": "static",
@@ -1381,14 +1379,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#8c00ff"
     },
     {
       "id": "b8-side-bar-roza",
       "name": "Rozā",
       "group": "b8-side-bar",
-      "fade": 3,
-      "swatch": "#ff008c",
       "layers": [
         {
           "kind": "static",
@@ -1398,14 +1396,14 @@
           },
           "intensity": 1
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#ff008c"
     },
     {
       "id": "b8-side-bar-off",
       "name": "Izslēgts",
       "group": "b8-side-bar",
-      "fade": 3,
-      "swatch": "#000000",
       "layers": [
         {
           "kind": "static",
@@ -1414,15 +1412,17 @@
           },
           "intensity": 0
         }
-      ]
+      ],
+      "fade": 3,
+      "swatch": "#000000"
     }
   ],
   "looks": [
     {
       "id": "walk-in",
       "name": "Walk-in",
-      "section": "Before",
       "swatch": "#0000ff",
+      "section": "Before",
       "groups": [
         {
           "group": "front-lights",
@@ -1449,8 +1449,8 @@
     {
       "id": "worship",
       "name": "Worship",
-      "section": "Worship",
       "swatch": "#8c00ff",
+      "section": "Worship",
       "groups": [
         {
           "group": "front-lights",
@@ -1477,8 +1477,8 @@
     {
       "id": "sermon",
       "name": "Sermon",
-      "section": "Word",
       "swatch": "#0000ff",
+      "section": "Word",
       "groups": [
         {
           "group": "front-lights",
@@ -1505,8 +1505,8 @@
     {
       "id": "response",
       "name": "Response",
-      "section": "Response",
       "swatch": "#ff5a00",
+      "section": "Response",
       "groups": [
         {
           "group": "front-lights",
@@ -1533,8 +1533,8 @@
     {
       "id": "prayer",
       "name": "Prayer",
-      "section": "Response",
       "swatch": "#0000ff",
+      "section": "Response",
       "groups": [
         {
           "group": "front-lights",
@@ -1561,8 +1561,8 @@
     {
       "id": "all-white",
       "name": "All white",
-      "section": "Utility",
       "swatch": "#dcebff",
+      "section": "Utility",
       "groups": [
         {
           "group": "front-lights",
@@ -1610,6 +1610,7 @@
       "kind": "artnet",
       "host": "192.168.0.114"
     },
+    "outputEnabled": true,
     "frameRate": 40,
     "gamma": 2.2
   },

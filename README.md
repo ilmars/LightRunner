@@ -2,7 +2,12 @@
 
 A browser-based lighting app that lets volunteers run a church service by tapping a handful of pre-built looks. One small Node.js server drives the lights over Art-Net, sACN or an ENTTEC DMX USB Pro; tablets, laptops and (later) Companion or a MIDI controller all send it the same commands.
 
-See [docs/PLAN.md](docs/PLAN.md) for the implementation plan.
+Start here:
+- [docs/STATUS.md](docs/STATUS.md): what's built, what's next, known issues
+- [docs/SPEC.md](docs/SPEC.md): the product spec
+- [docs/DECISIONS.md](docs/DECISIONS.md): choices made and why
+- [CONTRIBUTING.md](CONTRIBUTING.md): set up on your computer and send changes
+- [docs/PLAN.md](docs/PLAN.md): the original implementation plan
 
 ## Run it
 
