@@ -127,6 +127,8 @@ function changed() {
 // ---- Rendering ----
 
 function renderAll() {
+  renderMap();
+  renderLibrary();
   renderFixtures();
   renderGroups();
   renderStage();
@@ -143,7 +145,9 @@ function renderFixtures() {
   const body = $('fixtureRows');
   body.replaceChildren();
   for (const f of show.fixtures) {
-    const tr = el('tr', problems.has(f.id) ? 'bad' : null);
+    const tr = el('tr', [problems.has(f.id) ? 'bad' : '', f.id === selectedId ? 'sel' : ''].join(' ').trim() || null);
+    tr.dataset.id = f.id;
+    tr.addEventListener('pointerdown', () => { if (selectedId !== f.id) selectFixture(f.id, false); });
 
     const name = el('input');
     name.type = 'text';
@@ -256,24 +260,262 @@ $('addForm').addEventListener('submit', (ev) => {
   const universe = clampInt($('addUniverse').value, 0, 32767, 0);
   const start = clampInt($('addAddress').value, 1, 512, 1);
   if (!p || !prefix) return;
-  if (start + p.channels * count - 1 > 512) return toast('Those fixtures run past channel 512. Use a lower start address or another universe.', true);
+  if (addFixtures(p, prefix, count, universe, start)) {
+    toast(`Added ${count} ${count === 1 ? 'fixture' : 'fixtures'}. Put them in a group and on the stage plan, then save.`);
+    suggestAddress();
+  }
+});
+
+/** Patch `count` fixtures of type `p` from `start`. Returns the first new fixture, or null. */
+function addFixtures(p, prefix, count, universe, start) {
+  if (start + p.channels * count - 1 > 512) {
+    toast('Those fixtures run past channel 512. Use a lower start address or another universe.', true);
+    return null;
+  }
   const taken = new Set(show.fixtures.map((f) => f.id));
   // Number new fixtures after any that already use this name ("Bar 3", "Bar 4"...).
-  const existing = show.fixtures.map((f) => f.name.match(new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (\\d+)$`))).filter(Boolean).map((m) => Number(m[1]));
-  let n = existing.length ? Math.max(...existing) + 1 : 1;
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const existing = show.fixtures.map((f) => f.name.match(new RegExp(`^${escaped} (\\d+)$`))).filter(Boolean).map((m) => Number(m[1]));
+  const plain = show.fixtures.some((f) => f.name === prefix);
+  let n = existing.length ? Math.max(...existing) + 1 : plain ? 2 : 1;
+  let first = null;
   for (let k = 0; k < count; k++) {
-    const name = count === 1 && !existing.length ? prefix : `${prefix} ${n++}`;
+    const name = count === 1 && !existing.length && !plain ? prefix : `${prefix} ${n++}`;
     const id = uniqueId(name, taken);
     taken.add(id);
-    show.fixtures.push({
+    const f = {
       id, name, profile: p.id, universe, address: start + k * p.channels,
       x: count === 1 ? 0.5 : Math.round((0.1 + (0.8 * k) / (count - 1)) * 1000) / 1000, y: 0.5,
-    });
+    };
+    show.fixtures.push(f);
+    first ??= f;
   }
-  toast(`Added ${count} ${count === 1 ? 'fixture' : 'fixtures'}. Put them in a group and on the stage plan, then save.`);
+  selectedId = first.id;
+  viewUniverse = universe;
   changed();
-  suggestAddress();
-});
+  return first;
+}
+
+// ---- Graphical patch: the universe map ----
+
+const COLS = 32;
+let selectedId = null;
+let viewUniverse = null;
+
+/** One colour per fixture type, so fixtures of the same kind look alike (as in Lightkey). */
+function typeColour(profileId, alt = false) {
+  let h = 7;
+  for (const c of profileId) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return `hsl(${h % 360} 48% ${alt ? 28 : 38}%)`;
+}
+
+const shortName = (f) => {
+  const first = f.name.split(' ')[0];
+  return /^[A-Za-z]{1,3}\d{1,3}$/.test(first) ? first : f.name;
+};
+
+function universeList() {
+  const set = new Set(show.fixtures.map((f) => f.universe));
+  if (viewUniverse !== null) set.add(viewUniverse);
+  if (!set.size) set.add(1);
+  return [...set].sort((a, b) => a - b);
+}
+
+function selectFixture(id, scroll) {
+  selectedId = id;
+  const f = show.fixtures.find((x) => x.id === id);
+  if (f) viewUniverse = f.universe;
+  renderMap();
+  for (const tr of $('fixtureRows').children) tr.classList.toggle('sel', tr.dataset.id === id);
+  if (scroll) document.querySelector(`#fixtureRows tr[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+/** DMX channel under a pointer position, or null when outside the map. */
+function channelAt(x, y) {
+  const r = $('dmxMap').getBoundingClientRect();
+  if (x < r.left || x > r.right || y < r.top || y > r.bottom) return null;
+  const col = Math.min(COLS - 1, Math.floor(((x - r.left) / r.width) * COLS));
+  const row = Math.min(512 / COLS - 1, Math.floor(((y - r.top) / r.height) * (512 / COLS)));
+  return row * COLS + col + 1;
+}
+
+function renderMap() {
+  const universes = universeList();
+  if (viewUniverse === null || !universes.includes(viewUniverse)) viewUniverse = universes[0];
+  const tabs = $('universeTabs');
+  tabs.replaceChildren();
+  for (const u of universes) {
+    const used = show.fixtures.filter((f) => f.universe === u).reduce((n, f) => n + footprint(f), 0);
+    const b = el('button', u === viewUniverse ? 'utab on' : 'utab', `Universe ${u}`);
+    b.title = `${used} of 512 channels used`;
+    b.addEventListener('click', () => { viewUniverse = u; renderMap(); });
+    tabs.append(b);
+  }
+  const more = el('button', 'utab', '+');
+  more.title = 'Add a universe';
+  more.addEventListener('click', () => { viewUniverse = Math.max(...universes) + 1; renderMap(); });
+  tabs.append(more);
+
+  const grid = $('dmxMap');
+  grid.replaceChildren();
+  for (let ch = 1; ch <= 512; ch++) {
+    const cell = el('div', 'cell', String(ch));
+    cell.dataset.ch = String(ch);
+    cell.style.gridRow = String(Math.floor((ch - 1) / COLS) + 1);
+    cell.style.gridColumn = String(((ch - 1) % COLS) + 1);
+    // Tap a free channel to add fixtures there.
+    cell.addEventListener('click', () => {
+      $('addUniverse').value = String(viewUniverse);
+      $('addAddress').value = String(ch);
+      updateAddHint();
+      $('addForm').scrollIntoView({ block: 'center', behavior: 'smooth' });
+      $('addName').focus({ preventScroll: true });
+    });
+    grid.append(cell);
+  }
+  const problems = addressProblems();
+  let used = 0;
+  // Neighbours of the same type alternate shade, so back-to-back bars stay distinguishable.
+  const inUniverse = show.fixtures.filter((f) => f.universe === viewUniverse).sort((a, b) => a.address - b.address);
+  const alt = new Map();
+  inUniverse.forEach((f, k) => {
+    const prev = inUniverse[k - 1];
+    alt.set(f.id, prev && prev.profile === f.profile ? !alt.get(prev.id) : false);
+  });
+  for (const f of inUniverse) {
+    const n = footprint(f);
+    used += n;
+    let start = f.address, left = n, first = true;
+    while (left > 0 && start <= 512) {
+      const col = (start - 1) % COLS;
+      const span = Math.min(left, COLS - col);
+      const cls = ['block', first ? '' : 'cont', problems.has(f.id) ? 'bad' : '', f.id === selectedId ? 'sel' : ''].filter(Boolean).join(' ');
+      const block = el('div', cls);
+      block.style.gridRow = String(Math.floor((start - 1) / COLS) + 1);
+      block.style.gridColumn = `${col + 1} / span ${span}`;
+      block.style.background = typeColour(f.profile, alt.get(f.id));
+      if (first) {
+        block.append(el('span', null, shortName(f)));
+        if (span >= 4) block.append(el('small', null, `${f.address}–${f.address + n - 1}`));
+      } else if (span >= 3) {
+        block.append(el('small', null, `${shortName(f)} …`));
+      }
+      block.title = `${f.name}\n${profileById.get(f.profile)?.name ?? f.profile}\nChannels ${f.address}–${f.address + n - 1}${problems.has(f.id) ? `\n${problems.get(f.id)}` : ''}`;
+      block.addEventListener('pointerdown', (ev) => startBlockDrag(ev, f));
+      grid.append(block);
+      start += span;
+      left -= span;
+      first = false;
+    }
+  }
+  $('mapInfo').textContent = `Universe ${viewUniverse}: ${used} of 512 channels used. Drag a fixture to move it; tap a free channel to add fixtures there.`;
+}
+
+/** Drag a fixture block to a new start address. A tap without moving just selects it. */
+function startBlockDrag(ev, f) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const grab = (channelAt(ev.clientX, ev.clientY) ?? f.address) - f.address;
+  const n = footprint(f);
+  const startAddress = f.address;
+  let moved = false;
+  selectFixture(f.id, true);
+  const move = (e) => {
+    const ch = channelAt(e.clientX, e.clientY);
+    if (ch === null) return;
+    const next = Math.min(512 - n + 1, Math.max(1, ch - grab));
+    if (next !== f.address) {
+      f.address = next;
+      moved = true;
+      renderMap();
+      for (const b of document.querySelectorAll('.block.sel')) b.classList.add('dragging');
+    }
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    if (moved && f.address !== startAddress) changed();
+    else renderMap();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+}
+
+// ---- Fixture library ----
+
+const typeLabel = (p) => p.name.replace(/\s*\([^)]*\)\s*$/, '');
+
+function renderLibrary() {
+  const q = $('libSearch').value.trim().toLowerCase();
+  const list = $('libList');
+  list.replaceChildren();
+  for (const p of profiles) {
+    if (q && !p.name.toLowerCase().includes(q)) continue;
+    const item = el('div', $('addProfile').value === p.id ? 'lib-item picked' : 'lib-item');
+    const swatch = el('i');
+    swatch.style.background = typeColour(p.id);
+    item.append(swatch, el('span', null, typeLabel(p)), el('small', null, `${p.channels} ch`));
+    item.title = p.name;
+    item.addEventListener('pointerdown', (ev) => startLibraryDrag(ev, p, item));
+    list.append(item);
+  }
+}
+$('libSearch').addEventListener('input', renderLibrary);
+
+/** Drag a fixture type from the library onto the map to patch one there. */
+function startLibraryDrag(ev, p, item) {
+  ev.preventDefault();
+  const ghost = el('div', 'drag-ghost', `${typeLabel(p)} · ${p.channels} ch`);
+  ghost.style.background = typeColour(p.id);
+  let dragging = false;
+  const x0 = ev.clientX, y0 = ev.clientY;
+  let target = null;
+  const clearDrop = () => { for (const c of document.querySelectorAll('.cell.drop, .cell.drop-bad')) c.classList.remove('drop', 'drop-bad'); };
+  const move = (e) => {
+    if (!dragging && Math.hypot(e.clientX - x0, e.clientY - y0) < 6) return;
+    if (!dragging) { dragging = true; document.body.append(ghost); }
+    ghost.style.left = `${e.clientX}px`;
+    ghost.style.top = `${e.clientY}px`;
+    clearDrop();
+    target = channelAt(e.clientX, e.clientY);
+    if (target === null) return;
+    // Show where it would land, red where it would overlap or run past 512.
+    const busy = new Set();
+    for (const f of show.fixtures) if (f.universe === viewUniverse) for (let c = f.address; c < f.address + footprint(f); c++) busy.add(c);
+    const bad = target + p.channels - 1 > 512 || [...Array(p.channels).keys()].some((k) => busy.has(target + k));
+    for (let k = 0; k < p.channels && target + k <= 512; k++) {
+      document.querySelector(`.cell[data-ch="${target + k}"]`)?.classList.add(bad ? 'drop-bad' : 'drop');
+    }
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    ghost.remove();
+    clearDrop();
+    if (!dragging) {
+      // A tap picks the type for "Add fixtures".
+      $('addProfile').value = p.id;
+      if (!$('addName').value) $('addName').value = typeLabel(p);
+      suggestAddress();
+      renderLibrary();
+      return;
+    }
+    if (target === null) return;
+    const f = addFixtures(p, typeLabel(p), 1, viewUniverse, target);
+    if (f) {
+      toast(`Patched ${f.name} at ${f.address}. Rename it in the table, add it to a group, then save.`);
+      const input = document.querySelector(`#fixtureRows tr[data-id="${CSS.escape(f.id)}"] input`);
+      input?.focus({ preventScroll: true });
+      input?.select();
+    }
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+}
 
 // ---- Groups ----
 
