@@ -8,12 +8,14 @@ import { extname, join, normalize, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  BUILT_IN_PROFILES, Command, OutputSettings, isManualCommand, parseShow,
+  BUILT_IN_PROFILES, Command, OutputSettings, describeMode, isManualCommand, oflToProfile, parseShow,
+  type OflFixture,
   type LiveState, type RuntimeState, type Show,
 } from '../../packages/shared/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
 import { discoverArtNet } from './discovery.ts';
 import { NodeWatch } from './nodewatch.ts';
+import { OflClient } from './ofl.ts';
 import { operatorLayout, type OperatorLayout } from './layout.ts';
 import type { FromWorker, TimingStats, ToWorker } from './messages.ts';
 import { isLocalAddress } from './net.ts';
@@ -27,6 +29,8 @@ export interface AppOptions {
   webDir: string;
   /** Replace the show's output, e.g. `{ kind: 'none' }` in tests. */
   output?: OutputSettings;
+  /** For tests: stands in for the network when talking to the Open Fixture Library. */
+  fetch?: typeof fetch;
   log?: (msg: string) => void;
 }
 
@@ -70,6 +74,7 @@ export class App {
   private readonly sessions = new Sessions();
   private outputProblem: string | null = null;
   private readonly identifyTimers = new Map<string, NodeJS.Timeout>();
+  private ofl!: OflClient;
   private readonly nodeWatch = new NodeWatch((problem) => {
     if (problem !== this.outputProblem) this.log(problem ? `DMX: ${problem}` : 'DMX: node answering again');
     this.outputProblem = problem;
@@ -81,6 +86,7 @@ export class App {
     this.log = opts.log ?? ((m) => console.log(`${new Date().toISOString()} ${m}`));
     this.store = new Store(opts.dataDir, opts.seedPath);
     this.saver = new RuntimeSaver(this.store);
+    this.ofl = new OflClient(join(opts.dataDir, 'ofl'), opts.fetch);
   }
 
   get state(): LiveState | null {
@@ -351,6 +357,7 @@ export class App {
       'GET /api/session', 'POST /api/login', 'POST /api/logout', 'GET /api/settings', 'PUT /api/settings',
       'POST /api/pin', 'GET /api/artnet/nodes', 'GET /api/serial-ports', 'GET /api/backups',
       'POST /api/backups/restore', 'GET /api/show', 'PUT /api/show', 'GET /api/profiles', 'POST /api/identify',
+      'GET /api/ofl/search', 'GET /api/ofl/fixture', 'POST /api/ofl/profile', 'POST /api/ofl/file',
     ];
     if (!routes.includes(route)) return false;
     if (!open && !this.isProgrammer(req)) throw new HttpError(401, 'enter the programmer PIN');
@@ -457,6 +464,36 @@ export class App {
         json(res, 200, all.map((p) => ({ id: p.id, name: p.name, channels: p.channels.length, roles: [...new Set(p.channels.map((c) => c.role))] })));
         return true;
       }
+      case 'GET /api/ofl/search':
+        json(res, 200, await this.oflCall(() => this.ofl.search(url.searchParams.get('q') ?? '')));
+        return true;
+      case 'GET /api/ofl/fixture':
+        json(res, 200, await this.oflCall(() => this.ofl.modes(url.searchParams.get('key') ?? '')));
+        return true;
+      case 'POST /api/ofl/profile': {
+        // Returns the type; the patch page adds it to the show when the patch is saved.
+        const { key, mode } = (await readJson(req)) as { key?: unknown; mode?: unknown };
+        if (typeof key !== 'string' || typeof mode !== 'number') throw new HttpError(400, 'which fixture and mode?');
+        json(res, 200, await this.oflCall(() => this.ofl.profile(key, mode)));
+        return true;
+      }
+      case 'POST /api/ofl/file': {
+        // A fixture file saved from open-fixture-library.org, for use without internet.
+        const body = (await readJson(req, 2 * 1024 * 1024)) as { fixture?: OflFixture; mode?: number; manufacturer?: string; key?: string };
+        if (!body.fixture || !Array.isArray(body.fixture.modes)) throw new HttpError(400, 'not an Open Fixture Library fixture file');
+        const man = slugKey(body.manufacturer ?? 'imported');
+        const fix = slugKey(body.key ?? body.fixture.name ?? 'fixture');
+        if (typeof body.mode !== 'number') {
+          json(res, 200, { key: `${man}/${fix}`, name: body.fixture.name, manufacturer: body.manufacturer ?? '', modes: body.fixture.modes.map((m, index) => ({ index, name: m.name, shortName: m.shortName ?? null, ...describeMode(body.fixture!, m) })) });
+        } else {
+          try {
+            json(res, 200, oflToProfile(body.fixture, body.mode, man, fix, body.manufacturer ?? ''));
+          } catch (err) {
+            throw new HttpError(400, (err as Error).message);
+          }
+        }
+        return true;
+      }
       case 'POST /api/identify': {
         // Flash one fixture full white for 3 s so it can be found in the room.
         const { fixture } = (await readJson(req)) as { fixture?: unknown };
@@ -473,6 +510,17 @@ export class App {
       }
     }
     return false;
+  }
+
+  /** Open Fixture Library calls: network trouble becomes a readable 502. */
+  private async oflCall<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (/key|mode|modes/.test(msg)) throw new HttpError(400, msg);
+      throw new HttpError(502, `Can't reach the Open Fixture Library (${msg}). Check this computer's internet connection.`);
+    }
   }
 
   /** A copy of the show with the settings form's changes; throws 400 on bad values. */
@@ -538,6 +586,7 @@ export class App {
       case 'POST /safe': cmd = { type: 'safe' }; break;
       case 'POST /blackout': cmd = { type: 'blackout' }; break;
       case 'POST /undo': cmd = { type: 'undo' }; break;
+      case 'POST /fade/:': cmd = { type: 'fadeTime', value: parts[1] === 'auto' ? null : Number(parts[1]) }; break;
       case 'POST /master/:': cmd = { type: 'master', value: percent(parts[1], 0, 100) }; break;
       case 'POST /speed/:': cmd = { type: 'speed', value: percent(parts[1], 50, 200) }; break;
       default:
@@ -549,10 +598,14 @@ export class App {
   }
 }
 
+function slugKey(text: string): string {
+  return text.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'x';
+}
+
 /** Which path segments are parameters in the API's URL patterns. */
 function isParam(parts: string[], i: number): boolean {
   const [head] = parts;
-  if (head === 'look' || head === 'master' || head === 'speed') return i === 1;
+  if (head === 'look' || head === 'master' || head === 'speed' || head === 'fade') return i === 1;
   if (head === 'group') return i === 1 || (i === 3 && (parts[2] === 'preset' || parts[2] === 'level'));
   return false;
 }

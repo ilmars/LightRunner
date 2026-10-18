@@ -74,8 +74,8 @@ table.patch { width: 100%; min-width: 960px; border-collapse: collapse; font-siz
 .block.sel { outline: 2px solid #fff; outline-offset: -2px; z-index: 2; }
 .block.bad { background-image: repeating-linear-gradient(135deg, rgba(212, 60, 60, 0.9) 0 6px, rgba(110, 20, 20, 0.9) 6px 12px) !important; }
 .block.dragging { opacity: 0.85; cursor: grabbing; z-index: 3; }
-.library { flex: 0 0 260px; display: flex; flex-direction: column; gap: 8px; max-height: 560px; min-width: 0; }
-.lib-list { overflow: auto; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+.library { flex: 0 0 280px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.lib-list { overflow: auto; display: flex; flex-direction: column; gap: 4px; max-height: 260px; }
 .lib-item {
   display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--raised); cursor: grab; touch-action: none; font-size: 13px; user-select: none;
@@ -89,3 +89,16 @@ table.patch { width: 100%; min-width: 960px; border-collapse: collapse; font-siz
   color: #fff; transform: translate(12px, -50%); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
 }
 .patch tr.sel td { background: rgba(106, 162, 255, 0.1); }
+
+/* Open Fixture Library search */
+.ofl { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.ofl .row input { min-height: 36px; padding: 6px 10px; }
+.ofl-results { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow: auto; }
+.ofl-hit { text-align: left; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); padding: 7px 10px; cursor: pointer; font-size: 13px; }
+.ofl-hit small { display: block; color: var(--dim); }
+.ofl-hit:hover, .ofl-mode:hover { border-color: var(--accent); }
+.ofl-modes { display: flex; flex-direction: column; gap: 4px; }
+.ofl-modes h4 { margin: 4px 0 2px; font-size: 13px; }
+.ofl-mode { text-align: left; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 6px 10px; cursor: pointer; font-size: 13px; }
+.ofl-mode small { color: var(--dim); }
+.ofl .back-link { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font-size: 13px; text-align: left; }

@@ -108,6 +108,11 @@ $('next').addEventListener('click', () => {
 });
 $('undo').addEventListener('click', () => send({ type: 'undo' }));
 
+// Fade time for every look and preset change; shared by all devices.
+for (const b of $('fadeGroup').querySelectorAll('button')) {
+  b.addEventListener('click', () => send({ type: 'fadeTime', value: b.dataset.fade === 'auto' ? null : Number(b.dataset.fade) }));
+}
+
 // ---- Groups and the group panel ----
 
 function buildGroups() {
@@ -193,6 +198,10 @@ function render() {
   $('nextName').textContent = next ? next.name : 'End of list';
   $('next').disabled = !next;
   $('undo').disabled = !state.canUndo;
+  for (const b of $('fadeGroup').querySelectorAll('button')) {
+    const v = b.dataset.fade === 'auto' ? null : Number(b.dataset.fade);
+    b.classList.toggle('on', v === (state.fadeTime ?? null));
+  }
 
   for (const [id, b] of lookButtons) {
     const active = id === state.look;

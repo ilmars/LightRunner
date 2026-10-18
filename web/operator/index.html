@@ -15,6 +15,15 @@
 
   <header class="status">
     <span class="look-name" id="lookName">—</span>
+    <div id="fadeGroup" class="fadegroup" role="group" aria-label="Fade time">
+      <span class="fg-label">Fade</span>
+      <button data-fade="auto" title="Each look's own fade time">Auto</button>
+      <button data-fade="0" title="Change instantly">0</button>
+      <button data-fade="1">1</button>
+      <button data-fade="3">3</button>
+      <button data-fade="5">5</button>
+      <button data-fade="10">10<small>s</small></button>
+    </div>
     <span id="fade" class="fade" hidden><span class="fade-bar"><span id="fadeFill"></span></span><span id="fadeText"></span></span>
     <span class="link" id="link"><span class="dot"></span><span id="linkText">Connecting</span></span>
     <span class="clock" id="clock"></span>

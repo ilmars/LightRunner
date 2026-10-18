@@ -27,6 +27,8 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('speed'), value: z.number().min(0.5).max(2) }),
   z.object({ type: z.literal('groupLevel'), group: id, value: unit }),
   z.object({ type: z.literal('undo') }),
+  /** Fade time for every look and preset change; null = each look's own fade. */
+  z.object({ type: z.literal('fadeTime'), value: z.number().min(0).max(600).nullable() }),
 ]);
 export type Command = z.infer<typeof Command>;
 
@@ -60,6 +62,8 @@ export interface LiveState {
   lastLook: string | null;
   /** Undo has something to go back to. */
   canUndo: boolean;
+  /** Fade time chosen on the operator page, or null for each look's own fade. */
+  fadeTime: number | null;
   groups: Record<string, GroupStatus>;
   fixturesManual: string[];
   master: number;
@@ -77,6 +81,7 @@ export interface RuntimeState {
   speed: number;
   levels: Record<string, number>;
   lastLook?: string | null;
+  fadeTime?: number | null;
   /** Each group's preset before Blackout, so the next look restores the whole stage. */
   beforeBlackout?: Record<string, string | null>;
 }

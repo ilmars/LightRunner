@@ -18,10 +18,14 @@ Then open `http://<this computer>:8080/` on the tablet. Pages:
 | Page | For | What it does |
 | --- | --- | --- |
 | `/operator/` | Volunteers | Looks, Next, Undo, group presets, Master and group dimmers, Safe, Blackout |
-| `/patch/` | Programmer (PIN) | Fixtures, addresses, groups, stage plan, Identify |
+| `/patch/` | Programmer (PIN) | DMX map, fixtures, groups, stage plan, Identify, fixture types from the Open Fixture Library |
 | `/settings/` | Programmer (PIN) | DMX output (Art-Net, sACN, ENTTEC), Art-Net node finder, Send DMX switch, PIN, backups, show import and export |
 
 Environment variables: `PORT` (default 8080), `LIGHT_RUNNER_DATA` (folder for `show.json`, `runtime.json` and backups; default `./data`), `LIGHT_RUNNER_OUTPUT=none` (never send DMX).
+
+## Fixture types
+
+The Patch page searches the [Open Fixture Library](https://open-fixture-library.org) for fixture types; pick the DMX mode the fixture is set to. Downloaded fixtures are cached in `data/ofl/`, so they keep working without internet. A fixture file saved from the OFL website can also be imported.
 
 ## Import a Lightkey project
 

@@ -517,6 +517,99 @@ function startLibraryDrag(ev, p, item) {
   window.addEventListener('pointercancel', up);
 }
 
+// ---- Open Fixture Library ----
+
+let oflSearchToken = 0;
+
+$('oflForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const q = $('oflQuery').value.trim();
+  const box = $('oflResults');
+  if (q.length < 2) return;
+  const token = ++oflSearchToken;
+  box.replaceChildren(el('p', 'hint', 'Searching…'));
+  try {
+    const { hits, offline } = await call('GET', `/api/ofl/search?q=${encodeURIComponent(q)}`);
+    if (token !== oflSearchToken) return;
+    box.replaceChildren();
+    if (offline) box.append(el('p', 'warn', 'No internet: showing fixtures downloaded before.'));
+    if (!hits.length) box.append(el('p', 'hint', 'Nothing found. Try the model name without the brand, e.g. "SixBar".'));
+    for (const h of hits) {
+      const b = el('button', 'ofl-hit');
+      b.type = 'button';
+      b.append(el('span', null, h.name), el('small', null, h.manufacturer));
+      b.addEventListener('click', () => showOflModes(() => call('GET', `/api/ofl/fixture?key=${encodeURIComponent(h.key)}`), (mode) => call('POST', '/api/ofl/profile', { key: h.key, mode })));
+      box.append(b);
+    }
+  } catch (err) {
+    box.replaceChildren(el('p', 'warn', err.message));
+  }
+});
+
+/** Show a fixture's modes; picking one adds it to the library as a fixture type. */
+async function showOflModes(loadInfo, makeProfile) {
+  const box = $('oflResults');
+  box.replaceChildren(el('p', 'hint', 'Loading modes…'));
+  try {
+    const info = await loadInfo();
+    const wrap = el('div', 'ofl-modes');
+    const back = el('button', 'back-link', '‹ Back to results');
+    back.type = 'button';
+    back.addEventListener('click', () => $('oflForm').requestSubmit());
+    wrap.append(back, el('h4', null, `${info.manufacturer} ${info.name}`.trim()), el('p', 'hint', 'Pick the DMX mode the fixture is set to:'));
+    for (const m of info.modes) {
+      const b = el('button', 'ofl-mode');
+      b.type = 'button';
+      b.append(el('span', null, `${m.name} · ${m.channels} ch`), el('br'), el('small', null, m.roles.length ? m.roles.join(', ') : 'no colour or dimmer channels'));
+      b.addEventListener('click', async () => {
+        try {
+          addProfile(await makeProfile(m.index));
+        } catch (err) {
+          toast(err.message, true);
+        }
+      });
+      wrap.append(b);
+    }
+    box.replaceChildren(wrap);
+  } catch (err) {
+    box.replaceChildren(el('p', 'warn', err.message));
+  }
+}
+
+/** Add (or update) a fixture type in this show; it is stored when the patch is saved. */
+function addProfile(profile) {
+  const k = show.profiles.findIndex((p) => p.id === profile.id);
+  if (k >= 0) show.profiles[k] = profile;
+  else show.profiles.push(profile);
+  const summary = { id: profile.id, name: profile.name, channels: profile.channels.length, roles: [...new Set(profile.channels.map((c) => c.role))] };
+  const j = profiles.findIndex((p) => p.id === profile.id);
+  if (j >= 0) profiles[j] = summary;
+  else profiles.unshift(summary);
+  profileById.set(profile.id, summary);
+  fillAddForm(false);
+  $('addProfile').value = profile.id;
+  $('addName').value = typeLabel(summary).replace(/^\S+\s+/, '');
+  suggestAddress();
+  changed();
+  toast(`${profile.name} is in the library. Drag it onto the map, then save.`);
+}
+
+$('oflFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const fixture = JSON.parse(await file.text());
+    const key = file.name.replace(/\.json$/i, '');
+    await showOflModes(
+      () => call('POST', '/api/ofl/file', { fixture, key }),
+      (mode) => call('POST', '/api/ofl/file', { fixture, key, mode }),
+    );
+  } catch (err) {
+    toast(`That file isn't an Open Fixture Library fixture: ${err.message}`, true);
+  }
+});
+
 // ---- Groups ----
 
 function renderGroups() {
@@ -632,10 +725,8 @@ function renderStage() {
 
 // ---- Save ----
 
-$('discard').addEventListener('click', () => {
-  show = JSON.parse(savedJson);
-  renderAll();
-});
+// Reload from the server, so fixture types added since the last save go too.
+$('discard').addEventListener('click', () => load().catch((err) => toast(err.message, true)));
 
 $('save').addEventListener('click', async () => {
   const problems = addressProblems();

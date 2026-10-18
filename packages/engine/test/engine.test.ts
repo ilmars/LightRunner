@@ -226,3 +226,21 @@ test('the fade countdown and last look are reported', () => {
   assert.equal(s.look, 'safe');
   assert.equal(s.lastLook, 'prayer');
 });
+
+test('the operator fade time overrides each look and preset fade, and Auto goes back', () => {
+  const e = new Engine(demoShow());
+  e.apply({ type: 'fadeTime', value: 0 }, 0);
+  e.apply({ type: 'look', id: 'walk-in' }, 0);
+  e.frame(0);
+  assert.ok(close(lightOf(e, 'back-1').i, 0.8));
+  assert.equal(e.liveState(0, 'ok').fadeTime, 0);
+  e.apply({ type: 'fadeTime', value: 10 }, 1);
+  e.apply({ type: 'groupPreset', group: 'back-wall', preset: 'back-dim-blue' }, 1);
+  e.frame(6);
+  const mid = lightOf(e, 'back-1').i;
+  assert.ok(mid > 0.45 && mid < 0.65, `half way at ${mid}`);
+  e.apply({ type: 'fadeTime', value: null }, 20);
+  e.apply({ type: 'look', id: 'worship' }, 20);
+  assert.ok(close(e.liveState(20, 'ok').lookFadeLeft, 5));
+  assert.equal(e.runtime().fadeTime, null);
+});

@@ -133,6 +133,8 @@ export class Engine {
   /** Stage snapshots before each look or preset change, newest last. */
   private history: { look: string | null; lastLook: string | null; groups: Record<string, string | null>; beforeBlackout: Record<string, string | null> | null }[] = [];
   private lastLook: string | null = null;
+  /** Operator's fade time for look and preset changes; null = each look's own. */
+  private fadeTime: number | null = null;
   private last: number | null = null;
   private scratch: Light[] = [];
   private scratchWeights: number[] = [];
@@ -245,7 +247,7 @@ export class Engine {
         const preset = this.presets.get(cmd.preset);
         if (!group) return `unknown group "${cmd.group}"`;
         if (!preset || preset.group !== cmd.group) return `unknown preset "${cmd.preset}" for group "${cmd.group}"`;
-        this.setPreset(group, preset, cmd.fade ?? preset.fade, now);
+        this.setPreset(group, preset, cmd.fade ?? this.fadeTime ?? preset.fade, now);
         return null;
       }
       case 'manual': return this.setManual(cmd.target, cmd.colour, cmd.intensity, now);
@@ -256,6 +258,7 @@ export class Engine {
       case 'blackout': this.goBlackout(now); return null;
       case 'master': this.master.set(cmd.value, now, SMOOTH); return null;
       case 'speed': this.speed.set(cmd.value, now, SMOOTH); return null;
+      case 'fadeTime': this.fadeTime = cmd.value; return null;
       case 'groupLevel': {
         const group = this.groups.get(cmd.group);
         if (!group) return `unknown group "${cmd.group}"`;
@@ -274,7 +277,7 @@ export class Engine {
       const group = this.groups.get(entry.group);
       const preset = this.presets.get(entry.preset);
       if (!group || !preset) continue;
-      const t = fade ?? entry.fade ?? preset.fade;
+      const t = fade ?? this.fadeTime ?? entry.fade ?? preset.fade;
       this.setPreset(group, preset, t, now);
       listed.add(group.id);
       longest = Math.max(longest, t);
@@ -285,7 +288,7 @@ export class Engine {
         const group = this.groups.get(gid);
         const preset = pid ? this.presets.get(pid) : undefined;
         if (!group || listed.has(gid) || !preset) continue;
-        const t = fade ?? DEFAULT_FADE;
+        const t = fade ?? this.fadeTime ?? DEFAULT_FADE;
         this.setPreset(group, preset, t, now);
         longest = Math.max(longest, t);
       }
@@ -330,7 +333,7 @@ export class Engine {
     for (const entry of look.groups) {
       const group = this.groups.get(entry.group);
       const preset = this.presets.get(entry.preset);
-      if (group && preset) this.setPreset(group, preset, entry.fade ?? preset.fade, now);
+      if (group && preset) this.setPreset(group, preset, this.fadeTime ?? entry.fade ?? preset.fade, now);
     }
     return null;
   }
@@ -522,6 +525,7 @@ export class Engine {
       lookFadeLeft: Math.max(0, this.lookStart + this.lookDur - now),
       lastLook: this.lastLook,
       canUndo: this.history.length > 0,
+      fadeTime: this.fadeTime,
       groups,
       fixturesManual: this.fixtures.filter((f) => f.manual && !f.manual.releasing).map((f) => f.id),
       master: this.master.target,
@@ -545,6 +549,7 @@ export class Engine {
       speed: this.speed.target,
       levels,
       lastLook: this.lastLook,
+      fadeTime: this.fadeTime,
       ...(this.beforeBlackout ? { beforeBlackout: { ...this.beforeBlackout } } : {}),
     };
   }
@@ -558,6 +563,7 @@ export class Engine {
     }
     this.master.set(rt.master, now, 0);
     this.speed.set(rt.speed, now, 0);
+    this.fadeTime = rt.fadeTime ?? null;
     this.beforeBlackout = rt.beforeBlackout ?? null;
     this.look = rt.look;
     this.lastLook = rt.lastLook ?? (rt.look && this.looks.has(rt.look) ? rt.look : null);
