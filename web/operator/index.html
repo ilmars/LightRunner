@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="theme-color" content="#0b0c0e">
+  <title>Light Runner</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="banner" class="banner" hidden>Connection lost. Lights keep running. Reconnecting…</div>
+
+  <header class="status">
+    <span class="look-name" id="lookName">—</span>
+    <span id="fade" class="fade" hidden><span class="fade-bar"><span id="fadeFill"></span></span><span id="fadeText"></span></span>
+    <span class="link" id="link"><span class="dot"></span><span id="linkText">Connecting</span></span>
+    <span class="clock" id="clock"></span>
+    <a class="gear" href="/settings/" aria-label="Settings" title="Settings (PIN)">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.3 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.3-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
+    </a>
+  </header>
+
+  <div id="dmxBar" class="dmx-bar" hidden>
+    <span id="dmxText"></span>
+    <a href="/settings/">Settings</a>
+  </div>
+
+  <canvas id="stage" class="stage" aria-label="Stage view"></canvas>
+
+  <main class="middle">
+    <section id="looks" class="looks" aria-label="Looks"></section>
+    <button id="next" class="next" aria-label="Next look">
+      <span class="next-label">Next</span>
+      <span id="nextName" class="next-name">—</span>
+      <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </button>
+    <section id="dimmerPanel" class="panel dimmer-panel" hidden aria-label="Group dimmers">
+      <div class="panel-head">
+        <h2>Dimmers</h2>
+        <button id="allFull" class="ghost">All to 100%</button>
+        <button id="dimmersClose" class="ghost">Close</button>
+      </div>
+      <div id="dimmers" class="dimmers big"></div>
+    </section>
+    <section id="panel" class="panel" hidden aria-label="Group presets">
+      <div class="panel-head">
+        <h2 id="panelTitle"></h2>
+        <button id="release" class="ghost" hidden>Release</button>
+        <button id="panelClose" class="ghost" aria-label="Close">Close</button>
+      </div>
+      <div id="panelPresets" class="presets"></div>
+    </section>
+  </main>
+
+  <nav id="groups" class="groups" aria-label="Groups"></nav>
+
+  <footer class="controls">
+    <div class="masterbox">
+      <div id="masterFader" class="dimmers"></div>
+      <button id="dimmersToggle" class="dimmers-toggle" aria-expanded="false" aria-controls="dimmerPanel" aria-label="Group dimmers">
+        <small id="dimmedCount" class="count"></small>
+        <span id="miniLevels" class="mini-levels" aria-hidden="true"></span>
+        <span class="label">Groups</span>
+      </button>
+    </div>
+    <div class="stack">
+      <button id="undo" class="action" disabled>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg>
+        Undo
+      </button>
+      <button id="backToLook" class="action">Back to look</button>
+    </div>
+    <button id="safe" class="action safe">Safe</button>
+    <button id="blackout" class="action blackout"><span class="hold"></span><span class="label">Blackout<small>hold 1 s</small></span></button>
+  </footer>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

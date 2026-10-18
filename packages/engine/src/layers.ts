@@ -1,0 +1,64 @@
+// Rendering a preset's layer stack for one fixture. Every layer is a pure
+// function of effect time, the fixture's position in its group and its
+// parameters. Phase 1 has static layers only; Phase 2 adds effects here.
+
+import type { Layer, Palette, Preset } from '../../shared/src/index.ts';
+import { copy, dark, fromHex, type Light } from './light.ts';
+
+export interface LayerContext {
+  /** Fixture position in its group, 0-based. */
+  index: number;
+  /** Number of fixtures in the group. */
+  count: number;
+  /** Effect time in seconds, already scaled by the speed dial. */
+  time: number;
+}
+
+/** A layer with its colours looked up once, so rendering does no lookups. */
+export type CompiledLayer = { kind: 'static'; light: Light };
+
+export interface CompiledPreset {
+  id: string;
+  group: string;
+  fade: number;
+  layers: CompiledLayer[];
+}
+
+export function compilePreset(preset: Preset, palettes: ReadonlyMap<string, Palette>): CompiledPreset {
+  return {
+    id: preset.id,
+    group: preset.group,
+    fade: preset.fade,
+    layers: preset.layers.map((l) => compileLayer(l, palettes)),
+  };
+}
+
+function compileLayer(layer: Layer, palettes: ReadonlyMap<string, Palette>): CompiledLayer {
+  const c = layer.colour;
+  let hex = '#ffffff';
+  let white = 0;
+  if ('palette' in c) {
+    const colour = palettes.get(c.palette)?.colours[c.index];
+    if (colour) {
+      hex = colour.hex;
+      white = colour.white ?? 0;
+    }
+  } else {
+    hex = c.hex;
+    white = c.white ?? 0;
+  }
+  return { kind: 'static', light: fromHex(hex, white, layer.intensity) };
+}
+
+/** A preset that is not in the show: Safe's warm wash, or Blackout. */
+export function fixedPreset(id: string, group: string, light: Light, fade: number): CompiledPreset {
+  return { id, group, fade, layers: [{ kind: 'static', light }] };
+}
+
+export function renderPreset(out: Light, preset: CompiledPreset, _ctx: LayerContext): Light {
+  // Layers render bottom to top. With static layers only, the top one covers
+  // the rest; Phase 2b adds blend modes and opacity.
+  const top = preset.layers[preset.layers.length - 1];
+  if (!top) return copy(out, dark());
+  return copy(out, top.light);
+}

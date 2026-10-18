@@ -1,0 +1,124 @@
+// Turning a fixture's abstract light into DMX channel values.
+
+import type { Fixture, Profile, ChannelRole } from '../../shared/src/index.ts';
+import type { Light } from './light.ts';
+
+interface PlannedChannel {
+  role: ChannelRole;
+  /** Offset of this channel inside the universe (0-based). */
+  at: number;
+  /** Offset of the fine byte, or -1 for 8-bit. */
+  fineAt: number;
+  fixed: number;
+  kelvin: { min: number; max: number } | null;
+}
+
+export interface ChannelPlan {
+  universe: number;
+  channels: PlannedChannel[];
+  hasDimmer: boolean;
+  hasWhite: boolean;
+  gamma: number;
+}
+
+export function planChannels(fixture: Fixture, profile: Profile, defaultGamma: number): ChannelPlan {
+  const channels: PlannedChannel[] = [];
+  const base = fixture.address - 1;
+  profile.channels.forEach((ch, n) => {
+    if (ch.fine) {
+      // Attach to the closest earlier coarse channel of the same role.
+      for (let k = channels.length - 1; k >= 0; k--) {
+        if (channels[k].role === ch.role && channels[k].fineAt < 0) {
+          channels[k].fineAt = base + n;
+          return;
+        }
+      }
+      return;
+    }
+    channels.push({ role: ch.role, at: base + n, fineAt: -1, fixed: ch.default ?? 0, kelvin: ch.kelvin ?? null });
+  });
+  return {
+    universe: fixture.universe,
+    channels: channels.filter((c) => c.at < 512),
+    hasDimmer: channels.some((c) => c.role === 'dimmer'),
+    hasWhite: channels.some((c) => c.role === 'white'),
+    gamma: fixture.gamma ?? profile.gamma ?? defaultGamma,
+  };
+}
+
+function put(buf: Uint8Array, ch: PlannedChannel, v: number): void {
+  const x = Math.min(1, Math.max(0, v));
+  if (ch.fineAt >= 0) {
+    const v16 = Math.round(x * 65535);
+    buf[ch.at] = v16 >> 8;
+    if (ch.fineAt < 512) buf[ch.fineAt] = v16 & 255;
+  } else {
+    buf[ch.at] = Math.round(x * 255);
+  }
+}
+
+/**
+ * Write one fixture into its universe buffer. Gamma is applied per channel
+ * so slow fades look even at the dark end. Fixtures with a dimmer channel get
+ * intensity on the dimmer and colour on the colour channels; others get both
+ * multiplied together on the colour channels.
+ */
+export function writeFixture(buf: Uint8Array, plan: ChannelPlan, light: Light): void {
+  // Fully dark writes zeros everywhere, so Blackout looks like Blackout on any desk monitor.
+  if (light.i <= 0) {
+    for (const ch of plan.channels) {
+      const fixed = ch.role === 'strobe' || ch.role === 'other';
+      buf[ch.at] = fixed ? ch.fixed : 0;
+      if (ch.fineAt >= 0 && ch.fineAt < 512) buf[ch.fineAt] = 0;
+    }
+    return;
+  }
+  const g = plan.gamma;
+  // A fixture without a white channel makes white from red, green and blue.
+  const fold = plan.hasWhite ? 0 : light.w;
+  const level = plan.hasDimmer ? 1 : light.i;
+  const col = (c: number) => Math.pow(Math.min(1, c + fold) * level, g);
+  for (const ch of plan.channels) {
+    switch (ch.role) {
+      case 'dimmer': put(buf, ch, Math.pow(light.i, g)); break;
+      case 'red': put(buf, ch, col(light.r)); break;
+      case 'green': put(buf, ch, col(light.g)); break;
+      case 'blue': put(buf, ch, col(light.b)); break;
+      case 'white': put(buf, ch, Math.pow(light.w * level, g)); break;
+      case 'cct': {
+        const k = ch.kelvin ?? { min: 2700, max: 6500 };
+        put(buf, ch, (kelvinOf(light) - k.min) / (k.max - k.min));
+        break;
+      }
+      // Amber and UV are driven by effect layers from Phase 2b.
+      case 'amber':
+      case 'uv': put(buf, ch, 0); break;
+      default: buf[ch.at] = ch.fixed;
+    }
+  }
+}
+
+/** Blue-to-red ratio of typical white sources at a given colour temperature. */
+const KELVIN_BY_RATIO: [number, number][] = [
+  [0.2, 2000], [0.34, 2700], [0.45, 3200], [0.64, 4000], [0.87, 5600], [1.0, 6500], [1.27, 10000],
+];
+
+/**
+ * Colour temperature for a fixture that only has a CCT channel (no RGB):
+ * warm colours give warm white, blue colours give cool white.
+ */
+export function kelvinOf(light: Light): number {
+  const r = Math.min(1, light.r + light.w);
+  const b = Math.min(1, light.b + light.w);
+  if (r <= 0) return KELVIN_BY_RATIO[KELVIN_BY_RATIO.length - 1][1];
+  const ratio = b / r;
+  if (ratio <= KELVIN_BY_RATIO[0][0]) return KELVIN_BY_RATIO[0][1];
+  for (let k = 1; k < KELVIN_BY_RATIO.length; k++) {
+    const [r1, k1] = KELVIN_BY_RATIO[k];
+    if (ratio <= r1) {
+      const [r0, k0] = KELVIN_BY_RATIO[k - 1];
+      return k0 + ((ratio - r0) / (r1 - r0)) * (k1 - k0);
+    }
+  }
+  return KELVIN_BY_RATIO[KELVIN_BY_RATIO.length - 1][1];
+}

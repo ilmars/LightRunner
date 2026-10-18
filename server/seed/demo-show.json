@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "name": "Demo rig",
+  "profiles": [],
+  "fixtures": [
+    { "id": "front-1", "name": "Front 1", "profile": "generic-drgbws", "universe": 0, "address": 1, "x": 0.3, "y": 0.72 },
+    { "id": "front-2", "name": "Front 2", "profile": "generic-drgbws", "universe": 0, "address": 7, "x": 0.43, "y": 0.72 },
+    { "id": "front-3", "name": "Front 3", "profile": "generic-drgbws", "universe": 0, "address": 13, "x": 0.57, "y": 0.72 },
+    { "id": "front-4", "name": "Front 4", "profile": "generic-drgbws", "universe": 0, "address": 19, "x": 0.7, "y": 0.72 },
+    { "id": "back-1", "name": "Back 1", "profile": "generic-rgb", "universe": 0, "address": 25, "x": 0.15, "y": 0.15 },
+    { "id": "back-2", "name": "Back 2", "profile": "generic-rgb", "universe": 0, "address": 28, "x": 0.29, "y": 0.15 },
+    { "id": "back-3", "name": "Back 3", "profile": "generic-rgb", "universe": 0, "address": 31, "x": 0.43, "y": 0.15 },
+    { "id": "back-4", "name": "Back 4", "profile": "generic-rgb", "universe": 0, "address": 34, "x": 0.57, "y": 0.15 },
+    { "id": "back-5", "name": "Back 5", "profile": "generic-rgb", "universe": 0, "address": 37, "x": 0.71, "y": 0.15 },
+    { "id": "back-6", "name": "Back 6", "profile": "generic-rgb", "universe": 0, "address": 40, "x": 0.85, "y": 0.15 },
+    { "id": "aud-1", "name": "Audience L", "profile": "generic-rgbw", "universe": 0, "address": 43, "x": 0.2, "y": 0.93 },
+    { "id": "aud-2", "name": "Audience R", "profile": "generic-rgbw", "universe": 0, "address": 47, "x": 0.8, "y": 0.93 },
+    { "id": "pulpit", "name": "Pulpit", "profile": "generic-d16rgbw", "universe": 0, "address": 51, "x": 0.5, "y": 0.45 }
+  ],
+  "groups": [
+    { "id": "front-wash", "name": "Front wash", "fixtures": ["front-1", "front-2", "front-3", "front-4", "pulpit"] },
+    { "id": "back-wall", "name": "Back wall", "fixtures": ["back-1", "back-2", "back-3", "back-4", "back-5", "back-6"] },
+    { "id": "audience", "name": "Audience", "fixtures": ["aud-1", "aud-2"] },
+    { "id": "pulpit", "name": "Pulpit", "fixtures": ["pulpit"] }
+  ],
+  "palettes": [
+    { "id": "warm-whites", "name": "Warm whites", "colours": [
+      { "hex": "#ffb874", "white": 0.5 },
+      { "hex": "#ffe9d0", "white": 0.8 },
+      { "hex": "#ffc48a", "white": 0.3 }
+    ] }
+  ],
+  "presets": [
+    { "id": "front-warm", "name": "Warm", "group": "front-wash", "fade": 3, "swatch": "#ffb874",
+      "layers": [{ "kind": "static", "colour": { "palette": "warm-whites", "index": 0 }, "intensity": 0.8 }] },
+    { "id": "front-bright", "name": "Bright", "group": "front-wash", "fade": 3, "swatch": "#ffe9d0",
+      "layers": [{ "kind": "static", "colour": { "palette": "warm-whites", "index": 1 }, "intensity": 1 }] },
+    { "id": "front-dim", "name": "Dim", "group": "front-wash", "fade": 3, "swatch": "#8a6440",
+      "layers": [{ "kind": "static", "colour": { "palette": "warm-whites", "index": 0 }, "intensity": 0.35 }] },
+
+    { "id": "back-deep-blue", "name": "Deep blue", "group": "back-wall", "fade": 3, "swatch": "#1f3bff",
+      "layers": [{ "kind": "static", "colour": { "hex": "#1f3bff" }, "intensity": 0.8 }] },
+    { "id": "back-purple", "name": "Purple", "group": "back-wall", "fade": 3, "swatch": "#7a2bff",
+      "layers": [{ "kind": "static", "colour": { "hex": "#7a2bff" }, "intensity": 0.9 }] },
+    { "id": "back-amber", "name": "Amber", "group": "back-wall", "fade": 3, "swatch": "#ff8a1f",
+      "layers": [{ "kind": "static", "colour": { "hex": "#ff8a1f" }, "intensity": 0.7 }] },
+    { "id": "back-dim-blue", "name": "Dim blue", "group": "back-wall", "fade": 3, "swatch": "#14236b",
+      "layers": [{ "kind": "static", "colour": { "hex": "#1f3bff" }, "intensity": 0.3 }] },
+
+    { "id": "aud-warm", "name": "Warm", "group": "audience", "fade": 3, "swatch": "#ffc48a",
+      "layers": [{ "kind": "static", "colour": { "palette": "warm-whites", "index": 2 }, "intensity": 0.6 }] },
+    { "id": "aud-low", "name": "Low", "group": "audience", "fade": 3, "swatch": "#4a3828",
+      "layers": [{ "kind": "static", "colour": { "palette": "warm-whites", "index": 2 }, "intensity": 0.15 }] },
+    { "id": "aud-blue", "name": "Blue", "group": "audience", "fade": 3, "swatch": "#2a4bff",
+      "layers": [{ "kind": "static", "colour": { "hex": "#2a4bff" }, "intensity": 0.2 }] },
+
+    { "id": "pulpit-on", "name": "On", "group": "pulpit", "fade": 2, "swatch": "#ffe9d0",
+      "layers": [{ "kind": "static", "colour": { "palette": "warm-whites", "index": 1 }, "intensity": 1 }] }
+  ],
+  "looks": [
+    { "id": "walk-in", "name": "Walk-in", "section": "Before", "swatch": "#1f3bff", "groups": [
+      { "group": "front-wash", "preset": "front-dim" },
+      { "group": "back-wall", "preset": "back-deep-blue" },
+      { "group": "audience", "preset": "aud-warm" }
+    ] },
+    { "id": "worship", "name": "Worship", "section": "Worship", "swatch": "#7a2bff", "groups": [
+      { "group": "front-wash", "preset": "front-warm" },
+      { "group": "back-wall", "preset": "back-purple", "fade": 5 },
+      { "group": "audience", "preset": "aud-low" }
+    ] },
+    { "id": "word", "name": "Sermon", "section": "Word", "swatch": "#ffe9d0", "groups": [
+      { "group": "front-wash", "preset": "front-bright" },
+      { "group": "back-wall", "preset": "back-dim-blue" },
+      { "group": "audience", "preset": "aud-warm" },
+      { "group": "pulpit", "preset": "pulpit-on" }
+    ] },
+    { "id": "response", "name": "Response", "section": "Response", "swatch": "#ff8a1f", "groups": [
+      { "group": "front-wash", "preset": "front-warm" },
+      { "group": "back-wall", "preset": "back-amber" },
+      { "group": "audience", "preset": "aud-low" }
+    ] },
+    { "id": "prayer", "name": "Prayer", "section": "Response", "swatch": "#14236b", "groups": [
+      { "group": "front-wash", "preset": "front-dim", "fade": 6 },
+      { "group": "back-wall", "preset": "back-dim-blue", "fade": 6 },
+      { "group": "audience", "preset": "aud-blue", "fade": 6 }
+    ] }
+  ],
+  "operator": {
+    "looks": ["walk-in", "worship", "word", "response", "prayer"],
+    "groups": ["front-wash", "back-wall", "audience", "pulpit"],
+    "manualForOperators": false
+  },
+  "settings": { "output": { "kind": "none" }, "frameRate": 40, "gamma": 2.2 },
+  "stage": { "grid": 10 }
+}

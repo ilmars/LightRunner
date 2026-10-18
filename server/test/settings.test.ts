@@ -1,0 +1,163 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { App } from '../src/app.ts';
+import { hashPin, verifyPin } from '../src/auth.ts';
+import { multicastAddress, sacnPacket } from '../src/output/sacn.ts';
+import { parsePollReply } from '../src/discovery.ts';
+
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const seedPath = join(root, 'server/seed/demo-show.json');
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function withApp(fn: (call: (method: string, path: string, body?: unknown) => Promise<{ status: number; body: any }>, app: App) => Promise<void>) {
+  const dir = mkdtempSync(join(tmpdir(), 'light-runner-settings-'));
+  // Real output selection, but sending to "none" by default so tests never hit the network.
+  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath, webDir: join(root, 'web'), log: () => {} });
+  let cookie = '';
+  const call = async (method: string, path: string, body?: unknown) => {
+    const res = await fetch(`http://127.0.0.1:${app.port}${path}`, {
+      method,
+      headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(cookie ? { cookie } : {}) },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    const set = res.headers.get('set-cookie');
+    if (set) cookie = set.split(';')[0];
+    const text = await res.text();
+    let parsed: any = text;
+    try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+    return { status: res.status, body: parsed };
+  };
+  try {
+    await app.start();
+    // Never send DMX from tests.
+    await call('PUT', '/api/settings', { output: { kind: 'none' } });
+    await fn(call, app);
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('PIN hashes verify and reject', () => {
+  const h = hashPin('4321');
+  assert.ok(verifyPin('4321', h));
+  assert.ok(!verifyPin('1234', h));
+});
+
+test('sACN data packet layout and multicast address', () => {
+  const data = new Uint8Array(512).fill(7);
+  const p = sacnPacket(1, data, 9, 120);
+  assert.equal(p.length, 638);
+  assert.equal(p.subarray(4, 13).toString('ascii'), 'ASC-E1.17');
+  assert.equal(p.readUInt16BE(16) & 0x0fff, 638 - 16);
+  assert.equal(p.readUInt32BE(18), 4);
+  assert.equal(p.readUInt32BE(40), 2);
+  assert.equal(p.subarray(44, 56).toString('utf8'), 'Light Runner');
+  assert.equal(p[108], 120);
+  assert.equal(p[111], 9);
+  assert.equal(p.readUInt16BE(113), 1);
+  assert.equal(p[117], 2);
+  assert.equal(p[118], 0xa1);
+  assert.equal(p.readUInt16BE(123), 513);
+  assert.equal(p[125], 0);
+  assert.equal(p[126], 7);
+  assert.equal(multicastAddress(1), '239.255.0.1');
+  assert.equal(multicastAddress(300), '239.255.1.44');
+});
+
+test('ArtPollReply parsing finds the node and its output universe', () => {
+  const m = Buffer.alloc(239);
+  m.write('Art-Net\0', 0, 'latin1');
+  m.writeUInt16LE(0x2100, 8);
+  m.set([192, 168, 0, 114], 10);
+  m.write('Port 1', 26, 'latin1');
+  m.write('NetWork Node 2', 44, 'latin1');
+  m.writeUInt16BE(1, 172);
+  m[174] = 0x80;
+  m[190] = 1;
+  assert.deepEqual(parsePollReply(m), { ip: '192.168.0.114', shortName: 'Port 1', longName: 'NetWork Node 2', universes: [1] });
+});
+
+test('settings are open until a PIN is set, then locked', async () => {
+  await withApp(async (call) => {
+    assert.equal((await call('GET', '/api/session')).body.pinSet, false);
+    assert.equal((await call('GET', '/api/settings')).status, 200);
+    assert.equal((await call('POST', '/api/pin', { next: '12' })).status, 400);
+    assert.equal((await call('POST', '/api/pin', { next: '2468' })).status, 200);
+    // This browser stays logged in.
+    assert.equal((await call('GET', '/api/settings')).status, 200);
+    await call('POST', '/api/logout');
+    assert.equal((await call('GET', '/api/settings')).status, 401);
+    assert.equal((await call('POST', '/api/login', { pin: '1111' })).status, 401);
+    assert.equal((await call('POST', '/api/login', { pin: '2468' })).status, 200);
+    const s = await call('GET', '/api/settings');
+    assert.equal(s.body.pinSet, true);
+    // Changing the PIN needs the current one.
+    assert.equal((await call('POST', '/api/pin', { current: '0000', next: '1357' })).status, 401);
+    assert.equal((await call('POST', '/api/pin', { current: '2468', next: null })).status, 200);
+    assert.equal((await call('GET', '/api/session')).body.pinSet, false);
+  });
+});
+
+test('output settings save, switch off, and reach the live state', async () => {
+  await withApp(async (call, app) => {
+    let r = await call('PUT', '/api/settings', { output: { kind: 'sacn', host: '' }, outputEnabled: false, frameRate: 30 });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.output, { kind: 'sacn', host: '', priority: 100 });
+    assert.equal(r.body.outputEnabled, false);
+    assert.equal(r.body.frameRate, 30);
+    await sleep(150);
+    assert.equal(app.state?.output, 'off');
+    const saved = JSON.parse(readFileSync(join(app.store.dir, 'show.json'), 'utf8'));
+    assert.equal(saved.settings.output.kind, 'sacn');
+    // Bad values are refused and nothing changes.
+    r = await call('PUT', '/api/settings', { frameRate: 500 });
+    assert.equal(r.status, 400);
+    r = await call('PUT', '/api/settings', { output: { kind: 'none' }, universe: 3 });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.universes, [3]);
+  });
+});
+
+test('show export, import and backup restore', async () => {
+  await withApp(async (call) => {
+    const exported = await call('GET', '/api/show');
+    assert.equal(exported.status, 200);
+    assert.equal(exported.body.name, 'Demo rig');
+    assert.equal((await call('PUT', '/api/show', { nope: true })).status, 400);
+    assert.equal((await call('PUT', '/api/show', { ...exported.body, name: 'Imported' })).status, 200);
+    assert.equal((await call('GET', '/api/settings')).body.showName, 'Imported');
+    const backups = (await call('GET', '/api/backups')).body;
+    assert.ok(backups.length >= 2);
+    // The newest backup is the show just before the import.
+    const restored = await call('POST', '/api/backups/restore', { name: backups[0].name });
+    assert.equal(restored.status, 200);
+    assert.equal(restored.body.showName, 'Demo rig');
+  });
+});
+
+test('patch: profiles list, saving fixtures and groups, and Identify', async () => {
+  await withApp(async (call, app) => {
+    const profiles = (await call('GET', '/api/profiles')).body;
+    assert.ok(profiles.some((p: any) => p.id === 'generic-rgbw' && p.channels === 4));
+    const show = (await call('GET', '/api/show')).body;
+    show.fixtures.push({ id: 'new-bar', name: 'New bar', profile: 'generic-rgb', universe: 0, address: 100, x: 0.2, y: 0.3 });
+    show.groups.push({ id: 'new-group', name: 'New group', fixtures: ['new-bar'] });
+    assert.equal((await call('PUT', '/api/show?source=patch', show)).status, 200);
+    // A group pointing at a fixture that does not exist is refused.
+    const broken = structuredClone(show);
+    broken.groups.at(-1).fixtures.push('ghost');
+    const refused = await call('PUT', '/api/show?source=patch', broken);
+    assert.equal(refused.status, 400);
+    assert.match(refused.body.error, /ghost/);
+    // Identify takes over the fixture for a moment, as a programmer.
+    assert.equal((await call('POST', '/api/identify', { fixture: 'new-bar' })).status, 200);
+    await sleep(100);
+    assert.deepEqual(app.state?.fixturesManual, ['new-bar']);
+    assert.equal((await call('POST', '/api/identify', { fixture: 'nope' })).status, 404);
+  });
+});

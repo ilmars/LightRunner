@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0c0e">
+  <title>Light Runner Patch</title>
+  <link rel="stylesheet" href="/settings/style.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="back" href="/operator/">← Operator</a>
+    <h1>Patch</h1>
+    <nav class="nav"><a href="/patch/" aria-current="page">Patch</a><a href="/settings/">Settings</a></nav>
+  </header>
+
+  <section id="login" class="login" hidden>
+    <h2>Programmer PIN</h2>
+    <p class="hint">The patch changes how the whole rig works, so it is behind a PIN.</p>
+    <form id="loginForm">
+      <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="6" placeholder="••••" required>
+      <button class="primary">Unlock</button>
+    </form>
+    <p id="loginError" class="error"></p>
+  </section>
+
+  <main id="main" class="wide" hidden>
+    <section class="card">
+      <div class="card-head">
+        <h2>Fixtures <span id="fixtureCount" class="count"></span></h2>
+        <span id="overlapSummary" class="warn"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="patch">
+          <thead>
+            <tr><th>Name</th><th>Type</th><th class="num">Universe</th><th class="num">Address</th><th>Channels</th><th>Groups</th><th></th></tr>
+          </thead>
+          <tbody id="fixtureRows"></tbody>
+        </table>
+      </div>
+
+      <form id="addForm" class="add">
+        <h3>Add fixtures</h3>
+        <div class="add-grid">
+          <div class="field"><label for="addProfile">Type</label><select id="addProfile" required></select></div>
+          <div class="field"><label for="addName">Name</label><input id="addName" type="text" placeholder="Bar" required></div>
+          <div class="field"><label for="addCount">How many</label><input id="addCount" type="number" min="1" max="64" value="1" required></div>
+          <div class="field"><label for="addUniverse">Universe</label><input id="addUniverse" type="number" min="0" max="32767" required></div>
+          <div class="field"><label for="addAddress">Start address</label><input id="addAddress" type="number" min="1" max="512" required></div>
+          <button class="primary">Add</button>
+        </div>
+        <p class="hint" id="addHint"></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Groups</h2>
+        <form id="newGroupForm" class="row">
+          <input id="newGroupName" type="text" placeholder="New group name" required>
+          <button class="ghost">Add group</button>
+        </form>
+      </div>
+      <p class="hint">A fixture can be in several groups. Order matters: waves and chases run along it, left to right.</p>
+      <div id="groupList" class="groups"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Stage plan</h2>
+        <span class="hint">Drag fixtures to where they hang. The back of the stage is at the top.</span>
+      </div>
+      <div id="stage" class="stage-plan" aria-label="Stage plan"></div>
+    </section>
+  </main>
+
+  <footer id="saveBar" class="save-bar" hidden>
+    <span id="saveText">Unsaved changes</span>
+    <button id="discard" class="ghost">Discard</button>
+    <button id="save" class="primary">Save patch</button>
+  </footer>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="patch.js"></script>
+</body>
+</html>

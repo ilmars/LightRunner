@@ -1,0 +1,567 @@
+// The lighting engine. Pure: no timers, no network, no files. The caller
+// passes `now` (seconds on a monotonic clock) and gets DMX buffers back, so the
+// same code drives output, tests, blind preview and the soak test.
+
+import {
+  BLACKOUT, SAFE, findProfile,
+  type Command, type LiveState, type Look, type ManualTarget, type OutputStatus,
+  type Palette, type RuntimeState, type Show,
+} from '../../shared/src/index.ts';
+import { Crossfade, Ramp } from './fade.ts';
+import { compilePreset, fixedPreset, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
+import { copy, dark, fromHex, mix, mix2, type Light } from './light.ts';
+import { planChannels, writeFixture, type ChannelPlan } from './output.ts';
+
+/** Safe's fixed warm white stage wash. */
+const SAFE_LIGHT = fromHex('#ffd2a0', 0.5, 0.8);
+const SAFE_FADE = 1;
+/**
+ * Safe also brings master, speed and group levels back to default. Those
+ * multiply with the wash fading in, so they move over 2 s to keep the
+ * combined change under 5% per frame.
+ */
+const SAFE_RESET = 2;
+const BLACKOUT_FADE = 1;
+/** Fader and dial moves are smoothed over this long so they never step. */
+const SMOOTH = 0.2;
+/** Manual takes over this fast, and follows the finger with this smoothing. */
+const MANUAL_IN = 0.2;
+/** Release fades back to the running preset over this long. */
+const MANUAL_OUT = 1;
+const DEFAULT_FADE = 3;
+
+/** Undo fades back over this long, and keeps this many steps. */
+const UNDO_FADE = 2;
+const UNDO_STEPS = 20;
+
+const SAFE_ID = '__safe';
+const BLACKOUT_ID = '__blackout';
+
+interface PresetRun {
+  preset: CompiledPreset;
+  /** Effect time in seconds, advanced by speed × elapsed time. */
+  time: number;
+}
+
+class ManualRun {
+  target: Light;
+  current: Light;
+  weight = new Ramp(0);
+  releasing = false;
+
+  constructor(start: Light, now: number) {
+    this.target = copy(dark(), start);
+    this.current = copy(dark(), start);
+    this.weight.set(1, now, MANUAL_IN);
+  }
+
+  /** Follow the target with a one-pole filter that settles in about 0.2 s. */
+  follow(dt: number): void {
+    const a = 1 - Math.exp(-dt / (MANUAL_IN / 3));
+    const t = this.target, c = this.current;
+    c.r += (t.r - c.r) * a;
+    c.g += (t.g - c.g) * a;
+    c.b += (t.b - c.b) * a;
+    c.w += (t.w - c.w) * a;
+    c.i += (t.i - c.i) * a;
+  }
+}
+
+class GroupRun {
+  readonly id: string;
+  /** Fixture indices, in group order. */
+  fixtures: number[] = [];
+  /** Fixture index → position in this group. */
+  position = new Map<number, number>();
+  presets = new Crossfade<PresetRun>();
+  manual: ManualRun | null = null;
+  level = new Ramp(1);
+  /** This group's light for each of its fixtures, in group order. */
+  out: Light[] = [];
+
+  constructor(id: string) {
+    this.id = id;
+  }
+
+  setFixtures(fixtures: number[]): void {
+    this.fixtures = fixtures;
+    this.position = new Map(fixtures.map((f, k) => [f, k]));
+    while (this.out.length < fixtures.length) this.out.push(dark());
+    this.out.length = fixtures.length;
+  }
+}
+
+class FixtureRun {
+  readonly id: string;
+  plan: ChannelPlan;
+  /** Which group drives this fixture. The most recent change wins, and the handover fades. */
+  owners = new Crossfade<string>();
+  manual: ManualRun | null = null;
+  /** Final light after manual and master, before gamma. */
+  light: Light = dark();
+
+  constructor(id: string, plan: ChannelPlan) {
+    this.id = id;
+    this.plan = plan;
+  }
+}
+
+export interface Frame {
+  /** DMX data per universe, 512 bytes each. */
+  universes: Map<number, Uint8Array>;
+  /** Display colour per fixture (show order), 3 bytes RGB each, for the visualiser. */
+  visual: Uint8Array;
+}
+
+export class Engine {
+  private show!: Show;
+  private presets = new Map<string, CompiledPreset>();
+  private looks = new Map<string, Look>();
+  private groups = new Map<string, GroupRun>();
+  private fixtures: FixtureRun[] = [];
+  private fixtureIndex = new Map<string, number>();
+  private universes = new Map<number, Uint8Array>();
+  private visual = new Uint8Array(0);
+
+  private master = new Ramp(1);
+  private speed = new Ramp(1);
+  private look: string | null = null;
+  private lookStart = 0;
+  private lookDur = 0;
+  /** Each group's preset before Blackout, so any look brings the whole stage back. */
+  private beforeBlackout: Record<string, string | null> | null = null;
+  /** Stage snapshots before each look or preset change, newest last. */
+  private history: { look: string | null; lastLook: string | null; groups: Record<string, string | null>; beforeBlackout: Record<string, string | null> | null }[] = [];
+  private lastLook: string | null = null;
+  private last: number | null = null;
+  private scratch: Light[] = [];
+  private scratchWeights: number[] = [];
+  private scratchLights: Light[] = [];
+
+  constructor(show: Show, now = 0) {
+    this.setShow(show, now);
+  }
+
+  /** Load a new or edited show without disturbing what is on stage. */
+  setShow(show: Show, now: number): void {
+    this.show = show;
+    const palettes = new Map<string, Palette>(show.palettes.map((p) => [p.id, p]));
+    this.presets = new Map(show.presets.map((p) => [p.id, compilePreset(p, palettes)]));
+    this.looks = new Map(show.looks.map((l) => [l.id, l]));
+
+    const oldFixtures = new Map(this.fixtures.map((f) => [f.id, f]));
+    this.fixtures = [];
+    this.fixtureIndex = new Map();
+    for (const f of show.fixtures) {
+      const profile = findProfile(show, f.profile);
+      if (!profile) continue;
+      const plan = planChannels(f, profile, show.settings.gamma);
+      const run = oldFixtures.get(f.id) ?? new FixtureRun(f.id, plan);
+      run.plan = plan;
+      this.fixtureIndex.set(f.id, this.fixtures.length);
+      this.fixtures.push(run);
+    }
+
+    const oldGroups = this.groups;
+    this.groups = new Map();
+    for (const g of show.groups) {
+      const run = oldGroups.get(g.id) ?? new GroupRun(g.id);
+      run.setFixtures(g.fixtures.map((id) => this.fixtureIndex.get(id)).filter((i): i is number => i !== undefined));
+      // Running presets pick up edits; deleted ones keep running until they fade out.
+      run.presets.update((key, item) => {
+        const fresh = this.presets.get(key);
+        return fresh ? { ...item, preset: fresh } : item;
+      });
+      this.groups.set(g.id, run);
+    }
+
+    // A fixture nobody has driven yet belongs to its first group.
+    for (const g of this.groups.values()) {
+      for (const f of g.fixtures) {
+        const run = this.fixtures[f];
+        if (run.owners.size === 0) run.owners.push(g.id, () => g.id, now, 0);
+      }
+    }
+
+    this.universes = new Map();
+    for (const f of this.fixtures) {
+      if (!this.universes.has(f.plan.universe)) this.universes.set(f.plan.universe, new Uint8Array(512));
+    }
+    this.visual = new Uint8Array(this.fixtures.length * 3);
+  }
+
+  /** Apply a command. Returns an error message, or null when it worked. */
+  apply(cmd: Command, now: number): string | null {
+    if (cmd.type === 'undo') return this.undo(now);
+    if (cmd.type === 'look' || cmd.type === 'groupPreset' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') {
+      const before = this.snapshot();
+      const error = this.run(cmd, now);
+      const after = this.snapshot();
+      if (!error && JSON.stringify(before) !== JSON.stringify(after)) {
+        this.history.push(before);
+        if (this.history.length > UNDO_STEPS) this.history.shift();
+      }
+      return error;
+    }
+    return this.run(cmd, now);
+  }
+
+  private snapshot() {
+    const groups: Record<string, string | null> = {};
+    for (const g of this.groups.values()) groups[g.id] = g.presets.currentKey;
+    return { look: this.look, lastLook: this.lastLook, groups, beforeBlackout: this.beforeBlackout ? { ...this.beforeBlackout } : null };
+  }
+
+  /** Fade back to how the stage was before the last look or preset change. */
+  private undo(now: number): string | null {
+    const prev = this.history.pop();
+    if (!prev) return 'nothing to undo';
+    for (const group of this.groups.values()) {
+      // A group that had no preset yet was dark.
+      const preset = this.presetFor(prev.groups[group.id] ?? BLACKOUT_ID, group.id);
+      if (preset && group.presets.currentKey !== preset.id) {
+        this.setPreset(group, preset, UNDO_FADE, now, preset.id !== SAFE_ID && preset.id !== BLACKOUT_ID);
+      }
+    }
+    this.beforeBlackout = prev.beforeBlackout;
+    this.lastLook = prev.lastLook;
+    this.setLook(prev.look ?? '', now, UNDO_FADE);
+    if (!prev.look) this.look = null;
+    return null;
+  }
+
+  private presetFor(pid: string | null, group: string): CompiledPreset | undefined {
+    if (pid === SAFE_ID) return fixedPreset(SAFE_ID, group, SAFE_LIGHT, SAFE_FADE);
+    if (pid === BLACKOUT_ID) return fixedPreset(BLACKOUT_ID, group, dark(), BLACKOUT_FADE);
+    return pid ? this.presets.get(pid) : undefined;
+  }
+
+  private run(cmd: Command, now: number): string | null {
+    switch (cmd.type) {
+      case 'undo': return this.undo(now);
+      case 'look': return this.goLook(cmd.id, cmd.fade, now);
+      case 'groupPreset': {
+        const group = this.groups.get(cmd.group);
+        const preset = this.presets.get(cmd.preset);
+        if (!group) return `unknown group "${cmd.group}"`;
+        if (!preset || preset.group !== cmd.group) return `unknown preset "${cmd.preset}" for group "${cmd.group}"`;
+        this.setPreset(group, preset, cmd.fade ?? preset.fade, now);
+        return null;
+      }
+      case 'manual': return this.setManual(cmd.target, cmd.colour, cmd.intensity, now);
+      case 'release': return this.release(cmd.target, now);
+      case 'releaseAll': this.releaseAll(now); return null;
+      case 'backToLook': return this.backToLook(now);
+      case 'safe': this.goSafe(now); return null;
+      case 'blackout': this.goBlackout(now); return null;
+      case 'master': this.master.set(cmd.value, now, SMOOTH); return null;
+      case 'speed': this.speed.set(cmd.value, now, SMOOTH); return null;
+      case 'groupLevel': {
+        const group = this.groups.get(cmd.group);
+        if (!group) return `unknown group "${cmd.group}"`;
+        group.level.set(cmd.value, now, SMOOTH);
+        return null;
+      }
+    }
+  }
+
+  private goLook(id: string, fade: number | undefined, now: number): string | null {
+    const look = this.looks.get(id);
+    if (!look) return `unknown look "${id}"`;
+    let longest = 0;
+    const listed = new Set<string>();
+    for (const entry of look.groups) {
+      const group = this.groups.get(entry.group);
+      const preset = this.presets.get(entry.preset);
+      if (!group || !preset) continue;
+      const t = fade ?? entry.fade ?? preset.fade;
+      this.setPreset(group, preset, t, now);
+      listed.add(group.id);
+      longest = Math.max(longest, t);
+    }
+    // Coming out of Blackout, groups the look leaves alone return to what they ran before.
+    if (this.beforeBlackout) {
+      for (const [gid, pid] of Object.entries(this.beforeBlackout)) {
+        const group = this.groups.get(gid);
+        const preset = pid ? this.presets.get(pid) : undefined;
+        if (!group || listed.has(gid) || !preset) continue;
+        const t = fade ?? DEFAULT_FADE;
+        this.setPreset(group, preset, t, now);
+        longest = Math.max(longest, t);
+      }
+      this.beforeBlackout = null;
+    }
+    this.setLook(id, now, longest);
+    this.lastLook = id;
+    return null;
+  }
+
+  private goSafe(now: number): void {
+    const safeLook = this.show.operator.safeLook ? this.looks.get(this.show.operator.safeLook) : undefined;
+    for (const group of this.groups.values()) {
+      const entry = safeLook?.groups.find((e) => e.group === group.id);
+      const preset = (entry && this.presets.get(entry.preset)) ?? fixedPreset(SAFE_ID, group.id, SAFE_LIGHT, SAFE_FADE);
+      this.setPreset(group, preset, SAFE_FADE, now, false);
+    }
+    this.releaseAll(now);
+    this.master.set(1, now, SAFE_RESET);
+    this.speed.set(1, now, SAFE_RESET);
+    for (const group of this.groups.values()) group.level.set(1, now, SAFE_RESET);
+    this.beforeBlackout = null;
+    this.setLook(SAFE, now, SAFE_FADE);
+  }
+
+  private goBlackout(now: number): void {
+    if (!this.beforeBlackout) {
+      this.beforeBlackout = {};
+      for (const group of this.groups.values()) this.beforeBlackout[group.id] = group.presets.currentKey;
+    }
+    for (const group of this.groups.values()) {
+      this.setPreset(group, fixedPreset(BLACKOUT_ID, group.id, dark(), BLACKOUT_FADE), BLACKOUT_FADE, now, false);
+    }
+    this.releaseAll(now);
+    this.setLook(BLACKOUT, now, BLACKOUT_FADE);
+  }
+
+  private backToLook(now: number): string | null {
+    this.releaseAll(now);
+    const look = this.look ? this.looks.get(this.look) : undefined;
+    if (!look) return null;
+    for (const entry of look.groups) {
+      const group = this.groups.get(entry.group);
+      const preset = this.presets.get(entry.preset);
+      if (group && preset) this.setPreset(group, preset, entry.fade ?? preset.fade, now);
+    }
+    return null;
+  }
+
+  private setLook(id: string, now: number, dur: number): void {
+    this.look = id;
+    this.lookStart = now;
+    this.lookDur = dur;
+  }
+
+  /**
+   * Fade a group to a preset. Normally the group also takes over any fixtures
+   * it shares with other groups. Safe and Blackout set every group at once,
+   * so handing fixtures over would only add a second fade on top.
+   */
+  private setPreset(group: GroupRun, preset: CompiledPreset, fade: number, now: number, own = true): void {
+    group.presets.push(preset.id, () => ({ preset, time: 0 }), now, fade);
+    if (own) this.takeOwnership(group, now, fade);
+  }
+
+  /** The most recent change to a group wins its fixtures, including ones shared with other groups. */
+  private takeOwnership(group: GroupRun, now: number, fade: number): void {
+    for (const f of group.fixtures) {
+      const run = this.fixtures[f];
+      if (run.owners.currentKey !== group.id) run.owners.push(group.id, () => group.id, now, fade);
+    }
+  }
+
+  private setManual(target: ManualTarget, colour: string | undefined, intensity: number | undefined, now: number): string | null {
+    let holder: { manual: ManualRun | null };
+    let showing: Light;
+    if ('group' in target) {
+      const group = this.groups.get(target.group);
+      if (!group) return `unknown group "${target.group}"`;
+      holder = group;
+      showing = group.out[0] ?? dark();
+      this.takeOwnership(group, now, MANUAL_IN);
+    } else {
+      const index = this.fixtureIndex.get(target.fixture);
+      if (index === undefined) return `unknown fixture "${target.fixture}"`;
+      holder = this.fixtures[index];
+      showing = this.fixtures[index].light;
+    }
+    let m = holder.manual;
+    if (!m || m.releasing) {
+      // Start from what the fixture shows now, so taking control never jumps.
+      const start = m && m.releasing ? m.current : showing;
+      m = new ManualRun(start, now);
+      if (holder.manual) m.weight = holder.manual.weight;
+      m.weight.set(1, now, MANUAL_IN);
+      holder.manual = m;
+    }
+    if (colour) {
+      const c = fromHex(colour);
+      m.target.r = c.r; m.target.g = c.g; m.target.b = c.b; m.target.w = c.w;
+      if (intensity === undefined && c.i < 1) m.target.i = c.i;
+    }
+    if (intensity !== undefined) m.target.i = intensity;
+    return null;
+  }
+
+  private release(target: ManualTarget, now: number): string | null {
+    let holder: { manual: ManualRun | null } | undefined;
+    if ('group' in target) holder = this.groups.get(target.group);
+    else {
+      const index = this.fixtureIndex.get(target.fixture);
+      holder = index === undefined ? undefined : this.fixtures[index];
+    }
+    if (!holder) return `unknown target`;
+    if (holder.manual && !holder.manual.releasing) {
+      holder.manual.releasing = true;
+      holder.manual.weight.set(0, now, MANUAL_OUT);
+    }
+    return null;
+  }
+
+  private releaseAll(now: number): void {
+    for (const g of this.groups.values()) if (g.manual) this.release({ group: g.id }, now);
+    for (const f of this.fixtures) if (f.manual) this.release({ fixture: f.id }, now);
+  }
+
+  /** Render one frame at time `now`. */
+  frame(now: number): Frame {
+    const dt = this.last === null ? 0 : Math.min(0.5, Math.max(0, now - this.last));
+    this.last = now;
+    const speed = this.speed.value(now);
+    const ctx: LayerContext = { index: 0, count: 0, time: 0 };
+    const parts = this.scratch;
+    const weights = this.scratchWeights;
+
+    // 1–3. Each group renders and blends its presets, then its manual override and level.
+    for (const group of this.groups.values()) {
+      const mix0 = group.presets.weights(now);
+      for (const w of mix0) w.item.time += dt * speed;
+      const level = group.level.value(now);
+      const manual = this.liveManual(group, now, dt);
+      ctx.count = group.fixtures.length;
+      for (let k = 0; k < group.fixtures.length; k++) {
+        ctx.index = k;
+        const out = group.out[k];
+        if (mix0.length === 0) copy(out, dark());
+        else {
+          parts.length = 0;
+          weights.length = 0;
+          for (let n = 0; n < mix0.length; n++) {
+            ctx.time = mix0[n].item.time;
+            if (!this.scratchLights[n]) this.scratchLights[n] = dark();
+            parts.push(renderPreset(this.scratchLights[n], mix0[n].item.preset, ctx));
+            weights.push(mix0[n].weight);
+          }
+          mix(out, parts, weights);
+        }
+        if (manual) mix2(out, out, manual.current, manual.weight.value(now));
+        out.i *= level;
+      }
+    }
+
+    // 4–6. Each fixture takes its owning group's light, then manual and master, then gamma and channels.
+    const master = this.master.value(now);
+    for (const buf of this.universes.values()) buf.fill(0);
+    for (let f = 0; f < this.fixtures.length; f++) {
+      const run = this.fixtures[f];
+      const owners = run.owners.weights(now);
+      parts.length = 0;
+      weights.length = 0;
+      for (const o of owners) {
+        const group = this.groups.get(o.item);
+        const pos = group?.position.get(f);
+        if (!group || pos === undefined) continue;
+        parts.push(group.out[pos]);
+        weights.push(o.weight);
+      }
+      const light = run.light;
+      if (parts.length === 0) copy(light, dark());
+      else if (parts.length === 1) copy(light, parts[0]);
+      else mix(light, parts, weights);
+      const manual = this.liveManual(run, now, dt);
+      if (manual) mix2(light, light, manual.current, manual.weight.value(now));
+      light.i *= master;
+
+      const buf = this.universes.get(run.plan.universe);
+      if (buf) writeFixture(buf, run.plan, light);
+      const v = f * 3;
+      this.visual[v] = Math.round(Math.min(1, light.r + light.w) * light.i * 255);
+      this.visual[v + 1] = Math.round(Math.min(1, light.g + light.w) * light.i * 255);
+      this.visual[v + 2] = Math.round(Math.min(1, light.b + light.w) * light.i * 255);
+    }
+    return { universes: this.universes, visual: this.visual };
+  }
+
+  /** The holder's manual override if it still has weight; clears it once released. */
+  private liveManual(holder: { manual: ManualRun | null }, now: number, dt: number): ManualRun | null {
+    const m = holder.manual;
+    if (!m) return null;
+    if (m.releasing && m.weight.settled(now)) {
+      holder.manual = null;
+      return null;
+    }
+    m.follow(dt);
+    return m;
+  }
+
+  /** Final light of every fixture (after master, before gamma), in show order. */
+  lights(): readonly Light[] {
+    return this.fixtures.map((f) => f.light);
+  }
+
+  fixtureIds(): string[] {
+    return this.fixtures.map((f) => f.id);
+  }
+
+  liveState(now: number, output: OutputStatus): LiveState {
+    const look = this.look ? this.looks.get(this.look) : undefined;
+    const groups: LiveState['groups'] = {};
+    for (const g of this.groups.values()) {
+      const preset = g.presets.currentKey;
+      const expected = look?.groups.find((e) => e.group === g.id)?.preset;
+      groups[g.id] = {
+        preset,
+        changed: expected !== undefined && expected !== preset,
+        manual: g.manual !== null && !g.manual.releasing,
+        progress: g.presets.progress(now),
+        level: g.level.target,
+      };
+    }
+    return {
+      look: this.look,
+      lookProgress: this.lookDur > 0 ? Math.min(1, Math.max(0, (now - this.lookStart) / this.lookDur)) : 1,
+      lookFadeLeft: Math.max(0, this.lookStart + this.lookDur - now),
+      lastLook: this.lastLook,
+      canUndo: this.history.length > 0,
+      groups,
+      fixturesManual: this.fixtures.filter((f) => f.manual && !f.manual.releasing).map((f) => f.id),
+      master: this.master.target,
+      speed: this.speed.target,
+      output,
+      outputProblem: null,
+    };
+  }
+
+  runtime(): RuntimeState {
+    const groups: RuntimeState['groups'] = {};
+    const levels: RuntimeState['levels'] = {};
+    for (const g of this.groups.values()) {
+      groups[g.id] = g.presets.currentKey;
+      levels[g.id] = g.level.target;
+    }
+    return {
+      look: this.look,
+      groups,
+      master: this.master.target,
+      speed: this.speed.target,
+      levels,
+      lastLook: this.lastLook,
+      ...(this.beforeBlackout ? { beforeBlackout: { ...this.beforeBlackout } } : {}),
+    };
+  }
+
+  /** Put the stage back as it was saved, with no fade, so a restart matches what the node is holding. */
+  restore(rt: RuntimeState, now: number): void {
+    for (const group of this.groups.values()) {
+      const preset = this.presetFor(rt.groups[group.id] ?? null, group.id);
+      if (preset) this.setPreset(group, preset, 0, now);
+      group.level.set(rt.levels[group.id] ?? 1, now, 0);
+    }
+    this.master.set(rt.master, now, 0);
+    this.speed.set(rt.speed, now, 0);
+    this.beforeBlackout = rt.beforeBlackout ?? null;
+    this.look = rt.look;
+    this.lastLook = rt.lastLook ?? (rt.look && this.looks.has(rt.look) ? rt.look : null);
+    this.lookStart = now;
+    this.lookDur = 0;
+  }
+}

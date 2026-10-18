@@ -1,0 +1,1619 @@
+{
+  "schemaVersion": 1,
+  "name": "Dieva Mājas skatuve (from Lightkey)",
+  "profiles": [
+    {
+      "id": "neewer-as600b-cct-8-bit",
+      "name": "Neewer AS600B (CCT (8 Bit))",
+      "channels": [
+        {
+          "role": "dimmer"
+        },
+        {
+          "role": "cct",
+          "kelvin": {
+            "min": 2500,
+            "max": 10000
+          }
+        }
+      ]
+    },
+    {
+      "id": "elation-sixbar-500-18-ch",
+      "name": "Elation SixBar 500 (18 ch)",
+      "channels": [
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "amber",
+          "name": "Amber"
+        },
+        {
+          "role": "uv",
+          "name": "Ultraviolet"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "amber",
+          "name": "Amber"
+        },
+        {
+          "role": "uv",
+          "name": "Ultraviolet"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "amber",
+          "name": "Amber"
+        },
+        {
+          "role": "uv",
+          "name": "Ultraviolet"
+        }
+      ]
+    },
+    {
+      "id": "stairville-sonicpulse-led-bar-10-39-ch",
+      "name": "Stairville SonicPulse LED Bar 10 (39 ch)",
+      "channels": [
+        {
+          "role": "dimmer"
+        },
+        {
+          "role": "strobe",
+          "default": 0
+        },
+        {
+          "role": "other",
+          "default": 0,
+          "name": "RGBW Color Change"
+        },
+        {
+          "role": "other",
+          "default": 0,
+          "name": "Color 0"
+        },
+        {
+          "role": "other",
+          "default": 0,
+          "name": "Off"
+        },
+        {
+          "role": "other",
+          "default": 0,
+          "name": "Off"
+        },
+        {
+          "role": "other",
+          "default": 0,
+          "name": "custom"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        }
+      ]
+    },
+    {
+      "id": "generic-led-strip-rgb-3-ch",
+      "name": "Generic LED Strip (RGB) (3 ch)",
+      "channels": [
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        }
+      ]
+    },
+    {
+      "id": "stairville-sonicpulse-led-bar-05-23-ch",
+      "name": "Stairville SonicPulse LED Bar 05 (23 ch)",
+      "channels": [
+        {
+          "role": "dimmer"
+        },
+        {
+          "role": "strobe",
+          "default": 0
+        },
+        {
+          "role": "other",
+          "default": 0,
+          "name": "RGBW Color Change"
+        },
+        {
+          "role": "other",
+          "default": 0,
+          "name": "Color 0"
+        },
+        {
+          "role": "other",
+          "default": 0,
+          "name": "Off"
+        },
+        {
+          "role": "other",
+          "default": 0,
+          "name": "Off"
+        },
+        {
+          "role": "other",
+          "default": 0,
+          "name": "custom"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        },
+        {
+          "role": "red",
+          "name": "Red"
+        },
+        {
+          "role": "green",
+          "name": "Green"
+        },
+        {
+          "role": "blue",
+          "name": "Blue"
+        },
+        {
+          "role": "white",
+          "name": "CoolWhite"
+        }
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "p1",
+      "name": "P1 AS600B",
+      "profile": "neewer-as600b-cct-8-bit",
+      "universe": 1,
+      "address": 1,
+      "x": 0.554,
+      "y": 0.892
+    },
+    {
+      "id": "p2",
+      "name": "P2 AS600B",
+      "profile": "neewer-as600b-cct-8-bit",
+      "universe": 1,
+      "address": 3,
+      "x": 0.501,
+      "y": 0.892
+    },
+    {
+      "id": "p3",
+      "name": "P3 AS600B",
+      "profile": "neewer-as600b-cct-8-bit",
+      "universe": 1,
+      "address": 5,
+      "x": 0.449,
+      "y": 0.892
+    },
+    {
+      "id": "p4",
+      "name": "P4 AS600B",
+      "profile": "neewer-as600b-cct-8-bit",
+      "universe": 1,
+      "address": 7,
+      "x": 0.397,
+      "y": 0.892
+    },
+    {
+      "id": "b1",
+      "name": "B1 SixBar 500",
+      "profile": "elation-sixbar-500-18-ch",
+      "universe": 1,
+      "address": 10,
+      "x": 0.391,
+      "y": 0.243,
+      "w": 0.093,
+      "h": 0.04
+    },
+    {
+      "id": "b2",
+      "name": "B2 SixBar 500",
+      "profile": "elation-sixbar-500-18-ch",
+      "universe": 1,
+      "address": 30,
+      "x": 0.626,
+      "y": 0.243,
+      "w": 0.093,
+      "h": 0.04
+    },
+    {
+      "id": "b3",
+      "name": "B3 SonicPulse LED Bar 10",
+      "profile": "stairville-sonicpulse-led-bar-10-39-ch",
+      "universe": 1,
+      "address": 48,
+      "x": 0.859,
+      "y": 0.392,
+      "w": 0.221,
+      "h": 0.04
+    },
+    {
+      "id": "b4",
+      "name": "B4 SonicPulse LED Bar 10",
+      "profile": "stairville-sonicpulse-led-bar-10-39-ch",
+      "universe": 1,
+      "address": 87,
+      "x": 0.618,
+      "y": 0.392,
+      "w": 0.221,
+      "h": 0.04
+    },
+    {
+      "id": "b5",
+      "name": "B5 SonicPulse LED Bar 10",
+      "profile": "stairville-sonicpulse-led-bar-10-39-ch",
+      "universe": 1,
+      "address": 126,
+      "x": 0.382,
+      "y": 0.392,
+      "w": 0.221,
+      "h": 0.04
+    },
+    {
+      "id": "b6",
+      "name": "B6 SonicPulse LED Bar 10",
+      "profile": "stairville-sonicpulse-led-bar-10-39-ch",
+      "universe": 1,
+      "address": 165,
+      "x": 0.141,
+      "y": 0.392,
+      "w": 0.221,
+      "h": 0.04
+    },
+    {
+      "id": "l1",
+      "name": "L1 LED Strip (RGB)",
+      "profile": "generic-led-strip-rgb-3-ch",
+      "universe": 1,
+      "address": 221,
+      "x": 0.862,
+      "y": 0.062,
+      "w": 0.215,
+      "h": 0.0
+    },
+    {
+      "id": "b8",
+      "name": "B8 SonicPulse LED Bar 05",
+      "profile": "stairville-sonicpulse-led-bar-05-23-ch",
+      "universe": 1,
+      "address": 227,
+      "x": 0.69,
+      "y": 0.732,
+      "w": 0.012,
+      "h": 0.38
+    }
+  ],
+  "groups": [
+    {
+      "id": "front-lights",
+      "name": "Front lights",
+      "fixtures": [
+        "p4",
+        "p3",
+        "p2",
+        "p1"
+      ]
+    },
+    {
+      "id": "key-lights",
+      "name": "Key lights",
+      "fixtures": [
+        "b1",
+        "b2"
+      ]
+    },
+    {
+      "id": "background",
+      "name": "Background",
+      "fixtures": [
+        "b6",
+        "b5",
+        "b4",
+        "b3"
+      ]
+    },
+    {
+      "id": "drum-cage",
+      "name": "Drum cage",
+      "fixtures": [
+        "l1"
+      ]
+    },
+    {
+      "id": "b8-side-bar",
+      "name": "B8 side bar",
+      "fixtures": [
+        "b8"
+      ]
+    }
+  ],
+  "palettes": [
+    {
+      "id": "lightkey",
+      "name": "Lightkey colours",
+      "colours": [
+        {
+          "hex": "#ffaa5a"
+        },
+        {
+          "hex": "#dcebff"
+        },
+        {
+          "hex": "#ff0000"
+        },
+        {
+          "hex": "#ff5a00"
+        },
+        {
+          "hex": "#ffc800"
+        },
+        {
+          "hex": "#00ff00"
+        },
+        {
+          "hex": "#00ffc8"
+        },
+        {
+          "hex": "#0000ff"
+        },
+        {
+          "hex": "#8c00ff"
+        },
+        {
+          "hex": "#ff008c"
+        }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "id": "front-lights-silti-3200k",
+      "name": "Silti 3200K",
+      "group": "front-lights",
+      "fade": 3,
+      "swatch": "#ffb46b",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "hex": "#ffb46b"
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "front-lights-neitrali-5600k",
+      "name": "Neitrāli 5600K",
+      "group": "front-lights",
+      "fade": 3,
+      "swatch": "#ffeedd",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "hex": "#ffeedd"
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "front-lights-vesi-6500k",
+      "name": "Vēsi 6500K",
+      "group": "front-lights",
+      "fade": 3,
+      "swatch": "#fffaf6",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "hex": "#fffaf6"
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "front-lights-silti-50",
+      "name": "Silti 50%",
+      "group": "front-lights",
+      "fade": 3,
+      "swatch": "#ffb46b",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "hex": "#ffb46b"
+          },
+          "intensity": 0.5
+        }
+      ]
+    },
+    {
+      "id": "front-lights-off",
+      "name": "Izslēgts",
+      "group": "front-lights",
+      "fade": 3,
+      "swatch": "#000000",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "hex": "#ffffff"
+          },
+          "intensity": 0
+        }
+      ]
+    },
+    {
+      "id": "key-lights-silti-balts",
+      "name": "Silti balts",
+      "group": "key-lights",
+      "fade": 3,
+      "swatch": "#ffaa5a",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 0
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "key-lights-vesi-balts",
+      "name": "Vēsi balts",
+      "group": "key-lights",
+      "fade": 3,
+      "swatch": "#dcebff",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 1
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "key-lights-sarkans",
+      "name": "Sarkans",
+      "group": "key-lights",
+      "fade": 3,
+      "swatch": "#ff0000",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 2
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "key-lights-oranzs",
+      "name": "Oranžs",
+      "group": "key-lights",
+      "fade": 3,
+      "swatch": "#ff5a00",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 3
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "key-lights-dzeltens",
+      "name": "Dzeltens",
+      "group": "key-lights",
+      "fade": 3,
+      "swatch": "#ffc800",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 4
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "key-lights-zals",
+      "name": "Zaļš",
+      "group": "key-lights",
+      "fade": 3,
+      "swatch": "#00ff00",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 5
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "key-lights-tirkizs",
+      "name": "Tirkīzs",
+      "group": "key-lights",
+      "fade": 3,
+      "swatch": "#00ffc8",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 6
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "key-lights-zils",
+      "name": "Zils",
+      "group": "key-lights",
+      "fade": 3,
+      "swatch": "#0000ff",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 7
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "key-lights-violets",
+      "name": "Violets",
+      "group": "key-lights",
+      "fade": 3,
+      "swatch": "#8c00ff",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 8
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "key-lights-roza",
+      "name": "Rozā",
+      "group": "key-lights",
+      "fade": 3,
+      "swatch": "#ff008c",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 9
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "key-lights-off",
+      "name": "Izslēgts",
+      "group": "key-lights",
+      "fade": 3,
+      "swatch": "#000000",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "hex": "#ffffff"
+          },
+          "intensity": 0
+        }
+      ]
+    },
+    {
+      "id": "background-silti-balts",
+      "name": "Silti balts",
+      "group": "background",
+      "fade": 3,
+      "swatch": "#ffaa5a",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 0
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "background-vesi-balts",
+      "name": "Vēsi balts",
+      "group": "background",
+      "fade": 3,
+      "swatch": "#dcebff",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 1
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "background-sarkans",
+      "name": "Sarkans",
+      "group": "background",
+      "fade": 3,
+      "swatch": "#ff0000",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 2
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "background-oranzs",
+      "name": "Oranžs",
+      "group": "background",
+      "fade": 3,
+      "swatch": "#ff5a00",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 3
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "background-dzeltens",
+      "name": "Dzeltens",
+      "group": "background",
+      "fade": 3,
+      "swatch": "#ffc800",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 4
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "background-zals",
+      "name": "Zaļš",
+      "group": "background",
+      "fade": 3,
+      "swatch": "#00ff00",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 5
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "background-tirkizs",
+      "name": "Tirkīzs",
+      "group": "background",
+      "fade": 3,
+      "swatch": "#00ffc8",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 6
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "background-zils",
+      "name": "Zils",
+      "group": "background",
+      "fade": 3,
+      "swatch": "#0000ff",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 7
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "background-violets",
+      "name": "Violets",
+      "group": "background",
+      "fade": 3,
+      "swatch": "#8c00ff",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 8
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "background-roza",
+      "name": "Rozā",
+      "group": "background",
+      "fade": 3,
+      "swatch": "#ff008c",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 9
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "background-off",
+      "name": "Izslēgts",
+      "group": "background",
+      "fade": 3,
+      "swatch": "#000000",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "hex": "#ffffff"
+          },
+          "intensity": 0
+        }
+      ]
+    },
+    {
+      "id": "drum-cage-silti-balts",
+      "name": "Silti balts",
+      "group": "drum-cage",
+      "fade": 3,
+      "swatch": "#ffaa5a",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 0
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "drum-cage-vesi-balts",
+      "name": "Vēsi balts",
+      "group": "drum-cage",
+      "fade": 3,
+      "swatch": "#dcebff",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 1
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "drum-cage-sarkans",
+      "name": "Sarkans",
+      "group": "drum-cage",
+      "fade": 3,
+      "swatch": "#ff0000",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 2
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "drum-cage-oranzs",
+      "name": "Oranžs",
+      "group": "drum-cage",
+      "fade": 3,
+      "swatch": "#ff5a00",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 3
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "drum-cage-dzeltens",
+      "name": "Dzeltens",
+      "group": "drum-cage",
+      "fade": 3,
+      "swatch": "#ffc800",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 4
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "drum-cage-zals",
+      "name": "Zaļš",
+      "group": "drum-cage",
+      "fade": 3,
+      "swatch": "#00ff00",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 5
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "drum-cage-tirkizs",
+      "name": "Tirkīzs",
+      "group": "drum-cage",
+      "fade": 3,
+      "swatch": "#00ffc8",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 6
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "drum-cage-zils",
+      "name": "Zils",
+      "group": "drum-cage",
+      "fade": 3,
+      "swatch": "#0000ff",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 7
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "drum-cage-violets",
+      "name": "Violets",
+      "group": "drum-cage",
+      "fade": 3,
+      "swatch": "#8c00ff",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 8
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "drum-cage-roza",
+      "name": "Rozā",
+      "group": "drum-cage",
+      "fade": 3,
+      "swatch": "#ff008c",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 9
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "drum-cage-off",
+      "name": "Izslēgts",
+      "group": "drum-cage",
+      "fade": 3,
+      "swatch": "#000000",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "hex": "#ffffff"
+          },
+          "intensity": 0
+        }
+      ]
+    },
+    {
+      "id": "b8-side-bar-silti-balts",
+      "name": "Silti balts",
+      "group": "b8-side-bar",
+      "fade": 3,
+      "swatch": "#ffaa5a",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 0
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "b8-side-bar-vesi-balts",
+      "name": "Vēsi balts",
+      "group": "b8-side-bar",
+      "fade": 3,
+      "swatch": "#dcebff",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 1
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "b8-side-bar-sarkans",
+      "name": "Sarkans",
+      "group": "b8-side-bar",
+      "fade": 3,
+      "swatch": "#ff0000",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 2
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "b8-side-bar-oranzs",
+      "name": "Oranžs",
+      "group": "b8-side-bar",
+      "fade": 3,
+      "swatch": "#ff5a00",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 3
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "b8-side-bar-dzeltens",
+      "name": "Dzeltens",
+      "group": "b8-side-bar",
+      "fade": 3,
+      "swatch": "#ffc800",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 4
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "b8-side-bar-zals",
+      "name": "Zaļš",
+      "group": "b8-side-bar",
+      "fade": 3,
+      "swatch": "#00ff00",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 5
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "b8-side-bar-tirkizs",
+      "name": "Tirkīzs",
+      "group": "b8-side-bar",
+      "fade": 3,
+      "swatch": "#00ffc8",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 6
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "b8-side-bar-zils",
+      "name": "Zils",
+      "group": "b8-side-bar",
+      "fade": 3,
+      "swatch": "#0000ff",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 7
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "b8-side-bar-violets",
+      "name": "Violets",
+      "group": "b8-side-bar",
+      "fade": 3,
+      "swatch": "#8c00ff",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 8
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "b8-side-bar-roza",
+      "name": "Rozā",
+      "group": "b8-side-bar",
+      "fade": 3,
+      "swatch": "#ff008c",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "palette": "lightkey",
+            "index": 9
+          },
+          "intensity": 1
+        }
+      ]
+    },
+    {
+      "id": "b8-side-bar-off",
+      "name": "Izslēgts",
+      "group": "b8-side-bar",
+      "fade": 3,
+      "swatch": "#000000",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "hex": "#ffffff"
+          },
+          "intensity": 0
+        }
+      ]
+    }
+  ],
+  "looks": [
+    {
+      "id": "walk-in",
+      "name": "Walk-in",
+      "section": "Before",
+      "swatch": "#0000ff",
+      "groups": [
+        {
+          "group": "front-lights",
+          "preset": "front-lights-silti-50"
+        },
+        {
+          "group": "key-lights",
+          "preset": "key-lights-off"
+        },
+        {
+          "group": "background",
+          "preset": "background-zils"
+        },
+        {
+          "group": "drum-cage",
+          "preset": "drum-cage-zils"
+        },
+        {
+          "group": "b8-side-bar",
+          "preset": "b8-side-bar-zils"
+        }
+      ]
+    },
+    {
+      "id": "worship",
+      "name": "Worship",
+      "section": "Worship",
+      "swatch": "#8c00ff",
+      "groups": [
+        {
+          "group": "front-lights",
+          "preset": "front-lights-silti-3200k"
+        },
+        {
+          "group": "key-lights",
+          "preset": "key-lights-silti-balts"
+        },
+        {
+          "group": "background",
+          "preset": "background-violets"
+        },
+        {
+          "group": "drum-cage",
+          "preset": "drum-cage-violets"
+        },
+        {
+          "group": "b8-side-bar",
+          "preset": "b8-side-bar-violets"
+        }
+      ]
+    },
+    {
+      "id": "sermon",
+      "name": "Sermon",
+      "section": "Word",
+      "swatch": "#0000ff",
+      "groups": [
+        {
+          "group": "front-lights",
+          "preset": "front-lights-neitrali-5600k"
+        },
+        {
+          "group": "key-lights",
+          "preset": "key-lights-vesi-balts"
+        },
+        {
+          "group": "background",
+          "preset": "background-zils"
+        },
+        {
+          "group": "drum-cage",
+          "preset": "drum-cage-zils"
+        },
+        {
+          "group": "b8-side-bar",
+          "preset": "b8-side-bar-zils"
+        }
+      ]
+    },
+    {
+      "id": "response",
+      "name": "Response",
+      "section": "Response",
+      "swatch": "#ff5a00",
+      "groups": [
+        {
+          "group": "front-lights",
+          "preset": "front-lights-silti-3200k"
+        },
+        {
+          "group": "key-lights",
+          "preset": "key-lights-silti-balts"
+        },
+        {
+          "group": "background",
+          "preset": "background-oranzs"
+        },
+        {
+          "group": "drum-cage",
+          "preset": "drum-cage-oranzs"
+        },
+        {
+          "group": "b8-side-bar",
+          "preset": "b8-side-bar-oranzs"
+        }
+      ]
+    },
+    {
+      "id": "prayer",
+      "name": "Prayer",
+      "section": "Response",
+      "swatch": "#0000ff",
+      "groups": [
+        {
+          "group": "front-lights",
+          "preset": "front-lights-silti-50"
+        },
+        {
+          "group": "key-lights",
+          "preset": "key-lights-off"
+        },
+        {
+          "group": "background",
+          "preset": "background-zils"
+        },
+        {
+          "group": "drum-cage",
+          "preset": "drum-cage-zils"
+        },
+        {
+          "group": "b8-side-bar",
+          "preset": "b8-side-bar-zils"
+        }
+      ]
+    },
+    {
+      "id": "all-white",
+      "name": "All white",
+      "section": "Utility",
+      "swatch": "#dcebff",
+      "groups": [
+        {
+          "group": "front-lights",
+          "preset": "front-lights-neitrali-5600k"
+        },
+        {
+          "group": "key-lights",
+          "preset": "key-lights-vesi-balts"
+        },
+        {
+          "group": "background",
+          "preset": "background-vesi-balts"
+        },
+        {
+          "group": "drum-cage",
+          "preset": "drum-cage-vesi-balts"
+        },
+        {
+          "group": "b8-side-bar",
+          "preset": "b8-side-bar-vesi-balts"
+        }
+      ]
+    }
+  ],
+  "operator": {
+    "looks": [
+      "walk-in",
+      "worship",
+      "sermon",
+      "response",
+      "prayer",
+      "all-white"
+    ],
+    "groups": [
+      "front-lights",
+      "key-lights",
+      "background",
+      "drum-cage",
+      "b8-side-bar"
+    ],
+    "manualForOperators": false
+  },
+  "settings": {
+    "output": {
+      "kind": "artnet",
+      "host": "192.168.0.114"
+    },
+    "frameRate": 40,
+    "gamma": 2.2
+  },
+  "stage": {
+    "grid": 10
+  }
+}
