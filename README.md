@@ -23,9 +23,9 @@ Then open `http://<this computer>:8080/` on the tablet. Pages:
 
 Environment variables: `PORT` (default 8080), `LIGHT_RUNNER_DATA` (folder for `show.json`, `runtime.json` and backups; default `./data`), `LIGHT_RUNNER_OUTPUT=none` (never send DMX).
 
-## Fixture types
+## Fixture database
 
-The Patch page searches the [Open Fixture Library](https://open-fixture-library.org) for fixture types; pick the DMX mode the fixture is set to. Downloaded fixtures are cached in `data/ofl/`, so they keep working without internet. A fixture file saved from the OFL website can also be imported.
+Fixture types come from the [Open Fixture Library](https://open-fixture-library.org), a free database of DMX definitions (about 650 fixtures from 135 manufacturers). In Settings > Fixture database, download it once (about 3 MB from GitHub, stored in `data/ofl/database.json`); Patch then browses it by manufacturer and searches it without internet. "Check for updates" compares the latest version with the downloaded one and lists new, changed (marking those your show uses) and removed fixtures before you install it. Without the download, Patch searches the library online. A fixture file saved from the OFL website can also be imported.
 
 ## Import a Lightkey project
 

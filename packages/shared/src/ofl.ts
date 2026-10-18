@@ -173,6 +173,7 @@ export function oflToProfile(fixture: OflFixture, modeIndex: number, manufacture
     id: oflProfileId(manufacturerKey, fixtureKey, mode),
     name: `${manufacturerName} ${fixture.name} (${mode.name})`,
     channels,
+    source: { ofl: `${manufacturerKey}/${fixtureKey}`, mode: mode.name },
   };
 }
 

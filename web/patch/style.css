@@ -102,3 +102,5 @@ table.patch { width: 100%; min-width: 960px; border-collapse: collapse; font-siz
 .ofl-mode { text-align: left; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 6px 10px; cursor: pointer; font-size: 13px; }
 .ofl-mode small { color: var(--dim); }
 .ofl .back-link { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font-size: 13px; text-align: left; }
+
+.ofl select { min-height: 36px; padding: 6px 10px; }

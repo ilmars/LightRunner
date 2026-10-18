@@ -365,6 +365,8 @@ export class App {
       'POST /api/backups/restore', 'GET /api/show', 'PUT /api/show', 'GET /api/profiles', 'POST /api/identify',
       'GET /api/ofl/search', 'GET /api/ofl/fixture', 'POST /api/ofl/profile', 'POST /api/ofl/file',
       'POST /api/import/preview', 'POST /api/import/apply',
+      'GET /api/ofl/db', 'POST /api/ofl/db/download', 'POST /api/ofl/db/install', 'POST /api/ofl/db/discard',
+      'GET /api/ofl/manufacturers', 'GET /api/ofl/manufacturer',
     ];
     if (!routes.includes(route)) return false;
     if (!open && !this.isProgrammer(req)) throw new HttpError(401, 'enter the programmer PIN');
@@ -509,6 +511,33 @@ export class App {
         json(res, 200, this.settingsView());
         return true;
       }
+      case 'GET /api/ofl/db':
+        json(res, 200, this.oflStatus());
+        return true;
+      case 'POST /api/ofl/db/download':
+        // Downloads in the background; the page polls GET /api/ofl/db.
+        this.ofl.startDownload();
+        json(res, 200, this.oflStatus());
+        return true;
+      case 'POST /api/ofl/db/install':
+        try {
+          this.ofl.installUpdate();
+        } catch (err) {
+          throw new HttpError(409, (err as Error).message);
+        }
+        this.log('Fixture database updated');
+        json(res, 200, this.oflStatus());
+        return true;
+      case 'POST /api/ofl/db/discard':
+        this.ofl.discardUpdate();
+        json(res, 200, this.oflStatus());
+        return true;
+      case 'GET /api/ofl/manufacturers':
+        json(res, 200, await this.oflCall(() => this.ofl.manufacturerList()));
+        return true;
+      case 'GET /api/ofl/manufacturer':
+        json(res, 200, await this.oflCall(() => this.ofl.manufacturerFixtures(url.searchParams.get('key') ?? '')));
+        return true;
       case 'GET /api/ofl/search':
         json(res, 200, await this.oflCall(() => this.ofl.search(url.searchParams.get('q') ?? '')));
         return true;
@@ -582,6 +611,14 @@ export class App {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }
+
+  /** Database status, marking changed fixtures that this show's fixture types came from. */
+  private oflStatus() {
+    return this.ofl.status((key) => {
+      const prefix = `${slugKey(key.replace('/', '-'))}-`;
+      return this.show.profiles.some((p) => p.source?.ofl === key || p.id.startsWith(prefix));
+    });
   }
 
   /** Open Fixture Library calls: network trouble becomes a readable 502. */

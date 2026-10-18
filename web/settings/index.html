@@ -146,6 +146,28 @@
       </div>
     </section>
 
+    <section class="card" id="oflCard">
+      <div class="card-head">
+        <h2>Fixture database</h2>
+        <span id="oflPill" class="pill"></span>
+      </div>
+      <p class="hint">The <a href="https://open-fixture-library.org" target="_blank" rel="noopener">Open Fixture Library</a>: free DMX definitions for hundreds of fixtures. Download it once and the Patch page can browse and search it without internet.</p>
+      <p id="oflState"></p>
+      <div class="row wrap"><button id="oflDownload" class="ghost" type="button">Download database</button></div>
+      <p class="warn" id="oflError"></p>
+      <div id="oflUpdate" class="ofl-update" hidden>
+        <p id="oflUpdateSummary"></p>
+        <details id="oflAdded"><summary></summary><ul></ul></details>
+        <details id="oflChanged"><summary></summary><ul></ul></details>
+        <details id="oflRemoved"><summary></summary><ul></ul></details>
+        <p class="hint">Fixture types already in your show keep their channels. To use a changed definition, add it again from Patch.</p>
+        <div class="row">
+          <button id="oflInstall" class="primary" type="button">Install update</button>
+          <button id="oflDiscard" class="ghost" type="button">Not now</button>
+        </div>
+      </div>
+    </section>
+
     <section class="card">
       <h2>Show</h2>
       <div class="field">

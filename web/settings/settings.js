@@ -68,7 +68,80 @@ async function load() {
   $('main').hidden = false;
   render();
   loadBackups();
+  loadOfl();
 }
+
+// ---- Fixture database (Open Fixture Library) ----
+
+let oflTimer = 0;
+
+async function loadOfl() {
+  clearTimeout(oflTimer);
+  let st;
+  try {
+    st = await call('GET', '/api/ofl/db');
+  } catch {
+    return;
+  }
+  const pill = $('oflPill');
+  pill.className = `pill ${st.installed ? 'ok' : 'off'}`;
+  pill.textContent = st.downloading ? 'Downloading…' : st.installed ? 'On this computer' : 'Not downloaded';
+  const when = st.downloadedAt ? new Date(st.downloadedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  $('oflState').textContent = st.installed
+    ? `${st.fixtures} fixtures from ${st.manufacturers} manufacturers, downloaded ${when}${st.sha ? ` (version ${st.sha.slice(0, 7)})` : ''}.${st.upToDate ? ' Up to date.' : ''}`
+    : 'Not downloaded yet. Patch can still search the library online.';
+  const btn = $('oflDownload');
+  btn.textContent = st.downloading ? 'Downloading…' : st.installed ? 'Check for updates' : 'Download database (about 3 MB)';
+  btn.disabled = st.downloading;
+  $('oflError').textContent = st.error ?? '';
+
+  const u = st.update;
+  $('oflUpdate').hidden = !u;
+  if (u) {
+    const used = u.changed.filter((c) => c.usedInShow).length;
+    $('oflUpdateSummary').textContent = `Update available: ${u.added.length} new, ${u.changed.length} changed${used ? ` (${used} used in your show)` : ''}, ${u.removed.length} removed.`;
+    const fill = (id, title, items, mark) => {
+      const d = $(id);
+      d.hidden = !items.length;
+      d.querySelector('summary').textContent = `${title} (${items.length})`;
+      const ul = d.querySelector('ul');
+      ul.replaceChildren();
+      for (const c of items) {
+        const li = el('li', null, `${c.manufacturer} ${c.name}`);
+        if (mark && c.usedInShow) li.append(el('span', 'used', 'in your show'));
+        ul.append(li);
+      }
+      d.open = id === 'oflChanged' && used > 0;
+    };
+    fill('oflAdded', 'New fixtures', u.added, false);
+    fill('oflChanged', 'Changed', u.changed, true);
+    fill('oflRemoved', 'Removed', u.removed, false);
+  }
+  // Keep the card live while a download runs.
+  if (st.downloading) oflTimer = setTimeout(loadOfl, 1000);
+}
+
+$('oflDownload').addEventListener('click', async () => {
+  try {
+    await call('POST', '/api/ofl/db/download');
+  } catch (err) {
+    toast(err.message, true);
+  }
+  loadOfl();
+});
+$('oflInstall').addEventListener('click', async () => {
+  try {
+    await call('POST', '/api/ofl/db/install');
+    toast('Fixture database updated');
+  } catch (err) {
+    toast(err.message, true);
+  }
+  loadOfl();
+});
+$('oflDiscard').addEventListener('click', async () => {
+  await call('POST', '/api/ofl/db/discard').catch(() => {});
+  loadOfl();
+});
 
 function render() {
   const s = draft;

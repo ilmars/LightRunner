@@ -34,8 +34,10 @@ export type ProfileChannel = z.infer<typeof ProfileChannel>;
 export const Profile = z.object({
   id,
   name: z.string(),
-  channels: z.array(ProfileChannel).min(1).max(64),
+  channels: z.array(ProfileChannel).min(1).max(512),
   gamma: z.number().min(1).max(4).optional(),
+  /** Where the definition came from, e.g. { ofl: 'stairville/sonicpulse-led-bar-10', mode: '39-channel' }. */
+  source: z.object({ ofl: z.string(), mode: z.string() }).optional(),
 });
 export type Profile = z.infer<typeof Profile>;
 

@@ -63,6 +63,28 @@ async function load() {
   $('main').hidden = false;
   fillAddForm(true);
   renderAll();
+  loadOflBrowse();
+}
+
+/** Manufacturer list and where the library comes from (downloaded or online). */
+async function loadOflBrowse() {
+  try {
+    const st = await call('GET', '/api/ofl/db');
+    $('oflSource').textContent = st.installed
+      ? `Downloaded: ${st.fixtures} fixtures, works without internet.`
+      : 'Online. Download the database in Settings to use it without internet.';
+  } catch {
+    $('oflSource').textContent = '';
+  }
+  try {
+    const list = await call('GET', '/api/ofl/manufacturers');
+    const sel = $('oflBrowse');
+    sel.replaceChildren(new Option('Browse by manufacturer…', ''));
+    for (const m of list) sel.append(new Option(`${m.name} (${m.count})`, m.key));
+    sel.hidden = false;
+  } catch {
+    $('oflBrowse').hidden = true;
+  }
 }
 
 // ---- Helpers ----
@@ -531,18 +553,37 @@ $('oflForm').addEventListener('submit', async (ev) => {
   try {
     const { hits, offline } = await call('GET', `/api/ofl/search?q=${encodeURIComponent(q)}`);
     if (token !== oflSearchToken) return;
-    box.replaceChildren();
-    if (offline) box.append(el('p', 'warn', 'No internet: showing fixtures downloaded before.'));
-    if (!hits.length) box.append(el('p', 'hint', 'Nothing found. Try the model name without the brand, e.g. "SixBar".'));
-    for (const h of hits) {
-      const b = el('button', 'ofl-hit');
-      b.type = 'button';
-      b.append(el('span', null, h.name), el('small', null, h.manufacturer));
-      b.addEventListener('click', () => showOflModes(() => call('GET', `/api/ofl/fixture?key=${encodeURIComponent(h.key)}`), (mode) => call('POST', '/api/ofl/profile', { key: h.key, mode })));
-      box.append(b);
-    }
+    $('oflBrowse').value = '';
+    showHits(hits, offline ? 'No internet: showing fixtures downloaded before.' : null, 'Nothing found. Try the model name without the brand, e.g. "SixBar".');
   } catch (err) {
     box.replaceChildren(el('p', 'warn', err.message));
+  }
+});
+
+let lastHits = null;
+function showHits(hits, note, empty) {
+  lastHits = { hits, note, empty };
+  const box = $('oflResults');
+  box.replaceChildren();
+  if (note) box.append(el('p', 'warn', note));
+  if (!hits.length) box.append(el('p', 'hint', empty));
+  for (const h of hits) {
+    const b = el('button', 'ofl-hit');
+    b.type = 'button';
+    b.append(el('span', null, h.name), el('small', null, [h.manufacturer, ...(h.categories ?? []).slice(0, 2)].join(' · ')));
+    b.addEventListener('click', () => showOflModes(() => call('GET', `/api/ofl/fixture?key=${encodeURIComponent(h.key)}`), (mode) => call('POST', '/api/ofl/profile', { key: h.key, mode })));
+    box.append(b);
+  }
+}
+
+$('oflBrowse').addEventListener('change', async () => {
+  const man = $('oflBrowse').value;
+  if (!man) return;
+  $('oflResults').replaceChildren(el('p', 'hint', 'Loading…'));
+  try {
+    showHits(await call('GET', `/api/ofl/manufacturer?key=${encodeURIComponent(man)}`), null, 'No fixtures.');
+  } catch (err) {
+    $('oflResults').replaceChildren(el('p', 'warn', err.message));
   }
 });
 
@@ -555,7 +596,7 @@ async function showOflModes(loadInfo, makeProfile) {
     const wrap = el('div', 'ofl-modes');
     const back = el('button', 'back-link', '‹ Back to results');
     back.type = 'button';
-    back.addEventListener('click', () => $('oflForm').requestSubmit());
+    back.addEventListener('click', () => (lastHits ? showHits(lastHits.hits, lastHits.note, lastHits.empty) : $('oflForm').requestSubmit()));
     wrap.append(back, el('h4', null, `${info.manufacturer} ${info.name}`.trim()), el('p', 'hint', 'Pick the DMX mode the fixture is set to:'));
     for (const m of info.modes) {
       const b = el('button', 'ofl-mode');

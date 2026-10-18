@@ -128,3 +128,9 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .tag.added { background: #143522; color: #8fe0b0; }
 .tag.changed { background: #142640; color: #a8c7ff; }
 .tag.removed { background: #3d1616; color: #ff9d9d; }
+
+/* Fixture database */
+.ofl-update { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.ofl-update details summary { cursor: pointer; font-weight: 600; }
+.ofl-update ul { margin: 6px 0 0; padding-left: 18px; max-height: 220px; overflow: auto; color: var(--dim); font-size: 13px; }
+.ofl-update li .used { color: #e6c27a; font-weight: 600; margin-left: 6px; }
