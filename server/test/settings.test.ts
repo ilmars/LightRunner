@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -159,5 +159,43 @@ test('patch: profiles list, saving fixtures and groups, and Identify', async () 
     await sleep(100);
     assert.deepEqual(app.state?.fixturesManual, ['new-bar']);
     assert.equal((await call('POST', '/api/identify', { fixture: 'nope' })).status, 404);
+  });
+});
+
+test('import with comparison: preview a show file, apply only the ticked changes', async () => {
+  await withApp(async (call) => {
+    const current = (await call('GET', '/api/show')).body;
+    const incoming = structuredClone(current);
+    incoming.name = 'From a file';
+    incoming.fixtures.find((f: any) => f.id === 'back-1').address = 300;
+    incoming.fixtures.find((f: any) => f.id === 'back-2').address = 310;
+    const preview = await call('POST', '/api/import/preview', incoming);
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.scope, 'all');
+    assert.deepEqual(preview.body.items.map((i: any) => i.id).sort(), ['back-1', 'back-2']);
+    const applied = await call('POST', '/api/import/apply', { token: preview.body.token, picks: [{ kind: 'fixture', id: 'back-1', change: 'changed' }] });
+    assert.equal(applied.status, 200);
+    const after = (await call('GET', '/api/show')).body;
+    assert.equal(after.fixtures.find((f: any) => f.id === 'back-1').address, 300);
+    assert.equal(after.fixtures.find((f: any) => f.id === 'back-2').address, 28);
+    assert.equal(after.name, current.name);
+    // A used comparison can't be applied twice; a non-show file is refused.
+    assert.equal((await call('POST', '/api/import/apply', { token: preview.body.token, picks: [{ kind: 'fixture', id: 'back-2', change: 'changed' }] })).status, 404);
+    assert.equal((await call('POST', '/api/import/preview', { hello: 1 })).status, 400);
+  });
+});
+
+const lightkeyProject = join(process.env.HOME ?? '', 'Documents/Dieva Majas Skatuve - L1.lightkeyproj');
+test('import with comparison: a Lightkey project compares the patch only', { skip: !existsSync(lightkeyProject) && 'no Lightkey project on this computer' }, async () => {
+  await withApp(async (call, app) => {
+    const res = await fetch(`http://127.0.0.1:${app.port}/api/import/preview?name=rig.lightkeyproj`, {
+      method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: readFileSync(lightkeyProject),
+    });
+    const body = await res.json() as any;
+    assert.equal(res.status, 200);
+    assert.equal(body.scope, 'patch');
+    assert.ok(body.items.every((i: any) => i.kind === 'profile' || i.kind === 'fixture'));
+    // Against the demo show, every Lightkey fixture is new.
+    assert.ok(body.items.filter((i: any) => i.kind === 'fixture' && i.change === 'added').length >= 12);
   });
 });

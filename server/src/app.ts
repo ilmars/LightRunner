@@ -2,14 +2,18 @@
 // command bus, the HTTP API, static pages and WebSocket live state.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  BUILT_IN_PROFILES, Command, OutputSettings, describeMode, isManualCommand, oflToProfile, parseShow,
-  type OflFixture,
+  BUILT_IN_PROFILES, Command, OutputSettings, applyPicks, describeMode, diffShows, isManualCommand, oflToProfile, parseShow,
+  type OflFixture, type Pick, type Scope,
   type LiveState, type RuntimeState, type Show,
 } from '../../packages/shared/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
@@ -75,6 +79,8 @@ export class App {
   private outputProblem: string | null = null;
   private readonly identifyTimers = new Map<string, NodeJS.Timeout>();
   private ofl!: OflClient;
+  /** Files waiting for someone to pick what to take from them. */
+  private readonly imports = new Map<string, { show: Show; scope: Scope; at: number }>();
   private readonly nodeWatch = new NodeWatch((problem) => {
     if (problem !== this.outputProblem) this.log(problem ? `DMX: ${problem}` : 'DMX: node answering again');
     this.outputProblem = problem;
@@ -358,6 +364,7 @@ export class App {
       'POST /api/pin', 'GET /api/artnet/nodes', 'GET /api/serial-ports', 'GET /api/backups',
       'POST /api/backups/restore', 'GET /api/show', 'PUT /api/show', 'GET /api/profiles', 'POST /api/identify',
       'GET /api/ofl/search', 'GET /api/ofl/fixture', 'POST /api/ofl/profile', 'POST /api/ofl/file',
+      'POST /api/import/preview', 'POST /api/import/apply',
     ];
     if (!routes.includes(route)) return false;
     if (!open && !this.isProgrammer(req)) throw new HttpError(401, 'enter the programmer PIN');
@@ -464,6 +471,44 @@ export class App {
         json(res, 200, all.map((p) => ({ id: p.id, name: p.name, channels: p.channels.length, roles: [...new Set(p.channels.map((c) => c.role))] })));
         return true;
       }
+      case 'POST /api/import/preview': {
+        // A Light Runner show file (JSON) or a Lightkey project (binary), compared with the live show.
+        const lightkey = /\.lightkeyproj$/i.test(url.searchParams.get('name') ?? '') || req.headers['content-type'] === 'application/octet-stream';
+        let incoming: Show;
+        let scope: Scope = 'all';
+        if (lightkey) {
+          incoming = await this.fromLightkey(await readRaw(req, 50 * 1024 * 1024));
+          scope = 'patch';
+        } else {
+          try {
+            incoming = parseShow(await readJson(req, 10 * 1024 * 1024));
+          } catch (err) {
+            throw new HttpError(400, `That isn't a Light Runner show file: ${(err as Error).message.split('\n')[0]}`);
+          }
+        }
+        const token = randomBytes(12).toString('base64url');
+        for (const [k, v] of this.imports) if (Date.now() - v.at > 30 * 60_000) this.imports.delete(k);
+        this.imports.set(token, { show: incoming, scope, at: Date.now() });
+        json(res, 200, { token, scope, name: incoming.name, items: diffShows(this.show, incoming, scope) });
+        return true;
+      }
+      case 'POST /api/import/apply': {
+        const { token, picks } = (await readJson(req)) as { token?: string; picks?: Pick[] };
+        const pending = token ? this.imports.get(token) : undefined;
+        if (!pending) throw new HttpError(404, 'that comparison has expired; choose the file again');
+        if (!Array.isArray(picks) || !picks.length) throw new HttpError(400, 'nothing was ticked');
+        let merged: Show;
+        try {
+          merged = applyPicks(this.show, pending.show, picks);
+        } catch (err) {
+          throw new HttpError(400, (err as Error).message);
+        }
+        await this.setShow(merged);
+        this.imports.delete(token!);
+        this.log(`Imported ${picks.length} changes from "${pending.show.name}"`);
+        json(res, 200, this.settingsView());
+        return true;
+      }
       case 'GET /api/ofl/search':
         json(res, 200, await this.oflCall(() => this.ofl.search(url.searchParams.get('q') ?? '')));
         return true;
@@ -510,6 +555,33 @@ export class App {
       }
     }
     return false;
+  }
+
+  /** Convert a Lightkey project with the bundled importer, onto this show's node and universe. */
+  private async fromLightkey(data: Buffer): Promise<Show> {
+    const dir = mkdtempSync(join(tmpdir(), 'light-runner-lightkey-'));
+    try {
+      const project = join(dir, 'project.lightkeyproj');
+      const out = join(dir, 'show.json');
+      writeFileSync(project, data);
+      const output = this.show.settings.output;
+      const host = output.kind === 'artnet' || output.kind === 'sacn' ? output.host || '255.255.255.255' : '255.255.255.255';
+      const counts = new Map<number, number>();
+      for (const f of this.show.fixtures) counts.set(f.universe, (counts.get(f.universe) ?? 0) + 1);
+      const universe = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0;
+      const importer = fileURLToPath(new URL('../../tools/import-lightkey.py', import.meta.url));
+      await new Promise<void>((resolve, reject) => {
+        execFile('python3', ['-I', importer, project, out, '--artnet-host', host, '--universe', String(universe)], { timeout: 30_000 }, (err, _stdout, stderr) => {
+          if (err) reject(new Error(stderr.trim().split('\n').at(-1) || err.message));
+          else resolve();
+        });
+      });
+      return parseShow(JSON.parse(readFileSync(out, 'utf8')));
+    } catch (err) {
+      throw new HttpError(400, `Couldn't read that Lightkey project: ${(err as Error).message}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 
   /** Open Fixture Library calls: network trouble becomes a readable 502. */
@@ -614,6 +686,17 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   if (res.headersSent) return;
   res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
   res.end(JSON.stringify(body));
+}
+
+async function readRaw(req: IncomingMessage, limit: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > limit) throw new HttpError(413, 'file too large');
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function readJson(req: IncomingMessage, limit = 64 * 1024): Promise<unknown> {

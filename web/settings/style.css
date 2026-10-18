@@ -115,3 +115,16 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .nav { display: flex; gap: 4px; }
 .nav a { color: var(--dim); text-decoration: none; padding: 6px 12px; border-radius: 8px; font-weight: 600; }
 .nav a[aria-current="page"] { background: var(--raised); color: var(--text); }
+
+/* Import with comparison */
+.compare { border-color: #3d6bb3; }
+.compare-list { display: flex; flex-direction: column; gap: 14px; }
+.compare-list h3 { font-size: 13px; color: var(--dim); margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+.diff-row { display: grid; grid-template-columns: 24px 84px 1fr; gap: 10px; align-items: start; padding: 8px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.diff-row input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent); }
+.diff-row .what b { display: block; font-weight: 600; }
+.diff-row .what span { color: var(--dim); font-size: 13px; }
+.tag { font-size: 12px; font-weight: 700; border-radius: 6px; padding: 2px 8px; text-align: center; }
+.tag.added { background: #143522; color: #8fe0b0; }
+.tag.changed { background: #142640; color: #a8c7ff; }
+.tag.removed { background: #3d1616; color: #ff9d9d; }

@@ -264,18 +264,88 @@ $('refreshPorts').addEventListener('click', () => loadPorts(draft.output.port));
 
 // ---- Show file and backups ----
 
+// ---- Import with comparison ----
+
+let comparison = null; // { token, items }
+const KIND_TITLES = { profile: 'Fixture types', fixture: 'Fixtures', group: 'Groups', preset: 'Presets', look: 'Looks' };
+const CHANGE_LABEL = { added: 'New', changed: 'Changed', removed: 'Removed' };
+
 $('importFile').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
-  if (!confirm(`Replace the current show with "${file.name}"? The current show is kept as a backup.`)) return;
   try {
-    const show = JSON.parse(await file.text());
-    await call('PUT', '/api/show', show);
-    toast('Show imported');
-    await load();
+    const lightkey = /\.lightkeyproj$/i.test(file.name);
+    const res = await fetch(`/api/import/preview?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      headers: { 'content-type': lightkey ? 'application/octet-stream' : 'application/json' },
+      body: lightkey ? file : await file.text(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
+    comparison = data;
+    showComparison(file.name);
   } catch (err) {
     toast(err.message, true);
+  }
+});
+
+function showComparison(fileName) {
+  const { items, scope } = comparison;
+  $('compareName').textContent = fileName;
+  const counts = { added: 0, changed: 0, removed: 0 };
+  for (const i of items) counts[i.change]++;
+  $('compareSummary').textContent = items.length
+    ? `${counts.added} new, ${counts.changed} changed, ${counts.removed} not in the file.${scope === 'patch' ? ' A Lightkey project only has the patch, so fixture types and fixtures are compared.' : ''} New and changed items are ticked; removals are not.`
+    : 'Nothing differs: the file matches this show.';
+  const list = $('compareList');
+  list.replaceChildren();
+  for (const kind of Object.keys(KIND_TITLES)) {
+    const rows = items.filter((i) => i.kind === kind);
+    if (!rows.length) continue;
+    const section = el('div');
+    section.append(el('h3', null, `${KIND_TITLES[kind]} (${rows.length})`));
+    for (const item of rows) {
+      const row = el('label', 'diff-row');
+      const box = el('input');
+      box.type = 'checkbox';
+      box.checked = item.change !== 'removed';
+      box.dataset.kind = item.kind;
+      box.dataset.id = item.id;
+      box.dataset.change = item.change;
+      const what = el('div', 'what');
+      what.append(el('b', null, item.name));
+      const detail = item.change === 'removed' ? 'In this show but not in the file. Ticking removes it (and what depends on it).' : item.details.join(' · ');
+      if (detail) what.append(el('span', null, detail));
+      row.append(box, el('span', `tag ${item.change}`, CHANGE_LABEL[item.change]), what);
+      section.append(row);
+    }
+    list.append(section);
+  }
+  $('compareApply').hidden = !items.length;
+  $('compareError').textContent = '';
+  $('comparePanel').hidden = false;
+  $('comparePanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+const compareBoxes = () => [...$('compareList').querySelectorAll('input[type=checkbox]')];
+$('compareAll').addEventListener('click', () => compareBoxes().forEach((b) => (b.checked = true)));
+$('compareNone').addEventListener('click', () => compareBoxes().forEach((b) => (b.checked = false)));
+$('compareCancel').addEventListener('click', () => { comparison = null; $('comparePanel').hidden = true; });
+
+$('compareApply').addEventListener('click', async () => {
+  const picks = compareBoxes().filter((b) => b.checked).map((b) => ({ kind: b.dataset.kind, id: b.dataset.id, change: b.dataset.change }));
+  if (!picks.length) return toast('Tick at least one change', true);
+  const removals = picks.filter((p) => p.change === 'removed').length;
+  if (removals && !confirm(`Remove ${removals} ${removals === 1 ? 'item' : 'items'} from the show? The current show is kept as a backup.`)) return;
+  try {
+    await call('POST', '/api/import/apply', { token: comparison.token, picks });
+    comparison = null;
+    $('comparePanel').hidden = true;
+    toast(`Applied ${picks.length} ${picks.length === 1 ? 'change' : 'changes'}`);
+    await load();
+  } catch (err) {
+    $('compareError').textContent = err.message;
   }
 });
 

@@ -19,7 +19,7 @@ Then open `http://<this computer>:8080/` on the tablet. Pages:
 | --- | --- | --- |
 | `/operator/` | Volunteers | Looks, Next, Undo, group presets, Master and group dimmers, Safe, Blackout |
 | `/patch/` | Programmer (PIN) | DMX map, fixtures, groups, stage plan, Identify, fixture types from the Open Fixture Library |
-| `/settings/` | Programmer (PIN) | DMX output (Art-Net, sACN, ENTTEC), Art-Net node finder, Send DMX switch, PIN, backups, show import and export |
+| `/settings/` | Programmer (PIN) | DMX output (Art-Net, sACN, ENTTEC), Art-Net node finder, Send DMX switch, PIN, backups, show export, compare with a show file or Lightkey project and pick what to take |
 
 Environment variables: `PORT` (default 8080), `LIGHT_RUNNER_DATA` (folder for `show.json`, `runtime.json` and backups; default `./data`), `LIGHT_RUNNER_OUTPUT=none` (never send DMX).
 

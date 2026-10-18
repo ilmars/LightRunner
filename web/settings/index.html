@@ -28,6 +28,24 @@
   </section>
 
   <main id="main" hidden>
+    <section class="card compare" id="comparePanel" hidden>
+      <div class="card-head">
+        <h2>Compare with <span id="compareName"></span></h2>
+        <button id="compareCancel" class="ghost small">Cancel</button>
+      </div>
+      <p class="hint" id="compareSummary"></p>
+      <div class="row wrap">
+        <button id="compareAll" class="ghost small" type="button">Tick all</button>
+        <button id="compareNone" class="ghost small" type="button">Untick all</button>
+      </div>
+      <div id="compareList" class="compare-list"></div>
+      <p class="warn" id="compareError"></p>
+      <div class="row">
+        <button id="compareApply" class="primary" type="button">Apply selected</button>
+        <span class="hint">The current show is kept as a backup. PIN and DMX output settings are not changed.</span>
+      </div>
+    </section>
+
     <section class="card" id="outputCard">
       <div class="card-head">
         <h2>DMX output</h2>
@@ -137,7 +155,7 @@
       <p class="hint" id="showSummary"></p>
       <div class="row wrap">
         <a class="ghost button" href="/api/show" download>Export show file</a>
-        <label class="ghost button">Import show file…<input id="importFile" type="file" accept=".json,application/json" hidden></label>
+        <label class="ghost button">Compare with a file…<input id="importFile" type="file" accept=".json,.lightkeyproj,application/json" hidden></label>
       </div>
       <details class="backups">
         <summary>Backups <span id="backupCount" class="count"></span></summary>
