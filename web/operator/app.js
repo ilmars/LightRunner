@@ -109,9 +109,21 @@ $('next').addEventListener('click', () => {
 $('undo').addEventListener('click', () => send({ type: 'undo' }));
 
 // Fade time for every look and preset change; shared by all devices.
-for (const b of $('fadeGroup').querySelectorAll('button')) {
-  b.addEventListener('click', () => send({ type: 'fadeTime', value: b.dataset.fade === 'auto' ? null : Number(b.dataset.fade) }));
+const fadeMenu = $('fadeMenu');
+const showFadeMenu = (open) => {
+  fadeMenu.hidden = !open;
+  $('fadeButton').setAttribute('aria-expanded', String(open));
+};
+$('fadeButton').addEventListener('click', () => showFadeMenu(fadeMenu.hidden));
+for (const b of fadeMenu.querySelectorAll('button')) {
+  b.addEventListener('click', () => {
+    send({ type: 'fadeTime', value: b.dataset.fade === 'auto' ? null : Number(b.dataset.fade) });
+    showFadeMenu(false);
+  });
 }
+document.addEventListener('pointerdown', (ev) => {
+  if (!fadeMenu.hidden && !fadeMenu.parentElement.contains(ev.target)) showFadeMenu(false);
+}, true);
 
 // ---- Groups and the group panel ----
 
@@ -198,9 +210,13 @@ function render() {
   $('nextName').textContent = next ? next.name : 'End of list';
   $('next').disabled = !next;
   $('undo').disabled = !state.canUndo;
-  for (const b of $('fadeGroup').querySelectorAll('button')) {
+  const fade = state.fadeTime ?? null;
+  $('fadeValue').textContent = fade === null ? 'Auto' : fade === 0 ? 'Instant' : `${fade} s`;
+  $('fadeButton').classList.toggle('fixed', fade !== null);
+  for (const b of fadeMenu.querySelectorAll('button')) {
     const v = b.dataset.fade === 'auto' ? null : Number(b.dataset.fade);
-    b.classList.toggle('on', v === (state.fadeTime ?? null));
+    b.classList.toggle('on', v === fade);
+    b.setAttribute('aria-checked', String(v === fade));
   }
 
   for (const [id, b] of lookButtons) {

@@ -15,14 +15,19 @@
 
   <header class="status">
     <span class="look-name" id="lookName">—</span>
-    <div id="fadeGroup" class="fadegroup" role="group" aria-label="Fade time">
-      <span class="fg-label">Fade</span>
-      <button data-fade="auto" title="Each look's own fade time">Auto</button>
-      <button data-fade="0" title="Change instantly">0</button>
-      <button data-fade="1">1</button>
-      <button data-fade="3">3</button>
-      <button data-fade="5">5</button>
-      <button data-fade="10">10<small>s</small></button>
+    <div class="fadepick">
+      <button id="fadeButton" class="fade-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="fadeMenu">
+        Fade <b id="fadeValue">Auto</b>
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div id="fadeMenu" class="fade-menu" role="menu" hidden>
+        <button role="menuitemradio" data-fade="auto">Auto <small>each look's own</small></button>
+        <button role="menuitemradio" data-fade="0">Instant</button>
+        <button role="menuitemradio" data-fade="1">1 s</button>
+        <button role="menuitemradio" data-fade="3">3 s</button>
+        <button role="menuitemradio" data-fade="5">5 s</button>
+        <button role="menuitemradio" data-fade="10">10 s</button>
+      </div>
     </div>
     <span id="fade" class="fade" hidden><span class="fade-bar"><span id="fadeFill"></span></span><span id="fadeText"></span></span>
     <span class="link" id="link"><span class="dot"></span><span id="linkText">Connecting</span></span>
