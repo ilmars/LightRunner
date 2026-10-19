@@ -68,7 +68,7 @@ Rules for `applyQuickLookToItem`:
 - For each entry of the quick look, the item gets `{ group, preset, level }` (preset referenced, not copied), replacing that group's entry.
 - Groups the quick look doesn't list keep their entries. Levels are forced to 1 for Basic lights.
 
-- [ ] **Step 1: Write the failing tests** in `runningorder.test.ts`, using the file's existing demo-show helpers:
+- [ ] **Step 1: Write the failing tests** in `runningorder.test.ts`. Build the show with `ensureRunningOrder(parseShow(<server/seed/demo-show.json>))`: Basic lights first, then songs copied from the looks. `song-1` below means `show.operator.runningOrder[1]`, and the quick look means `show.operator.quickLooks[0].look`.
 
 ```ts
 test('setItemGroup sets a preset and a level in a song, leaving the rest', () => { /* song-1, audience → aud-blue at 0.4: entry equals { group: 'audience', preset: 'aud-blue', level: 0.4 }; every other entry deepEqual before; input show unchanged */ });
@@ -117,7 +117,7 @@ Expected: PASS. Typecheck fails in `server/src/app.ts` until Task 2 handles the 
 
 - [ ] **Step 1: Write the failing tests**
   - `preview.test.ts`:
-    - `'settledVisual shows a look settled, without touching any stage'`: demo show; a look that sets audience to a blue preset. The audience fixtures' bytes are blue (b > r and b > g); another look's visual differs; the result's length is `fixtures.length * 3`.
+    - `'settledVisual shows a look settled, without touching any stage'`: demo show, look `prayer` (audience → `aud-blue`). The audience fixtures' bytes are blue (b > r and b > g); `walk-in`'s visual differs; the result's length is `fixtures.length * 3`.
     - `'settledVisual of Basic lights is the safe light'`: every fixture lit, r ≥ b.
   - `server.test.ts` (use `withApp`, `tablet`, `savedLook`):
     - `'Preview edits change a song and never the stage, even the song on stage'`. Start song 1 with fade 0 and wait for the state. Send `itemGroup` to song 1 with audience → `aud-blue` at level 0.4, and expect a `null` reply. Then:
@@ -198,7 +198,7 @@ Behaviour:
   - `presetInfo`, `runningLight`, `renderDetails`, `renderPicker` and `renderSheet` take their status from `groupStatus`.
   - `presetInfo` returns `{ name: s.entry.name, colour: s.entry.swatch }` when `s.entry` is present.
   - `runningLight` uses `s.entry.light`.
-  - An item that doesn't set a group gives `{ preset: null, level: 0, live: null, entry: null }`. Its row shows "not set" and its dimmer is disabled (class `ds-disabled`, no pointer handling).
+  - An item that doesn't set a group gives `{ preset: null, level: 0, live: null, entry: null }`. Its row shows "not set" and its dimmer is disabled: class `ds-disabled`, no pointer handling. Add `.ds-fill.ds-disabled { opacity: 0.4; pointer-events: none; }` to `web/shared/theme.css` and a line about it to docs/design-system.md.
 
 Behaviour in Preview. All sends go to the selected item; nothing is sent to the stage.
 - The details title is the selected item's name. `#saveBtn` and `#backBtn` are hidden.
