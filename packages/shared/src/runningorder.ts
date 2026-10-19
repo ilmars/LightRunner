@@ -74,9 +74,9 @@ function entriesFor(show: Show, stage: Stage, only?: string[]): LookEntry[] {
   const entries: LookEntry[] = [];
   for (const [group, preset] of Object.entries(stage.groups)) {
     if (!preset || (only && !only.includes(group))) continue;
-    const kind = show.groups.find((g) => g.id === group)?.kind;
-    if (!kind) throw new Error(`the show has no group "${group}"`);
-    if (kind === 'smoke') continue;
+    const found = show.groups.find((g) => g.id === group);
+    if (!found) throw new Error(`the show has no group "${group}"`);
+    if (found.kind === 'smoke') continue;
     const level = stage.levels[group] ?? 1;
     const live = parseLivePreset(preset);
     const builtIn = BUILT_IN.get(preset);
