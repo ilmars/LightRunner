@@ -507,3 +507,32 @@ test('Flash follows group membership when the show is edited', () => {
   assert.equal(lightOf(e, 'aud-2').i, 1);
   assert.equal(lightOf(e, 'aud-1').i, 0);
 });
+
+test('an Any colour group comes back after Blackout when the next look does not list it', () => {
+  const show = demoShow();
+  show.looks.push({ id: 'pulpit-only', name: 'Pulpit only', section: 'Other', swatch: '#ffffff', groups: [{ group: 'pulpit', preset: 'pulpit-on' }] });
+  const e2 = new Engine(show);
+  e2.apply({ type: 'look', id: 'walk-in' }, 0);
+  e2.apply({ type: 'groupColour', group: 'audience', colour: '#00ff80', fade: 0 }, 1);
+  e2.apply({ type: 'blackout' }, 5);
+  e2.frame(7);
+  assert.equal(e2.apply({ type: 'look', id: 'pulpit-only' }, 7), null);
+  const step = maxStep(e2, 7, 12);
+  assert.ok(step < 0.05, `largest step ${step}`);
+  assert.equal(e2.liveState(12, 'ok').groups.audience.preset, 'live:audience:#00ff80');
+  const l = lightOf(e2, 'aud-1');
+  assert.ok(close(l.r, 0) && close(l.g, 1) && close(l.i, 1), JSON.stringify(l));
+});
+
+test('a group on the built-in safe light before Blackout comes back to it', () => {
+  const show = demoShow();
+  show.looks.push({ id: 'pulpit-only', name: 'Pulpit only', section: 'Other', swatch: '#ffffff', groups: [{ group: 'pulpit', preset: 'pulpit-on' }] });
+  const e = new Engine(show);
+  e.apply({ type: 'safe' }, 0);
+  e.apply({ type: 'blackout' }, 5);
+  e.frame(7);
+  assert.equal(e.apply({ type: 'look', id: 'pulpit-only' }, 7), null);
+  e.frame(12);
+  assert.equal(e.liveState(12, 'ok').groups.audience.preset, '__safe');
+  assert.ok(lightOf(e, 'aud-1').i > 0.3);
+});

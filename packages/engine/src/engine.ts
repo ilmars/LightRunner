@@ -332,10 +332,11 @@ export class Engine {
     if (this.beforeBlackout) {
       for (const [gid, pid] of Object.entries(this.beforeBlackout)) {
         const group = this.groups.get(gid);
-        const preset = pid ? this.presets.get(pid) : undefined;
-        if (!group || listed.has(gid) || !preset) continue;
+        const preset = this.presetFor(pid, gid);
+        if (!group || listed.has(gid) || !preset || preset.id === BLACKOUT_ID) continue;
         const t = fade ?? this.fadeTime ?? DEFAULT_FADE;
-        this.setPreset(group, preset, t, now);
+        // The built-in safe light is set for every group at once, so it doesn't take shared fixtures.
+        this.setPreset(group, preset, t, now, preset.id !== SAFE_ID);
         longest = Math.max(longest, t);
       }
       this.beforeBlackout = null;
