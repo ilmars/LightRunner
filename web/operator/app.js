@@ -76,6 +76,12 @@ function connect() {
       buildQuick();
       buildSheetGroups();
       buildFlash();
+      if (preview.on) {
+        // The show changed (maybe this item): ask again, and move off an item that is gone.
+        if (!previewItem()) preview.item = defaultPreviewItem();
+        loadPreviewVisual();
+      }
+      markSelected();
       render();
     } else if (msg.type === 'state') {
       if (state && msg.state.look !== seenLook) previousLook = seenLook;
@@ -246,7 +252,8 @@ function buildPlainRows(order) {
     const mark = el('span', 'mark', 'changed');
     mark.hidden = true;
     b.append(strip, el('span', 'name', item.name), mark);
-    b.addEventListener('click', () => start(item));
+    // In Preview a tap picks the item to look at; it starts nothing.
+    b.addEventListener('click', () => (preview.on ? selectItem(item.id) : start(item)));
     nodes.push(b);
     orderRows.push({ item, button: b, mark });
     if (basic && k < order.length - 1) nodes.push(el('div', 'sep'));
@@ -482,6 +489,8 @@ function finishDrag(cancelled) {
 
 function setEditing(on) {
   if (drag || on === editing) return;
+  // Editing the order and Preview don't mix.
+  if (on) setPreview(false);
   // On a tablet a tap on this button doesn't leave the field, so do it here: it sends the rename.
   if (document.activeElement instanceof HTMLElement && $('runningOrder').contains(document.activeElement)) document.activeElement.blur();
   editing = on;
@@ -496,6 +505,82 @@ function setEditing(on) {
   }
 }
 $('editBtn').addEventListener('click', () => setEditing(!editing));
+
+// ---- Preview: look at an item, and change it, without touching the stage ----
+// Only this tablet knows it is on; the server's stage and show are untouched by selecting.
+
+const preview = { on: false, item: null };
+// What the selected item looks like settled (3 bytes per fixture), or null until the server has answered.
+let previewVisual = null;
+// Counts the asks for a picture, so a slow answer for an earlier choice is dropped.
+let previewSeq = 0;
+
+/** The selected running-order item, or null. */
+function previewItem() {
+  return layout?.runningOrder.find((i) => i.id === preview.item) ?? null;
+}
+
+/** The item Preview opens on, and falls back to: what is on stage, else what Next would start. */
+const defaultPreviewItem = () => (stageItem() ?? nextItem() ?? layout?.runningOrder[0] ?? null)?.id ?? null;
+
+function markSelected() {
+  orderRows.forEach((row) => row.button.classList.toggle('selected', preview.on && row.item.id === preview.item));
+}
+
+function setPreview(on) {
+  if (on === preview.on) return;
+  if (on) {
+    if (!layout || phoneQuery.matches) return;
+    if (editing) {
+      setEditing(false);
+      if (editing) return;
+    }
+  }
+  preview.on = on;
+  preview.item = on ? defaultPreviewItem() : null;
+  document.body.classList.toggle('preview', on);
+  $('topBar').classList.toggle('preview', on);
+  $('previewBtn').setAttribute('aria-pressed', String(on));
+  if (on) {
+    loadPreviewVisual();
+  } else {
+    // Drop any answer still on its way.
+    previewSeq++;
+    previewVisual = null;
+    drawStage();
+  }
+  markSelected();
+  render();
+}
+$('previewBtn').addEventListener('click', () => setPreview(!preview.on));
+
+function selectItem(id) {
+  if (!preview.on || preview.item === id) return;
+  preview.item = id;
+  previewVisual = null;
+  markSelected();
+  loadPreviewVisual();
+  render();
+}
+
+async function loadPreviewVisual() {
+  const seq = ++previewSeq;
+  if (!preview.on || !preview.item) {
+    previewVisual = null;
+    drawStage();
+    return;
+  }
+  let bytes = null;
+  try {
+    const res = await fetch(`/api/looks/${encodeURIComponent(preview.item)}/visual`);
+    if (res.ok) bytes = Uint8Array.from((await res.json()).visual);
+  } catch {
+    // Offline or the item is gone: the picture waits for the next layout.
+  }
+  if (seq !== previewSeq) return;
+  previewVisual = bytes;
+  drawStage();
+}
 
 // A tap anywhere else takes back a "Delete" that was waiting for its second tap.
 document.addEventListener('pointerdown', (ev) => {
@@ -1626,10 +1711,12 @@ function drawStage() {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
+  // In Preview the picture is the selected item settled, not the stage.
+  const shownVisual = preview.on && previewVisual ? previewVisual : visual;
   const pad = 14, r = Math.max(5, Math.min(9, h / 16));
   layout.fixtures.forEach((f, k) => {
     const x = pad + f.x * (w - 2 * pad), y = pad + f.y * (h - 2 * pad);
-    const [R, G, B] = shownRgb(visual[k * 3] ?? 0, visual[k * 3 + 1] ?? 0, visual[k * 3 + 2] ?? 0);
+    const [R, G, B] = shownRgb(shownVisual[k * 3] ?? 0, shownVisual[k * 3 + 1] ?? 0, shownVisual[k * 3 + 2] ?? 0);
     const lit = Math.max(R, G, B) / 255;
     if (f.w || f.h) {
       // A bar or strip: a lit rounded rectangle at its real size.
@@ -1664,6 +1751,14 @@ function drawStage() {
     ctx.strokeStyle = '#3a3f48';
     ctx.stroke();
   });
+  if (preview.on) {
+    // So the picture can't be mistaken for the real stage.
+    const style = getComputedStyle(document.body);
+    ctx.font = `11px ${style.fontFamily}`;
+    ctx.fillStyle = style.getPropertyValue('--ds-muted').trim() || '#8F9AB0';
+    ctx.textBaseline = 'top';
+    ctx.fillText('Preview', 10, 8);
+  }
 }
 
 window.addEventListener('resize', drawStage);
@@ -1746,6 +1841,8 @@ function applyPhone() {
     // Editing belongs to the iPad: the running order's, and the colour list's (its buttons are hidden here,
     // and in Edit a swatch tap opens the editor instead of setting the colour).
     if (editing) setEditing(false);
+    // No Preview on the phone: it stays a remote for the live stage.
+    setPreview(false);
     if (picker.edit) setEditMode(false);
     closeSheet();
   } else if (flash.parentElement !== $('masterFader').parentElement) {
