@@ -260,6 +260,17 @@ button { font: inherit; color: inherit; cursor: pointer; }
    and a neutral grey fill (no colour to carry). */
 .row.smoke { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-rows: var(--ds-target) minmax(44px, 1fr); }
 .row .smoke-tag { justify-self: start; padding: 0 10px; color: var(--ds-muted); font-size: 15px; }
+/* Preview: a group the selected item doesn't set says "not set" quietly. */
+.chip.unset span { color: var(--ds-muted); }
+
+/* ---- Preview: the details work on the selected item ----
+   Smoke isn't part of a song, and these work on other things than the item:
+   Save stage as quick look, the colour list's Edit and Add to colours. */
+body.preview .row.smoke,
+body.preview .ql.newq,
+body.preview #pEditBtn,
+body.preview #pAddOpen,
+body.preview #pAdd { display: none; }
 .row.smoke .ds-fill > .ds-fill-slab { background: var(--ds-fill-sheen), linear-gradient(90deg, rgba(143, 154, 176, 0.20), rgba(160, 170, 190, 0.28)); }
 .puff {
   min-height: var(--ds-target); min-width: 76px; padding: 0 16px; border: 0; border-radius: var(--ds-r-pill);
