@@ -77,6 +77,7 @@ The first suggested palette was measured at about 4× the old screen's average b
 - **Surfaces:** glass panels on the background. Group zones in Details are flat and divided by a faint line, not cards inside a card. The bottom bar is one strip whose groups are divided by faint lines.
 - **Levels:** a clear number on the right of the group's header line, never drawn over the slider. 0 % is muted.
 - **Details adapt to the rig:** with few groups each zone grows into the spare room (up to 124 px, the slider up to 64 px tall); with many groups they shrink back to their content (slider 44 px) and the list scrolls, so capacity isn't lost.
+- **White, Amber and UV** (colour picker, groups that have them): fill sliders side by side under Any colour, name and level on the header line, the fill carrying a little white, amber or violet.
 - **Quick looks** keep a fixed two rows (12 looks before scrolling), so the layout doesn't jump when switching tabs.
 - **Running order:**
   - on stage: blue-tinted glass with a blue edge
