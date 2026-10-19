@@ -20,11 +20,18 @@ export function enttecPacket(data: Uint8Array): Buffer {
   return p;
 }
 
-interface SerialLike {
+export interface SerialLike {
   write(data: Buffer): boolean;
   close(cb?: (err: Error | null) => void): void;
   on(event: 'close' | 'error', fn: (...args: unknown[]) => void): void;
   isOpen: boolean;
+}
+
+async function openSerial(path: string): Promise<SerialLike> {
+  const { SerialPort } = await import('serialport');
+  return new Promise<SerialLike>((resolve, reject) => {
+    const p = new SerialPort({ path, baudRate: 250000 }, (err) => (err ? reject(err) : resolve(p as unknown as SerialLike)));
+  });
 }
 
 export class EnttecOutput implements DmxOutput {
@@ -33,9 +40,12 @@ export class EnttecOutput implements DmxOutput {
   private lastTry = 0;
   private closed = false;
   private path: string;
+  private readonly openPort: (path: string) => Promise<SerialLike>;
 
-  constructor(path: string) {
+  /** `openPort` stands in for the serial port in tests. */
+  constructor(path: string, openPort: (path: string) => Promise<SerialLike> = openSerial) {
     this.path = path;
+    this.openPort = openPort;
     void this.open();
   }
 
@@ -48,10 +58,12 @@ export class EnttecOutput implements DmxOutput {
     this.opening = true;
     this.lastTry = Date.now();
     try {
-      const { SerialPort } = await import('serialport');
-      const port = await new Promise<SerialLike>((resolve, reject) => {
-        const p = new SerialPort({ path: this.path, baudRate: 250000 }, (err) => (err ? reject(err) : resolve(p as unknown as SerialLike)));
-      });
+      const port = await this.openPort(this.path);
+      // Closed while the port was opening (routes changed): let it go, or it stays open and busy.
+      if (this.closed) {
+        port.close();
+        return;
+      }
       port.on('close', () => (this.port = null));
       port.on('error', () => (this.port = null));
       this.port = port;

@@ -4,6 +4,7 @@ import { createSocket, type Socket } from 'node:dgram';
 import { planRoutes, type OutputSettings, type OutputStatus } from '../../packages/shared/src/index.ts';
 import { OutputSet, type DmxOutput } from '../src/output/index.ts';
 import { ArtNetOutput } from '../src/output/artnet.ts';
+import { EnttecOutput } from '../src/output/enttec.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const artnet = (host: string): OutputSettings => ({ kind: 'artnet', host });
@@ -86,6 +87,17 @@ test('status: off with nothing to send, lost when any output is lost, and a lost
   made[1].status = 'ok';
   assert.equal(set.status, 'ok');
   assert.equal(set.problem, null);
+});
+
+test('a USB port that finishes opening after its output closed is closed again', async () => {
+  let finish!: () => void;
+  const port = { isOpen: true, closed: false, write: () => true, on: () => {}, close() { this.closed = true; this.isOpen = false; } };
+  const out = new EnttecOutput('COM3', () => new Promise((resolve) => (finish = () => resolve(port))));
+  out.close(); // routes changed while the port was still opening
+  finish();
+  await sleep(10);
+  assert.equal(port.closed, true);
+  assert.equal(out.status, 'lost');
 });
 
 async function receiver(): Promise<{ socket: Socket; port: number; packets: Buffer[] }> {
