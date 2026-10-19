@@ -1257,7 +1257,11 @@ function renderPicker() {
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
   const running = runningLight(row.group, s);
   pickerColour = running.colour;
-  pickerLive = !!s?.live;
+  // In Preview the item's own Any colour pick is a saved hidden "Custom" preset (not in the colour list):
+  // its White, Amber and UV are the user's too.
+  pickerLive = preview.on
+    ? !!s?.entry && s.entry.name === 'Custom' && !row.group.presets.some((p) => p.id === s.entry.preset)
+    : !!s?.live;
   const now = performance.now();
   for (const r of extraRows) if (!r.dragging && now >= r.holdUntil) showLevel(r, running[r.key]);
   renderAddColour();
