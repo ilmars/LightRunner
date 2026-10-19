@@ -381,3 +381,24 @@ test('recorded is true for a look and false for a dimmer change', () => {
   e.apply({ type: 'master', value: 0.5 }, 8);
   assert.equal(e.recorded, false);
 });
+
+test('Back to look works after Basic lights and keeps Master where it was', () => {
+  const e = new Engine(levelsShow(true));
+  e.apply({ type: 'look', id: 'song-3' }, 0);
+  e.apply({ type: 'safe' }, 4);
+  e.apply({ type: 'master', value: 0.6 }, 8);
+  e.apply({ type: 'groupLevel', group: 'front-wash', value: 1 }, 8);
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-blue' }, 8);
+  e.frame(9);
+  assert.equal(e.liveState(9, 'ok').lookChanged, true);
+  assert.equal(e.apply({ type: 'backToLook' }, 9), null);
+  const step = maxStep(e, 9, 14);
+  assert.ok(step < 0.05, `largest step ${step}`);
+  const s = e.liveState(14, 'ok');
+  assert.equal(s.look, 'safe');
+  assert.equal(s.lookChanged, false);
+  assert.equal(s.groups['front-wash'].level, 0.5);
+  assert.equal(s.groups.audience.preset, 'aud-low');
+  assert.equal(s.groups['back-wall'].preset, '__safe');
+  assert.equal(s.master, 0.6);
+});

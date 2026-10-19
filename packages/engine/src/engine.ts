@@ -340,21 +340,25 @@ export class Engine {
   }
 
   private goSafe(now: number): void {
-    const safeLook = this.show.operator.safeLook ? this.looks.get(this.show.operator.safeLook) : undefined;
     for (const group of this.groups.values()) {
-      const entry = safeLook?.groups.find((e) => e.group === group.id);
-      const preset = (entry && this.presets.get(entry.preset)) ?? fixedPreset(SAFE_ID, group.id, SAFE_LIGHT, SAFE_FADE);
+      const { preset } = this.safeTarget(group);
       this.setPreset(group, preset, SAFE_FADE, now, false);
     }
     this.releaseAll(now);
     this.master.set(1, now, SAFE_RESET);
     this.speed.set(1, now, SAFE_RESET);
-    for (const group of this.groups.values()) {
-      const entry = safeLook?.groups.find((e) => e.group === group.id);
-      group.level.set(entry?.level ?? 1, now, SAFE_RESET);
-    }
+    for (const group of this.groups.values()) group.level.set(this.safeTarget(group).level, now, SAFE_RESET);
     this.beforeBlackout = null;
     this.setLook(SAFE, now, SAFE_FADE);
+  }
+
+  /** What Safe (Basic lights) sets for a group: the safe look's entry, or the built-in warm wash at full. */
+  private safeTarget(group: GroupRun): { preset: CompiledPreset; level: number; fade: number } {
+    const safeLook = this.show.operator.safeLook ? this.looks.get(this.show.operator.safeLook) : undefined;
+    const entry = safeLook?.groups.find((e) => e.group === group.id);
+    const own = entry && this.presets.get(entry.preset);
+    if (entry && own) return { preset: own, level: entry.level ?? 1, fade: entry.fade ?? own.fade };
+    return { preset: fixedPreset(SAFE_ID, group.id, SAFE_LIGHT, SAFE_FADE), level: entry?.level ?? 1, fade: SAFE_FADE };
   }
 
   private goBlackout(now: number): void {
@@ -371,6 +375,16 @@ export class Engine {
 
   private backToLook(now: number): string | null {
     this.releaseAll(now);
+    if (this.look === SAFE) {
+      // Basic lights is not a look in the show; put back what Safe set, but leave Master and speed.
+      for (const group of this.groups.values()) {
+        const { preset, level, fade } = this.safeTarget(group);
+        const t = preset.id === SAFE_ID ? fade : this.fadeTime ?? fade;
+        this.setPreset(group, preset, t, now, false);
+        group.level.set(level, now, t * LEVEL_FADE_FACTOR);
+      }
+      return null;
+    }
     const look = this.look ? this.looks.get(this.look) : undefined;
     if (!look) return null;
     this.applyEntries(look.groups, undefined, now);
