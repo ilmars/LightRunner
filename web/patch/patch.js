@@ -689,8 +689,9 @@ function renderGroups() {
     sw.append(box, track, el('span', 'switch-label', 'Smoke or haze machine'));
     kind.append(sw);
     if (g.kind === 'smoke') {
-      kind.append(el('span', 'note', 'Looks, Basic lights and Flash leave it alone. It runs only from its own slider and Puff, and is off after a restart.'));
+      kind.append(el('span', 'note', 'Looks, Basic lights and Flash leave it alone. It runs only from its own slider and Puff, and is off after a restart. Turning this off lets Basic lights and looks drive the machine.'));
     }
+    for (const text of smokeWarnings(g)) kind.append(el('p', 'warn', text));
 
     const members = el('div', 'members');
     g.fixtures.forEach((fid, k) => {
@@ -720,6 +721,32 @@ function renderGroups() {
     card.append(head, kind, members);
     root.append(card);
   }
+}
+
+const SMOKE_NAME = /\b(fog|fogger|haze|hazer|smoke)\b/i;
+
+/**
+ * Problems with smoke machines in a group. A smoke group drives a fixture's dimmer channel
+ * (or its only channel), so a multi-channel type without one is never driven. A light group
+ * holding something that looks like a smoke machine would let Basic lights and looks run it.
+ */
+function smokeWarnings(g) {
+  const out = [];
+  for (const fid of g.fixtures) {
+    const f = show.fixtures.find((x) => x.id === fid);
+    const type = f && profileById.get(f.profile);
+    if (!f || !type) continue;
+    if (g.kind === 'smoke') {
+      if (type.channels > 1 && !type.roles?.includes('dimmer')) {
+        out.push(`${f.name}: This fixture has no dimmer channel, so Light Runner can't drive it. Set its level channel to dimmer in the fixture type.`);
+      }
+    } else {
+      const own = show.profiles.find((p) => p.id === f.profile);
+      const looksLikeSmoke = SMOKE_NAME.test(f.name) || SMOKE_NAME.test(type.name) || !!own?.channels.some((c) => c.role === 'dimmer' && SMOKE_NAME.test(c.name ?? ''));
+      if (looksLikeSmoke) out.push(`${f.name} looks like a smoke or haze machine. Mark this group as one, or Basic lights and looks will turn it on.`);
+    }
+  }
+  return out;
 }
 
 $('newGroupForm').addEventListener('submit', (ev) => {

@@ -139,6 +139,11 @@ function toChannel(name: string | null, fixture: OflFixture): ProfileChannel {
   const only = (t: string) => types.size === 1 && types.has(t);
 
   if (only('Intensity')) return { role: 'dimmer', name, ...(fine ? { fine: true } : {}) };
+  // A smoke or haze machine's output: its level is the dimmer, which only a smoke group drives (linear, no gamma).
+  const fog = real.filter((c) => c.type === 'Fog' || c.type === 'FogOutput');
+  if (fog.length && fog.length === real.length) return { role: 'dimmer', name, ...(fine ? { fine: true } : {}) };
+  // Fog mixed with other functions on one channel: parked at 0 so its default can never make smoke.
+  if (fog.length) return { role: 'other', name, default: 0 };
   if (only('ColorIntensity') && real.length === 1) {
     const role = COLOUR_ROLES[real[0].color ?? ''];
     if (role) return { role, name, ...(fine ? { fine: true } : {}) };
