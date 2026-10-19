@@ -34,6 +34,8 @@ table.patch { width: 100%; min-width: 960px; border-collapse: collapse; font-siz
 .member .pos { color: var(--dim); font-size: 11px; margin-right: 4px; }
 .group-card select { width: auto; min-height: 34px; padding: 4px 8px; }
 .group-card .note { font-size: 12px; color: var(--dim); }
+.group-card .kind { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.group-card .kind .switch-label { font-size: 14px; }
 
 .stage-plan {
   position: relative; width: 100%; aspect-ratio: 2.4 / 1; border-radius: 10px; border: 1px solid var(--line);

@@ -677,6 +677,21 @@ function renderGroups() {
     });
     head.append(name, el('span', 'note', `${presets} presets`), del);
 
+    // A smoke or haze machine: only its own slider and Puff on the operator page turn it on.
+    const kind = el('div', 'kind');
+    const sw = el('label', 'switch');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = g.kind === 'smoke';
+    box.addEventListener('change', () => { g.kind = box.checked ? 'smoke' : 'light'; changed(); });
+    const track = el('span', 'track');
+    track.append(el('span', 'knob'));
+    sw.append(box, track, el('span', 'switch-label', 'Smoke or haze machine'));
+    kind.append(sw);
+    if (g.kind === 'smoke') {
+      kind.append(el('span', 'note', 'Looks, Basic lights and Flash leave it alone. It runs only from its own slider and Puff, and is off after a restart.'));
+    }
+
     const members = el('div', 'members');
     g.fixtures.forEach((fid, k) => {
       const f = show.fixtures.find((x) => x.id === fid);
@@ -702,7 +717,7 @@ function renderGroups() {
     add.addEventListener('change', () => { if (add.value) { g.fixtures.push(add.value); changed(); } });
     if (add.options.length > 1) members.append(add);
     if (!g.fixtures.length) members.prepend(el('span', 'note', 'No fixtures yet.'));
-    card.append(head, members);
+    card.append(head, kind, members);
     root.append(card);
   }
 }
@@ -712,7 +727,7 @@ $('newGroupForm').addEventListener('submit', (ev) => {
   const name = $('newGroupName').value.trim();
   if (!name) return;
   const id = uniqueId(name, new Set(show.groups.map((g) => g.id)));
-  show.groups.push({ id, name, fixtures: [] });
+  show.groups.push({ id, name, kind: 'light', fixtures: [] });
   // Show it on the operator page too.
   if (show.operator.groups.length) show.operator.groups.push(id);
   $('newGroupName').value = '';
