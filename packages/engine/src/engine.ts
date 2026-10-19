@@ -4,7 +4,7 @@
 
 import {
   BLACKOUT, SAFE, findProfile,
-  type Command, type LiveState, type Look, type ManualTarget, type OutputStatus,
+  type Command, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
   type Palette, type RuntimeState, type Show,
 } from '../../shared/src/index.ts';
 import { Crossfade, Ramp } from './fade.ts';
@@ -22,6 +22,8 @@ const SAFE_FADE = 1;
  */
 const SAFE_RESET = 2;
 const BLACKOUT_FADE = 1;
+/** A look fades each group's level over the preset's fade time multiplied by this. */
+const LEVEL_FADE_FACTOR = 1;
 /** Fader and dial moves are smoothed over this long so they never step. */
 const SMOOTH = 0.2;
 /** Manual takes over this fast, and follows the finger with this smoothing. */
@@ -36,6 +38,15 @@ const UNDO_STEPS = 20;
 
 const SAFE_ID = '__safe';
 const BLACKOUT_ID = '__blackout';
+
+interface Snapshot {
+  look: string | null;
+  lastLook: string | null;
+  groups: Record<string, string | null>;
+  /** Each group's level target. */
+  levels: Record<string, number>;
+  beforeBlackout: Record<string, string | null> | null;
+}
 
 interface PresetRun {
   preset: CompiledPreset;
@@ -131,7 +142,9 @@ export class Engine {
   /** Each group's preset before Blackout, so any look brings the whole stage back. */
   private beforeBlackout: Record<string, string | null> | null = null;
   /** Stage snapshots before each look or preset change, newest last. */
-  private history: { look: string | null; lastLook: string | null; groups: Record<string, string | null>; beforeBlackout: Record<string, string | null> | null }[] = [];
+  private history: Snapshot[] = [];
+  /** True when the last apply() added an Undo step. */
+  recorded = false;
   private lastLook: string | null = null;
   /** Operator's fade time for look and preset changes; null = each look's own. */
   private fadeTime: number | null = null;
@@ -194,24 +207,30 @@ export class Engine {
 
   /** Apply a command. Returns an error message, or null when it worked. */
   apply(cmd: Command, now: number): string | null {
+    this.recorded = false;
     if (cmd.type === 'undo') return this.undo(now);
-    if (cmd.type === 'look' || cmd.type === 'groupPreset' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') {
+    if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') {
       const before = this.snapshot();
       const error = this.run(cmd, now);
       const after = this.snapshot();
       if (!error && JSON.stringify(before) !== JSON.stringify(after)) {
         this.history.push(before);
         if (this.history.length > UNDO_STEPS) this.history.shift();
+        this.recorded = true;
       }
       return error;
     }
     return this.run(cmd, now);
   }
 
-  private snapshot() {
+  private snapshot(): Snapshot {
     const groups: Record<string, string | null> = {};
-    for (const g of this.groups.values()) groups[g.id] = g.presets.currentKey;
-    return { look: this.look, lastLook: this.lastLook, groups, beforeBlackout: this.beforeBlackout ? { ...this.beforeBlackout } : null };
+    const levels: Record<string, number> = {};
+    for (const g of this.groups.values()) {
+      groups[g.id] = g.presets.currentKey;
+      levels[g.id] = g.level.target;
+    }
+    return { look: this.look, lastLook: this.lastLook, groups, levels, beforeBlackout: this.beforeBlackout ? { ...this.beforeBlackout } : null };
   }
 
   /** Fade back to how the stage was before the last look or preset change. */
@@ -224,6 +243,8 @@ export class Engine {
       if (preset && group.presets.currentKey !== preset.id) {
         this.setPreset(group, preset, UNDO_FADE, now, preset.id !== SAFE_ID && preset.id !== BLACKOUT_ID);
       }
+      const level = prev.levels[group.id] ?? 1;
+      if (group.level.target !== level) group.level.set(level, now, UNDO_FADE);
     }
     this.beforeBlackout = prev.beforeBlackout;
     this.lastLook = prev.lastLook;
@@ -242,6 +263,7 @@ export class Engine {
     switch (cmd.type) {
       case 'undo': return this.undo(now);
       case 'look': return this.goLook(cmd.id, cmd.fade, now);
+      case 'quickLook': return this.quickLook(cmd.id, cmd.fade, now);
       case 'groupPreset': {
         const group = this.groups.get(cmd.group);
         const preset = this.presets.get(cmd.preset);
@@ -271,17 +293,8 @@ export class Engine {
   private goLook(id: string, fade: number | undefined, now: number): string | null {
     const look = this.looks.get(id);
     if (!look) return `unknown look "${id}"`;
-    let longest = 0;
     const listed = new Set<string>();
-    for (const entry of look.groups) {
-      const group = this.groups.get(entry.group);
-      const preset = this.presets.get(entry.preset);
-      if (!group || !preset) continue;
-      const t = fade ?? this.fadeTime ?? entry.fade ?? preset.fade;
-      this.setPreset(group, preset, t, now);
-      listed.add(group.id);
-      longest = Math.max(longest, t);
-    }
+    let longest = this.applyEntries(look.groups, fade, now, listed);
     // Coming out of Blackout, groups the look leaves alone return to what they ran before.
     if (this.beforeBlackout) {
       for (const [gid, pid] of Object.entries(this.beforeBlackout)) {
@@ -299,6 +312,33 @@ export class Engine {
     return null;
   }
 
+  /** Like a look, but only for the groups it lists; the current look stays. */
+  private quickLook(id: string, fade: number | undefined, now: number): string | null {
+    const look = this.looks.get(id);
+    if (!look) return `unknown look "${id}"`;
+    this.applyEntries(look.groups, fade, now);
+    return null;
+  }
+
+  /**
+   * Set each listed group to its preset and level, both over the same fade.
+   * Returns the longest fade used. `listed` collects the groups that were set.
+   */
+  private applyEntries(entries: readonly LookEntry[], fade: number | undefined, now: number, listed?: Set<string>): number {
+    let longest = 0;
+    for (const entry of entries) {
+      const group = this.groups.get(entry.group);
+      const preset = this.presets.get(entry.preset);
+      if (!group || !preset) continue;
+      const t = fade ?? this.fadeTime ?? entry.fade ?? preset.fade;
+      this.setPreset(group, preset, t, now);
+      group.level.set(entry.level ?? 1, now, t * LEVEL_FADE_FACTOR);
+      listed?.add(group.id);
+      longest = Math.max(longest, t);
+    }
+    return longest;
+  }
+
   private goSafe(now: number): void {
     const safeLook = this.show.operator.safeLook ? this.looks.get(this.show.operator.safeLook) : undefined;
     for (const group of this.groups.values()) {
@@ -309,7 +349,10 @@ export class Engine {
     this.releaseAll(now);
     this.master.set(1, now, SAFE_RESET);
     this.speed.set(1, now, SAFE_RESET);
-    for (const group of this.groups.values()) group.level.set(1, now, SAFE_RESET);
+    for (const group of this.groups.values()) {
+      const entry = safeLook?.groups.find((e) => e.group === group.id);
+      group.level.set(entry?.level ?? 1, now, SAFE_RESET);
+    }
     this.beforeBlackout = null;
     this.setLook(SAFE, now, SAFE_FADE);
   }
@@ -330,11 +373,7 @@ export class Engine {
     this.releaseAll(now);
     const look = this.look ? this.looks.get(this.look) : undefined;
     if (!look) return null;
-    for (const entry of look.groups) {
-      const group = this.groups.get(entry.group);
-      const preset = this.presets.get(entry.preset);
-      if (group && preset) this.setPreset(group, preset, this.fadeTime ?? entry.fade ?? preset.fade, now);
-    }
+    this.applyEntries(look.groups, undefined, now);
     return null;
   }
 
@@ -521,6 +560,7 @@ export class Engine {
     }
     return {
       look: this.look,
+      lookChanged: this.lookChanged(),
       lookProgress: this.lookDur > 0 ? Math.min(1, Math.max(0, (now - this.lookStart) / this.lookDur)) : 1,
       lookFadeLeft: Math.max(0, this.lookStart + this.lookDur - now),
       lastLook: this.lastLook,
@@ -533,6 +573,19 @@ export class Engine {
       output,
       outputProblem: null,
     };
+  }
+
+  /** A group the current look lists runs another preset, or has another level target, than the look says. */
+  private lookChanged(): boolean {
+    if (!this.look || this.look === BLACKOUT) return false;
+    const id = this.look === SAFE ? this.show.operator.safeLook : this.look;
+    const look = id ? this.looks.get(id) : undefined;
+    if (!look) return false;
+    return look.groups.some((entry) => {
+      const group = this.groups.get(entry.group);
+      if (!group) return false;
+      return group.presets.currentKey !== entry.preset || Math.abs(group.level.target - (entry.level ?? 1)) > 1e-9;
+    });
   }
 
   runtime(): RuntimeState {

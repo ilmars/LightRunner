@@ -16,6 +16,8 @@ export type ManualTarget = z.infer<typeof ManualTarget>;
 
 export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('look'), id, fade }),
+  /** Set only the groups a look lists, leaving the current look and the other groups alone. */
+  z.object({ type: z.literal('quickLook'), id, fade }),
   z.object({ type: z.literal('groupPreset'), group: id, preset: id, fade }),
   z.object({ type: z.literal('manual'), target: ManualTarget, colour: hex.optional(), intensity: unit.optional() }),
   z.object({ type: z.literal('release'), target: ManualTarget }),
@@ -60,6 +62,8 @@ export interface LiveState {
   lookFadeLeft: number;
   /** The last real look (not Safe or Blackout), for the Next button. */
   lastLook: string | null;
+  /** A group the current look lists runs another preset or level than the look says. */
+  lookChanged: boolean;
   /** Undo has something to go back to. */
   canUndo: boolean;
   /** Fade time chosen on the operator page, or null for each look's own fade. */

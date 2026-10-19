@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Engine } from '../src/index.ts';
-import { close, demoShow, lightOf, maxStep } from './helpers.ts';
+import { close, demoShow, levelsShow, lightOf, maxStep } from './helpers.ts';
 
 const GAMMA = 2.2;
 const dmx = (v: number) => Math.round(Math.pow(v, GAMMA) * 255);
@@ -243,4 +243,141 @@ test('the operator fade time overrides each look and preset fade, and Auto goes 
   e.apply({ type: 'look', id: 'worship' }, 20);
   assert.ok(close(e.liveState(20, 'ok').lookFadeLeft, 5));
   assert.equal(e.runtime().fadeTime, null);
+});
+
+test("a look sets each group's saved level with the look's fade", () => {
+  const e = new Engine(levelsShow());
+  e.apply({ type: 'look', id: 'song-3' }, 0);
+  const s0 = e.liveState(0, 'ok');
+  assert.equal(s0.groups['front-wash'].level, 0.4);
+  assert.equal(s0.groups.audience.level, 0.5);
+  assert.equal(s0.groups['back-wall'].level, 1);
+  const step = maxStep(e, 0, 4);
+  assert.ok(step < 0.05, `largest step ${step}`);
+  assert.ok(close(lightOf(e, 'front-1').i, 0.8 * 0.4));
+  assert.ok(close(lightOf(e, 'aud-1').i, 0.15 * 0.5));
+  // A look without a level brings the group back to full.
+  e.apply({ type: 'look', id: 'worship' }, 4);
+  e.frame(9);
+  assert.equal(e.liveState(9, 'ok').groups['front-wash'].level, 1);
+  assert.ok(close(lightOf(e, 'front-1').i, 0.8));
+});
+
+test('a 1 s look that lights a dark group and raises its level from 0 stays under 5% per frame', () => {
+  const e = new Engine(levelsShow());
+  e.apply({ type: 'groupLevel', group: 'front-wash', value: 0 }, 0);
+  e.frame(1);
+  // "word" has a full-intensity front wash, the steepest case.
+  e.apply({ type: 'look', id: 'word', fade: 1 }, 1);
+  const step = maxStep(e, 1, 3);
+  assert.ok(step < 0.05, `largest step ${step}`);
+  assert.ok(close(lightOf(e, 'front-1').i, 1));
+});
+
+test('a quick look changes only its groups and keeps the current look', () => {
+  const e = new Engine(levelsShow());
+  e.apply({ type: 'look', id: 'song-3' }, 0);
+  e.frame(4);
+  assert.equal(e.liveState(4, 'ok').lookChanged, false);
+  assert.equal(e.apply({ type: 'quickLook', id: 'accent' }, 4), null);
+  const step = maxStep(e, 4, 7);
+  assert.ok(step < 0.05, `largest step ${step}`);
+  const s = e.liveState(7, 'ok');
+  assert.equal(s.look, 'song-3');
+  assert.equal(s.lastLook, 'song-3');
+  assert.equal(s.lookChanged, true);
+  assert.equal(s.groups.pulpit.preset, 'pulpit-on');
+  assert.equal(s.groups.pulpit.level, 0.7);
+  assert.equal(s.groups.audience.preset, 'aud-blue');
+  assert.equal(s.groups.audience.level, 1);
+  assert.equal(s.groups['back-wall'].preset, 'back-purple');
+  assert.equal(s.groups['front-wash'].level, 0.4);
+  assert.equal(s.canUndo, true);
+  assert.match(e.apply({ type: 'quickLook', id: 'nope' }, 7)!, /unknown look/);
+});
+
+test('changing a level or preset marks the look changed; Back to look clears it', () => {
+  const e = new Engine(levelsShow());
+  assert.equal(e.liveState(0, 'ok').lookChanged, false);
+  e.apply({ type: 'look', id: 'song-3' }, 0);
+  e.frame(4);
+  assert.equal(e.liveState(4, 'ok').lookChanged, false);
+  e.apply({ type: 'groupLevel', group: 'front-wash', value: 1 }, 4);
+  e.frame(5);
+  assert.equal(e.liveState(5, 'ok').lookChanged, true);
+  e.apply({ type: 'backToLook' }, 5);
+  e.frame(10);
+  let s = e.liveState(10, 'ok');
+  assert.equal(s.lookChanged, false);
+  assert.equal(s.groups['front-wash'].level, 0.4);
+  e.apply({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber' }, 10);
+  assert.equal(e.liveState(10, 'ok').lookChanged, true);
+  e.apply({ type: 'backToLook' }, 11);
+  assert.equal(e.liveState(11, 'ok').lookChanged, false);
+  // A group the look does not list can change without marking it.
+  e.apply({ type: 'groupPreset', group: 'pulpit', preset: 'pulpit-on' }, 12);
+  e.apply({ type: 'groupLevel', group: 'pulpit', value: 0.3 }, 12);
+  assert.equal(e.liveState(12, 'ok').lookChanged, false);
+  e.apply({ type: 'blackout' }, 13);
+  assert.equal(e.liveState(13, 'ok').lookChanged, false);
+  e.apply({ type: 'safe' }, 14);
+  assert.equal(e.liveState(14, 'ok').lookChanged, false);
+  s = new Engine(levelsShow()).liveState(0, 'ok');
+  assert.equal(s.look, null);
+  assert.equal(s.lookChanged, false);
+});
+
+test('Undo after a look brings the levels back too', () => {
+  const e = new Engine(levelsShow());
+  e.apply({ type: 'look', id: 'worship' }, 0);
+  e.frame(5);
+  e.apply({ type: 'look', id: 'song-3' }, 5);
+  e.frame(10);
+  assert.equal(e.liveState(10, 'ok').groups['front-wash'].level, 0.4);
+  assert.equal(e.apply({ type: 'undo' }, 10), null);
+  const s = e.liveState(10, 'ok');
+  assert.equal(s.groups['front-wash'].level, 1);
+  assert.equal(s.groups.audience.level, 1);
+  const step = maxStep(e, 10, 13);
+  assert.ok(step < 0.05, `largest step ${step}`);
+  assert.ok(close(lightOf(e, 'front-1').i, 0.8));
+  assert.ok(close(lightOf(e, 'aud-1').i, 0.15));
+});
+
+test("Safe uses the safe look's saved levels and is not changed right after", () => {
+  const e = new Engine(levelsShow(true));
+  e.apply({ type: 'look', id: 'song-3' }, 0);
+  e.apply({ type: 'master', value: 0.2 }, 0);
+  e.frame(4);
+  e.apply({ type: 'safe' }, 4);
+  const step = maxStep(e, 4, 8);
+  assert.ok(step < 0.05, `largest step ${step}`);
+  const s = e.liveState(8, 'ok');
+  assert.equal(s.look, 'safe');
+  assert.equal(s.lookChanged, false);
+  assert.equal(s.master, 1);
+  assert.equal(s.groups['front-wash'].preset, 'front-dim');
+  assert.equal(s.groups['front-wash'].level, 0.5);
+  // Groups the safe look does not list keep the plain warm wash at full.
+  assert.equal(s.groups['back-wall'].level, 1);
+  assert.ok(close(lightOf(e, 'back-1').i, 0.8));
+  e.apply({ type: 'groupLevel', group: 'front-wash', value: 1 }, 8);
+  assert.equal(e.liveState(9, 'ok').lookChanged, true);
+});
+
+test('recorded is true for a look and false for a dimmer change', () => {
+  const e = new Engine(levelsShow());
+  assert.equal(e.recorded, false);
+  e.apply({ type: 'look', id: 'song-3' }, 0);
+  assert.equal(e.recorded, true);
+  e.apply({ type: 'groupLevel', group: 'front-wash', value: 1 }, 4);
+  assert.equal(e.recorded, false);
+  e.apply({ type: 'quickLook', id: 'accent' }, 5);
+  assert.equal(e.recorded, true);
+  e.apply({ type: 'quickLook', id: 'accent' }, 6);
+  assert.equal(e.recorded, false);
+  e.apply({ type: 'look', id: 'nope' }, 7);
+  assert.equal(e.recorded, false);
+  e.apply({ type: 'master', value: 0.5 }, 8);
+  assert.equal(e.recorded, false);
 });

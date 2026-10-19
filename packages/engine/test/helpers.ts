@@ -32,3 +32,38 @@ export function lightOf(engine: Engine, fixture: string) {
 export function close(a: number, b: number, eps = 1e-6): boolean {
   return Math.abs(a - b) <= eps;
 }
+
+/**
+ * The demo show plus looks that carry group levels: "song-3" dims the front
+ * lights and the audience, "accent" is a quick look for the pulpit and the audience,
+ * and "basic" (dimmed front lights) is the Basic lights look when `withSafe` is set.
+ */
+export function levelsShow(withSafe = false): Show {
+  const show = demoShow();
+  show.looks.push(
+    {
+      id: 'song-3', name: 'Song 3', section: 'Worship', swatch: '#7a2bff',
+      groups: [
+        { group: 'front-wash', preset: 'front-warm', level: 0.4 },
+        { group: 'back-wall', preset: 'back-purple' },
+        { group: 'audience', preset: 'aud-low', level: 0.5 },
+      ],
+    },
+    {
+      id: 'accent', name: 'Accent', section: 'Worship', swatch: '#ffe9d0',
+      groups: [
+        { group: 'pulpit', preset: 'pulpit-on', level: 0.7 },
+        { group: 'audience', preset: 'aud-blue' },
+      ],
+    },
+    {
+      id: 'basic', name: 'Basic lights', section: 'Other', swatch: '#ffd2a0',
+      groups: [
+        { group: 'front-wash', preset: 'front-dim', level: 0.5 },
+        { group: 'audience', preset: 'aud-low' },
+      ],
+    },
+  );
+  if (withSafe) show.operator.safeLook = 'basic';
+  return show;
+}

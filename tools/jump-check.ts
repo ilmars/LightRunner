@@ -11,13 +11,14 @@
 //   node tools/jump-check.ts [--show path.json] [--hours 2] [--seed 1]
 
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { parseShow, type Command } from '../packages/shared/src/index.ts';
 import { Engine } from '../packages/engine/src/index.ts';
 
 const { values } = parseArgs({
   options: {
-    show: { type: 'string', default: new URL('../server/seed/demo-show.json', import.meta.url).pathname },
+    show: { type: 'string', default: fileURLToPath(new URL('../server/seed/demo-show.json', import.meta.url)) },
     hours: { type: 'string', default: '2' },
     seed: { type: 'string', default: '1' },
     limit: { type: 'string', default: '0.05' },
@@ -39,13 +40,18 @@ const rand = () => {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
 const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)];
+
+// Half of the looks' entries carry a saved group level, so look changes move levels too.
+for (const look of show.looks) {
+  for (const entry of look.groups) if (rand() < 0.5) entry.level = rand();
+}
 const hex = () => '#' + Math.floor(rand() * 0xffffff).toString(16).padStart(6, '0');
 
 function randomCommand(): { cmd: Command; fast: boolean } {
   const r = rand();
   if (r < 0.35) {
     const fade = rand() < 0.3 ? 1 + rand() * 5 : undefined;
-    return { cmd: { type: 'look', id: pick(show.looks).id, fade }, fast: false };
+    return { cmd: { type: rand() < 0.2 ? 'quickLook' : 'look', id: pick(show.looks).id, fade }, fast: false };
   }
   if (r < 0.6) {
     const p = pick(show.presets);
