@@ -362,6 +362,8 @@ export class App {
       case 'moveItem': next = moveItem(before, cmd.id, cmd.to); break;
       case 'saveQuickLook': next = saveQuickLook(before, { name: cmd.name, tab: cmd.tab, groups: cmd.groups }, stage!).show; break;
       // A colour doesn't depend on the stage, so it is fine during Blackout.
+      case 'itemGroup': throw new Error('not yet');
+      case 'itemQuickLook': throw new Error('not yet');
       case 'addColour': next = addColour(before, cmd).show; break;
       case 'editColour': next = editColour(before, cmd).show; break;
       case 'deleteColour': {
