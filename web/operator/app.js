@@ -914,6 +914,11 @@ const EXTRAS = [
 let extraRows = [];
 // The colour the group runs, which a slider move sends again with the new levels.
 let pickerColour = '#000000';
+// The group runs an Any colour pick (so its White, Amber and UV levels are the user's own).
+let pickerLive = false;
+// A White, Amber or UV slider was moved since the picker opened.
+let extrasMoved = false;
+const NO_EXTRAS = { white: 0, amber: 0, uv: 0 };
 
 function buildExtras(group) {
   const box = $('pExtras');
@@ -983,6 +988,7 @@ function wireExtra(row) {
   row.dim.addEventListener('pointermove', (ev) => {
     if (!row.dragging) return;
     showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
+    if (row.value !== startV) extrasMoved = true;
     out.push();
   });
   const end = () => {
@@ -1007,6 +1013,7 @@ function renderPicker() {
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
   const running = runningLight(row.group, s?.preset);
   pickerColour = running.colour;
+  pickerLive = parseLive(s?.preset) !== null;
   const now = performance.now();
   for (const r of extraRows) if (!r.dragging && now >= r.holdUntil) showLevel(r, running[r.key]);
 }
@@ -1017,6 +1024,7 @@ function openPicker(groupId) {
     $('pAnyH').hidden = true;
   }
   picker.group = groupId;
+  extrasMoved = false;
   buildPickerGrid();
   showPickerTab('col');
   $('picker').hidden = false;
@@ -1042,10 +1050,13 @@ $('pDone').addEventListener('click', closePicker);
 for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('click', () => showPickerTab(t.dataset.pt));
 
 // Any colour: picking sends right away; moves are throttled and the last one always goes.
-// The White, Amber and UV sliders' levels go with it.
+// The White, Amber and UV sliders' levels go with it when they are the user's: the group
+// already runs an Any colour pick, or a slider was moved since the picker opened. Otherwise
+// (a preset or Basic light with its own white) the pick is the plain colour.
 (() => {
   const strip = $('pAny');
-  const out = dragSender((hex, first) => sendColour(hex, first, extraLevels()));
+  let keep = false;
+  const out = dragSender((hex, first) => sendColour(hex, first, keep ? extraLevels() : NO_EXTRAS));
   let dragging = false;
   const pick = (ev) => {
     const r = strip.getBoundingClientRect();
@@ -1062,6 +1073,7 @@ for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('clic
     dragging = true;
     try { strip.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     out.start();
+    keep = pickerLive || extrasMoved;
     hex = pick(ev);
     if (hex) out.push(hex);
   });

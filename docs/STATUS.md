@@ -16,7 +16,7 @@ Last updated: 19 Oct 2026. Update this file whenever a feature lands or a priori
 | HTTP API | Looks, presets, manual, release, back to look, Basic lights (`POST /api/safe` starts it), Blackout, master, speed, group level, undo, fade time, state, looks list; local network only | 4 (HTTP part) |
 | Tools | Lightkey importer, jump check (no fixture steps >5% per frame over hours of random changes), timing probe | — |
 
-Tests: 136 (`npm test`): 135 pass, 1 is skipped (the Lightkey project test, needs `LIGHTKEY_PROJECT`).
+Tests: 140 (`npm test`): 139 pass, 1 is skipped (the Lightkey project test, needs `LIGHTKEY_PROJECT`).
 
 ## Not built yet (in rough priority order)
 
