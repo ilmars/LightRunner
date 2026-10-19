@@ -127,7 +127,10 @@ function setConnected(on) {
   }
   if (!on && pendingEdit !== null) {
     pendingEdit = null;
+    pendingEditNext = [];
     $('peSave').disabled = false;
+    $('feSave').disabled = false;
+    $('feCopy').disabled = false;
   }
   if (!on && pendingColour !== null) {
     pendingColour = null;
@@ -1206,14 +1209,24 @@ function buildEffectGrid(group) {
     const sw = el('i', 'fxsw');
     sw.style.setProperty('--g', effectGradient(p.effect, true));
     b.append(sw, el('span', null, p.name));
+    b.classList.toggle('editable', picker.edit);
+    b.classList.toggle('editing', effectEdit?.id === p.id);
+    // While editing, a tap opens the effect's editor and leaves the stage alone.
     // In Preview it goes into the selected item; live it goes on stage.
     b.addEventListener('click', () => {
-      if (preview.on) sendItemGroup(group.id, { preset: p.id });
+      if (picker.edit) openEffectEditor(group.presets.find((x) => x.id === p.id) ?? p);
+      else if (preview.on) sendItemGroup(group.id, { preset: p.id });
       else send({ type: 'groupPreset', group: group.id, preset: p.id });
     });
     grid.append(b);
   }
-  $('fxNone').hidden = effects.length > 0;
+  if (picker.edit) {
+    const add = el('button', 'pc newfx', '＋ New effect');
+    add.classList.toggle('editing', effectEdit?.id === null);
+    add.addEventListener('click', () => openEffectEditor(null));
+    grid.append(add);
+  }
+  $('fxNone').hidden = effects.length > 0 || picker.edit;
 }
 
 // White, Amber and UV under the Any colour strip, for groups whose fixtures have them.
@@ -1350,6 +1363,7 @@ function renderPicker() {
   for (const r of extraRows) if (!r.dragging && now >= r.holdUntil) showLevel(r, running[r.key]);
   renderAddColour();
   renderEditor();
+  renderEffectEditor();
 }
 
 // ---- Keep a strip colour: "＋ Add to colours" ----
@@ -1430,6 +1444,7 @@ function openPicker(groupId) {
   $('pEditBtn').classList.remove('on');
   $('pEditBtn').setAttribute('aria-pressed', 'false');
   $('pCol').classList.remove('editing');
+  $('pFx').classList.remove('editing');
   closeEditor();
   extrasMoved = false;
   buildPickerGrid();
@@ -1451,6 +1466,7 @@ function closePicker() {
 }
 
 function showPickerTab(name) {
+  const changed = picker.tab !== name;
   picker.tab = name;
   for (const t of document.querySelectorAll('[data-pt]')) {
     const on = t.dataset.pt === name;
@@ -1459,9 +1475,8 @@ function showPickerTab(name) {
   }
   $('pCol').hidden = name !== 'col';
   $('pFx').hidden = name !== 'fx';
-  // Edit belongs to the colour list for now.
-  if (name === 'fx' && picker.edit) setEditMode(false);
-  $('pEditBtn').hidden = picker.tab === 'fx';
+  // Edit works on the tab it was turned on in.
+  if (changed && picker.edit) setEditMode(false);
 }
 
 $('pDone').addEventListener('click', closePicker);
@@ -1760,7 +1775,11 @@ let colourEdit = null;
 let deleteArmed = 0;
 // The ref of an edit or delete the server hasn't answered yet.
 let pendingEdit = null;
-let pendingEditDelete = false;
+// What to say when the answer is yes, and the commands still to send after it (an effect's name, then its settings).
+let pendingEditToast = 'Colour saved';
+let pendingEditNext = [];
+/** The effect the editor is open on: { id (null for a new one), name, effect, original, choices }. */
+let effectEdit = null;
 
 const editedPreset = () => (colourEdit ? pickerRow()?.group.presets.find((p) => p.id === colourEdit.id) : undefined);
 
@@ -1770,6 +1789,7 @@ function setEditMode(on) {
   $('pEditBtn').classList.toggle('on', on);
   $('pEditBtn').setAttribute('aria-pressed', String(on));
   $('pCol').classList.toggle('editing', on);
+  $('pFx').classList.toggle('editing', on);
   if (on) $('pAdd').hidden = true;
   buildPickerGrid();
   renderPicker();
@@ -1802,6 +1822,13 @@ function closeEditor(keepPending = false) {
   $('peName').blur();
   $('pEdit').hidden = true;
   for (const b of $('pGrid').children) b.classList.remove('editing');
+  closeEffectEditor();
+}
+
+/** "Used in …" for the songs and quick looks that use any of these presets. */
+function usedText(presets) {
+  const used = [...new Set(presets.flatMap((x) => x.usedBy ?? []))];
+  return used.length ? `Used in ${used.slice(0, 4).join(', ')}${used.length > 4 ? ` and ${used.length - 4} more` : ''}` : 'Not used in any song or quick look';
 }
 
 /** Who uses it, and whether other groups have a colour of the same name. */
@@ -1816,8 +1843,7 @@ function renderEditor() {
   if (!others.length) $('peSame').checked = false;
   // With the switch on, the change reaches every same-named colour, so list where any of them is used.
   const affected = $('peSame').checked ? [p, ...others] : [p];
-  const used = [...new Set(affected.flatMap((x) => x.usedBy ?? []))];
-  $('peUsed').textContent = used.length ? `Used in ${used.slice(0, 4).join(', ')}${used.length > 4 ? ` and ${used.length - 4} more` : ''}` : 'Not used in any song or quick look';
+  $('peUsed').textContent = usedText(affected);
   // An Off colour can be renamed but has no colour to change.
   $('peStrip').hidden = p.canRecolour === false;
 }
@@ -1825,8 +1851,10 @@ function renderEditor() {
 function disarmDelete() {
   clearTimeout(deleteArmed);
   deleteArmed = 0;
-  $('peDelete').classList.remove('armed');
-  $('peDelete').textContent = 'Delete';
+  for (const id of ['peDelete', 'feDelete']) {
+    $(id).classList.remove('armed');
+    $(id).textContent = 'Delete';
+  }
 }
 
 $('pEditBtn').addEventListener('click', () => setEditMode(!picker.edit));
@@ -1855,8 +1883,9 @@ $('peSave').addEventListener('click', () => {
     closeEditor();
     return;
   }
+  pendingEditToast = 'Colour saved';
+  pendingEditNext = [];
   pendingEdit = send(cmd);
-  pendingEditDelete = false;
   $('peSave').disabled = pendingEdit !== null;
 });
 
@@ -1869,20 +1898,236 @@ $('peDelete').addEventListener('click', () => {
     $('peDelete').textContent = 'Delete?';
     return;
   }
+  pendingEditToast = 'Colour deleted';
+  pendingEditNext = [];
   pendingEdit = send({ type: 'deleteColour', preset: colourEdit.id });
-  pendingEditDelete = true;
   disarmDelete();
 });
 
+/** The server's answer to a Save or Delete in either editor: the next command if one is waiting, else done. */
 function finishEdit(error) {
-  const deleted = pendingEditDelete;
   pendingEdit = null;
+  let failed = !!error;
+  if (!failed && pendingEditNext.length) {
+    pendingEdit = send(pendingEditNext.shift());
+    if (pendingEdit !== null) return;
+    failed = true;
+  }
+  pendingEditNext = [];
   $('peSave').disabled = false;
-  if (!error) {
+  $('feSave').disabled = false;
+  $('feCopy').disabled = false;
+  if (!failed) {
     closeEditor();
-    toast(deleted ? 'Colour deleted' : 'Colour saved', true);
+    toast(pendingEditToast, true);
   }
 }
+
+// ---- Edit effects: the Effects tab's Edit, the same way as the colour list's ----
+
+const EFFECT_NAMES = [
+  ['colourFade', 'Colour fade'], ['wave', 'Wave'], ['chase', 'Chase'], ['sparkle', 'Sparkle'],
+  ['breathe', 'Breathe'], ['meteor', 'Meteor'], ['fill', 'Fill'], ['yoyo', 'Yo-yo'],
+];
+
+/** A colour as one string: its hex and White, Amber and UV levels, so the same colour always matches. */
+const colourKey = (c) => [c.hex.toLowerCase(), ...['white', 'amber', 'uv'].map((k) => Math.round((c[k] ?? 0) * 1000) / 1000)].join('|');
+
+/** An effect as one string, the colours by their keys, for telling whether the editor changed it. */
+const effectSig = (layer) => JSON.stringify({ ...layer, colours: layer.colours.map(colourKey) });
+
+/**
+ * The colours the editor offers: the group's own colour list, then any colour the effect already
+ * has that is not in the list (a colour picked on the strip, say), so it can be taken out and put back.
+ */
+function effectChoices(group, effect) {
+  const choices = [];
+  const seen = new Set();
+  const add = (name, swatch, colour) => {
+    const key = colourKey(colour);
+    if (seen.has(key)) return;
+    seen.add(key);
+    choices.push({ key, name, swatch, colour });
+  };
+  for (const p of group.presets) {
+    if (p.effect || !p.light) continue;
+    add(p.name, p.swatch ?? NEUTRAL, { hex: p.light.hex, white: p.light.white, amber: p.light.amber, uv: p.light.uv });
+  }
+  for (const c of effect.colours) add('Custom', c.hex, { ...c });
+  return choices;
+}
+
+/** A new effect starts as a wave of the group's first two colours (not Off), one round every 4 beats. */
+function newEffectLayer(choices) {
+  const colours = choices.filter((c) => colourKey(c.colour) !== '#000000|0|0|0').slice(0, 2).map((c) => ({ ...c.colour }));
+  if (!colours.length) colours.push({ hex: '#ffffff' });
+  return liveLayer({ effect: 'wave', colours, speed: { beats: 4 }, direction: 'ltr', waves: 1, size: 0.5, edge: 'soft', intensity: 1 });
+}
+
+/** Opens the editor on a listed effect, or empty (preset null) for a new one. */
+function openEffectEditor(preset) {
+  const row = pickerRow();
+  if (!row) return;
+  const choices = effectChoices(row.group, preset ? preset.effect : { colours: [] });
+  const effect = preset ? liveLayer(preset.effect) : newEffectLayer(choices);
+  effectEdit = { id: preset?.id ?? null, name: preset?.name ?? '', effect, original: effectSig(effect), choices };
+  pendingEdit = null;
+  pendingEditNext = [];
+  disarmDelete();
+  $('feName').value = effectEdit.name;
+  $('feSave').disabled = false;
+  $('feCopy').disabled = false;
+  $('feSave').textContent = preset ? 'Save' : 'Add';
+  $('feDelete').hidden = $('feCopy').hidden = $('feUsed').hidden = !preset;
+  $('fxEdit').hidden = false;
+  drawEffectEditor();
+  renderEffectEditor();
+  for (const b of $('fxGrid').children) b.classList.toggle('editing', preset ? b.dataset.preset === preset.id : b.classList.contains('newfx'));
+  $('fxEdit').scrollIntoView({ block: 'nearest' });
+}
+
+function closeEffectEditor() {
+  effectEdit = null;
+  $('feName').blur();
+  $('fxEdit').hidden = true;
+  for (const b of $('fxGrid').children) b.classList.remove('editing');
+}
+
+/** Keeps "Used in …" true as the show changes; closes the editor if the effect is gone. */
+function renderEffectEditor() {
+  if (!effectEdit || effectEdit.id === null) return;
+  const p = pickerRow()?.group.presets.find((x) => x.id === effectEdit.id);
+  if (!p?.effect) {
+    closeEffectEditor();
+    return;
+  }
+  $('feUsed').textContent = usedText([p]);
+}
+
+/** Draws what the editor holds: the swatch, the kind, the colours in order and the settings. */
+function drawEffectEditor() {
+  const { effect, choices } = effectEdit;
+  $('feSw').style.background = effectGradient(effect);
+  for (const b of $('feKind').children) {
+    const on = b.dataset.kind === effect.effect;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  }
+  const order = effect.colours.map(colourKey);
+  const box = $('feColours');
+  box.replaceChildren();
+  for (const c of choices) {
+    const at = order.indexOf(c.key);
+    const b = el('button', 'fecol');
+    b.type = 'button';
+    b.setAttribute('role', 'checkbox');
+    b.setAttribute('aria-checked', String(at >= 0));
+    const sw = el('i');
+    sw.style.background = shown(c.swatch) ?? NEUTRAL;
+    b.append(sw, el('span', null, c.name));
+    if (at >= 0) b.append(el('b', 'fenum', String(at + 1)));
+    b.classList.toggle('on', at >= 0);
+    b.addEventListener('click', () => toggleEffectColour(c));
+    box.append(b);
+  }
+  effectEditSettings.show(effect, state?.tempo ?? 120);
+}
+
+function setEffectEdit(next) {
+  if (!effectEdit) return;
+  effectEdit.effect = next;
+  disarmDelete();
+  drawEffectEditor();
+}
+
+/** A tap on a colour adds it at the end of the order, or takes it out. An effect has one to six. */
+function toggleEffectColour(choice) {
+  const { effect } = effectEdit;
+  const at = effect.colours.map(colourKey).indexOf(choice.key);
+  if (at >= 0) {
+    if (effect.colours.length === 1) return toast('An effect needs at least one colour', true);
+    setEffectEdit({ ...effect, colours: effect.colours.filter((_, i) => i !== at) });
+  } else {
+    if (effect.colours.length >= 6) return toast('An effect has at most six colours', true);
+    setEffectEdit({ ...effect, colours: [...effect.colours, { ...choice.colour }] });
+  }
+}
+
+for (const [kind, text] of EFFECT_NAMES) {
+  const b = el('button', null, text);
+  b.type = 'button';
+  b.dataset.kind = kind;
+  b.setAttribute('role', 'radio');
+  b.addEventListener('click', () => {
+    if (effectEdit && effectEdit.effect.effect !== kind) setEffectEdit({ ...effectEdit.effect, effect: kind });
+  });
+  $('feKind').append(b);
+}
+
+// The same settings as the Effects tab shows for a running effect; here they only change what is being edited.
+const effectEditSettings = effectControls($('feSet'), (effect, how) => {
+  if (!effectEdit || how === 'start') return;
+  effectEdit.effect = effect;
+  disarmDelete();
+  if (how !== 'move') drawEffectEditor();
+});
+
+$('feCancel').addEventListener('click', () => closeEditor());
+$('feName').addEventListener('keydown', (ev) => {
+  ev.stopPropagation();
+  if (ev.key === 'Enter') $('feName').blur();
+});
+$('feName').addEventListener('input', disarmDelete);
+
+/** Sends the commands one after the other: the next goes when the server has said yes to the one before. */
+function sendEffectEdit(cmds, doneText) {
+  pendingEditToast = doneText;
+  pendingEditNext = cmds.slice(1);
+  pendingEdit = send(cmds[0]);
+  $('feSave').disabled = $('feCopy').disabled = pendingEdit !== null;
+}
+
+// A plain tap. Only what changed is sent (the name, then the settings); the editor closes when the server says yes.
+$('feSave').addEventListener('click', () => {
+  if (!effectEdit || pendingEdit !== null) return;
+  const name = $('feName').value;
+  const effect = liveLayer(effectEdit.effect);
+  if (effectEdit.id === null) {
+    sendEffectEdit([{ type: 'addEffect', group: picker.group, name, effect }], 'Effect added');
+    return;
+  }
+  const cmds = [];
+  if (name.trim() !== effectEdit.name) cmds.push({ type: 'editColour', preset: effectEdit.id, name, sameName: false });
+  if (effectSig(effect) !== effectEdit.original) cmds.push({ type: 'editEffect', preset: effectEdit.id, effect });
+  if (!cmds.length) {
+    closeEditor();
+    return;
+  }
+  sendEffectEdit(cmds, 'Effect saved');
+});
+
+// Save as a copy: a new effect with these settings; the original stays as it was. Under the same name it becomes "… copy".
+$('feCopy').addEventListener('click', () => {
+  if (!effectEdit || effectEdit.id === null || pendingEdit !== null) return;
+  let name = $('feName').value.trim();
+  if (name === effectEdit.name) name = `${name} copy`;
+  sendEffectEdit([{ type: 'addEffect', group: picker.group, name, effect: liveLayer(effectEdit.effect) }], 'Saved as a copy');
+});
+
+// First tap arms it ("Delete?"), the second one deletes. A song or quick look that uses it refuses, and the toast names them.
+$('feDelete').addEventListener('click', () => {
+  if (!effectEdit || effectEdit.id === null || pendingEdit !== null) return;
+  if (!deleteArmed) {
+    deleteArmed = setTimeout(disarmDelete, 4000);
+    $('feDelete').classList.add('armed');
+    $('feDelete').textContent = 'Delete?';
+    return;
+  }
+  pendingEditToast = 'Effect deleted';
+  pendingEditNext = [];
+  pendingEdit = send({ type: 'deleteColour', preset: effectEdit.id });
+  disarmDelete();
+});
 
 // ---- Quick looks: tabs and grid ----
 
