@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import { BUILT_IN_PROFILES } from './profiles.ts';
+import { routeProblems } from './routing.ts';
 
 export const SCHEMA_VERSION = 1;
 
@@ -157,13 +158,25 @@ export const OutputSettings = z.discriminatedUnion('kind', [
 ]);
 export type OutputSettings = z.infer<typeof OutputSettings>;
 
+/** One universe sent somewhere other than the default output (see routing.ts). */
+export const OutputRoute = z.object({
+  universe: z.number().int().min(0).max(32767),
+  output: OutputSettings,
+});
+export type OutputRoute = z.infer<typeof OutputRoute>;
+
 export const Settings = z.object({
+  /** The default output: every universe goes here unless a route says otherwise. */
   output: OutputSettings.default({ kind: 'artnet', host: '2.255.255.255' }),
+  /** Universes with their own output. Absent in older shows. */
+  routes: z.array(OutputRoute).max(64).optional(),
   /** Master switch for sending DMX. Off lets another desk (e.g. Lightkey) keep the lights. */
   outputEnabled: z.boolean().default(true),
   frameRate: z.number().int().min(10).max(44).default(40),
   gamma: z.number().min(1).max(4).default(2.2),
   pinHash: z.string().optional(),
+}).superRefine((s, ctx) => {
+  for (const message of routeProblems(s.output, s.routes)) ctx.addIssue({ code: 'custom', message, path: ['routes'] });
 });
 export type Settings = z.infer<typeof Settings>;
 
