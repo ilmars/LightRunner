@@ -872,9 +872,55 @@ function sendItemGroup(group, change) {
   return send({ type: 'itemGroup', item: preview.item, group, ...change });
 }
 
+/**
+ * The effect a group runs now, as groupEffect takes it, or null when it runs a colour.
+ * `s` is groupStatus(group). Live: a live change (`s.effect`, an `fx:` id), a listed effect,
+ * or an effect a Save kept in a song (a hidden "Custom effect" the group goes on running:
+ * its settings come with the look's entry). In Preview: the selected item's entry.
+ */
+function runningEffect(group, s) {
+  if (!s || !group) return null;
+  if ('entry' in s) return s.entry?.effect ?? null;
+  if (s.live) return null;
+  if (s.effect) return s.effect;
+  const id = s.preset;
+  if (!id) return null;
+  const listed = group.presets.find((p) => p.id === id);
+  if (listed) return listed.effect ?? null;
+  return savedEntry(group, id)?.effect ?? null;
+}
+
+/** A look's entry that gives the group this preset (a hidden one Save made): the look on stage first, then any. */
+function savedEntry(group, presetId) {
+  const k = layout.groups.findIndex((g) => g.id === group.id);
+  const looks = [...layout.runningOrder, ...layout.looks, ...layout.quickLooks];
+  const onStage = looks.find((l) => l.id === state?.look);
+  for (const look of onStage ? [onStage, ...looks] : looks) {
+    const entry = look.entries?.[k];
+    if (entry?.preset === presetId) return entry;
+  }
+  return null;
+}
+
+/** The group's line: more than one segment (several fixtures, or a bar), so effects have somewhere to move. */
+const hasLine = (group) => (group?.segments ?? 1) > 1 || (layout?.members?.[group?.id]?.length ?? 0) > 1;
+
+/** An effect's colours side by side, whites drawn as whites; `loop` ends on the first colour again, for a swatch that moves. */
+function effectGradient(effect, loop = false) {
+  const colours = effect.colours.map((c) => shown(c.hex));
+  if (colours.length === 1) return colours[0];
+  return `linear-gradient(90deg, ${(loop ? [...colours, colours[0]] : colours).join(', ')})`;
+}
+
+/** The background of a small swatch for what a group runs: the colour, or an effect's colours. */
+const swatchFill = (info) => (info.effect ? effectGradient(info.effect) : shown(info.colour) ?? '#0d0e11');
+
 /** What a group runs, as an Any colour pick would make it: { colour, white, amber, uv }. */
 function runningLight(group, s) {
   if (s?.live) return s.live;
+  // An effect: its first colour, with White, Amber and UV from 0. A strip pick or a slider replaces the effect with a colour.
+  const effect = runningEffect(group, s);
+  if (effect) return { colour: effect.colours[0]?.hex ?? '#000000', white: 0, amber: 0, uv: 0 };
   if (s?.entry) {
     const light = s.entry.light;
     return light ? { colour: light.hex, white: light.white, amber: light.amber, uv: light.uv } : { colour: '#000000', white: 0, amber: 0, uv: 0 };
@@ -885,17 +931,23 @@ function runningLight(group, s) {
   return { colour: '#000000', white: 0, amber: 0, uv: 0 };
 }
 
-/** Name and colour to show for what a group runs (never throws on an id the layout doesn't list). */
+/**
+ * Name and colour to show for what a group runs (never throws on an id the layout doesn't list).
+ * `effect` is the effect it runs (see runningEffect), or null.
+ */
 function presetInfo(group, s) {
-  if (s?.entry) return { name: s.entry.name, colour: s.entry.swatch };
-  if (notSet(s)) return { name: 'not set', colour: null };
+  const effect = runningEffect(group, s);
+  if (s?.entry) return { name: s.entry.name, colour: s.entry.swatch, effect };
+  if (notSet(s)) return { name: 'not set', colour: null, effect: null };
   const id = s?.preset;
-  if (id === null || id === undefined || id === '__blackout') return { name: 'Off', colour: null };
-  if (id === '__safe') return { name: 'Basic light', colour: layout.basicSwatch };
-  if (s.live) return { name: 'Custom', colour: s.live.display };
+  if (id === null || id === undefined || id === '__blackout') return { name: 'Off', colour: null, effect: null };
+  if (id === '__safe') return { name: 'Basic light', colour: layout.basicSwatch, effect: null };
+  if (s.live) return { name: 'Custom', colour: s.live.display, effect: null };
   const p = group?.presets.find((x) => x.id === id);
-  if (p) return { name: p.name, colour: p.swatch ?? NEUTRAL };
-  return { name: 'Custom', colour: NEUTRAL };
+  if (p) return { name: p.name, colour: p.swatch ?? NEUTRAL, effect };
+  // A live change to an effect, or the "Custom effect" a Save kept in the song.
+  if (effect) return { name: savedEntry(group, id)?.name ?? 'Custom effect', colour: effect.colours[0]?.hex ?? NEUTRAL, effect };
+  return { name: 'Custom', colour: NEUTRAL, effect: null };
 }
 
 /** At most one send every 40 ms while a finger moves; `end` always sends the last value. */
@@ -1043,7 +1095,7 @@ function renderDetails() {
     }
     const s = groupStatus(row.group);
     const info = presetInfo(row.group, s);
-    row.sw.style.background = shown(info.colour) ?? '#0d0e11';
+    row.sw.style.background = swatchFill(info);
     row.chipName.textContent = info.name;
     row.chip.classList.toggle('unset', notSet(s));
     const locked = dimmerLocked(row.group);
@@ -1093,7 +1145,7 @@ saveBtn.addEventListener('click', (ev) => ev.preventDefault());
 
 // ---- Colour picker (covers the details panel only) ----
 
-const picker = { group: null, edit: false };
+const picker = { group: null, edit: false, tab: 'col' };
 
 const HUE_STOPS = ['#ff0000', '#ffc800', '#00ff00', '#00ffc8', '#0000ff', '#8c00ff', '#ff008c', '#ff0000'];
 const WHITE_STOPS = ['#ffb46b', '#f4f8ff'];
@@ -1115,7 +1167,8 @@ function buildPickerGrid() {
   if (!row) return;
   const grid = $('pGrid');
   grid.replaceChildren();
-  for (const p of row.group.presets) {
+  // The Colours tab lists colours only; effects have their own tab.
+  for (const p of row.group.presets.filter((x) => !x.effect)) {
     const b = el('button', 'pc');
     b.dataset.preset = p.id;
     const sw = el('i');
@@ -1136,6 +1189,31 @@ function buildPickerGrid() {
   $('pAny').className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'}`;
   $('pAny').setAttribute('aria-label', $('pAnyLab').textContent);
   buildExtras(row.group);
+  buildEffectGrid(row.group);
+  // A group that is a single light has nowhere for an effect to move: no Effects tab.
+  $('pTabs').hidden = !hasLine(row.group);
+  if ($('pTabs').hidden && picker.tab === 'fx') showPickerTab('col');
+}
+
+/** The Effects tab: one tile per effect in the group's list, with a small moving swatch of its colours. */
+function buildEffectGrid(group) {
+  const grid = $('fxGrid');
+  grid.replaceChildren();
+  const effects = group.presets.filter((p) => p.effect);
+  for (const p of effects) {
+    const b = el('button', 'pc fx');
+    b.dataset.preset = p.id;
+    const sw = el('i', 'fxsw');
+    sw.style.setProperty('--g', effectGradient(p.effect, true));
+    b.append(sw, el('span', null, p.name));
+    // In Preview it goes into the selected item; live it goes on stage.
+    b.addEventListener('click', () => {
+      if (preview.on) sendItemGroup(group.id, { preset: p.id });
+      else send({ type: 'groupPreset', group: group.id, preset: p.id });
+    });
+    grid.append(b);
+  }
+  $('fxNone').hidden = effects.length > 0;
 }
 
 // White, Amber and UV under the Any colour strip, for groups whose fixtures have them.
@@ -1254,9 +1332,13 @@ function renderPicker() {
   if (!row) return;
   const s = groupStatus(row.group);
   const info = presetInfo(row.group, s);
-  $('pCurSw').style.background = shown(info.colour) ?? '#0d0e11';
+  $('pCurSw').style.background = swatchFill(info);
   $('pCurText').textContent = notSet(s) ? info.name : `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
+  for (const b of $('fxGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
+  // The settings of the effect the group runs (in Preview: the item's), under the list.
+  $('fxSet').hidden = !info.effect;
+  effectSettings.show(info.effect, preview.on ? previewItem()?.tempo ?? 120 : state?.tempo ?? 120);
   const running = runningLight(row.group, s);
   pickerColour = running.colour;
   // In Preview the item's own Any colour pick is a saved hidden "Custom" preset (not in the colour list):
@@ -1351,7 +1433,9 @@ function openPicker(groupId) {
   closeEditor();
   extrasMoved = false;
   buildPickerGrid();
-  showPickerTab('col');
+  // A group that runs an effect opens on its Effects tab.
+  const group = pickerRow()?.group;
+  showPickerTab(group && hasLine(group) && runningEffect(group, groupStatus(group)) ? 'fx' : 'col');
   $('picker').hidden = false;
   renderPicker();
 }
@@ -1367,6 +1451,7 @@ function closePicker() {
 }
 
 function showPickerTab(name) {
+  picker.tab = name;
   for (const t of document.querySelectorAll('[data-pt]')) {
     const on = t.dataset.pt === name;
     t.classList.toggle('on', on);
@@ -1374,10 +1459,236 @@ function showPickerTab(name) {
   }
   $('pCol').hidden = name !== 'col';
   $('pFx').hidden = name !== 'fx';
+  // Edit belongs to the colour list for now.
+  if (name === 'fx' && picker.edit) setEditMode(false);
+  $('pEditBtn').hidden = picker.tab === 'fx';
 }
 
 $('pDone').addEventListener('click', closePicker);
 for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('click', () => showPickerTab(t.dataset.pt));
+
+// ---- Effect settings: speed, direction, waves, size and edges ----
+
+const SPEED_BEATS = [1, 2, 4, 8, 16, 32];
+const SPEED_SECONDS = [2, 5, 10, 30, 60];
+const DIRECTIONS = [['ltr', 'Left to right'], ['rtl', 'Right to left'], ['centreOut', 'Centre out'], ['outsideIn', 'Outside in']];
+/**
+ * The settings that change what each kind of effect does (the others are left out), and what
+ * its size is called. A wave uses its size only with one colour and hard edges.
+ */
+const EFFECT_USES = {
+  colourFade: {},
+  wave: { direction: true, waves: true },
+  chase: { direction: true, waves: true, size: 'Size' },
+  sparkle: { size: 'Amount' },
+  breathe: { size: 'Depth' },
+  meteor: { direction: true, size: 'Tail' },
+  fill: { direction: true },
+  yoyo: { direction: true, size: 'Size' },
+};
+function effectUses(effect) {
+  const uses = EFFECT_USES[effect.effect] ?? { direction: true, waves: true, size: 'Size' };
+  if (effect.effect === 'wave' && effect.colours.length === 1 && effect.edge === 'hard') return { ...uses, size: 'Size' };
+  return uses;
+}
+
+/** The choice nearest to v. */
+const nearest = (choices, v) => choices.reduce((best, c) => (Math.abs(c - v) < Math.abs(best - v) ? c : best));
+
+/** An effect as groupEffect takes it: plain colours, every setting, nothing else. */
+function liveLayer(fx) {
+  return {
+    kind: 'effect', effect: fx.effect,
+    colours: fx.colours.map((c) => {
+      const out = { hex: c.hex };
+      for (const k of ['white', 'amber', 'uv']) if (typeof c[k] === 'number') out[k] = c[k];
+      return out;
+    }),
+    speed: 'beats' in fx.speed ? { beats: fx.speed.beats } : { seconds: fx.speed.seconds },
+    direction: fx.direction, waves: fx.waves, size: fx.size, edge: fx.edge, intensity: fx.intensity,
+  };
+}
+
+/**
+ * The settings of one effect, built into `root`. `show(effect, tempo)` puts an effect in (the
+ * caller hides the box when there is none). Every change calls `onChange(effect, how)` with the
+ * whole effect: `how` is 'tap' for a choice, and 'start', 'move' and 'end' for a Size drag.
+ */
+function effectControls(root, onChange) {
+  let fx = null, tempo = 120;
+  const seg = (label) => {
+    const box = el('div', 'ds-seg');
+    box.setAttribute('role', 'radiogroup');
+    box.setAttribute('aria-label', label);
+    return box;
+  };
+  const choice = (box, text, label, pick) => {
+    const b = el('button', null, text);
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    if (label) b.setAttribute('aria-label', label);
+    b.addEventListener('click', () => { if (fx) pick(); });
+    box.append(b);
+    return b;
+  };
+  const item = (label, ...parts) => {
+    const box = el('span', 'fxitem');
+    const lab = el('span', 'lab2', label);
+    box.append(lab, ...parts);
+    return { box, lab };
+  };
+  /** A tap: the whole effect with `patch`, unless nothing changes. */
+  const change = (patch) => {
+    const next = { ...fx, ...patch };
+    if (JSON.stringify(liveLayer(next)) !== JSON.stringify(liveLayer(fx))) onChange(liveLayer(next), 'tap');
+  };
+
+  // Speed: one round every 1 … 32 beats of the tempo, or Free: every 2 … 60 seconds.
+  const beatsBox = seg('Beats for one round');
+  const beatButtons = SPEED_BEATS.map((n) => [n, choice(beatsBox, String(n), `One round every ${n} beat${n === 1 ? '' : 's'}`, () => change({ speed: { beats: n } }))]);
+  const freeButton = choice(beatsBox, 'Free', 'Free: in seconds, not with the tempo', () => {
+    if ('seconds' in fx.speed) return;
+    change({ speed: { seconds: nearest(SPEED_SECONDS, (fx.speed.beats * 60) / tempo) } });
+  });
+  const secondsBox = seg('Seconds for one round');
+  const secondButtons = SPEED_SECONDS.map((n) => [n, choice(secondsBox, `${n} s`, `One round every ${n} seconds`, () => change({ speed: { seconds: n } }))]);
+  const speedUnit = el('span', 'lab-note');
+  const speed = item('Speed', beatsBox, secondsBox);
+  speed.lab.append(' ', speedUnit);
+
+  const dirBox = seg('Direction');
+  const dirButtons = DIRECTIONS.map(([d, text]) => [d, choice(dirBox, text, null, () => change({ direction: d }))]);
+  const direction = item('Direction', dirBox);
+
+  const edgeBox = seg('Edges');
+  const edgeButtons = [['soft', 'Soft'], ['hard', 'Hard']].map(([e, text]) => [e, choice(edgeBox, text, `${text} edges`, () => change({ edge: e }))]);
+  const edges = item('Edges', edgeBox);
+
+  const fewer = el('button', 'ds-btn fxstep', '−');
+  const more = el('button', 'ds-btn fxstep', '+');
+  const count = el('b', 'fxcount');
+  fewer.setAttribute('aria-label', 'Fewer waves');
+  more.setAttribute('aria-label', 'More waves');
+  fewer.addEventListener('click', () => { if (fx && fx.waves > 1) change({ waves: fx.waves - 1 }); });
+  more.addEventListener('click', () => { if (fx && fx.waves < 16) change({ waves: fx.waves + 1 }); });
+  const waves = item('Waves', fewer, count, more);
+
+  // Size: a fill slider, moved relative to where the finger starts (as the dimmers are).
+  const slab = el('span', 'ds-fill-slab');
+  const dim = el('div', 'ds-fill');
+  dim.setAttribute('role', 'slider');
+  dim.setAttribute('aria-valuemin', '0');
+  dim.setAttribute('aria-valuemax', '100');
+  dim.append(slab);
+  const pct = el('span', 'pct');
+  const size = item('Size', dim, pct);
+  size.box.classList.add('fxsize');
+  const slider = { dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
+  let startX = 0, startV = 0, base = null;
+  const sized = () => ({ ...base, size: Math.round(slider.value * 100) / 100 });
+  dim.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    if (!fx) return;
+    slider.dragging = true;
+    base = liveLayer(fx);
+    try { dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    dim.classList.add('ds-dragging');
+    startX = ev.clientX;
+    startV = slider.value;
+    onChange(base, 'start');
+  });
+  dim.addEventListener('pointermove', (ev) => {
+    if (!slider.dragging) return;
+    showLevel(slider, startV + (ev.clientX - startX) / dim.clientWidth);
+    if (slider.value !== startV) onChange(sized(), 'move');
+  });
+  const end = () => {
+    if (!slider.dragging) return;
+    slider.dragging = false;
+    dim.classList.remove('ds-dragging');
+    // Keep what the finger set until the server has caught up with it.
+    slider.holdUntil = performance.now() + 600;
+    if (slider.value !== startV) onChange(sized(), 'end');
+  };
+  dim.addEventListener('pointerup', end);
+  dim.addEventListener('pointercancel', end);
+
+  const line = (...items) => {
+    const row = el('div', 'fxrow');
+    row.append(...items.map((i) => i.box));
+    return row;
+  };
+  root.replaceChildren(line(speed), line(direction, edges), line(waves, size));
+
+  const mark = (pairs, value) => {
+    for (const [v, b] of pairs) {
+      b.classList.toggle('on', v === value);
+      b.setAttribute('aria-checked', String(v === value));
+    }
+  };
+  return {
+    show(effect, bpm) {
+      fx = effect;
+      tempo = bpm;
+      if (!fx) return;
+      const free = 'seconds' in fx.speed;
+      mark(beatButtons, free ? null : fx.speed.beats);
+      freeButton.classList.toggle('on', free);
+      freeButton.setAttribute('aria-checked', String(free));
+      secondsBox.hidden = !free;
+      mark(secondButtons, free ? fx.speed.seconds : null);
+      speedUnit.textContent = free ? '· seconds a round' : '· beats a round';
+      mark(dirButtons, fx.direction);
+      mark(edgeButtons, fx.edge);
+      count.textContent = String(fx.waves);
+      fewer.disabled = fx.waves <= 1;
+      more.disabled = fx.waves >= 16;
+      const uses = effectUses(fx);
+      direction.box.hidden = !uses.direction;
+      waves.box.hidden = !uses.waves;
+      size.box.hidden = !uses.size;
+      size.lab.textContent = uses.size ?? 'Size';
+      dim.setAttribute('aria-label', uses.size ?? 'Size');
+      if (!slider.dragging && performance.now() >= slider.holdUntil) showLevel(slider, fx.size);
+    },
+  };
+}
+
+/**
+ * The picker's effect settings. Live, a change goes on stage (a Size drag is one Undo step:
+ * its later sends continue it, in 0.2 s each, like Any colour). In Preview it goes into the
+ * selected item: once per tap, and once when a drag ends. The group and item are the ones the
+ * finger started on.
+ */
+const effectSettings = (() => {
+  let target = null;
+  const sendEffect = (group, effect, first) =>
+    send({ type: 'groupEffect', group, effect, ...(first ? {} : { continues: true, fade: DRAG_FADE }) });
+  const out = dragSender((effect, first) => target && sendEffect(target.group, effect, first));
+  const capture = () => ({ group: picker.group, inPreview: preview.on, item: preview.item });
+  const toItem = (t, effect) => {
+    if (preview.on && t.item && preview.item === t.item) sendItemGroup(t.group, { effect });
+  };
+  return effectControls($('fxSet'), (effect, how) => {
+    if (how === 'tap') {
+      const t = capture();
+      if (!t.group) return;
+      if (t.inPreview) toItem(t, effect);
+      else sendEffect(t.group, effect, true);
+      return;
+    }
+    if (how === 'start') {
+      target = capture();
+      out.start();
+      return;
+    }
+    if (!target?.group) return;
+    if (target.inPreview) {
+      if (how === 'end') toItem(target, effect);
+    } else if (how === 'move') out.push(effect);
+    else out.end(effect);
+  });
+})();
 
 /**
  * Makes a strip pick colours: `onStart()` when a finger touches, then `onColour(hex, last)`
@@ -1676,7 +1987,7 @@ function renderSheet() {
     const left = qs.left.has(b.dataset.group);
     b.classList.toggle('off', left);
     b.setAttribute('aria-pressed', String(!left));
-    b.querySelector('i').style.background = shown(info.colour) ?? '#0d0e11';
+    b.querySelector('i').style.background = swatchFill(info);
     b.querySelector('.gs span').textContent = left ? 'left out' : info.name;
     b.querySelector('.gl').textContent = left ? '' : `${Math.round((s?.level ?? 0) * 100)}%`;
   }

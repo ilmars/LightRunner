@@ -100,7 +100,8 @@
           <button id="pEditBtn" class="ghost" aria-pressed="false">Edit</button>
           <button id="pDone" class="done">Done</button>
         </div>
-        <div class="ptabs" role="tablist">
+        <!-- Only for groups that make a line (more than one segment or fixture); otherwise just the colours. -->
+        <div id="pTabs" class="ptabs" role="tablist">
           <button class="tab on" data-pt="col" role="tab" aria-selected="true">Colours</button>
           <button class="tab" data-pt="fx" role="tab" aria-selected="false">Effects</button>
         </div>
@@ -148,7 +149,12 @@
             </div>
           </div>
         </div>
-        <p id="pFx" class="soon" hidden>Effects come later.</p>
+        <div id="pFx" class="pfx" hidden>
+          <div id="fxGrid" class="pgrid"></div>
+          <p id="fxNone" class="soon" hidden>No effects for this group yet.</p>
+          <!-- While the group runs an effect: its settings. Built by app.js; hidden on the phone. -->
+          <div id="fxSet" class="fxset" aria-label="Effect settings" hidden></div>
+        </div>
       </div>
       <div id="qSheet" class="picker qsheet" hidden>
         <div class="phead">

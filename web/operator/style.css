@@ -386,6 +386,31 @@ body.preview #pAdd { display: none; }
 .done:disabled { opacity: 0.5; }
 .soon { margin: 0; padding: 24px 4px; color: var(--dim); font-size: 15px; }
 
+/* ---- Effects tab: the group's effects, then the running effect's settings ---- */
+.pfx { display: flex; flex-direction: column; gap: 8px; flex: none; }
+/* An effect's swatch: its colours side by side, drifting slowly to one side (twice as wide, moved by its own width, so it loops). */
+.pc .fxsw { position: relative; overflow: hidden; }
+.pc .fxsw::before {
+  content: ""; position: absolute; inset: 0 auto 0 0; width: 200%;
+  background: var(--g); background-size: 50% 100%; background-repeat: repeat-x;
+  animation: fx-drift 6s linear infinite;
+}
+@keyframes fx-drift { to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .pc .fxsw::before { animation: none; } }
+/* The settings: quiet rows of small choices, divided from the list by a faint line. */
+.fxset { display: flex; flex-direction: column; gap: 4px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.045); }
+.fxrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 22px; }
+.fxitem { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.fxitem .lab2 { margin: 0 2px; white-space: nowrap; }
+.fxset .ds-seg { flex-wrap: wrap; }
+.fxset .ds-seg > button { min-height: 44px; min-width: 44px; padding: 0 12px; font-size: 15px; font-variant-numeric: tabular-nums; }
+.fxstep { width: 44px; padding: 0; font-size: 20px; color: var(--ds-muted-on); }
+.fxcount { min-width: 28px; text-align: center; font-size: var(--ds-fs-value); font-weight: 400; font-variant-numeric: tabular-nums; }
+.fxsize { flex: 1; min-width: 220px; }
+.fxsize .ds-fill { flex: 1; min-width: 120px; }
+.fxsize .pct { min-width: 52px; text-align: right; font-size: var(--ds-fs-value); font-variant-numeric: tabular-nums; }
+.fxsize .pct.zero { color: var(--ds-muted); }
+
 /* ---- Bottom bar: one control strip; groups divided by faint lines ---- */
 .bottom {
   grid-column: 1 / -1; display: flex; align-items: stretch; gap: 6px; min-width: 0; padding: 7px;
@@ -504,6 +529,8 @@ body.preview #pAdd { display: none; }
 
   /* A remote doesn't change the prepared show. */
   #editBtn, #orderFoot, #saveBtn, #pEditBtn, #pAddOpen, #pAdd, #pEdit, .ql.newq { display: none !important; }
+  /* Effects can be picked here, but their settings stay on the iPad. */
+  #fxSet { display: none !important; }
 
   /* Order: big rows. */
   .order { padding: 6px; }
