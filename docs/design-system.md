@@ -69,8 +69,8 @@ The first suggested palette was measured at about 4× the old screen's average b
 | Area | State |
 | --- | --- |
 | Operator page: everything (frame, top bar, running order and edit mode, quick looks, details, colour picker, new-quick-look sheet, bottom bar) | Done |
-| Settings | To do |
-| Patch (frame and controls; the DMX map and stage plan keep their own look) | To do |
+| Settings | Done: glass panels in a two-column bento grid on wide screens (DMX output, Show and Compare span both), tinted segmented choices and switches (Send DMX on is green), flat fields, status pills, glass top bar and save bar |
+| Patch (frame and controls; the DMX map and stage plan keep their own look) | Partly: it loads the Settings base, so frame, cards, buttons and fields already match; its own controls still to do |
 
 ### Operator page rules
 
