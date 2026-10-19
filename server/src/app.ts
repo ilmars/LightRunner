@@ -11,9 +11,10 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OutputSettings, addSong, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureRunningOrder, isManualCommand,
-  isShowEdit, moveItem, oflToProfile, parseShow, renameItem, saveItem, saveQuickLook,
+  BUILT_IN_PROFILES, Command, OutputRoute, OutputSettings, addSong, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureRunningOrder, isManualCommand,
+  isShowEdit, moveItem, oflToProfile, parseShow, planRoutes, renameItem, saveItem, saveQuickLook,
   type OflFixture, type Pick, type Scope,
   BLACKOUT, type LiveState, type RuntimeState, type Show, type ShowEdit,
 } from '../../packages/shared/src/index.ts';
@@ -32,8 +33,10 @@ export interface AppOptions {
   dataDir: string;
   seedPath: string;
   webDir: string;
-  /** Replace the show's output, e.g. `{ kind: 'none' }` in tests. */
+  /** Replace the show's output, e.g. `{ kind: 'none' }` in tests. Routes are ignored then. */
   output?: OutputSettings;
+  /** For tests: the UDP port to send Art-Net to, per host (normally 6454). */
+  artnetPorts?: Record<string, number>;
   /** For tests: stands in for the network when talking to the Open Fixture Library. */
   fetch?: typeof fetch;
   log?: (msg: string) => void;
@@ -182,17 +185,18 @@ export class App {
     this.saver.flush();
   }
 
-  /** The show as the engine runs it: tests can force the output off. */
+  /** The show as the engine runs it: tests (and LIGHT_RUNNER_OUTPUT=none) can force the output, routes included. */
   private engineShow(): Show {
     const show = this.show;
-    return this.opts.output ? { ...show, settings: { ...show.settings, output: this.opts.output } } : show;
+    return this.opts.output ? { ...show, settings: { ...show.settings, output: this.opts.output, routes: undefined } } : show;
   }
 
   /** The engine's live state plus what the node watch and the Undo list know, sent to every device. */
   private publishState(): void {
     const state = this.engineState;
     if (!state) return;
-    const problem = state.outputProblem ?? this.outputProblem;
+    // The worker names outputs it can't send to; the node watch names nodes that don't answer.
+    const problem = [state.outputProblem, this.outputProblem].filter(Boolean).join('. ') || null;
     const canUndo = state.canUndo || this.undoLog.some((step) => step !== 'stage');
     const merged: LiveState = problem && state.output === 'ok'
       ? { ...state, canUndo, output: 'lost', outputProblem: problem }
@@ -201,9 +205,11 @@ export class App {
     this.broadcast(JSON.stringify({ type: 'state', state: merged }));
   }
 
+  /** Watch every Art-Net node the show sends to (the default output's and each route's). */
   private watchNode(): void {
-    const s = this.engineShow().settings;
-    this.nodeWatch.watch(s.outputEnabled && s.output.kind === 'artnet' ? s.output.host : null);
+    const show = this.engineShow();
+    const plan = planRoutes(show.settings, show.fixtures.map((f) => f.universe));
+    this.nodeWatch.watch(plan.destinations.map((d) => (d.output.kind === 'artnet' ? d.output.host : null)));
   }
 
   // ---- Engine worker ----
@@ -225,7 +231,7 @@ export class App {
       this.undoLog = this.undoLog.filter((step) => step !== 'stage');
       setTimeout(() => this.startWorker(), 200);
     });
-    this.post({ type: 'init', show: this.engineShow(), runtime: this.latestRuntime });
+    this.post({ type: 'init', show: this.engineShow(), runtime: this.latestRuntime, artnetPorts: this.opts.artnetPorts });
   }
 
   private post(msg: ToWorker): void {
@@ -519,9 +525,16 @@ export class App {
 
   private settingsView() {
     const s = this.show.settings;
+    const perUniverse: Record<number, number> = {};
+    for (const f of this.show.fixtures) perUniverse[f.universe] = (perUniverse[f.universe] ?? 0) + 1;
     return {
       showName: this.show.name,
       output: s.output,
+      routes: s.routes ?? [],
+      /** Fixtures patched on each universe. */
+      fixturesPerUniverse: perUniverse,
+      /** Universes in the patch that no output sends (a USB interface sends one). */
+      unsent: planRoutes(s, this.show.fixtures.map((f) => f.universe)).unsent,
       outputEnabled: s.outputEnabled,
       forcedOff: Boolean(this.opts.output),
       outputStatus: this.latestState?.output ?? null,
@@ -818,6 +831,10 @@ export class App {
     try {
       if (typeof body.showName === 'string' && body.showName.trim()) show.name = body.showName.trim();
       if (body.output !== undefined) show.settings.output = OutputSettings.parse(body.output);
+      if (body.routes !== undefined) {
+        const routes = OutputRoute.array().parse(body.routes);
+        show.settings.routes = routes.length ? routes.sort((a, b) => a.universe - b.universe) : undefined;
+      }
       if (typeof body.outputEnabled === 'boolean') show.settings.outputEnabled = body.outputEnabled;
       if (body.frameRate !== undefined) show.settings.frameRate = Number(body.frameRate);
       if (body.gamma !== undefined) show.settings.gamma = Number(body.gamma);
@@ -828,10 +845,18 @@ export class App {
         if (used.size > 1) throw new Error('this show uses several universes; change them per fixture');
         const u = Number(body.universe);
         if (!Number.isInteger(u) || u < 0 || u > 32767) throw new Error('universe must be 0–32767');
+        const [from] = used;
         for (const f of show.fixtures) f.universe = u;
+        // A route for the rig's universe moves with it.
+        const routes = show.settings.routes;
+        if (routes && from !== u && !routes.some((r) => r.universe === u)) for (const r of routes) if (r.universe === from) r.universe = u;
       }
       return parseShow(show);
     } catch (err) {
+      if (err instanceof ZodError) {
+        const issue = err.issues[0];
+        throw new HttpError(400, issue.code === 'custom' ? issue.message : `${issue.path.join('.') || 'settings'}: ${issue.message}`);
+      }
       throw new HttpError(400, (err as Error).message.split('\n')[0]);
     }
   }
