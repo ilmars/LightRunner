@@ -37,6 +37,22 @@
           <button role="menuitemradio" data-fade="10">10 s</button>
         </div>
       </div>
+      <!-- Tempo: a quiet readout that opens a few steps, and a Tap button. On the phone this moves to the top of Groups. -->
+      <div id="tempoCtl" class="tempo">
+        <div class="fadepick">
+          <button id="tempoButton" class="fade-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="tempoMenu" title="Beats per minute">
+            Tempo <b id="tempoValue">120</b>
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div id="tempoMenu" class="fade-menu tempo-menu" role="menu" hidden>
+            <button role="menuitem" data-step="double" aria-label="Double the tempo">×2</button>
+            <button role="menuitem" data-step="half" aria-label="Half the tempo">÷2</button>
+            <button role="menuitem" data-step="-1" aria-label="One beat per minute slower">−</button>
+            <button role="menuitem" data-step="1" aria-label="One beat per minute faster">+</button>
+          </div>
+        </div>
+        <button id="tapBtn" class="tap-btn" type="button" title="Tap along with the band">Tap</button>
+      </div>
       <span class="q link" id="link"><span class="dot"></span><span id="linkText">Connecting</span></span>
     </span>
     <!-- Outside the quiet items: the DMX box holds its last frame, so smoke can still be running during a problem. -->

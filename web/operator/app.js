@@ -668,6 +668,133 @@ document.addEventListener('pointerdown', (ev) => {
   if (!fadeMenu.hidden && !fadeMenu.parentElement.contains(ev.target)) showFadeMenu(false);
 }, true);
 
+// ---- Tempo: beats per minute for the stage (in Preview, for the selected song) ----
+// Live it sends `tempo`; in Preview, `itemTempo`. The readout shows the stage's tempo, or the
+// selected song's saved one (120 when it has none). The menu steps by 1 (hold to repeat), ×2, ÷2.
+
+const TEMPO_MIN = 40;
+const TEMPO_MAX = 240;
+const clampTempo = (bpm) => Math.min(TEMPO_MAX, Math.max(TEMPO_MIN, Math.round(bpm)));
+
+const tempoMenu = $('tempoMenu');
+const showTempoMenu = (open) => {
+  tempoMenu.hidden = !open;
+  $('tempoButton').setAttribute('aria-expanded', String(open));
+  if (open) showFadeMenu(false);
+};
+$('tempoButton').addEventListener('click', () => showTempoMenu(tempoMenu.hidden));
+$('fadeButton').addEventListener('click', () => showTempoMenu(false));
+document.addEventListener('pointerdown', (ev) => {
+  if (!tempoMenu.hidden && !tempoMenu.parentElement.contains(ev.target)) showTempoMenu(false);
+}, true);
+$('tempoCtl').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape' || tempoMenu.hidden) return;
+  showTempoMenu(false);
+  $('tempoButton').focus();
+});
+
+/** What the stage runs, or in Preview what the selected song is saved with. */
+const shownTempo = () => Math.round(preview.on ? previewItem()?.tempo ?? 120 : state?.tempo ?? 120);
+
+// A step shows at once; the server's answer takes over after a moment (so a held button doesn't jump back).
+let tempoLocal = null;
+let tempoLocalAt = 0;
+function currentTempo() {
+  if (tempoLocal !== null && performance.now() - tempoLocalAt < 700) return tempoLocal;
+  tempoLocal = null;
+  return shownTempo();
+}
+
+function sendTempo(bpm) {
+  if (!preview.on) send({ type: 'tempo', bpm });
+  else if (preview.item) send({ type: 'itemTempo', item: preview.item, bpm });
+}
+
+// A held button sends at most 4 a second (every change is an Undo step), and the last one when let go.
+let tempoSentAt = 0;
+let tempoUnsent = null;
+function setTempo(bpm, throttle = false) {
+  const v = clampTempo(bpm);
+  tempoLocal = v;
+  tempoLocalAt = performance.now();
+  $('tempoValue').textContent = String(v);
+  if (throttle && tempoLocalAt - tempoSentAt < 250) {
+    tempoUnsent = v;
+    return;
+  }
+  tempoSentAt = tempoLocalAt;
+  tempoUnsent = null;
+  sendTempo(v);
+}
+function flushTempo() {
+  if (tempoUnsent === null) return;
+  const v = tempoUnsent;
+  tempoUnsent = null;
+  tempoSentAt = performance.now();
+  sendTempo(v);
+}
+
+for (const b of tempoMenu.querySelectorAll('button')) {
+  const step = b.dataset.step;
+  if (step === 'double' || step === 'half') {
+    b.addEventListener('click', () => setTempo(currentTempo() * (step === 'double' ? 2 : 0.5)));
+    continue;
+  }
+  const by = Number(step);
+  let delay = null;
+  let repeat = null;
+  const stop = () => {
+    clearTimeout(delay);
+    clearInterval(repeat);
+    delay = repeat = null;
+    flushTempo();
+  };
+  b.addEventListener('pointerdown', (ev) => {
+    if (ev.button || b.disabled) return;
+    b.setPointerCapture?.(ev.pointerId);
+    setTempo(currentTempo() + by);
+    delay = setTimeout(() => {
+      repeat = setInterval(() => setTempo(currentTempo() + by, true), 80);
+    }, 400);
+  });
+  b.addEventListener('pointerup', stop);
+  b.addEventListener('pointercancel', stop);
+  b.addEventListener('lostpointercapture', stop);
+  // A key press arrives as a click with no pointer; a pointer's click was already handled on pointerdown.
+  b.addEventListener('click', (ev) => {
+    if (ev.detail === 0) setTempo(currentTempo() + by);
+  });
+}
+
+// Tap: the average of the last 4 gaps; a gap over 2 s starts over. Sets the tempo from the second tap.
+const tapTimes = [];
+function tapTempo() {
+  const t = performance.now();
+  if (tapTimes.length && t - tapTimes[tapTimes.length - 1] > 2000) tapTimes.length = 0;
+  tapTimes.push(t);
+  if (tapTimes.length > 5) tapTimes.shift();
+  const btn = $('tapBtn');
+  btn.classList.add('hit');
+  setTimeout(() => btn.classList.remove('hit'), 120);
+  if (tapTimes.length < 2) return;
+  setTempo((60000 * (tapTimes.length - 1)) / (t - tapTimes[0]));
+}
+$('tapBtn').addEventListener('pointerdown', (ev) => {
+  if (!ev.button) tapTempo();
+});
+$('tapBtn').addEventListener('click', (ev) => {
+  if (ev.detail === 0) tapTempo();
+});
+
+function renderTempo() {
+  $('tempoValue').textContent = String(currentTempo());
+  // In Preview with no song selected there is nothing to change.
+  const none = preview.on && !previewItem();
+  for (const b of $('tempoCtl').querySelectorAll('button')) {
+    if (b !== $('tempoButton')) b.disabled = none;
+  }
+}
+
 // ---- Rendering live state ----
 
 /** What to call a look id in the top bar. */
@@ -733,6 +860,7 @@ function render() {
   // Blackout is the most important state on the page: the whole bar says so.
   top.classList.toggle('blackout', blackedOut);
 
+  renderTempo();
   const fade = state.fadeTime ?? null;
   $('fadeValue').textContent = fade === null ? 'Auto' : fade === 0 ? 'Instant' : `${fade} s`;
   $('fadeButton').classList.toggle('fixed', fade !== null);
@@ -2517,7 +2645,10 @@ function applyPhone() {
   const phone = phoneQuery.matches;
   document.body.classList.toggle('phone', phone);
   const flash = $('flashArea');
+  // The tempo row goes first in Groups (the top bar's quiet items are hidden here).
+  const tempo = $('tempoCtl');
   if (phone) {
+    $('details').insertBefore(tempo, $('groupRows'));
     $('details').insertBefore(flash, $('groupRows'));
     // Editing belongs to the iPad: the running order's, and the colour list's (its buttons are hidden here,
     // and in Edit a swatch tap opens the editor instead of setting the colour).
@@ -2526,9 +2657,11 @@ function applyPhone() {
     setPreview(false);
     if (picker.edit) setEditMode(false);
     closeSheet();
-  } else if (flash.parentElement !== $('masterFader').parentElement) {
-    $('masterFader').after(flash);
+  } else {
+    if (flash.parentElement !== $('masterFader').parentElement) $('masterFader').after(flash);
+    if (tempo.parentElement !== $('quiet')) $('fadeButton').parentElement.after(tempo);
   }
+  showTempoMenu(false);
   if (!document.body.dataset.tab) setPhoneTab('order');
 }
 

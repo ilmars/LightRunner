@@ -55,7 +55,7 @@ One screen, no menus, no scrolling on an iPad in landscape. Everything is reacha
 3. **Look grid.** 6–12 large buttons (at least 120 × 90 px), each with a name and a colour swatch or small animated preview of its effect. The active look has a bold outline; the look being faded into shows a progress fill.
 4. **Group strip.** One button per group (Front wash, Back wall, Audience). Each shows the group's current colour and a badge: "changed" when it differs from the look, "M" when under manual control. Tapping a group opens its panel.
 5. **Group panel.** Slides up over the look grid and affects only the selected group: its preset buttons, then a Manual tab (colour swatches, colour wheel, intensity fader) and a Release button. Closes with one tap outside.
-6. **Two dials.** Master brightness (0–100%) and effect speed (50–200% of the programmed speed). Both have a small reset-to-default button.
+6. **Two dials.** Master brightness (0–100%) and effect speed (50–200% of the programmed speed). Both have a small reset-to-default button. *Built differently: the speed dial became the tempo control (Tempo, ×2, ÷2, −, + and Tap in the top bar); see [the effects design](superpowers/specs/2026-10-19-effects-design.md).*
 7. **Bottom row.** Back to look, Safe (large, always green) and Blackout (press and hold for 1 second to avoid accidents).
 
 **Behaviour rules:**
