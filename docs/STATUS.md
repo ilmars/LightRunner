@@ -37,6 +37,7 @@ Tests: 147 (`npm test`): 146 pass, 1 is skipped (the Lightkey project test, need
 - One server test (show saved with backups) has failed once on Windows and passed on re-run.
 - Each Save of an Any colour adds a hidden custom preset; old ones aren't cleaned up.
 - Not yet tried on the real iPad: finger drag in the running order, the on-screen keyboard over the quick-look sheet, two fingers on Flash, pointer capture on iOS Safari.
+- Restoring a backup from before a group was marked as a smoke machine brings that group back as a light (Basic lights and looks would drive it); mark it again in Patch. "Compare with a file" never changes whether a group is smoke.
 - Smoke support has not met a real smoke or haze machine yet. Machines with a separate fan or mode channel need a fixture type whose level channel is "dimmer"; other channels keep their fixed values.
 - The server test "Add, rename, move and delete edit the running order" has failed once in a full run on Windows and passed on re-run.
 

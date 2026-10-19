@@ -4,6 +4,7 @@ Choices made while building Light Runner, newest first, with the reason. Add an 
 
 | Date | Decision | Why |
 | --- | --- | --- |
+| 2026-10-19 | **"Compare with a file" never changes whether a group is a smoke machine**: a changed group keeps this show's kind, and kind alone is not listed as a difference. A new group takes the file's kind. | Show files made from Lightkey know nothing of smoke, so every group in them reads as a light. Taking one would quietly hand the hazer back to Basic lights. |
 | 2026-10-19 | **A group can be a smoke or haze machine** (`kind: 'smoke'`, set in Patch; old shows read every group as a light). | The owner asked about a smoke machine. Patched as a plain dimmer, Basic lights would turn it on at full, Flash All would fire it, and looks would switch it on and off. |
 | 2026-10-19 | **Only four things change the smoke level: its own slider, Puff, Basic lights (off) and Blackout (off).** Looks, quick looks, Back to look, Undo and Master never do. A smoke group never counts as "changed". | Starting a song must never fill the room, or clear it, by surprise. The volunteer decides when there is smoke. |
 | 2026-10-19 | **Saves leave smoke groups out** (Save to an item, Save to Basic lights, Add song, Save stage as quick look; the quick-look sheet doesn't offer them), and the engine ignores a smoke group listed in an older or imported look. | Same rule from the other side: a look can't hold smoke, so it can't start it. |
