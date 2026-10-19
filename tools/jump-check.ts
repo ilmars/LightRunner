@@ -57,7 +57,12 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
     const p = pick(show.presets);
     return { cmd: { type: 'groupPreset', group: p.group, preset: p.id }, fast: false };
   }
-  if (r < 0.6) return { cmd: { type: 'groupColour', group: pick(show.groups).id, colour: hex() }, fast: false };
+  if (r < 0.6) {
+    // Half of the Any colour picks carry white, amber or UV (each one sometimes).
+    const extra = () => (rand() < 0.5 ? rand() : undefined);
+    const extras = rand() < 0.5 ? { white: extra(), amber: extra(), uv: extra() } : {};
+    return { cmd: { type: 'groupColour', group: pick(show.groups).id, colour: hex(), ...extras }, fast: false };
+  }
   if (r < 0.68) {
     const target = rand() < 0.5 ? { group: pick(show.groups).id } : { fixture: pick(show.fixtures).id };
     return { cmd: { type: 'manual', target, colour: hex(), intensity: rand() }, fast: true };
