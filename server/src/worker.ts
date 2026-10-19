@@ -4,9 +4,10 @@
 
 import { parentPort } from 'node:worker_threads';
 import { Engine } from '../../packages/engine/src/index.ts';
-import type { LiveState, Show } from '../../packages/shared/src/index.ts';
+import { planRoutes, type LiveState, type Show } from '../../packages/shared/src/index.ts';
 import type { FromWorker, TimingStats, ToWorker } from './messages.ts';
-import { createOutput, type DmxOutput } from './output/index.ts';
+import { ArtNetOutput, ARTNET_PORT } from './output/artnet.ts';
+import { createOutput, OutputSet } from './output/index.ts';
 
 if (!parentPort) throw new Error('worker.ts must run as a worker thread');
 const port = parentPort;
@@ -18,8 +19,10 @@ const STATE_EVERY = 100;
 const VISUAL_EVERY = 50;
 
 let engine: Engine | null = null;
-let show: Show | null = null;
-let output: DmxOutput | null = null;
+/** Test hook: the UDP port to send Art-Net to, per host (normally 6454 for all). */
+let artnetPorts: Record<string, number> = {};
+const outputs = new OutputSet((o) =>
+  o.kind === 'artnet' ? new ArtNetOutput(o.host, artnetPorts[o.host] ?? ARTNET_PORT) : createOutput(o));
 let period = 25;
 let running = false;
 let lastStateJson = '';
@@ -38,23 +41,18 @@ function freshTiming(): TimingStats & { startedAt: number } {
 }
 
 function applyShow(next: Show): void {
-  const outputKey = (s: Show) => JSON.stringify([s.settings.output, s.settings.outputEnabled]);
-  const outputChanged = !show || outputKey(show) !== outputKey(next);
-  show = next;
   period = 1000 / next.settings.frameRate;
   if (!engine) engine = new Engine(next, clock() / 1000);
   else engine.setShow(next, clock() / 1000);
-  if (outputChanged) {
-    output?.close();
-    output = createOutput(next.settings.output, next.settings.outputEnabled);
-  }
+  // One output per box; outputs whose box didn't change keep running untouched.
+  outputs.update(planRoutes(next.settings, next.fixtures.map((f) => f.universe)).destinations);
 }
 
 function render(): void {
-  if (!engine || !output) return;
+  if (!engine) return;
   const ms = clock();
   const frame = engine.frame(ms / 1000);
-  output.send(frame.universes);
+  outputs.send(frame.universes);
 
   if (lastFrameAt) {
     const interval = ms - lastFrameAt;
@@ -74,10 +72,10 @@ function render(): void {
 }
 
 function publishState(ms: number): void {
-  if (!engine || !output) return;
+  if (!engine) return;
   stateDue = false;
   lastStateAt = ms;
-  const state: LiveState = engine.liveState(ms / 1000, output.status);
+  const state: LiveState = { ...engine.liveState(ms / 1000, outputs.status), outputProblem: outputs.problem };
   const json = JSON.stringify(state);
   if (json !== lastStateJson) {
     lastStateJson = json;
@@ -117,6 +115,7 @@ function loop(): void {
 port.on('message', (msg: ToWorker) => {
   switch (msg.type) {
     case 'init': {
+      artnetPorts = msg.artnetPorts ?? {};
       applyShow(msg.show);
       if (msg.runtime) engine!.restore(msg.runtime, clock() / 1000);
       post({ type: 'ready', fixtures: engine!.fixtureIds() });
@@ -150,7 +149,7 @@ port.on('message', (msg: ToWorker) => {
     }
     case 'stop':
       running = false;
-      output?.close();
+      outputs.close();
       port.close();
       break;
   }
