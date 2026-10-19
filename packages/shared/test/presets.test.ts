@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { addColour, checkReferences, groupIsWhiteOnly, parseShow, type Show } from '../src/index.ts';
+import {
+  addColour, checkReferences, deleteColour, editColour, ensureRunningOrder, groupIsWhiteOnly, listNames, parseShow, presetUsers,
+  type Show,
+} from '../src/index.ts';
 
 const rig = (): Show => parseShow(JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8')));
 const names = (s: Show, group: string) => s.presets.filter((p) => p.group === group && !p.custom).map((p) => p.name);
@@ -101,4 +104,88 @@ test('ids stay unique when the name is already used', () => {
   s = addColour(s, { group: 'key-lights', colour: '#222222', name: 'Deep blue', allGroups: false }).show;
   const ids = s.presets.map((p) => p.id);
   assert.equal(new Set(ids).size, ids.length);
+});
+
+const ready = () => ensureRunningOrder(rig());
+const preset = (s: Show, id: string) => s.presets.find((p) => p.id === id)!;
+
+test('a colour is used by the running-order items first, then the quick looks', () => {
+  const s = ready();
+  assert.deepEqual(presetUsers(s, 'key-lights-silti-balts'), ['Song 1', 'Song 2', 'Song 3', 'Song 4', 'Song 5', 'Worship', 'Response']);
+  assert.deepEqual(presetUsers(s, 'key-lights-zils'), []);
+  assert.equal(listNames(['A', 'B']), 'A, B');
+  assert.equal(listNames(['A', 'B', 'C', 'D', 'E', 'F']), 'A, B, C, D and 2 more');
+});
+
+test('a colour can be renamed and recoloured; the swatch and layer follow', () => {
+  const before = ready();
+  const { show, ids } = editColour(before, { preset: 'key-lights-zils', name: ' Deep sea ', colour: '#103A7C', sameName: false });
+  assert.deepEqual(ids, ['key-lights-zils']);
+  assert.deepEqual(preset(show, 'key-lights-zils'), {
+    id: 'key-lights-zils', name: 'Deep sea', group: 'key-lights', fade: 3, swatch: '#103a7c',
+    layers: [{ kind: 'static', colour: { hex: '#103a7c' }, intensity: 1 }],
+  });
+  assert.equal(preset(show, 'background-zils').name, 'Zils'); // other groups untouched
+  assert.equal(preset(before, 'key-lights-zils').name, 'Zils'); // input not changed
+  assert.deepEqual(checkReferences(show), []);
+  parseShow(JSON.parse(JSON.stringify(show)));
+  // Name only, colour only.
+  assert.equal(preset(editColour(before, { preset: 'key-lights-zils', name: 'Sea', sameName: false }).show, 'key-lights-zils').swatch, '#0000ff');
+  const colourOnly = preset(editColour(before, { preset: 'key-lights-zils', colour: '#103a7c', sameName: false }).show, 'key-lights-zils');
+  assert.equal(colourOnly.name, 'Zils');
+  assert.equal(colourOnly.swatch, '#103a7c');
+});
+
+test('a dimmer colour keeps its brightness; an off colour turns on when given a colour', () => {
+  const s = rig();
+  const half = s.presets.find((p) => p.name === 'Silti 50%')!;
+  const dim = preset(editColour(s, { preset: half.id, colour: '#ff0000', sameName: false }).show, half.id);
+  assert.equal(dim.layers[0]!.intensity, 0.5);
+  const off = preset(editColour(s, { preset: 'key-lights-off', colour: '#ff0000', sameName: false }).show, 'key-lights-off');
+  assert.equal(off.layers[0]!.intensity, 1);
+});
+
+test('with the same-name switch, the other groups\' colours of that name change too', () => {
+  const { show, ids } = editColour(ready(), { preset: 'key-lights-zils', name: 'Deep sea', colour: '#103a7c', sameName: true });
+  assert.deepEqual(ids.sort(), ['b8-side-bar-zils', 'background-zils', 'drum-cage-zils', 'key-lights-zils']);
+  for (const id of ids) {
+    assert.equal(preset(show, id).name, 'Deep sea');
+    assert.equal(preset(show, id).swatch, '#103a7c');
+  }
+  assert.equal(show.presets.find((p) => p.group === 'front-lights' && p.name === 'Deep sea'), undefined);
+  assert.equal(show.presets.filter((p) => p.name === 'Zils').length, 0);
+});
+
+test('editing refuses hidden presets, missing ones, bad input and no change', () => {
+  const s = ready();
+  const hidden = saveHidden(s);
+  assert.throws(() => editColour(hidden.show, { preset: hidden.id, name: 'x', sameName: false }), /can't be edited/);
+  assert.throws(() => editColour(s, { preset: 'nope', name: 'x', sameName: false }), /not in the list/);
+  assert.throws(() => editColour(s, { preset: 'key-lights-zils', name: '  ', sameName: false }), /name is needed/);
+  assert.throws(() => editColour(s, { preset: 'key-lights-zils', colour: 'blue', sameName: false }), /not a colour/);
+  assert.throws(() => editColour(s, { preset: 'key-lights-zils', sameName: false }), /nothing to change/);
+  const plain = addColour(s, { group: 'key-lights', colour: '#123456', name: 'Plain', allGroups: false });
+  assert.throws(() => editColour(plain.show, { preset: plain.ids[0]!, name: 'Plain', colour: '#123456', sameName: false }), /nothing changed/);
+  assert.equal(preset(editColour(s, { preset: 'key-lights-zils', name: 'y'.repeat(60), sameName: false }).show, 'key-lights-zils').name, 'y'.repeat(40));
+});
+
+/** A show holding a hidden (custom) preset, as Save makes for an Any colour pick. */
+function saveHidden(s: Show): { show: Show; id: string } {
+  const show = structuredClone(s);
+  show.presets.push({ id: 'custom-9', name: 'Custom', group: 'key-lights', custom: true, fade: 3, swatch: '#123456', layers: [{ kind: 'static', colour: { hex: '#123456' }, intensity: 1 }] });
+  return { show, id: 'custom-9' };
+}
+
+test('a colour no look uses can be deleted; a used one is refused with the names', () => {
+  const s = ready();
+  const gone = deleteColour(s, 'key-lights-zils');
+  assert.equal(gone.presets.some((p) => p.id === 'key-lights-zils'), false);
+  assert.equal(gone.presets.length, s.presets.length - 1);
+  assert.equal(s.presets.some((p) => p.id === 'key-lights-zils'), true);
+  assert.deepEqual(checkReferences(gone), []);
+  assert.throws(() => deleteColour(s, 'key-lights-vesi-balts'), /^Error: Used in Sermon, All white\. Change those first\.$/);
+  assert.throws(() => deleteColour(s, 'key-lights-silti-balts'), /^Error: Used in Song 1, Song 2, Song 3, Song 4 and 3 more\. Change those first\.$/);
+  assert.throws(() => deleteColour(s, 'nope'), /not in the list/);
+  const hidden = saveHidden(s);
+  assert.throws(() => deleteColour(hidden.show, hidden.id), /can't be deleted/);
 });

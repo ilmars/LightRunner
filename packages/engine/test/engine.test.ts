@@ -690,6 +690,47 @@ test('undoing the added colour turns the group back into the same colour live', 
   assert.ok(maxStep(e, 2.05, 6) < 0.05);
 });
 
+test('a colour edited while it is lit fades to the new colour with its own fade, and stays the same preset', () => {
+  const plain = (hex: string): Show => {
+    const show = demoShow();
+    const p = show.presets.find((x) => x.id === 'aud-blue')!;
+    p.layers = [{ kind: 'static', colour: { hex }, intensity: 1 }];
+    p.fade = 4;
+    return show;
+  };
+  const e = new Engine(plain('#0000ff'));
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-blue', fade: 0 }, 0);
+  e.frame(1);
+  const undoable = e.liveState(1, 'ok').canUndo;
+  const before = lightOf(e, 'aud-1');
+  e.setShow(plain('#ff8000'), 1);
+  const at = (t: number) => { e.frame(t); return lightOf(e, 'aud-1'); };
+  const start = at(1.025);
+  assert.ok(close(start.r, before.r, 0.02) && close(start.b, before.b, 0.02), 'no jump when the edit lands');
+  const mid = at(3);
+  assert.ok(mid.r > 0.2 && mid.b > 0.2, `halfway between the two colours (${mid.r}, ${mid.b})`);
+  const end = at(6);
+  assert.ok(close(end.r, 1, 0.01) && close(end.g, 0.5, 0.02) && close(end.b, 0, 0.01), `settled on the new colour (${end.r}, ${end.g}, ${end.b})`);
+  const s = e.liveState(6, 'ok');
+  assert.equal(s.groups.audience.preset, 'aud-blue');
+  assert.equal(s.canUndo, undoable);
+  const e2 = new Engine(plain('#0000ff'));
+  e2.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-blue', fade: 0 }, 0);
+  e2.frame(1);
+  e2.setShow(plain('#ff8000'), 1);
+  assert.ok(maxStep(e2, 1.025, 8) < 0.05);
+});
+
+test('a show edit that leaves a lit colour alone does not start a fade', () => {
+  const e = new Engine(demoShow());
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-blue', fade: 0 }, 0);
+  e.frame(1);
+  const edited = demoShow();
+  edited.looks.push({ id: 'extra', name: 'Extra', section: 'Other', swatch: '#ffffff', groups: [] });
+  e.setShow(edited, 1);
+  assert.equal(e.liveState(1.025, 'ok').groups.audience.progress, 1);
+});
+
 test('a group on a preset the show loses, that is not a plain colour, is left alone', () => {
   const e = new Engine(demoShow());
   e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-low', fade: 0 }, 0);

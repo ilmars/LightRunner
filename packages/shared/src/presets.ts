@@ -78,3 +78,84 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
   if (!ids.length) throw new Error(input.allGroups ? 'every group already has that colour' : 'that colour is already in the list');
   return { show: out, ids };
 }
+
+/** Names of the looks that use a preset: running-order items first, then quick looks, then any other look. */
+export function presetUsers(show: Show, presetId: string): string[] {
+  const using = new Set(show.looks.filter((l) => l.groups.some((e) => e.preset === presetId)).map((l) => l.id));
+  const order = [
+    ...show.operator.runningOrder,
+    ...show.operator.quickLooks.map((q) => q.look),
+    ...show.looks.map((l) => l.id),
+  ];
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const id of order) {
+    if (!using.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    const name = show.looks.find((l) => l.id === id)!.name;
+    // A running-order item and the quick look it was copied from share a name; list it once.
+    if (!names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+/** "Song 2, Sermon", or "Song 2, Sermon, Prayer, Walk-in and 3 more" when there are many. */
+export function listNames(names: string[], shown = 4): string {
+  if (names.length <= shown) return names.join(', ');
+  return `${names.slice(0, shown).join(', ')} and ${names.length - shown} more`;
+}
+
+export interface EditColour {
+  preset: string;
+  /** New name; undefined leaves it. */
+  name?: string;
+  /** New #rrggbb colour; undefined leaves it. */
+  colour?: string;
+  /** Also change the presets of other groups that have the same name as this one has now. */
+  sameName: boolean;
+}
+
+/**
+ * Changes the name and/or the colour of a colour in a group's list. A new colour replaces the
+ * preset's layer with one plain colour (keeping its brightness) and updates the swatch.
+ * Returns the ids changed. Hidden (custom) presets can't be edited from here.
+ */
+export function editColour(show: Show, input: EditColour): { show: Show; ids: string[] } {
+  const out = structuredClone(show);
+  const target = out.presets.find((p) => p.id === input.preset);
+  if (!target) throw new Error('that colour is not in the list');
+  if (target.custom) throw new Error("that colour can't be edited");
+  if (input.name === undefined && input.colour === undefined) throw new Error('nothing to change');
+  const name = input.name === undefined ? undefined : cleanName(input.name);
+  if (input.colour !== undefined && !HEX_COLOUR.test(input.colour)) throw new Error('that is not a colour');
+  const colour = input.colour?.toLowerCase();
+
+  const oldName = target.name;
+  const chosen = out.presets.filter((p) => p.id === target.id
+    || (input.sameName && !p.custom && p.group !== target.group && p.name === oldName));
+  const ids: string[] = [];
+  for (const p of chosen) {
+    const before = JSON.stringify(p);
+    if (name !== undefined) p.name = name;
+    if (colour !== undefined) {
+      const first = p.layers[0];
+      p.layers = [{ kind: 'static', colour: { hex: colour }, intensity: p.layers.length === 1 && first && first.intensity > 0 ? first.intensity : 1 }];
+      p.swatch = colour;
+    }
+    if (JSON.stringify(p) !== before) ids.push(p.id);
+  }
+  if (!ids.length) throw new Error('nothing changed');
+  return { show: out, ids };
+}
+
+/** Removes a colour from a group's list, unless a look uses it. */
+export function deleteColour(show: Show, presetId: string): Show {
+  const found = show.presets.find((p) => p.id === presetId);
+  if (!found) throw new Error('that colour is not in the list');
+  if (found.custom) throw new Error("that colour can't be deleted");
+  const users = presetUsers(show, presetId);
+  if (users.length) throw new Error(`Used in ${listNames(users)}. Change those first.`);
+  const out = structuredClone(show);
+  out.presets = out.presets.filter((p) => p.id !== presetId);
+  return out;
+}

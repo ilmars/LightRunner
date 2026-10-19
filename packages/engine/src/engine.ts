@@ -197,11 +197,14 @@ export class Engine {
     for (const g of show.groups) {
       const run = oldGroups.get(g.id) ?? new GroupRun(g.id);
       run.setFixtures(g.fixtures.map((id) => this.fixtureIndex.get(id)).filter((i): i is number => i !== undefined));
+      // A colour edited while it is lit fades to the new colour instead of snapping.
+      const lit = this.editedColour(run, before, now);
       // Running presets pick up edits; deleted ones keep running until they fade out.
       run.presets.update((key, item) => {
         const fresh = this.presets.get(key);
         return fresh ? { ...item, preset: fresh } : item;
       });
+      if (lit) this.setPreset(run, lit, this.fadeTime ?? lit.fade, now, false);
       this.groups.set(g.id, run);
     }
 
@@ -256,6 +259,24 @@ export class Engine {
       if (!sameLight(target, running)) continue;
       group.presets.rekey(key, target.id, { preset: target, time: group.presets.current!.time });
     }
+  }
+
+  /**
+   * The group runs a plain one-colour preset whose colour the new show changed: the running copy
+   * is set aside under a spare key to fade out, and the new one to fade in. Returns the new
+   * preset to start, or null (everything else just takes the edit in place).
+   */
+  private editedColour(group: GroupRun, before: Show | undefined, now: number): CompiledPreset | null {
+    const key = group.presets.currentKey;
+    const running = group.presets.current;
+    if (!before || !key || !running) return null;
+    const was = before.presets.find((p) => p.id === key);
+    const is = this.show.presets.find((p) => p.id === key);
+    const fresh = this.presets.get(key);
+    if (!was || !is || !fresh || was.layers.length !== 1 || is.layers.length !== 1) return null;
+    if (JSON.stringify(was.layers) === JSON.stringify(is.layers)) return null;
+    if (!group.presets.rekey(key, `${key}~${now}`, running)) return null;
+    return fresh;
   }
 
   /**
