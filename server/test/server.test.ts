@@ -610,3 +610,39 @@ test('Compare with a file that removes Basic lights leaves a Basic lights first,
   assert.equal((await api(app, 'PUT', '/api/settings', { safeLook: song })).status, 200);
   assert.equal((await api(app, 'GET', '/api/layout')).body.basicLights, layout.basicLights);
 }));
+
+test('the rig: the layout says which groups have white, amber and UV, and Any colour with amber reaches the key lights', async () => {
+  const dir = tempDir();
+  const app = new App({
+    port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'shows/stage-l1.json'), webDir: join(root, 'web'),
+    output: { kind: 'none' }, log: () => {},
+  });
+  try {
+    await app.start();
+    const t = await tablet(app);
+    const layout = await waitFor(t.layout);
+    const extras = (id: string) => layout.groups.find((g: any) => g.id === id).extras;
+    assert.deepEqual(extras('key-lights'), { white: true, amber: true, uv: true });
+    assert.deepEqual(extras('front-lights'), { white: false, amber: false, uv: false });
+    assert.deepEqual(extras('background'), { white: true, amber: false, uv: false });
+    assert.deepEqual(extras('drum-cage'), { white: false, amber: false, uv: false });
+    const preset = layout.groups.find((g: any) => g.id === 'key-lights').presets[0];
+    assert.match(preset.light.hex, /^#[0-9a-f]{6}$/);
+
+    // Visualiser frames: one RGB triple per fixture, in layout order.
+    let frame: Uint8Array | null = null;
+    t.ws.on('message', (data, isBinary) => { if (isBinary) frame = new Uint8Array(data as Buffer); });
+    const b1 = layout.fixtures.findIndex((f: any) => f.id === 'b1') * 3;
+    assert.equal(await t.send({ type: 'groupColour', group: 'key-lights', colour: '#000000', amber: 1, fade: 0 }), null);
+    await waitFor(() => t.state()?.groups['key-lights'].preset === 'live:key-lights:#000000:a100', 2000, 'the live colour');
+    frame = null;
+    const vis = await waitFor(() => frame && Array.from(frame.subarray(b1, b1 + 3)), 2000, 'a visualiser frame');
+    assert.deepEqual(vis, [255, 0xbf, 0]);
+    // Levels are 0..1.
+    assert.match(await t.send({ type: 'groupColour', group: 'key-lights', colour: '#000000', amber: 2 }) ?? '', /^invalid command/);
+    t.ws.close();
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

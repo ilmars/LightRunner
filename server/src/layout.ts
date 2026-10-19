@@ -1,7 +1,7 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { findProfile } from '../../packages/shared/src/index.ts';
-import type { QuickTab, Show } from '../../packages/shared/src/index.ts';
+import { findProfile, resolveColour } from '../../packages/shared/src/index.ts';
+import type { ChannelRole, Palette, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
 
 export interface OperatorLook {
   id: string;
@@ -19,7 +19,20 @@ export interface OperatorGroup {
   name: string;
   /** True when no fixture in the group can make colour, so the colour picker has nothing to do. */
   whiteOnly: boolean;
-  presets: { id: string; name: string; swatch: string | null }[];
+  /** Which extra channels some fixture in the group has, for the White, Amber and UV sliders. */
+  extras: { white: boolean; amber: boolean; uv: boolean };
+  presets: OperatorPreset[];
+}
+
+export interface OperatorPreset {
+  id: string;
+  name: string;
+  swatch: string | null;
+  /**
+   * The preset as an Any colour pick would make it: its top layer's colour,
+   * white, amber and UV, scaled by the layer's intensity (null if it has no layers).
+   */
+  light: { hex: string; white: number; amber: number; uv: number } | null;
 }
 
 export interface OperatorLayout {
@@ -59,11 +72,12 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     return [{ id: l.id, name: l.name, swatch: l.swatch ?? null, section: l.section ?? null, colours, levels }];
   };
 
-  const makesColour = (fixtureId: string): boolean => {
+  const hasRole = (fixtureId: string, roles: ChannelRole[]): boolean => {
     const f = byId.get(fixtureId);
     const profile = f ? findProfile(show, f.profile) : undefined;
-    return !!profile?.channels.some((c) => c.role === 'red' || c.role === 'green' || c.role === 'blue');
+    return !!profile?.channels.some((c) => roles.includes(c.role));
   };
+  const palettes = new Map<string, Palette>(show.palettes.map((p) => [p.id, p]));
 
   return {
     show: show.name,
@@ -76,8 +90,13 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
       if (!g) return [];
       const presets = show.presets
         .filter((p) => p.group === id && !p.custom)
-        .map((p) => ({ id: p.id, name: p.name, swatch: p.swatch ?? null }));
-      return [{ id: g.id, name: g.name, whiteOnly: !g.fixtures.some(makesColour), presets }];
+        .map((p) => ({ id: p.id, name: p.name, swatch: p.swatch ?? null, light: presetLight(p, palettes) }));
+      const any = (roles: ChannelRole[]) => g.fixtures.some((f) => hasRole(f, roles));
+      return [{
+        id: g.id, name: g.name, whiteOnly: !any(['red', 'green', 'blue']),
+        extras: { white: any(['white']), amber: any(['amber']), uv: any(['uv']) },
+        presets,
+      }];
     }),
     fixtures: fixtureOrder.flatMap((id) => {
       const f = byId.get(id);
@@ -86,4 +105,15 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     members: Object.fromEntries(show.groups.map((g) => [g.id, g.fixtures])),
     manualForOperators: show.operator.manualForOperators,
   };
+}
+
+function presetLight(preset: Preset, palettes: ReadonlyMap<string, Palette>): OperatorPreset['light'] {
+  const top = preset.layers[preset.layers.length - 1];
+  if (!top) return null;
+  const c = resolveColour(top.colour, palettes);
+  const k = top.intensity;
+  const n = parseInt(c.hex.slice(1), 16);
+  const hex = `#${[16, 8, 0].map((s) => Math.round(((n >> s) & 255) * k).toString(16).padStart(2, '0')).join('')}`;
+  const level = (v: number | undefined) => Math.round((v ?? 0) * k * 1000) / 1000;
+  return { hex, white: level(c.white), amber: level(c.amber), uv: level(c.uv) };
 }
