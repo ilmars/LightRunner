@@ -616,6 +616,7 @@ test('a colour added with Add to colours survives a restart, still adopted by th
 });
 
 const presetOf = (layout: any, group: string, id: string) => presetsOf(layout, group).find((p) => p.id === id);
+const plainOf = (p: any) => (p ? { id: p.id, name: p.name, swatch: p.swatch } : p);
 
 test('Edit colour renames and recolours, the stage follows, and Undo restores it', () => withApp(async (app, dir) => {
   const t = await tablet(app);
@@ -628,7 +629,7 @@ test('Edit colour renames and recolours, the stage follows, and Undo restores it
 
   // Only this group, then the same name in every group.
   assert.equal(await t.send({ type: 'editColour', preset: mine, name: ' Pasture ', colour: '#406080', sameName: false }), null);
-  assert.deepEqual(presetOf(t.layout(), 'back-wall', mine), { id: mine, name: 'Pasture', swatch: '#406080' });
+  assert.deepEqual(plainOf(presetOf(t.layout(), 'back-wall', mine)), { id: mine, name: 'Pasture', swatch: '#406080' });
   assert.equal(presetOf(t.layout(), 'audience', other)!.name, 'Meadow');
   assert.equal(t.state().groups['back-wall'].preset, mine, 'the stage keeps the same preset');
   assert.ok(savedPresets(dir).some((p) => p.id === mine && p.name === 'Pasture' && !p.custom));
@@ -639,7 +640,7 @@ test('Edit colour renames and recolours, the stage follows, and Undo restores it
   assert.equal(await t.send({ type: 'undo' }), null);
   assert.equal(presetOf(t.layout(), 'audience', other)!.name, 'Meadow');
   assert.equal(await t.send({ type: 'undo' }), null);
-  assert.deepEqual(presetOf(t.layout(), 'back-wall', mine), { id: mine, name: 'Meadow', swatch: '#12ab34' });
+  assert.deepEqual(plainOf(presetOf(t.layout(), 'back-wall', mine)), { id: mine, name: 'Meadow', swatch: '#12ab34' });
 
   // Refused edits say so in plain words.
   assert.equal(await t.send({ type: 'editColour', preset: mine, name: '  ', sameName: false }), 'a name is needed');

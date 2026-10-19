@@ -284,11 +284,23 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .labrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; }
 .labrow .lab2 { margin: 4px 2px 0; }
 .pill-add { flex: none; min-height: 36px; }
+#pEditBtn { min-height: 40px; padding: 0 18px; }
 .padd {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 14px; flex: none; padding: 6px 12px;
   border-radius: var(--ds-r-tile); background: var(--ds-tile-fill); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
-.padd[hidden], .pill-add[hidden] { display: none; }
+.padd[hidden], .pill-add[hidden], .pswitch[hidden] { display: none; }
+/* Edit mode: the strip row and the Add form give way to the editor. */
+.pcol.editing .labrow, .pcol.editing #pAny { display: none; }
+.pc { position: relative; }
+.pc.editable::after { content: "✎"; position: absolute; bottom: 10px; right: 10px; font-size: 14px; line-height: 1; color: var(--ds-muted-on); opacity: 0.8; }
+.pc.editable span { max-width: calc(100% - 16px); }
+.pc.editing { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.ghost.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.pedit .pe-strip { grid-column: 1 / -1; height: 40px; }
+.pe-used { grid-column: 1 / -1; margin: 0 2px; font-size: var(--ds-fs-label); color: var(--ds-muted); }
+.pedit .padd-btns { grid-column: 2; justify-self: end; }
+.ghost.danger.armed { color: var(--ds-danger-text); background: var(--ds-danger-fill); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
 .padd-top { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }
 .padd-top .qs-name { flex: 1; min-width: 0; }
 .padd-sw { flex: none; width: 28px; height: 28px; border-radius: 8px; opacity: 0.8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }

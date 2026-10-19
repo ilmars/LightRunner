@@ -67,6 +67,7 @@ function connect() {
         else renderSheet();
       }
       if (msg.ref !== null && msg.ref === pendingColour) finishAddColour(msg.error);
+      if (msg.ref !== null && msg.ref === pendingEdit) finishEdit(msg.error);
       if (itemSave && msg.ref === itemSave.ref) {
         if (!msg.error) toast(`Saved to ${itemSave.name}`, true);
         itemSave = null;
@@ -90,6 +91,10 @@ function setConnected(on) {
     addWanted = false;
     renames.clear();
     moves.clear();
+  }
+  if (!on && pendingEdit !== null) {
+    pendingEdit = null;
+    $('peSave').disabled = false;
   }
   if (!on && pendingColour !== null) {
     pendingColour = null;
@@ -846,7 +851,7 @@ saveBtn.addEventListener('click', (ev) => ev.preventDefault());
 
 // ---- Colour picker (covers the details panel only) ----
 
-const picker = { group: null };
+const picker = { group: null, edit: false };
 
 const HUE_STOPS = ['#ff0000', '#ffc800', '#00ff00', '#00ffc8', '#0000ff', '#8c00ff', '#ff008c', '#ff0000'];
 const WHITE_STOPS = ['#ffb46b', '#f4f8ff'];
@@ -874,7 +879,13 @@ function buildPickerGrid() {
     const sw = el('i');
     sw.style.background = p.swatch ?? NEUTRAL;
     b.append(sw, el('span', null, p.name));
-    b.addEventListener('click', () => send({ type: 'groupPreset', group: row.group.id, preset: p.id }));
+    b.classList.toggle('editable', picker.edit);
+    b.classList.toggle('editing', colourEdit?.id === p.id);
+    // While editing, a tap opens the colour's editor and leaves the stage alone.
+    b.addEventListener('click', () => {
+      if (picker.edit) openEditor(row.group.presets.find((x) => x.id === p.id) ?? p);
+      else send({ type: 'groupPreset', group: row.group.id, preset: p.id });
+    });
     grid.append(b);
   }
   $('pTitle').textContent = row.group.name;
@@ -893,6 +904,7 @@ function renderPicker() {
   $('pCurText').textContent = `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
   renderAddColour();
+  renderEditor();
 }
 
 // ---- Keep a strip colour: "＋ Add to colours" ----
@@ -912,7 +924,7 @@ function renderAddColour() {
   const open = !$('pAdd').hidden;
   // The form follows the colour: it goes when the group no longer runs a new strip colour.
   if (open && (!hex || listed)) $('pAdd').hidden = true;
-  $('pAddOpen').hidden = !hex || listed || !$('pAdd').hidden;
+  $('pAddOpen').hidden = !hex || listed || !$('pAdd').hidden || picker.edit;
   if (hex) $('paSw').style.background = hex;
   if (row) $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
 }
@@ -969,6 +981,11 @@ function openPicker(groupId) {
   }
   $('pAdd').hidden = true;
   picker.group = groupId;
+  picker.edit = false;
+  $('pEditBtn').classList.remove('on');
+  $('pEditBtn').setAttribute('aria-pressed', 'false');
+  $('pCol').classList.remove('editing');
+  closeEditor();
   buildPickerGrid();
   showPickerTab('col');
   $('picker').hidden = false;
@@ -979,6 +996,8 @@ function closePicker() {
   pendingColour = null;
   $('paAddBtn').disabled = false;
   $('pAdd').hidden = true;
+  picker.edit = false;
+  closeEditor();
   picker.group = null;
   $('picker').hidden = true;
 }
@@ -996,44 +1015,173 @@ function showPickerTab(name) {
 $('pDone').addEventListener('click', closePicker);
 for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('click', () => showPickerTab(t.dataset.pt));
 
-// Any colour: picking sends right away; moves are throttled and the last one always goes.
-(() => {
-  const strip = $('pAny');
-  const out = throttle((hex) => {
-    if (picker.group) send({ type: 'groupColour', group: picker.group, colour: hex });
-  });
+/**
+ * Makes a strip pick colours: `onColour(hex, last)` is called while a finger moves and
+ * once more with `last` when it lifts. `whiteOnly()` says which colours the strip holds.
+ */
+function attachStrip(strip, handle, whiteOnly, onColour) {
   let dragging = false;
+  let hex = null;
   const pick = (ev) => {
     const r = strip.getBoundingClientRect();
     const p = clamp01((ev.clientX - r.left) / r.width);
-    const row = pickerRow();
-    if (!row) return null;
-    $('pAnyH').hidden = false;
-    $('pAnyH').style.left = `calc(${p * 100}% - ${p * 4}px)`;
-    return stripColour(row.group.whiteOnly ? WHITE_STOPS : HUE_STOPS, p);
+    if (whiteOnly() === null) return null;
+    handle.hidden = false;
+    handle.style.left = `calc(${p * 100}% - ${p * 4}px)`;
+    return stripColour(whiteOnly() ? WHITE_STOPS : HUE_STOPS, p);
   };
-  let hex = null;
   strip.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
     dragging = true;
     try { strip.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     hex = pick(ev);
-    if (hex) out.push(hex);
+    if (hex) onColour(hex, false);
   });
   strip.addEventListener('pointermove', (ev) => {
     if (!dragging) return;
     hex = pick(ev) ?? hex;
-    if (hex) out.push(hex);
+    if (hex) onColour(hex, false);
   });
   const end = () => {
     if (!dragging) return;
     dragging = false;
-    if (hex) out.end(hex);
+    if (hex) onColour(hex, true);
     hex = null;
   };
   strip.addEventListener('pointerup', end);
   strip.addEventListener('pointercancel', end);
+}
+
+// Any colour: picking sends right away; moves are throttled and the last one always goes.
+(() => {
+  const out = throttle((hex) => {
+    if (picker.group) send({ type: 'groupColour', group: picker.group, colour: hex });
+  });
+  attachStrip($('pAny'), $('pAnyH'), () => pickerRow()?.group.whiteOnly ?? null, (hex, last) => (last ? out.end(hex) : out.push(hex)));
 })();
+
+// ---- Edit colours: tap a swatch to rename it, change its colour or delete it ----
+
+/** The preset the editor is open on: { id, name, colour (picked, or null), swatch (as listed) }. */
+let colourEdit = null;
+let deleteArmed = 0;
+// The ref of an edit or delete the server hasn't answered yet.
+let pendingEdit = null;
+let pendingEditDelete = false;
+
+const editedPreset = () => (colourEdit ? pickerRow()?.group.presets.find((p) => p.id === colourEdit.id) : undefined);
+
+function setEditMode(on) {
+  picker.edit = on;
+  closeEditor();
+  $('pEditBtn').classList.toggle('on', on);
+  $('pEditBtn').setAttribute('aria-pressed', String(on));
+  $('pCol').classList.toggle('editing', on);
+  if (on) $('pAdd').hidden = true;
+  buildPickerGrid();
+  renderPicker();
+}
+
+function openEditor(preset) {
+  const row = pickerRow();
+  if (!row) return;
+  colourEdit = { id: preset.id, name: preset.name, colour: null, swatch: preset.swatch ?? NEUTRAL };
+  pendingEdit = null;
+  disarmDelete();
+  $('peName').value = preset.name;
+  $('peStrip').className = `strip2 pe-strip ${row.group.whiteOnly ? 'cct' : 'hue'}`;
+  $('peStrip').setAttribute('aria-label', row.group.whiteOnly ? 'Change the colour: warm to cool' : 'Change the colour');
+  $('peH').hidden = true;
+  $('peSw').style.background = colourEdit.swatch;
+  $('peSave').disabled = false;
+  $('pEdit').hidden = false;
+  renderEditor();
+  for (const b of $('pGrid').children) b.classList.toggle('editing', b.dataset.preset === preset.id);
+  $('pEdit').scrollIntoView({ block: 'nearest' });
+}
+
+function closeEditor(keepPending = false) {
+  colourEdit = null;
+  if (!keepPending) pendingEdit = null;
+  disarmDelete();
+  $('peName').blur();
+  $('pEdit').hidden = true;
+  for (const b of $('pGrid').children) b.classList.remove('editing');
+}
+
+/** Who uses it, and whether other groups have a colour of the same name. */
+function renderEditor() {
+  const p = editedPreset();
+  if (!p) {
+    if (colourEdit) closeEditor(true);
+    return;
+  }
+  $('peUsed').textContent = p.usedBy?.length ? `Used in ${p.usedBy.slice(0, 4).join(', ')}${p.usedBy.length > 4 ? ` and ${p.usedBy.length - 4} more` : ''}` : 'Not used in any song or quick look';
+  const same = layout.groups.some((g) => g.id !== picker.group && g.presets.some((x) => x.name === p.name));
+  $('peSameWrap').hidden = !same;
+  if (!same) $('peSame').checked = false;
+}
+
+function disarmDelete() {
+  clearTimeout(deleteArmed);
+  deleteArmed = 0;
+  $('peDelete').classList.remove('armed');
+  $('peDelete').textContent = 'Delete';
+}
+
+$('pEditBtn').addEventListener('click', () => setEditMode(!picker.edit));
+$('peCancel').addEventListener('click', closeEditor);
+$('peName').addEventListener('keydown', (ev) => {
+  ev.stopPropagation();
+  if (ev.key === 'Enter') $('peName').blur();
+});
+$('peName').addEventListener('input', disarmDelete);
+attachStrip($('peStrip'), $('peH'), () => (pickerRow() ? pickerRow().group.whiteOnly : null), (hex) => {
+  if (!colourEdit) return;
+  colourEdit.colour = hex;
+  $('peSw').style.background = hex;
+  disarmDelete();
+});
+
+// A plain tap. Only what changed is sent; the editor closes when the server says yes.
+$('peSave').addEventListener('click', () => {
+  if (!colourEdit || pendingEdit !== null) return;
+  const name = $('peName').value;
+  const cmd = { type: 'editColour', preset: colourEdit.id, sameName: $('peSame').checked && !$('peSameWrap').hidden };
+  if (name.trim() !== colourEdit.name) cmd.name = name;
+  if (colourEdit.colour) cmd.colour = colourEdit.colour;
+  if (cmd.name === undefined && cmd.colour === undefined) {
+    closeEditor();
+    return;
+  }
+  pendingEdit = send(cmd);
+  pendingEditDelete = false;
+  $('peSave').disabled = pendingEdit !== null;
+});
+
+// First tap arms it ("Delete?"), the second one deletes. It disarms after a few seconds.
+$('peDelete').addEventListener('click', () => {
+  if (!colourEdit || pendingEdit !== null) return;
+  if (!deleteArmed) {
+    deleteArmed = setTimeout(disarmDelete, 4000);
+    $('peDelete').classList.add('armed');
+    $('peDelete').textContent = 'Delete?';
+    return;
+  }
+  pendingEdit = send({ type: 'deleteColour', preset: colourEdit.id });
+  pendingEditDelete = true;
+  disarmDelete();
+});
+
+function finishEdit(error) {
+  const deleted = pendingEditDelete;
+  pendingEdit = null;
+  $('peSave').disabled = false;
+  if (!error) {
+    closeEditor();
+    toast(deleted ? 'Colour deleted' : 'Colour saved', true);
+  }
+}
 
 // ---- Quick looks: tabs and grid ----
 
