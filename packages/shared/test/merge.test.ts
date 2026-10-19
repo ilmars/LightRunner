@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { applyPicks, diffShows, parseShow, type Show } from '../src/index.ts';
 
-const rig = (): Show => parseShow(JSON.parse(readFileSync(new URL('../../../shows/dieva-majas-l1.json', import.meta.url), 'utf8')));
+const rig = (): Show => parseShow(JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8')));
 
 test('an identical show has no differences', () => {
   assert.deepEqual(diffShows(rig(), rig()), []);

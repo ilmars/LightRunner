@@ -5,7 +5,7 @@ import { parseShow } from '../../shared/src/index.ts';
 import { Engine, fromHex } from '../src/index.ts';
 import { kelvinOf } from '../src/output.ts';
 
-const show = () => parseShow(JSON.parse(readFileSync(new URL('../../../shows/dieva-majas-l1.json', import.meta.url), 'utf8')));
+const show = () => parseShow(JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8')));
 const dmx = (v: number) => Math.round(Math.pow(v, 2.2) * 255);
 
 test('warm colours give warm colour temperature, blue gives cool', () => {

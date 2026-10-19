@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describeMode, expandModeChannels, oflToProfile, parseShow, type OflFixture } from '../src/index.ts';
 
 const load = (name: string): OflFixture => JSON.parse(readFileSync(new URL(`./ofl/${name}.json`, import.meta.url), 'utf8'));
-const lightkeyShow = () => parseShow(JSON.parse(readFileSync(new URL('../../../shows/dieva-majas-l1.json', import.meta.url), 'utf8')));
+const lightkeyShow = () => parseShow(JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8')));
 const roles = (p: { channels: { role: string; default?: number }[] }) => p.channels.map((c) => `${c.role}${c.default ? `=${c.default}` : ''}`);
 
 test('SonicPulse 39-channel mode matches the layout imported from Lightkey', () => {

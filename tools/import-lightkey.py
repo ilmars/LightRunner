@@ -14,6 +14,7 @@ keyed-archive property lists, which plistlib reads).
 
 import argparse
 import json
+import os
 import plistlib
 import re
 import unicodedata
@@ -316,7 +317,7 @@ def convert(top, host, universe, named_groups=(), skip=()):
 
     return {
         'schemaVersion': 1,
-        'name': 'Dieva Mājas skatuve (from Lightkey)',
+        'name': 'Imported from Lightkey',
         'profiles': profiles,
         'fixtures': fixtures,
         'groups': groups,
@@ -347,8 +348,7 @@ def main():
     with open(args.project, 'rb') as fh:
         top = unarchive(fh.read())
     show = convert(top, args.artnet_host, args.universe, named, {slug(x) for x in args.skip})
-    if args.name:
-        show['name'] = args.name
+    show['name'] = args.name or f'{os.path.splitext(os.path.basename(args.project))[0]} (from Lightkey)'
     with open(args.out, 'w', encoding='utf-8') as fh:
         json.dump(show, fh, indent=2, ensure_ascii=False)
     print(f'{len(show["fixtures"])} fixtures, {len(show["profiles"])} profiles, {len(show["groups"])} groups, '

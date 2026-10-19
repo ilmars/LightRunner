@@ -1,6 +1,6 @@
 # Light Runner: project briefing
 
-Light Runner is a browser-based lighting controller for a church (Dieva Māja). Volunteers tap pre-built looks on an iPad; one Node.js server on a Mac mini at the church drives the lights over Art-Net. The product spec is [docs/SPEC.md](docs/SPEC.md). Read [docs/STATUS.md](docs/STATUS.md) for what is built and what is next, and [docs/DECISIONS.md](docs/DECISIONS.md) before changing behaviour the spec describes.
+Light Runner is a browser-based lighting controller for a church. Volunteers tap pre-built looks on an iPad; one Node.js server on a Mac mini at the church drives the lights over Art-Net. The product spec is [docs/SPEC.md](docs/SPEC.md). Read [docs/STATUS.md](docs/STATUS.md) for what is built and what is next, and [docs/DECISIONS.md](docs/DECISIONS.md) before changing behaviour the spec describes.
 
 Owner: Ilmārs (@ilmars). The app's interface text is English; the show's preset names are Latvian (from Lightkey) and stay that way.
 
@@ -27,7 +27,7 @@ Pages: `/operator/` (volunteers, no login), `/patch/` and `/settings/` (programm
 | `packages/engine/src` | The engine. Pure: takes `now` in seconds, returns DMX buffers; no timers or I/O. `fade.ts` (Crossfade, Ramp, ease), `light.ts` (colour + intensity mixing), `layers.ts`, `output.ts` (channel mapping, gamma, CCT), `engine.ts` |
 | `server/src` | `app.ts` (HTTP API, WebSocket, command bus, programmer routes), `worker.ts` (frame clock + engine + DMX output on a worker thread), `output/` (Art-Net, sACN, ENTTEC), `store.ts` (atomic saves, 20 backups), `nodewatch.ts`, `discovery.ts`, `ofl.ts` + `ofldb.ts` (fixture database), `auth.ts` |
 | `web/` | Plain HTML + JS pages, no framework or build: `operator/`, `patch/`, `settings/` |
-| `tools/` | `import-lightkey.py` (Lightkey project → show), `import-dieva-majas.sh`, `install-show.ts`, `jump-check.ts`, `timing-probe.ts` |
+| `tools/` | `import-lightkey.py` (Lightkey project → show), `import-stage-l1.sh`, `install-show.ts`, `jump-check.ts`, `timing-probe.ts` |
 
 ## Conventions
 
@@ -39,11 +39,11 @@ Pages: `/operator/` (volunteers, no login), `/patch/` and `/settings/` (programm
 - Writing (UI text, docs, commits): plain words, sentence case, no jargon a volunteer wouldn't know.
 - Commits: small, descriptive messages; push to `main` only when tests pass. For changes by collaborators, use a branch and a pull request.
 
-## The rig (Dieva Māja, stage L1)
+## The rig (stage L1)
 
 - Art-Net node "NetWork Node 2" at **192.168.0.114**, both ports on **Art-Net universe 1**. The server Mac is 192.168.0.195.
 - Groups: **Front lights** P1–P4 (Neewer AS600B, CCT 2 ch), **Key lights** B1–B2 (Elation SixBar 500, 18 ch RGBWAUV × 3), **Background** B3–B6 (Stairville SonicPulse LED Bar 10, 39 ch), **Drum cage** L1 (LED strip RGB), **B8 side bar** (SonicPulse Bar 05, 23 ch). **P5 (Wild Wash) is not used** and is left out.
-- The show came from the Lightkey project `Dieva Majas Skatuve - L1.lightkeyproj` via `tools/import-dieva-majas.sh`. Lightkey import is a feature to keep (owner's request): the CLI importer and Settings > "Compare with a file" both accept `.lightkeyproj`. Lightkey and Light Runner must not send to the node at the same time: use Settings > Send DMX to hand over.
+- The show (`shows/stage-l1.json`) came from the church's Lightkey project via `tools/import-stage-l1.sh <project>` (or set `LIGHTKEY_PROJECT`). Lightkey import is a feature to keep (owner's request): the CLI importer and Settings > "Compare with a file" both accept `.lightkeyproj`. Lightkey and Light Runner must not send to the node at the same time: use Settings > Send DMX to hand over.
 - SixBar 500 and AS600B are not in the Open Fixture Library; their types come from Lightkey.
 
 ## Gotchas

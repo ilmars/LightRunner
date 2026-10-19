@@ -1,7 +1,7 @@
 // Make a show file the live show (the old one is kept as a backup).
 // Stop the server first; it loads the show when it starts.
 //
-//   node tools/install-show.ts shows/dieva-majas-l1.json [--data data] [--keep-state]
+//   node tools/install-show.ts shows/stage-l1.json [--data data] [--keep-state]
 
 import { readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';

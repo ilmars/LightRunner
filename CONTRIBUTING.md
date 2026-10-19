@@ -1,6 +1,6 @@
 # Working on Light Runner
 
-Light Runner runs the lights at Dieva Māja. Changes reach a live church service, so the rules below are about not surprising the volunteers on Sunday. Start with [docs/STATUS.md](docs/STATUS.md) (what's built, what's next) and [docs/SPEC.md](docs/SPEC.md) (what we're building).
+Light Runner runs the lights at a church. Changes reach a live church service, so the rules below are about not surprising the volunteers on Sunday. Start with [docs/STATUS.md](docs/STATUS.md) (what's built, what's next) and [docs/SPEC.md](docs/SPEC.md) (what we're building).
 
 ## Set up on your computer
 
@@ -26,7 +26,7 @@ Works on macOS, Windows and Linux.
 4. Open `http://localhost:8080/`. The first start loads a demo rig. To work with the church rig instead, stop the server and install its show:
 
    ```bash
-   node tools/install-show.ts shows/dieva-majas-l1.json
+   node tools/install-show.ts shows/stage-l1.json
    ```
 
 The live show, state and backups live in `data/`, which is not in git. If you change the church show in the app and want to keep the change, export it (Settings > Export show file) into `shows/` and commit it.

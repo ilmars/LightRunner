@@ -4,7 +4,7 @@
 
 Light Runner lets volunteers run the lights for a church service from a tablet, after a five-minute briefing. They tap a look (Walk-in, Worship, Sermon…) and the whole room fades smoothly to it. One small server on a computer at the church drives the lights; every tablet, laptop and (later) Stream Deck shows the same live state.
 
-It was built for Dieva Māja's stage and is shared under the MIT license so other churches and small venues can use it too.
+It was built for one church's stage and is shared under the MIT license so other churches and small venues can use it too.
 
 ## What it does
 

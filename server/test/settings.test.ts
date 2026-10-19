@@ -185,8 +185,9 @@ test('import with comparison: preview a show file, apply only the ticked changes
   });
 });
 
-const lightkeyProject = join(process.env.HOME ?? '', 'Documents/Dieva Majas Skatuve - L1.lightkeyproj');
-test('import with comparison: a Lightkey project compares the patch only', { skip: !existsSync(lightkeyProject) && 'no Lightkey project on this computer' }, async () => {
+// Set LIGHTKEY_PROJECT to a .lightkeyproj file to run this test.
+const lightkeyProject = process.env.LIGHTKEY_PROJECT ?? '';
+test('import with comparison: a Lightkey project compares the patch only', { skip: !(lightkeyProject && existsSync(lightkeyProject)) && 'set LIGHTKEY_PROJECT to a Lightkey project to run this' }, async () => {
   await withApp(async (call, app) => {
     const res = await fetch(`http://127.0.0.1:${app.port}/api/import/preview?name=rig.lightkeyproj`, {
       method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: readFileSync(lightkeyProject),
