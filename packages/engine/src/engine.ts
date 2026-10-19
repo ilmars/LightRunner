@@ -77,8 +77,8 @@ interface PresetRun {
   levels: number[];
 }
 
-function newRun(preset: CompiledPreset): PresetRun {
-  return { preset, time: 0, beats: 0, cycles: [], levels: [] };
+function newRun(preset: CompiledPreset, cycles: number[]): PresetRun {
+  return { preset, time: 0, beats: 0, cycles, levels: [] };
 }
 
 class ManualRun {
@@ -240,6 +240,12 @@ export class Engine {
   private speed = new Ramp(1);
   /** Stage tempo in beats per minute. */
   private bpm = DEFAULT_TEMPO;
+  /**
+   * The stage's one beat clock (beats, at the tempo and the speed dial) and seconds
+   * clock (with the speed dial), never reset: every effect starts in step with them.
+   */
+  private stageBeats = 0;
+  private stageSeconds = 0;
   private look: string | null = null;
   private lookStart = 0;
   private lookDur = 0;
@@ -739,9 +745,22 @@ export class Engine {
   private setPreset(group: GroupRun, preset: CompiledPreset, fade: number, now: number, own = true): PresetRun | null {
     // A smoke group runs no presets: nothing but its level drives it.
     if (group.smoke) return null;
-    const run = group.presets.push(preset.id, () => newRun(preset), now, fade);
+    const run = group.presets.push(preset.id, () => newRun(preset, this.startPhases(preset)), now, fade);
     if (own) this.takeOwnership(group, now, fade);
     return run;
+  }
+
+  /**
+   * Where a new run of a preset starts each of its effects: at the stage clock (its beats ÷
+   * the effect's beats, or seconds ÷ its seconds), so effects on different groups stay in
+   * step however late they start. Taken round its colour list, so the colours are in step too.
+   */
+  private startPhases(preset: CompiledPreset): number[] {
+    return preset.layers.map((l) => {
+      if (l.kind !== 'effect') return 0;
+      const cycles = 'beats' in l.speed ? this.stageBeats / l.speed.beats : this.stageSeconds / l.speed.seconds;
+      return cycles % l.colours.length;
+    });
   }
 
   /** The most recent change to a group wins its fixtures, including ones shared with other groups. */
@@ -813,6 +832,8 @@ export class Engine {
     this.last = now;
     const speed = this.speed.value(now);
     const beatsPerSecond = this.bpm / 60 * speed;
+    this.stageBeats += dt * beatsPerSecond;
+    this.stageSeconds += dt * speed;
     const ctx: LayerContext = { index: 0, count: 0, time: 0, beats: 0, cycles: [] };
     const parts = this.scratch;
     const weights = this.scratchWeights;

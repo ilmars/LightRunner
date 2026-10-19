@@ -9,7 +9,7 @@ import { Engine } from '../src/index.ts';
 import { compileEffect, cyclesPerSecond, renderEffect, safeRate, type CompiledEffect } from '../src/effects.ts';
 import { dark, type Light } from '../src/light.ts';
 import { planChannels, visibleLevel } from '../src/output.ts';
-import { FRAME, beyondOwnMotion, segmentsOf } from './helpers.ts';
+import { FRAME, beyondOwnMotion, lightOf, segmentsOf } from './helpers.ts';
 
 const RED = { hex: '#ff0000' };
 const BLUE = { hex: '#0000ff' };
@@ -163,67 +163,108 @@ test('intensity scales the result', () => {
 
 // ---- Light safety ----
 
+const WHITE = { hex: '#ffffff' };
+const OFF = { hex: '#000000' };
+
 /**
- * The most brightness swings (rise and fall, or fall and rise, by 20 % or more)
- * any segment makes in any one second, running at `rate` cycles a second.
+ * The most brightness changes any segment makes in any one second, running at
+ * `rate` cycles a second: a change counts once the brightness has moved 20 % or more
+ * against the last change (a rise after a fall, or a fall after a rise). The rule
+ * allows 6 (3 rise-and-falls). Sampled every `step` seconds, so each change is found
+ * up to one step late; the window is two steps shorter to allow for that.
  */
-function swingsPerSecond(f: CompiledEffect, count: number, rate: number, seconds = 3): number {
-  const STEP = 0.001;
+function changesPerSecond(f: CompiledEffect, count: number, rate: number, seconds = 3, step = 0.001): number {
   let worst = 0;
+  const samples = Math.round(seconds / step);
   for (let k = 0; k < count; k++) {
-    // Each change of 20 % or more against the last one: a rise after a fall, or a fall after a rise.
     const changes: number[] = [];
     let lo = at(f, k, count, 0).i, hi = lo, dir = 0;
-    for (let n = 0; n * STEP <= seconds; n++) {
-      const t = n * STEP;
+    for (let n = 1; n <= samples; n++) {
+      const t = n * step;
       const v = at(f, k, count, rate * t).i;
+      // The first change only sets which way it is going (it is counted from wherever t = 0 happened to be).
+      const counts = dir !== 0;
+      let changed = false;
       if (dir !== -1 && hi - v >= 0.2) {
-        changes.push(t);
         dir = -1;
-        lo = hi = v;
+        changed = true;
       } else if (dir !== 1 && v - lo >= 0.2) {
-        changes.push(t);
         dir = 1;
+        changed = true;
+      }
+      if (changed) {
+        if (counts) changes.push(t);
         lo = hi = v;
       }
       lo = Math.min(lo, v);
       hi = Math.max(hi, v);
     }
-    // Two opposite changes make one swing; count them in every one-second window.
     for (let a = 0, b = 0; a < changes.length; a++) {
-      while (b < changes.length && changes[b]! < changes[a]! + 1) b++;
-      worst = Math.max(worst, Math.floor((b - a) / 2));
+      while (b < changes.length && changes[b]! < changes[a]! + 1 - 2 * step) b++;
+      worst = Math.max(worst, b - a);
     }
   }
   return worst;
 }
 
-test('light safety: a hard chase at 1 beat a cycle and 240 bpm is slowed to 3 swings a second or fewer', () => {
+test('light safety: a hard chase at 1 beat a cycle and 240 bpm is slowed to 3 rise-and-falls a second or fewer', () => {
   const chase = fx({ effect: 'chase', edge: 'hard', speed: { beats: 1 } });
   const asked = cyclesPerSecond(chase, 240 / 60, 1);
   assert.equal(asked, 4);
   const rate = safeRate(chase, asked);
   assert.ok(rate < asked, `not slowed: ${rate}`);
-  assert.ok(swingsPerSecond(chase, 32, rate) <= 3, `${swingsPerSecond(chase, 32, rate)} swings a second`);
+  assert.ok(changesPerSecond(chase, 32, rate) <= 6, `${changesPerSecond(chase, 32, rate)} changes in a second`);
   // Unslowed it would break the rule.
-  assert.ok(swingsPerSecond(chase, 32, asked) > 3);
+  assert.ok(changesPerSecond(chase, 32, asked) > 6);
   // A soft colour fade at the same tempo changes colour, not brightness: not slowed.
   const fade = fx({ effect: 'colourFade', colours: [RED, BLUE], speed: { beats: 1 } });
   assert.equal(safeRate(fade, cyclesPerSecond(fade, 4, 1)), 4);
+  // A soft one-colour wave at 1 beat and 180 bpm (3 a second) is right at the limit, so it is not slowed.
+  const wave = fx({ effect: 'wave', speed: { beats: 1 } });
+  assert.equal(safeRate(wave, cyclesPerSecond(wave, 3, 1)), 3);
 });
 
-test('light safety holds for every kind, edge and setting at fast tempos', () => {
-  const colourSets = [[RED], [RED, BLUE, GREEN], [RED, DIM], [DIM, RED, DIM, BLUE]];
+test('light safety: effects that bunch their changes are slowed for the worst second (regressions)', () => {
+  const cases: { what: string; f: CompiledEffect; asked: number }[] = [
+    // Yo-yo passes segments near its ends twice in quick succession: 2 beats a cycle at 180 bpm asks 1.5 cycles a second.
+    { what: 'hard yo-yo', f: fx({ effect: 'yoyo', edge: 'hard', size: 0.3, speed: { beats: 2 } }), asked: 1.5 },
+    { what: 'soft yo-yo', f: fx({ effect: 'yoyo', edge: 'soft', size: 0.3, speed: { beats: 2 } }), asked: 1.5 },
+    // A soft breathe through a bright and a dim colour makes its changes 0.7 and 1.3 cycles apart: 1 beat at 180 bpm.
+    { what: 'soft breathe', f: fx({ effect: 'breathe', colours: [RED, { hex: '#202020' }], size: 0.9, speed: { beats: 1 } }), asked: 3 },
+    // A soft wave through colours of different brightness bunches them too.
+    { what: 'soft wave', f: fx({ effect: 'wave', colours: [DIM, WHITE, OFF, WHITE, DIM], speed: { beats: 1 } }), asked: 3 },
+  ];
+  for (const { what, f, asked } of cases) {
+    const rate = safeRate(f, asked);
+    assert.ok(rate < asked, `${what} not slowed from ${asked}`);
+    for (const step of [0.001, 0.0005]) {
+      const changes = changesPerSecond(f, 32, rate, 4, step);
+      assert.ok(changes <= 6, `${what} at ${rate} cycles a second: ${changes} changes in a second (sampled every ${step * 1000} ms)`);
+    }
+    // At the asked rate it would have broken the rule.
+    assert.ok(changesPerSecond(f, 32, asked, 4) > 6, `${what} would have been fine unslowed`);
+  }
+});
+
+test('light safety holds for every kind, edge, direction and setting at the fastest rate it allows, and below', () => {
+  const colourSets = [[RED], [RED, BLUE, GREEN], [RED, DIM], [DIM, WHITE, OFF, WHITE, DIM], [OFF, RED, DIM, BLUE, OFF, WHITE]];
   for (const effect of EffectLayer.shape.effect.options) {
     for (const edge of ['soft', 'hard'] as const) {
-      for (const [waves, size] of [[1, 0.5], [3, 0.1], [2, 0.9]] as const) {
-        for (const colours of colourSets) {
-          const f = fx({ effect, edge, waves, size, colours, speed: { beats: 0.25 } });
-          // 240 bpm at a quarter beat a cycle: 16 cycles a second asked for.
-          const rate = safeRate(f, cyclesPerSecond(f, 4, 1));
-          const count = waves === 3 ? 32 : 6;
-          const swings = swingsPerSecond(f, count, rate, 2);
-          assert.ok(swings <= 3, `${effect} ${edge} waves ${waves} size ${size} colours ${colours.length}: ${swings} swings a second at ${rate} cycles a second`);
+      for (const direction of ['ltr', 'centreOut', 'outsideIn'] as const) {
+        for (const [waves, size] of [[1, 0.5], [3, 0.1], [2, 0.9]] as const) {
+          for (const colours of colourSets) {
+            const f = fx({ effect, edge, direction, waves, size, colours });
+            const fastest = Number.isFinite(f.maxRate) ? f.maxRate : 16;
+            // Asking a bit more than allowed halves it.
+            if (Number.isFinite(f.maxRate)) assert.equal(safeRate(f, fastest * 1.01), fastest * 1.01 / 2);
+            assert.equal(safeRate(f, fastest), fastest);
+            const count = waves === 3 ? 32 : 7;
+            for (const share of [1, 0.8, 0.55]) {
+              const rate = fastest * share;
+              const changes = changesPerSecond(f, count, rate, Math.min(4, Math.max(2, 3 / rate)));
+              assert.ok(changes <= 6, `${effect} ${edge} ${direction} waves ${waves} size ${size} colours ${colours.length}: ${changes} changes in a second at ${rate} cycles a second`);
+            }
+          }
         }
       }
     }
@@ -374,4 +415,46 @@ test('an effect edited while it runs fades to the new settings and keeps its pla
   const fade = beyondOwnMotion(e, 2 + FRAME, 6);
   assert.ok(fade.worst <= 0.05, `stepped ${fade.worst} beyond its own motion`);
   assert.equal(e.liveState(6, 'off').groups[BG]!.preset, 'bg-wave');
+});
+
+test('effects started at different moments on different groups run in step with the stage clock', () => {
+  const layer: EffectInput = { effect: 'colourFade', colours: [RED, BLUE, GREEN], speed: { beats: 4 } };
+  const free: EffectInput = { effect: 'colourFade', colours: [RED, BLUE], speed: { seconds: 5 } };
+  const e = new Engine(effectsShow(
+    effectPreset('bg-fade', BG, layer), effectPreset('key-fade', 'key-lights', layer),
+    effectPreset('bg-free', BG, free), effectPreset('key-free', 'key-lights', free),
+  ), 0);
+  // A look change in between: the stage clock never starts again.
+  e.apply({ type: 'look', id: 'worship', fade: 0 }, 0);
+  for (let t = 0; t <= 3 + 1e-9; t += FRAME) e.frame(t);
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-fade', fade: 0 }, 3.01);
+  for (let t = 3 + FRAME; t <= 9 + 1e-9; t += FRAME) e.frame(t);
+  e.apply({ type: 'look', id: 'walk-in', fade: 0 }, 9.01);
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-fade', fade: 0 }, 9.01);
+  const inStep = (what: string) => {
+    const a = lightOf(e, 'b6'), b = lightOf(e, 'b1');
+    for (const c of ['r', 'g', 'b', 'i'] as const) assert.ok(Math.abs(a[c] - b[c]) < 1e-6, `${what}: ${c} ${a[c]} and ${b[c]}`);
+  };
+  let started = false;
+  for (let t = 9 + FRAME; t <= 20 + 1e-9; t += FRAME) {
+    // The key lights start the same effect 4.36 s later, between two frames.
+    if (!started && t > 13.37) {
+      e.apply({ type: 'groupPreset', group: 'key-lights', preset: 'key-fade', fade: 0 }, 13.37);
+      started = true;
+    }
+    e.frame(t);
+    if (started) inStep(`beats at ${t.toFixed(3)} s`);
+  }
+  // The same at another tempo, and for an effect counted in seconds.
+  e.apply({ type: 'tempo', bpm: 97 }, 20.01);
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-free', fade: 0 }, 20.01);
+  started = false;
+  for (let t = 20 + FRAME; t <= 30 + 1e-9; t += FRAME) {
+    if (!started && t > 23.3) {
+      e.apply({ type: 'groupPreset', group: 'key-lights', preset: 'key-free', fade: 0 }, 23.3);
+      started = true;
+    }
+    e.frame(t);
+    if (started) inStep(`seconds at ${t.toFixed(3)} s`);
+  }
 });

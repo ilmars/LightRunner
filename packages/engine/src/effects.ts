@@ -3,21 +3,26 @@
 // and the effect's settings, so the same moment always looks the same.
 //
 // Light safety lives here too: no segment's brightness may rise and fall by
-// 20 % or more more than 3 times a second. safeRate() halves an effect's rate
-// (again, if needed) until it doesn't.
+// 20 % or more more than 3 times in any second. safeRate() halves an effect's
+// rate (again, if needed) until it doesn't.
 
 import { resolveColour, type EffectKind, type EffectLayer, type EffectSpeed, type Palette } from '../../shared/src/index.ts';
 import { copy, dark, fromHex, type Light } from './light.ts';
 import type { LayerContext } from './layers.ts';
 
-/** A brightness rise and fall of at least this much counts as a swing. */
+/** A change of brightness of at least this much (after one the other way) counts. */
 const SWING_DEPTH = 0.2;
-/** At most this many swings a second for any one segment. */
-const MAX_SWINGS = 3;
+/**
+ * At most this many such changes in any one second for any one segment: three
+ * rises and three falls, so never more than 3 rise-and-falls a second.
+ */
+const MAX_CHANGES = 6;
 /** Sparkle picks new sparks this many times a cycle. */
 const SPARKLE_SLOTS = 8;
 /** Sparkle's base: the first colour at this brightness. */
 const SPARKLE_BASE = 0.4;
+/** Samples per cycle when the safe rate is measured from the effect itself. */
+const SAMPLES = 1024;
 
 /** An effect layer with its colours looked up once, so rendering does no lookups. */
 export interface CompiledEffect {
@@ -30,8 +35,12 @@ export interface CompiledEffect {
   size: number;
   edge: EffectLayer['edge'];
   intensity: number;
-  /** The most brightness swings (rise and fall by 20 % or more) one segment makes in a cycle. */
-  swings: number;
+  /**
+   * The fastest rate (cycles per second) at which no segment changes brightness by
+   * 20 % or more, one way and then the other, more than 6 times in any one second.
+   * Infinity when its brightness never moves that much.
+   */
+  maxRate: number;
 }
 
 export function compileEffect(layer: EffectLayer, palettes: ReadonlyMap<string, Palette>): CompiledEffect {
@@ -50,9 +59,9 @@ export function compileEffect(layer: EffectLayer, palettes: ReadonlyMap<string, 
     size: layer.size,
     edge: layer.edge,
     intensity: layer.intensity,
-    swings: 0,
+    maxRate: Infinity,
   };
-  fx.swings = swingsPerCycle(fx);
+  fx.maxRate = fastestSafeRate(fx);
   return fx;
 }
 
@@ -63,41 +72,103 @@ export function cyclesPerSecond(fx: CompiledEffect, beatsPerSecond: number, spee
 
 /**
  * The rate actually used: `cyclesPerSecond`, halved (again, if needed) while one
- * segment's brightness swings would come more than 3 times a second. Colour
- * changes at the same brightness are not swings, so they are never slowed.
+ * segment's brightness would rise and fall by 20 % or more more than 3 times in
+ * any one second (see maxRate). Colour changes at the same brightness don't
+ * count, so they are never slowed.
  */
 export function safeRate(fx: CompiledEffect, cyclesPerSecond: number): number {
   let rate = cyclesPerSecond;
-  if (fx.swings <= 0) return rate;
-  while (rate * fx.swings > MAX_SWINGS + 1e-9) rate /= 2;
+  while (rate > fx.maxRate) rate /= 2;
   return rate;
 }
 
 /**
- * The most swings one segment can make in a cycle, counted per kind (and 0 when
- * the brightness never moves by 20 %). Each segment sees one wave, chase block,
- * breath, meteor and fill a cycle; yo-yo passes it twice; sparkle can turn a
- * segment on and off every other of its 8 slots; colour fade changes colour
- * once a cycle, so it can swing at most every other cycle.
+ * How fast an effect may run. A segment's brightness changes are counted with
+ * 20 % hysteresis (a change counts once the brightness has moved 20 % against the
+ * last one); a one-second window may hold at most 6. The bound is for the worst
+ * one-second window, not the average, because some effects bunch their changes
+ * (yo-yo near its turning points, a breathe or a wave through colours of
+ * different brightness).
+ *
+ * - Every segment of a colour fade or a breathe does the same, and every segment of
+ *   a wave through several colours does the same, only later: their changes are
+ *   measured from the effect itself over one period.
+ * - Wave (one colour), chase, meteor and fill change a segment at most twice a cycle,
+ *   at the same moments every cycle, so 6 changes take at least 3 cycles. Yo-yo passes
+ *   each segment twice a cycle (4 changes, bunched near the ends): at most 1 cycle a second.
+ * - Sparkle changes a segment at most once in each of its 8 slots a cycle: on the
+ *   slot's edge (hard) or during its crossfade (soft), so 7 changes take at least
+ *   6 slots (hard) or 5 (soft).
  */
-function swingsPerCycle(fx: CompiledEffect): number {
+function fastestSafeRate(fx: CompiledEffect): number {
   const levels = fx.colours.map((c) => c.i * fx.intensity);
   const top = Math.max(...levels), bottom = Math.min(...levels);
   const first = levels[0]!, last = levels[levels.length - 1]!;
   const deep = (depth: number) => depth >= SWING_DEPTH - 1e-9;
+  const same = levels.every((v) => Math.abs(v - first) < 1e-9);
   const n = levels.length;
+  const soft = fx.edge === 'soft';
+  /** The rate for an effect that changes a segment this many times a cycle, at the same moments every cycle. */
+  const perCycle = (changes: number) => Math.floor(MAX_CHANGES / changes);
   switch (fx.effect) {
-    case 'colourFade': return deep(top - bottom) ? 0.5 : 0;
+    case 'colourFade': return measuredRate(fx, n);
     case 'wave':
-      if (n === 1) return deep(first) && (fx.edge === 'soft' || (fx.size > 0 && fx.size < 1)) ? 1 : 0;
-      return deep(top - bottom) ? Math.max(1, Math.floor(n / 2)) : 0;
-    case 'chase': return deep(top) ? 1 : 0;
-    case 'sparkle': return deep(Math.abs(last - SPARKLE_BASE * first)) ? SPARKLE_SLOTS / 2 : 0;
-    case 'breathe': return deep(top - (1 - fx.size) * bottom) ? 1 : 0;
-    case 'meteor': return deep(first) ? 1 : 0;
-    case 'fill': return deep(top) ? 1 : 0;
-    case 'yoyo': return deep(first) && fx.size < 1 ? 2 : 0;
+      if (n === 1) return deep(first) && (fx.edge === 'soft' || (fx.size > 0 && fx.size < 1)) ? perCycle(2) : Infinity;
+      return measuredRate(fx, 1);
+    // Chase and fill light each cycle in the next colour: with soft edges a dimmer colour
+    // is counted later in its (at most half-cycle) fade, so allow half a cycle for that.
+    case 'chase': return deep(top) ? perCycle(2) - (soft && !same ? 0.5 : 0) : Infinity;
+    case 'sparkle':
+      if (!deep(Math.abs(last - SPARKLE_BASE * first))) return Infinity;
+      return (fx.edge === 'hard' ? MAX_CHANGES : MAX_CHANGES - 1) / SPARKLE_SLOTS;
+    case 'breathe':
+      if (same) return deep(fx.size * first) ? perCycle(2) : Infinity;
+      return measuredRate(fx, n);
+    case 'meteor': return deep(first) ? perCycle(2) : Infinity;
+    case 'fill': return deep(top) ? perCycle(2) - (soft && !same ? 0.5 : 0) : Infinity;
+    case 'yoyo': return deep(first) && fx.size < 1 ? perCycle(4) : Infinity;
   }
+}
+
+const probe = dark();
+
+/**
+ * The fastest safe rate of an effect whose every segment shows the same brightness
+ * over time (perhaps later than the others), measured from one segment over a
+ * period of `period` cycles: the shortest stretch that holds 7 changes, less one
+ * sample for the timing of the samples.
+ */
+function measuredRate(fx: CompiledEffect, period: number): number {
+  const at = { index: 0, count: 1 };
+  const span = Math.round(period * SAMPLES);
+  const changes: number[] = [];
+  let lo = renderEffect(probe, fx, at, 0).i, hi = lo, dir = 0;
+  // One period to settle, then the changes of the next.
+  for (let s = 1; s < 2 * span; s++) {
+    const v = renderEffect(probe, fx, at, s / SAMPLES).i;
+    let changed = false;
+    if (dir !== -1 && hi - v >= SWING_DEPTH) {
+      dir = -1;
+      changed = true;
+    } else if (dir !== 1 && v - lo >= SWING_DEPTH) {
+      dir = 1;
+      changed = true;
+    }
+    if (changed) {
+      lo = hi = v;
+      if (s >= span) changes.push(s / SAMPLES);
+    }
+    lo = Math.min(lo, v);
+    hi = Math.max(hi, v);
+  }
+  const c = changes.length;
+  if (c === 0) return Infinity;
+  let shortest = Infinity;
+  for (let k = 0; k < c; k++) {
+    const j = k + MAX_CHANGES;
+    shortest = Math.min(shortest, changes[j % c]! + period * Math.floor(j / c) - changes[k]!);
+  }
+  return Math.max(1 / SAMPLES, shortest - 1 / SAMPLES);
 }
 
 // ---- Rendering ----
@@ -204,12 +275,13 @@ export function renderEffect(out: Light, fx: CompiledEffect, ctx: Pick<LayerCont
     case 'chase': {
       // The blocks move one segment a step: `steps` steps make one wave length.
       const steps = Math.max(2, Math.round(1 / (fx.waves * (count > 1 ? e * (count - 1) / count : e))));
-      const block = Math.min(1, Math.max(fx.size, 1 / steps));
+      // Whole steps long (at least one), so a segment is never on a block's edge.
+      const block = Math.min(steps, Math.max(1, Math.round(fx.size * steps)));
       const q = phase * steps;
       const k = Math.floor(q);
-      chaseStep(stepA, fx, xw, k / steps, steps, block);
+      chaseStep(stepA, fx, xw, k, steps, block);
       if (soft) {
-        chaseStep(stepB, fx, xw, (k + 1) / steps, steps, block);
+        chaseStep(stepB, fx, xw, k + 1, steps, block);
         blend(out, stepA, stepB, smooth(q - k));
       } else copy(out, stepA);
       break;
@@ -276,11 +348,13 @@ export function renderEffect(out: Light, fx: CompiledEffect, ctx: Pick<LayerCont
 }
 
 /** A chase at one step: lit in its block's colour inside a block, dark between them. */
-function chaseStep(out: Light, fx: CompiledEffect, xw: number, at: number, steps: number, block: number): Light {
+function chaseStep(out: Light, fx: CompiledEffect, xw: number, step: number, steps: number, block: number): Light {
+  // Counted from the start of this cycle, so every cycle steps exactly alike.
+  const cycle = Math.floor(step / steps);
   // Half a step's offset keeps segments clear of the block edges.
-  const v = at - fx.waves * xw + 0.5 / steps;
-  const colour = colourAt(fx, Math.floor(v));
-  return lit(out, colour, frac(v) < block ? 1 : 0);
+  const v = (step - cycle * steps + 0.5) / steps - fx.waves * xw;
+  const colour = colourAt(fx, cycle + Math.floor(v));
+  return lit(out, colour, frac(v) * steps < block ? 1 : 0);
 }
 
 /** Sparkle in one slot: a spark (the last colour at full) or the base (the first colour at 40 %). */
