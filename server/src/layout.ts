@@ -1,7 +1,7 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { findProfile, resolveColour } from '../../packages/shared/src/index.ts';
-import type { ChannelRole, Palette, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, findProfile, resolveColour } from '../../packages/shared/src/index.ts';
+import type { ChannelRole, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
 
 export interface OperatorLook {
   id: string;
@@ -32,7 +32,15 @@ export interface OperatorPreset {
    * The preset as an Any colour pick would make it: its top layer's colour,
    * white, amber and UV, scaled by the layer's intensity (null if it has no layers).
    */
-  light: { hex: string; white: number; amber: number; uv: number } | null;
+  light: LiveLight | null;
+}
+
+/** A light as an Any colour pick would make it: #rrggbb and white, amber and UV 0..1, intensity included. */
+export interface LiveLight {
+  hex: string;
+  white: number;
+  amber: number;
+  uv: number;
 }
 
 export interface OperatorLayout {
@@ -45,6 +53,8 @@ export interface OperatorLayout {
   /** Id of the safe look (Basic lights), or null when the show has none. */
   basicLights: string | null;
   groups: OperatorGroup[];
+  /** The engine's own Basic light (a group Basic lights doesn't list), as an Any colour pick would make it. */
+  basicLight: LiveLight;
   /** In the same order as the bytes of each visualiser frame. */
   fixtures: { id: string; name: string; x: number; y: number; w: number | null; h: number | null }[];
   /** Fixture ids of each group, for tapping a group on the mini visualiser. */
@@ -85,6 +95,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     runningOrder: show.operator.runningOrder.flatMap(describe),
     quickLooks: show.operator.quickLooks.flatMap((q) => describe(q.look).map((l) => ({ ...l, tab: q.tab }))),
     basicLights: show.operator.safeLook ?? null,
+    basicLight: liveLight(SAFE_LIGHT, SAFE_LIGHT.intensity),
     groups: groupIds.flatMap((id) => {
       const g = show.groups.find((x) => x.id === id);
       if (!g) return [];
@@ -110,8 +121,10 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
 function presetLight(preset: Preset, palettes: ReadonlyMap<string, Palette>): OperatorPreset['light'] {
   const top = preset.layers[preset.layers.length - 1];
   if (!top) return null;
-  const c = resolveColour(top.colour, palettes);
-  const k = top.intensity;
+  return liveLight(resolveColour(top.colour, palettes), top.intensity);
+}
+
+function liveLight(c: PaletteColour, k: number): LiveLight {
   const n = parseInt(c.hex.slice(1), 16);
   const hex = `#${[16, 8, 0].map((s) => Math.round(((n >> s) & 255) * k).toString(16).padStart(2, '0')).join('')}`;
   const level = (v: number | undefined) => Math.round((v ?? 0) * k * 1000) / 1000;

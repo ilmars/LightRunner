@@ -692,9 +692,7 @@ function displayColour(hex, x) {
 function runningLight(group, id) {
   const live = parseLive(id);
   if (live) return live;
-  // Basic light: #ffd2a0 with half white, at 80 %.
-  if (id === '__safe') return { colour: '#cca880', white: 0.4, amber: 0, uv: 0 };
-  const light = group?.presets.find((x) => x.id === id)?.light;
+  const light = id === '__safe' ? layout.basicLight : group?.presets.find((x) => x.id === id)?.light;
   if (light) return { colour: light.hex, white: light.white, amber: light.amber, uv: light.uv };
   return { colour: '#000000', white: 0, amber: 0, uv: 0 };
 }

@@ -650,6 +650,8 @@ test('the rig: the layout says which groups have white, amber and UV, and Any co
     assert.deepEqual(extras('drum-cage'), { white: false, amber: false, uv: false });
     const preset = layout.groups.find((g: any) => g.id === 'key-lights').presets[0];
     assert.match(preset.light.hex, /^#[0-9a-f]{6}$/);
+    // The engine's Basic light (#ffd2a0, half white, at 80 %) as an Any colour pick would make it.
+    assert.deepEqual(layout.basicLight, { hex: '#cca880', white: 0.4, amber: 0, uv: 0 });
 
     // Visualiser frames: one RGB triple per fixture, in layout order.
     let frame: Uint8Array | null = null;
