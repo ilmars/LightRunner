@@ -26,7 +26,7 @@ function slug(text: string): string {
 }
 
 /** A slug of the name that no id in `taken` uses: "song-6", then "song-6-2", "song-6-3", ... */
-function uniqueId(name: string, taken: Iterable<string>): string {
+export function uniqueId(name: string, taken: Iterable<string>): string {
   const used = new Set(taken);
   const base = slug(name);
   let id = base;

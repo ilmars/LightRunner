@@ -49,10 +49,16 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('moveItem'), id, to: z.number().int() }),
   /** A new quick look from the chosen groups of the stage. */
   z.object({ type: z.literal('saveQuickLook'), name: z.string(), tab: QuickTab, groups: z.array(id).min(1).max(64) }),
+  /** Keep an Any colour pick: add it to a group's colour list, or to every group of its kind. */
+  z.object({ type: z.literal('addColour'), group: id, colour: hex, name: z.string(), allGroups: z.boolean() }),
+  /** Change the name and/or colour of a colour in a group's list; `sameName` also changes the same-named ones of other groups. */
+  z.object({ type: z.literal('editColour'), preset: id, name: z.string().optional(), colour: hex.optional(), sameName: z.boolean() }),
+  /** Remove a colour from a group's list (refused while a look uses it). */
+  z.object({ type: z.literal('deleteColour'), preset: id }),
 ]);
 export type Command = z.infer<typeof Command>;
 
-const SHOW_EDITS = ['saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook'] as const;
+const SHOW_EDITS = ['saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'addColour', 'editColour', 'deleteColour'] as const;
 /** Commands that change the show rather than the stage. */
 export type ShowEdit = Extract<Command, { type: (typeof SHOW_EDITS)[number] }>;
 /** Commands the engine runs. */

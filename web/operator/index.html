@@ -87,6 +87,7 @@
         <div class="phead">
           <h2 id="pTitle"></h2>
           <span id="pCur" class="cur"><i id="pCurSw"></i><span id="pCurText"></span></span>
+          <button id="pEditBtn" class="ghost" aria-pressed="false">Edit</button>
           <button id="pDone" class="done">Done</button>
         </div>
         <div class="ptabs" role="tablist">
@@ -95,8 +96,46 @@
         </div>
         <div id="pCol" class="pcol">
           <div id="pGrid" class="pgrid"></div>
-          <p id="pAnyLab" class="lab2">Any colour</p>
+          <div class="labrow">
+            <p id="pAnyLab" class="lab2">Any colour</p>
+            <!-- Only while the group runs a colour picked on the strip. -->
+            <button id="pAddOpen" class="ghost pill-add" hidden>＋ Add to colours</button>
+          </div>
           <div id="pAny" class="strip2 hue" aria-label="Any colour"><span id="pAnyH" class="strip-handle" hidden></span></div>
+          <!-- Edit mode: tapping a swatch opens this, prefilled. -->
+          <div id="pEdit" class="padd pedit" hidden>
+            <div class="padd-top">
+              <i id="peSw" class="padd-sw"></i>
+              <input id="peName" class="qs-name" type="text" maxlength="40" placeholder="Name" aria-label="Name" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
+            </div>
+            <div id="peStrip" class="strip2 hue pe-strip" aria-label="Change the colour"><span id="peH" class="strip-handle" hidden></span></div>
+            <p id="peUsed" class="pe-used"></p>
+            <label id="peSameWrap" class="pswitch" hidden>
+              <input id="peSame" type="checkbox" role="switch">
+              <span class="track"><span class="knob"></span></span>
+              <span>Change in every group with this name</span>
+            </label>
+            <div class="padd-btns">
+              <button id="peDelete" class="ghost danger">Delete</button>
+              <button id="peCancel" class="ghost">Cancel</button>
+              <button id="peSave" class="done">Save</button>
+            </div>
+          </div>
+          <div id="pAdd" class="padd" hidden>
+            <div class="padd-top">
+              <i id="paSw" class="padd-sw"></i>
+              <input id="paName" class="qs-name" type="text" maxlength="40" placeholder="e.g. Deep blue" aria-label="Name" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
+            </div>
+            <label class="pswitch">
+              <input id="paAll" type="checkbox" role="switch">
+              <span class="track"><span class="knob"></span></span>
+              <span id="paAllText">Add to every colour group</span>
+            </label>
+            <div class="padd-btns">
+              <button id="paCancel" class="ghost">Cancel</button>
+              <button id="paAddBtn" class="done">Add</button>
+            </div>
+          </div>
         </div>
         <p id="pFx" class="soon" hidden>Effects come later.</p>
       </div>

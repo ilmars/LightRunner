@@ -281,6 +281,40 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .strip2.hue { --grad: linear-gradient(90deg, #ff0000, #ffc800, #00ff00, #00ffc8, #0000ff, #8c00ff, #ff008c, #ff0000); }
 .strip2.cct { --grad: linear-gradient(90deg, #f7d6b4, #f4f8ff); }
 .strip2.cct::before { opacity: 0.7; }
+/* Keep a strip colour: a quiet pill beside the strip's label, and a small form under the strip. */
+.labrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; }
+.labrow .lab2 { margin: 4px 2px 0; }
+.pill-add { flex: none; min-height: 40px; }
+#pEditBtn { min-height: 40px; padding: 0 18px; }
+.padd {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 14px; flex: none; padding: 6px 12px;
+  border-radius: var(--ds-r-tile); background: var(--ds-tile-fill); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+.padd[hidden], .pill-add[hidden], .pswitch[hidden] { display: none; }
+/* Edit mode: the strip row and the Add form give way to the editor. */
+.pcol.editing .labrow, .pcol.editing #pAny { display: none; }
+.pc { position: relative; }
+.pc.editable::after { content: "✎"; position: absolute; bottom: 10px; right: 10px; font-size: 14px; line-height: 1; color: var(--ds-muted-on); opacity: 0.8; }
+.pc.editable span { max-width: calc(100% - 16px); }
+.pc.editing { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.ghost.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.pedit .pe-strip { grid-column: 1 / -1; height: 40px; }
+.pe-strip[hidden] { display: none; }
+.pe-used { grid-column: 1 / -1; margin: 0 2px; font-size: var(--ds-fs-label); color: var(--ds-muted); }
+.pedit .padd-btns { grid-column: 2; justify-self: end; }
+.ghost.danger.armed { color: var(--ds-danger-text); background: var(--ds-danger-fill); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
+.padd-top { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }
+.padd-top .qs-name { flex: 1; min-width: 0; }
+.padd-sw { flex: none; width: 28px; height: 28px; border-radius: 8px; opacity: 0.8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.padd-btns { display: flex; align-items: center; gap: 8px; }
+/* A switch in the picker's quiet style: faint track, blue tint when on. */
+.pswitch { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; color: var(--ds-muted-on); font-size: 15px; cursor: pointer; }
+.pswitch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.pswitch .track { position: relative; flex: none; width: 48px; height: 28px; border-radius: var(--ds-r-pill); background: rgba(148, 170, 210, 0.12); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.pswitch .knob { position: absolute; top: 4px; left: 4px; width: 20px; height: 20px; border-radius: 50%; background: #aab3c5; transition: transform 0.15s; }
+.pswitch input:checked + .track { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.pswitch input:checked + .track .knob { transform: translateX(20px); background: #d6dcea; }
+.pswitch input:focus-visible + .track { outline: 2px solid var(--ds-accent); outline-offset: 2px; }
 .strip-handle { position: absolute; top: 4px; bottom: 4px; left: 0; width: 4px; background: #c9ccd2; border-radius: 2px; box-shadow: 0 0 0 1px #000; }
 /* ---- New quick look sheet (same cover as the colour picker) ---- */
 .lab-note { text-transform: none; letter-spacing: 0; font-weight: 400; }

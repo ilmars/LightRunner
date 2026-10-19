@@ -13,7 +13,7 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OutputRoute, OutputSettings, addSong, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureRunningOrder, isManualCommand,
+  BUILT_IN_PROFILES, Command, OutputRoute, OutputSettings, addColour, addSong, deleteColour, editColour, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureRunningOrder, isManualCommand,
   isShowEdit, moveItem, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook,
   type OflFixture, type Pick, type Scope,
   BLACKOUT, type LiveState, type RuntimeState, type Show, type ShowEdit,
@@ -340,8 +340,9 @@ export class App {
   /** Operator edits to the running order and quick looks. Throws with a plain message when refused. */
   private async editShow(cmd: ShowEdit): Promise<void> {
     const usesStage = cmd.type === 'saveItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook';
-    const stage = usesStage ? await this.stage() : null;
-    if (stage?.look === BLACKOUT) throw new Error('Blackout is on. Bring the lights back, then save.');
+    // Deleting a colour only looks at the stage to keep a lit colour; it is fine during Blackout.
+    const stage = usesStage || cmd.type === 'deleteColour' ? await this.stage() : null;
+    if (usesStage && stage?.look === BLACKOUT) throw new Error('Blackout is on. Bring the lights back, then save.');
     // Nothing below waits until the show is replaced, so no other edit can slip in between.
     const before = this.show;
     let next: Show;
@@ -356,6 +357,18 @@ export class App {
       case 'deleteItem': next = deleteItem(before, cmd.id); break;
       case 'moveItem': next = moveItem(before, cmd.id, cmd.to); break;
       case 'saveQuickLook': next = saveQuickLook(before, { name: cmd.name, tab: cmd.tab, groups: cmd.groups }, stage!).show; break;
+      // A colour doesn't depend on the stage, so it is fine during Blackout.
+      case 'addColour': next = addColour(before, cmd).show; break;
+      case 'editColour': next = editColour(before, cmd).show; break;
+      case 'deleteColour': {
+        // A colour that is lit (or was, before Blackout) stays: the group would name a preset that is gone.
+        next = deleteColour(before, cmd.preset); // refuses while a look uses it
+        const group = before.presets.find((p) => p.id === cmd.preset)!.group;
+        if (stage!.groups[group] === cmd.preset || stage!.beforeBlackout?.[group] === cmd.preset) {
+          throw new Error('That colour is on stage now. Pick another colour for the group first.');
+        }
+        break;
+      }
     }
     await this.operatorSave(next);
     this.remember(before);

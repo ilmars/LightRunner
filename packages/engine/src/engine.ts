@@ -5,7 +5,7 @@
 import {
   BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, findProfile, livePresetId, parseLivePreset,
   type StageCommand, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
-  type Palette, type RuntimeState, type Show,
+  type Palette, type Preset, type RuntimeState, type Show,
 } from '../../shared/src/index.ts';
 import { Crossfade, Ramp } from './fade.ts';
 import { compilePreset, fixedPreset, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
@@ -173,6 +173,7 @@ export class Engine {
 
   /** Load a new or edited show without disturbing what is on stage. */
   setShow(show: Show, now: number): void {
+    const before = this.show as Show | undefined;
     this.show = show;
     const palettes = new Map<string, Palette>(show.palettes.map((p) => [p.id, p]));
     this.presets = new Map(show.presets.map((p) => [p.id, compilePreset(p, palettes)]));
@@ -196,11 +197,14 @@ export class Engine {
     for (const g of show.groups) {
       const run = oldGroups.get(g.id) ?? new GroupRun(g.id);
       run.setFixtures(g.fixtures.map((id) => this.fixtureIndex.get(id)).filter((i): i is number => i !== undefined));
+      // A colour edited while it is lit fades to the new colour instead of snapping.
+      const lit = this.editedColour(run, before, now);
       // Running presets pick up edits; deleted ones keep running until they fade out.
       run.presets.update((key, item) => {
         const fresh = this.presets.get(key);
         return fresh ? { ...item, preset: fresh } : item;
       });
+      if (lit) this.setPreset(run, lit, this.fadeTime ?? lit.fade, now, false);
       this.groups.set(g.id, run);
     }
 
@@ -221,6 +225,10 @@ export class Engine {
     for (const id of this.flash) if (!this.groups.has(id)) this.flash.delete(id);
     this.updateFlashed();
     this.adoptSaved();
+    if (before) {
+      this.adoptAdded(before);
+      this.releaseRemoved(before);
+    }
   }
 
   /** The look whose entries the operator page compares the stage with: the current look, or the safe look on Basic lights. */
@@ -250,6 +258,74 @@ export class Engine {
       if (!saved?.custom || !target || !running || target.group !== group.id) continue;
       if (!sameLight(target, running)) continue;
       group.presets.rekey(key, target.id, { preset: target, time: group.presets.current!.time });
+    }
+  }
+
+  /**
+   * The group runs a plain one-colour preset whose colour the new show changed: the running copy
+   * is set aside under a spare key to fade out, and the new one to fade in. Returns the new
+   * preset to start, or null (everything else just takes the edit in place).
+   */
+  private editedColour(group: GroupRun, before: Show | undefined, now: number): CompiledPreset | null {
+    const key = group.presets.currentKey;
+    const running = group.presets.current;
+    if (!before || !key || !running) return null;
+    const was = before.presets.find((p) => p.id === key);
+    const is = this.show.presets.find((p) => p.id === key);
+    const fresh = this.presets.get(key);
+    if (!was || !is || !fresh || was.layers.length !== 1 || is.layers.length !== 1) return null;
+    if (JSON.stringify(was.layers) === JSON.stringify(is.layers)) return null;
+    if (!group.presets.rekey(key, `${key}~${now}`, running)) return null;
+    return fresh;
+  }
+
+  /**
+   * A colour added to a group's list (Add to colours) while the group runs that
+   * same colour live: the group runs the new preset under its own id, with no
+   * fade, so the picker shows its name. Only presets that weren't in the show
+   * before count, and only when the light is identical.
+   */
+  private adoptAdded(before: Show): void {
+    const known = new Set(before.presets.map((p) => p.id));
+    const added = this.show.presets.filter((p) => !known.has(p.id) && !p.custom);
+    if (!added.length) return;
+    for (const group of this.groups.values()) {
+      const key = group.presets.currentKey;
+      const running = group.presets.current;
+      if (!key || !running || !parseLivePreset(key)) continue;
+      const found = added.find((p) => p.group === group.id && sameLight(this.presets.get(p.id)!, running.preset));
+      const target = found && this.presets.get(found.id);
+      if (target) group.presets.rekey(key, target.id, { preset: target, time: running.time });
+    }
+  }
+
+  /**
+   * The reverse, for an Undo of that edit: a group running a plain single-colour
+   * preset the new show no longer has carries on as the same colour live, rather than
+   * naming a preset that isn't there (the next Save would refuse it).
+   */
+  private releaseRemoved(before: Show): void {
+    const gone = new Map(before.presets.filter((p) => !this.presets.has(p.id)).map((p) => [p.id, p]));
+    if (!gone.size) return;
+    /** The live colour that is the same light as a removed plain preset, or null. */
+    const liveOf = (old: Preset | undefined, group: string): string | null => {
+      if (!old || old.group !== group || old.layers.length !== 1) return null;
+      const layer = old.layers[0]!;
+      if (!('hex' in layer.colour) || layer.colour.white || layer.intensity !== 1) return null;
+      return livePresetId(group, layer.colour.hex);
+    };
+    for (const group of this.groups.values()) {
+      const key = group.presets.currentKey;
+      const running = group.presets.current;
+      const id = key ? liveOf(gone.get(key), group.id) : null;
+      const live = id ? this.presetFor(id, group.id) : undefined;
+      if (key && running && live) group.presets.rekey(key, live.id, { preset: live, time: running.time });
+    }
+    // Blackout remembers what each group ran; the next look brings that back, so it must not name a removed preset.
+    if (this.beforeBlackout) {
+      for (const [gid, pid] of Object.entries(this.beforeBlackout)) {
+        if (pid && gone.has(pid)) this.beforeBlackout[gid] = liveOf(gone.get(pid), gid);
+      }
     }
   }
 
