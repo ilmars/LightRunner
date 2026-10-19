@@ -13,81 +13,76 @@
 <body>
   <div id="banner" class="banner" hidden>Connection lost. Lights keep running. Reconnecting…</div>
 
-  <header class="status">
-    <span class="look-name" id="lookName">—</span>
-    <div class="fadepick">
-      <button id="fadeButton" class="fade-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="fadeMenu">
-        Fade <b id="fadeValue">Auto</b>
-        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
-      </button>
-      <div id="fadeMenu" class="fade-menu" role="menu" hidden>
-        <button role="menuitemradio" data-fade="auto">Auto <small>each look's own</small></button>
-        <button role="menuitemradio" data-fade="0">Instant</button>
-        <button role="menuitemradio" data-fade="1">1 s</button>
-        <button role="menuitemradio" data-fade="3">3 s</button>
-        <button role="menuitemradio" data-fade="5">5 s</button>
-        <button role="menuitemradio" data-fade="10">10 s</button>
+  <!-- Top bar: what is on stage, then only the state that matters right now. -->
+  <header id="topBar" class="topbar">
+    <span class="now">
+      <span id="nowName" class="now-name">—</span>
+      <span id="nowChanged" class="changed" hidden>changed</span>
+    </span>
+    <span id="quiet" class="quiet">
+      <span id="fading" class="q" hidden>fading<span class="fade-bar"><span id="fadeFill"></span></span><b id="fadeLeft"></b></span>
+      <span id="flashNote" class="q flash-note" hidden></span>
+      <div class="fadepick">
+        <button id="fadeButton" class="fade-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="fadeMenu">
+          Fade <b id="fadeValue">Auto</b>
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div id="fadeMenu" class="fade-menu" role="menu" hidden>
+          <button role="menuitemradio" data-fade="auto">Auto <small>each look's own</small></button>
+          <button role="menuitemradio" data-fade="0">Instant</button>
+          <button role="menuitemradio" data-fade="1">1 s</button>
+          <button role="menuitemradio" data-fade="3">3 s</button>
+          <button role="menuitemradio" data-fade="5">5 s</button>
+          <button role="menuitemradio" data-fade="10">10 s</button>
+        </div>
       </div>
-    </div>
-    <span id="fade" class="fade" hidden><span class="fade-bar"><span id="fadeFill"></span></span><span id="fadeText"></span></span>
-    <span class="link" id="link"><span class="dot"></span><span id="linkText">Connecting</span></span>
+      <span class="q link" id="link"><span class="dot"></span><span id="linkText">Connecting</span></span>
+    </span>
+    <span id="outputNote" class="output-note" hidden><span class="dot"></span><span id="outputText"></span></span>
     <span class="clock" id="clock"></span>
     <a class="gear" href="/settings/" aria-label="Settings" title="Settings (PIN)">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.3 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.3-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
     </a>
   </header>
 
-  <div id="dmxBar" class="dmx-bar" hidden>
-    <span id="dmxText"></span>
-    <a href="/settings/">Settings</a>
-  </div>
+  <!-- Left column: stage preview (looking only), then the running order. -->
+  <aside class="left">
+    <canvas id="stage" class="stage" aria-label="Stage view"></canvas>
+    <nav class="order" aria-label="Running order">
+      <!-- Task 9 puts the Edit button and the Add song row here. -->
+      <div id="orderHead" class="order-head"></div>
+      <div id="runningOrder" class="order-list"></div>
+      <div id="orderFoot" class="order-foot"></div>
+    </nav>
+  </aside>
 
-  <canvas id="stage" class="stage" aria-label="Stage view"></canvas>
-
-  <main class="middle">
-    <section id="looks" class="looks" aria-label="Looks"></section>
-    <button id="next" class="next" aria-label="Next look">
-      <span class="next-label">Next</span>
-      <span id="nextName" class="next-name">—</span>
-      <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6"/></svg>
-    </button>
-    <section id="dimmerPanel" class="panel dimmer-panel" hidden aria-label="Group dimmers">
-      <div class="panel-head">
-        <h2>Dimmers</h2>
-        <button id="allFull" class="ghost">All to 100%</button>
-        <button id="dimmersClose" class="ghost">Close</button>
-      </div>
-      <div id="dimmers" class="dimmers big"></div>
-    </section>
-    <section id="panel" class="panel" hidden aria-label="Group presets">
-      <div class="panel-head">
-        <h2 id="panelTitle"></h2>
-        <button id="release" class="ghost" hidden>Release</button>
-        <button id="panelClose" class="ghost" aria-label="Close">Close</button>
-      </div>
-      <div id="panelPresets" class="presets"></div>
-    </section>
+  <!-- Right column. -->
+  <main class="right">
+    <!-- Task 8: Quick looks tabs and grid. -->
+    <section id="quickLooks" class="block quick-looks" aria-label="Quick looks"></section>
+    <!-- Task 7: group rows, Save to … / Back to …, and the colour picker. -->
+    <section id="details" class="block details" aria-label="Details"></section>
   </main>
 
-  <nav id="groups" class="groups" aria-label="Groups"></nav>
-
-  <footer class="controls">
-    <div class="masterbox">
-      <div id="masterFader" class="dimmers"></div>
-      <button id="dimmersToggle" class="dimmers-toggle" aria-expanded="false" aria-controls="dimmerPanel" aria-label="Group dimmers">
-        <small id="dimmedCount" class="count"></small>
-        <span id="miniLevels" class="mini-levels" aria-hidden="true"></span>
-        <span class="label">Groups</span>
-      </button>
+  <!-- Bottom bar. -->
+  <footer class="bottom">
+    <div id="masterFader" class="master" aria-label="Master">
+      <div class="master-label"><span>Master</span><b id="masterValue">100%</b></div>
+      <div id="masterTrack" class="master-track" role="slider" aria-label="Master" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" tabindex="0">
+        <div id="masterFill" class="master-fill"></div>
+        <div id="masterHandle" class="master-handle"></div>
+      </div>
     </div>
-    <div class="stack">
-      <button id="undo" class="action" disabled>
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg>
-        Undo
-      </button>
-      <button id="backToLook" class="action">Back to look</button>
-    </div>
-    <button id="safe" class="action safe">Safe</button>
+    <!-- Task 10: Flash buttons (All, then one per group). -->
+    <div id="flashArea" class="flash-area" aria-label="Flash"></div>
+    <button id="undo" class="action undo" disabled>
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg>
+      Undo
+    </button>
+    <button id="next" class="action next" aria-label="Next">
+      <small>Next ▸</small>
+      <span id="nextName" class="next-name">—</span>
+    </button>
     <button id="blackout" class="action blackout"><span class="hold"></span><span class="label">Blackout<small>hold 1 s</small></span></button>
   </footer>
 
