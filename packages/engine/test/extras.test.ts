@@ -157,6 +157,39 @@ test('Any colour with white, amber and UV runs a live colour that Undo and a res
   assert.equal(e.liveState(5, 'ok').groups.audience.preset, 'live:audience:#00ff80');
 });
 
+test('a slider drag (Any colour sends that continue the first) is one Undo step', () => {
+  const e = new Engine(extrasShow());
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-amber', fade: 0 }, 0);
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-uv', fade: 0 }, 1);
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#ff0000', amber: 0.01, fade: 0.2 }, 2);
+  assert.equal(e.recorded, true, 'the first send of a drag is an Undo step');
+  for (let k = 2; k <= 31; k++) {
+    assert.equal(e.apply({ type: 'groupColour', group: 'audience', colour: '#ff0000', amber: k / 100, fade: 0.2, continues: true }, 2 + k * 0.04), null);
+    assert.equal(e.recorded, false);
+  }
+  assert.equal(e.liveState(4, 'ok').groups.audience.preset, 'live:audience:#ff0000:a31');
+  assert.equal(e.apply({ type: 'undo' }, 4), null);
+  assert.equal(e.liveState(4, 'ok').groups.audience.preset, 'aud-uv');
+  assert.equal(e.apply({ type: 'undo' }, 5), null);
+  assert.equal(e.liveState(5, 'ok').groups.audience.preset, 'aud-amber');
+});
+
+test('a continued Any colour send after something else changed the group is its own Undo step', () => {
+  const e = new Engine(extrasShow());
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-amber', fade: 0 }, 0);
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#ff0000', uv: 0.5, fade: 0.2 }, 1);
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-uv', fade: 0 }, 2);
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#ff0000', uv: 0.6, fade: 0.2, continues: true }, 3);
+  assert.equal(e.recorded, true);
+  // On another group, too.
+  e.apply({ type: 'groupColour', group: 'back-wall', colour: '#00ff00', fade: 0.2, continues: true }, 4);
+  assert.equal(e.recorded, true);
+  // And after an Undo.
+  e.apply({ type: 'undo' }, 5);
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#ff0000', uv: 0.7, fade: 0.2, continues: true }, 6);
+  assert.equal(e.recorded, true);
+});
+
 test('Save adopts a live colour with amber when the custom preset has the same amber', () => {
   const show = extrasShow();
   show.looks.push({ id: 'mine', name: 'Mine', groups: [{ group: 'audience', preset: 'aud-low' }] });

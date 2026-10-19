@@ -161,6 +161,8 @@ export class Engine {
   private history: Snapshot[] = [];
   /** True when the last apply() added an Undo step. */
   recorded = false;
+  /** The group and live preset of the last Any colour send that added an Undo step, for the drag it starts. */
+  private lastColourStep: { group: string; key: string } | null = null;
   private lastLook: string | null = null;
   /** Operator's fade time for look and preset changes; null = each look's own. */
   private fadeTime: number | null = null;
@@ -263,7 +265,21 @@ export class Engine {
   /** Apply a command. Returns an error message, or null when it worked. */
   apply(cmd: StageCommand, now: number): string | null {
     this.recorded = false;
-    if (cmd.type === 'undo') return this.undo(now);
+    if (cmd.type === 'undo') {
+      this.lastColourStep = null;
+      return this.undo(now);
+    }
+    // A later send of the same Any colour drag joins the drag's one Undo step,
+    // as long as nothing else has changed the group since.
+    if (cmd.type === 'groupColour' && cmd.continues) {
+      const step = this.lastColourStep;
+      const group = this.groups.get(cmd.group);
+      if (step && group && step.group === cmd.group && group.presets.currentKey === step.key) {
+        const error = this.run(cmd, now);
+        step.key = group.presets.currentKey ?? step.key;
+        return error;
+      }
+    }
     if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || cmd.type === 'groupColour' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') {
       const before = this.snapshot();
       const error = this.run(cmd, now);
@@ -272,6 +288,8 @@ export class Engine {
         this.history.push(before);
         if (this.history.length > UNDO_STEPS) this.history.shift();
         this.recorded = true;
+        const key = cmd.type === 'groupColour' ? this.groups.get(cmd.group)?.presets.currentKey : null;
+        this.lastColourStep = key ? { group: (cmd as { group: string }).group, key } : null;
       }
       return error;
     }

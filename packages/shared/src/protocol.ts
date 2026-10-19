@@ -22,10 +22,14 @@ export const Command = z.discriminatedUnion('type', [
   /** Set only the groups a look lists, leaving the current look and the other groups alone. */
   z.object({ type: z.literal('quickLook'), id, fade }),
   z.object({ type: z.literal('groupPreset'), group: id, preset: id, fade }),
-  /** Any colour: run this exact colour (with optional white, amber and UV) on a group, as a live preset. */
+  /**
+   * Any colour: run this exact colour (with optional white, amber and UV) on a group, as a live preset.
+   * `continues`: a later send of the same drag, which adds no Undo step of its own.
+   */
   z.object({
     type: z.literal('groupColour'), group: id, colour: hex,
     white: unit.optional(), amber: unit.optional(), uv: unit.optional(), fade,
+    continues: z.boolean().optional(),
   }),
   /** Hold the groups at full white while `on`; snaps, and is not saved or undone. */
   z.object({ type: z.literal('flash'), groups: z.array(id).max(64), on: z.boolean() }),

@@ -611,6 +611,28 @@ test('Compare with a file that removes Basic lights leaves a Basic lights first,
   assert.equal((await api(app, 'GET', '/api/layout')).body.basicLights, layout.basicLights);
 }));
 
+test('a slider drag after a Save is one Undo step, so two Undos put the show back', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  const before = savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')?.preset;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupColour', group: 'back-wall', colour: '#12ab34', fade: 0 }), null);
+  assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+  const custom = savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')!.preset;
+  await waitFor(() => t.state()?.groups['back-wall'].preset === custom, 2000, 'the stage to run the saved preset');
+  // The drag: a first send, then 30 that continue it.
+  assert.equal(await t.send({ type: 'groupColour', group: 'back-wall', colour: '#12ab34', white: 0.01, fade: 0.2 }), null);
+  for (let k = 2; k <= 31; k++) {
+    assert.equal(await t.send({ type: 'groupColour', group: 'back-wall', colour: '#12ab34', white: k / 100, fade: 0.2, continues: true }), null);
+  }
+  await waitFor(() => t.state()?.groups['back-wall'].preset === 'live:back-wall:#12ab34:w31', 2000, 'the last send of the drag');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  await waitFor(() => t.state()?.groups['back-wall'].preset === custom, 2000, 'Undo to bring back the saved preset');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')?.preset, before, 'the second Undo takes back the Save');
+}));
+
 test('the rig: the layout says which groups have white, amber and UV, and Any colour with amber reaches the key lights', async () => {
   const dir = tempDir();
   const app = new App({
