@@ -174,6 +174,29 @@ test('the layout lists the running order, quick looks and white-only groups', as
   }
 });
 
+test('a show imported without a running order gets one in the layout', async () => {
+  const dir = tempDir();
+  const app = makeApp(dir);
+  try {
+    await app.start();
+    const show = (await api(app, 'GET', '/api/show')).body;
+    show.operator.runningOrder = [];
+    show.operator.quickLooks = [];
+    show.operator.safeLook = undefined;
+    show.looks = show.looks.filter((l: any) => l.name !== 'Basic lights' && !/^Song \d$/.test(l.name));
+    assert.equal((await api(app, 'PUT', '/api/show', show)).status, 200);
+    const { body: layout } = await api(app, 'GET', '/api/layout');
+    assert.ok(layout.basicLights);
+    assert.equal(layout.runningOrder[0].id, layout.basicLights);
+    assert.ok(layout.runningOrder.length > 1);
+    const saved = parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8')));
+    assert.ok(saved.operator.runningOrder.length > 1);
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a restart restores the last look, master and group presets', async () => {
   const dir = tempDir();
   try {

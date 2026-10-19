@@ -273,6 +273,8 @@ export class App {
 
   /** Replace the show (programmer edits, import). Saves it with a backup first. */
   async setShow(show: Show): Promise<void> {
+    // A show that arrives without a running order (import, restore, merge) gets one, as at start.
+    if (!show.operator.runningOrder.length) show = ensureRunningOrder(show);
     this.store.saveShow(show);
     this.show = show;
     this.post({ type: 'show', show: this.engineShow() });
