@@ -146,6 +146,23 @@ export function ensureRunningOrder(show: Show): Show {
   return out;
 }
 
+/**
+ * Keeps the rule the operator page relies on: a safe look (Basic lights) always
+ * exists, it is first in the running order and nowhere else in it. A show that
+ * lost it (Compare with a file, an old Settings choice) gets an empty "Basic
+ * lights" look, or the look of that name if there is one.
+ */
+export function ensureBasicLights(show: Show): Show {
+  const out = structuredClone(show);
+  let safeId = out.operator.safeLook;
+  if (!safeId || !out.looks.some((l) => l.id === safeId)) {
+    safeId = out.looks.find((l) => l.name === BASIC)?.id ?? addLook(out, BASIC, []);
+    out.operator.safeLook = safeId;
+  }
+  out.operator.runningOrder = [safeId, ...out.operator.runningOrder.filter((id) => id !== safeId)];
+  return out;
+}
+
 /** Replaces what a look holds with the stage as it is going; the look keeps its id, name and place. */
 export function saveItem(show: Show, lookId: string, stage: Stage): Show {
   const out = structuredClone(show);

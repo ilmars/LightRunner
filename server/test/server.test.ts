@@ -585,3 +585,28 @@ test('after Undo of a Save, a restart still lights the group in the same colour'
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('Compare with a file that removes Basic lights leaves a Basic lights first, and Settings no longer moves it', () => withApp(async (app) => {
+  const before = (await api(app, 'GET', '/api/layout')).body;
+  const safe = before.basicLights;
+  const incoming = (await api(app, 'GET', '/api/show')).body;
+  incoming.looks = incoming.looks.filter((l: any) => l.id !== safe);
+  incoming.operator.runningOrder = incoming.operator.runningOrder.filter((id: string) => id !== safe);
+  delete incoming.operator.safeLook;
+  const preview = await api(app, 'POST', '/api/import/preview', incoming);
+  assert.equal(preview.status, 200);
+  assert.ok(preview.body.items.some((i: any) => i.kind === 'look' && i.id === safe && i.change === 'removed'));
+  const applied = await api(app, 'POST', '/api/import/apply', { token: preview.body.token, picks: [{ kind: 'look', id: safe, change: 'removed' }] });
+  assert.equal(applied.status, 200);
+  const layout = (await api(app, 'GET', '/api/layout')).body;
+  assert.ok(layout.basicLights);
+  assert.equal(layout.runningOrder[0].id, layout.basicLights);
+  assert.equal(layout.runningOrder[0].name, 'Basic lights');
+  assert.equal(layout.runningOrder.filter((l: any) => l.id === layout.basicLights).length, 1);
+  assert.deepEqual(layout.runningOrder.slice(1).map((l: any) => l.id), before.runningOrder.slice(1).map((l: any) => l.id));
+
+  // The Settings page can't point Basic lights at another look any more.
+  const song = layout.runningOrder[1].id;
+  assert.equal((await api(app, 'PUT', '/api/settings', { safeLook: song })).status, 200);
+  assert.equal((await api(app, 'GET', '/api/layout')).body.basicLights, layout.basicLights);
+}));

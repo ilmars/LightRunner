@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  addSong, applyPicks, checkReferences, cleanName, deleteItem, ensureRunningOrder, livePresetId, moveItem,
+  addSong, applyPicks, checkReferences, cleanName, deleteItem, ensureBasicLights, ensureRunningOrder, livePresetId, moveItem,
   parseLivePreset, parseShow, renameItem, saveItem, saveQuickLook, BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET,
   type Show, type Stage,
 } from '../src/index.ts';
@@ -302,4 +302,39 @@ test('a stray Blackout on a group is saved as a dark "Off" preset, reused per gr
   assert.equal(off[0]!.group, 'background');
   assert.ok(off[0]!.layers.every((l) => l.intensity === 0));
   assert.equal(look(s, 'Song 2').groups[0]!.preset, off[0]!.id);
+});
+
+test('Basic lights is made again when the show has lost it, and put first', () => {
+  const s = ready();
+  const songs = s.operator.runningOrder.slice(1);
+  const lost = structuredClone(s);
+  lost.looks = lost.looks.filter((l) => l.id !== s.operator.safeLook);
+  lost.operator.runningOrder = songs;
+  lost.operator.safeLook = undefined;
+  const fixed = ensureBasicLights(lost);
+  const safe = fixed.operator.safeLook!;
+  assert.equal(nameOf(fixed, safe), 'Basic lights');
+  assert.deepEqual(fixed.looks.find((l) => l.id === safe)!.groups, []);
+  assert.deepEqual(fixed.operator.runningOrder, [safe, ...songs]);
+  assert.deepEqual(checkReferences(fixed), []);
+  assert.equal(lost.operator.safeLook, undefined, 'the input is not changed');
+  // A safe look that was cleared but is still in the show is used again, not copied.
+  const cleared = structuredClone(s);
+  cleared.operator.safeLook = undefined;
+  assert.deepEqual(ensureBasicLights(cleared), s);
+});
+
+test('Basic lights moves to the front and appears only once', () => {
+  const s = ready();
+  const [safe, ...songs] = s.operator.runningOrder;
+  const middle = structuredClone(s);
+  middle.operator.runningOrder = [songs[0]!, songs[1]!, safe!, ...songs.slice(2)];
+  assert.deepEqual(ensureBasicLights(middle).operator.runningOrder, s.operator.runningOrder);
+  const twice = structuredClone(s);
+  twice.operator.runningOrder = [safe!, songs[0]!, safe!, ...songs.slice(1), safe!];
+  assert.deepEqual(ensureBasicLights(twice).operator.runningOrder, s.operator.runningOrder);
+  const empty = structuredClone(s);
+  empty.operator.runningOrder = [];
+  assert.deepEqual(ensureBasicLights(empty).operator.runningOrder, [safe]);
+  assert.deepEqual(ensureBasicLights(s), s, 'a show that keeps the rule is left as it is');
 });

@@ -169,10 +169,6 @@ function render() {
     'Used when you switch to Art-Net or sACN.';
 
   $('manualForOperators').checked = s.manualForOperators;
-  const safe = $('safeLook');
-  safe.replaceChildren(new Option('Built-in warm white wash', ''));
-  for (const l of s.looks) safe.append(new Option(`Look: ${l.name}`, l.id));
-  safe.value = s.safeLook ?? '';
 
   $('frameRate').value = String(s.frameRate);
   $('gamma').value = String(s.gamma);
@@ -214,7 +210,7 @@ setInterval(async () => {
 
 function changedFields() {
   const out = {};
-  const keys = ['showName', 'output', 'frameRate', 'gamma', 'manualForOperators', 'safeLook'];
+  const keys = ['showName', 'output', 'frameRate', 'gamma', 'manualForOperators'];
   for (const k of keys) if (JSON.stringify(draft[k]) !== JSON.stringify(saved[k])) out[k] = draft[k];
   if (draft.universe !== undefined && draft.universe !== saved.universes[0]) out.universe = draft.universe;
   return out;
@@ -248,7 +244,6 @@ $('sacnPriority').addEventListener('input', (e) => { draft.output.priority = Num
 $('enttecPort').addEventListener('change', (e) => { draft.output.port = e.target.value; markDirty(); });
 $('universe').addEventListener('input', (e) => { draft.universe = Number(e.target.value); markDirty(); });
 $('manualForOperators').addEventListener('change', (e) => { draft.manualForOperators = e.target.checked; markDirty(); });
-$('safeLook').addEventListener('change', (e) => { draft.safeLook = e.target.value || null; markDirty(); });
 $('frameRate').addEventListener('change', (e) => { draft.frameRate = Number(e.target.value); markDirty(); });
 $('gamma').addEventListener('input', (e) => { draft.gamma = Number(e.target.value); markDirty(); });
 $('showName').addEventListener('input', (e) => { draft.showName = e.target.value; markDirty(); });

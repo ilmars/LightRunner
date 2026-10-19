@@ -12,7 +12,7 @@ import { extname, join, normalize, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  BUILT_IN_PROFILES, Command, OutputSettings, addSong, applyPicks, deleteItem, describeMode, diffShows, ensureRunningOrder, isManualCommand,
+  BUILT_IN_PROFILES, Command, OutputSettings, addSong, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureRunningOrder, isManualCommand,
   isShowEdit, moveItem, oflToProfile, parseShow, renameItem, saveItem, saveQuickLook,
   type OflFixture, type Pick, type Scope,
   BLACKOUT, type LiveState, type RuntimeState, type Show, type ShowEdit,
@@ -133,7 +133,7 @@ export class App {
     const loaded = this.store.loadShow();
     if (loaded.problem) this.log(`WARNING: ${loaded.problem}`);
     this.log(`Loaded show "${loaded.show.name}" from ${loaded.source}`);
-    const migrated = ensureRunningOrder(loaded.show);
+    const migrated = ensureBasicLights(ensureRunningOrder(loaded.show));
     if (JSON.stringify(migrated) !== JSON.stringify(loaded.show)) {
       this.store.saveShow(migrated);
       this.log('Gave the show a running order');
@@ -389,8 +389,9 @@ export class App {
 
   /** Save the show, hand it to the engine and send every device the new layout. */
   private async putShow(show: Show, backup = true): Promise<void> {
-    // A show that arrives without a running order (import, restore, merge) gets one, as at start.
-    if (!show.operator.runningOrder.length) show = ensureRunningOrder(show);
+    // A show that arrives without a running order (import, restore, merge) gets one, as at start,
+    // and Basic lights always exists and comes first, whatever Compare with a file took away.
+    show = ensureBasicLights(ensureRunningOrder(show));
     this.store.saveShow(show, { backup });
     this.show = show;
     this.post({ type: 'show', show: this.engineShow() });
@@ -527,7 +528,6 @@ export class App {
       frameRate: s.frameRate,
       gamma: s.gamma,
       manualForOperators: this.show.operator.manualForOperators,
-      safeLook: this.show.operator.safeLook ?? null,
       looks: this.show.looks.map((l) => ({ id: l.id, name: l.name })),
       universes: [...new Set(this.show.fixtures.map((f) => f.universe))].sort((a, b) => a - b),
       fixtures: this.show.fixtures.length,
@@ -822,7 +822,6 @@ export class App {
       if (body.frameRate !== undefined) show.settings.frameRate = Number(body.frameRate);
       if (body.gamma !== undefined) show.settings.gamma = Number(body.gamma);
       if (typeof body.manualForOperators === 'boolean') show.operator.manualForOperators = body.manualForOperators;
-      if (body.safeLook !== undefined) show.operator.safeLook = body.safeLook ? String(body.safeLook) : undefined;
       if (body.universe !== undefined) {
         // Move the whole rig to one universe (only for single-universe shows).
         const used = new Set(show.fixtures.map((f) => f.universe));
