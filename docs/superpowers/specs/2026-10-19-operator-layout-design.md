@@ -81,7 +81,7 @@ The current item group by group: one card per group with its name, its colour or
 The header holds **Save to Song 3**, which writes what's on stage into that running-order item, and **Back to Song 3**, which drops the live changes and fades back to what's saved.
 
 ### Bottom bar
-Master fader, **Flash** buttons you hold (All, Key, Bars), Undo, **Next ▸** showing the next item's name, and Blackout (hold 1 s).
+Master fader, **Flash** buttons you hold (All, plus one per group), Undo, **Next ▸** showing the next item's name, and Blackout (hold 1 s).
 
 ## How a change becomes part of the show
 
@@ -99,7 +99,7 @@ Ilmārs's answers (19 Oct 2026):
 - **Unsaved changes are dropped when another item is started.** No question, no draft. Live tweaks are temporary unless saved, as in Lightkey.
 - **Save needs no PIN, but it is a hold** (like Blackout), so it can't happen by a stray tap. Undo can take back the last Save. ＋ add needs no PIN either.
 - **Basic lights replaces the Safe button.** It is the show's Safe look (`operator.safeLook`), stays fixed at the top of the running order, and tapping it also resets Master and group dimmers, as Safe does today (see DECISIONS: Safe resets over 2 s). The HTTP API's Safe keeps working and does the same thing.
-- **Quick looks are made on the operator page:** set the stage, then hold **Save as quick look** and give it a name and a tab. It's the same flow as Save to Song 3. Today's imported looks (Walk-in, Worship, Response, Prayer, All white) become the first quick looks.
+- **Quick looks are made on the operator page:** set the stage, then **Save stage as quick look** and give it a name, a tab and the groups it sets (see Detailed UI). Today's imported looks (Walk-in, Worship, Response, Prayer, All white) become the first quick looks.
 
 Calls made while writing this up (Claude's, open to change):
 
@@ -107,7 +107,7 @@ Calls made while writing this up (Claude's, open to change):
 - **Starting content:** on first use, the running order is Basic lights (from the current Safe look), Song 1 to 5, Sermon and Midweek calm, each starting as a copy of the closest imported look.
 - **Quick looks set only the groups they list.** Other groups keep what they have, so a "Key lights low" quick look can be laid over any song.
 - **Saving stores the item's own copy** of each group's colour, effect and level. A Save never changes a preset or quick look that something else uses. How the show file holds this is up to the builder (new presets per item, or colours stored in the look).
-- **Flash:** while held, the group goes to full intensity in its current colour (white if it is dark), ignoring Master and group dimmers but not Blackout. It snaps in and out, so like short fades it is outside the 5% jump check. Buttons: All, Key (Key lights), Bars (Background and B8 side bar). Which groups get a Flash button can become a setting later.
+- **Flash** ignores Master and group dimmers but not Blackout. It snaps in and out, so like short fades it is outside the 5% jump check. (Buttons and colour were decided later; see Detailed UI.)
 - **Undo** covers starting items, quick looks, Save, Save as quick look and ＋ add. It doesn't cover each dimmer drag; Back to Song 3 covers those.
 - **The group card picker** (colours, presets, effects) is designed in the detailed UI step.
 
@@ -118,18 +118,44 @@ Calls made while writing this up (Claude's, open to change):
 - New on the server: Flash (hold and release), saving the stage into a running-order item or a new quick look, adding, renaming, deleting and reordering running-order items, quick looks as a separate list from the running order, and Undo for all of these.
 - STATUS's "Record look / edit colours" (item 3) is largely this design. Its open question about dimmer levels is answered above. SPEC's Safe button becomes Basic lights; add that to DECISIONS when it's built. These are commands through `App.command()` like everything else.
 
-## Detailed UI (in progress)
+## Detailed UI
 
-A clickable sketch at the iPad's real size is in [2026-10-19-operator-ui-sketch.html](2026-10-19-operator-ui-sketch.html). Open it in a browser; it needs no server.
+Agreed with Ilmārs on 19 Oct 2026. A clickable sketch at the iPad's real size is in [2026-10-19-operator-ui-sketch.html](2026-10-19-operator-ui-sketch.html). Open it in any browser; it needs no server. The sketch is for look and behaviour only: its code isn't meant to be reused.
 
-Decided so far:
+### Details: group rows
+- One row per group: the group name, a **colour chip** (colour square plus preset name, e.g. "Silti balts") and a wide horizontal **dimmer bar** with its percentage.
+- **Dimmers are calm:** grey fill on a dark track with a **faint tint** of the group's colour (about 14 %) and a small dim handle. They are not filled in full colour.
+- **Save to …** fills while held (1 s). **Back to …** only shows when there are changes.
 
-- **Group rows in the details:** one row per group, with the group name, a colour chip (colour square plus preset name, e.g. "Silti balts") and a wide horizontal dimmer bar with its percentage.
-- **Dimmers are calm:** grey fill on a dark track with a **faint tint** of the group's colour (about 14 %), and a small dim handle. They are not filled in full colour.
-- **Colour picker:** tapping a group's colour chip opens the picker over the details area, so the running order and stage preview stay visible. It shows the group's presets as swatches, plus an "Any colour" strip; Front lights (white only) get whites and a warm-to-cool strip instead. Picking changes the stage immediately and marks the item changed. **Done** closes the picker. There's an Effects tab for later.
-- **Save** fills while held (1 s). **Back to …** only shows when there are changes.
+### Colour picker
+- Tapping a group's colour chip opens the picker **over the details area**, so the running order and stage preview stay visible.
+- It shows the group's presets as swatches (slightly dimmed), plus an **Any colour** strip. Front lights (white only) get whites (3200K, 5600K, 6500K) and a warm-to-cool strip instead.
+- Picking changes the stage straight away and marks the item changed. **Done** closes the picker. An **Effects** tab is there for later.
 
-Still open: how the running order is edited. The sketch has two ways to compare: an **Edit** button that turns the list into rows with delete, rename and drag handles, or **holding** a song for a menu (Rename, Move up, Move down, Duplicate, Delete). After that come Save as quick look, the quick looks tabs, Flash and the top bar.
+### Running order editing
+- An **Edit** button in the list's header. While editing, each song is a row with delete (tap ⊖, then tap Delete to confirm), its name as a text field, and a drag handle to reorder. Basic lights stays fixed at the top.
+- **Nothing goes on stage while editing**: tapping rows doesn't start them. **Done** ends editing.
+- **＋ Add song** puts a new song after the current one, holding what's on stage now.
+- (Turned down: holding a song for a menu.)
+
+### Save stage as quick look
+- A dashed **＋ Save stage as quick look** tile at the end of the quick looks opens a sheet over the details with: **Name**, **Tab** (Plain, Colours, Effects; starts on the tab being viewed) and **Groups it sets** (all on to start with; tap a group to leave it out, and left-out groups keep what they have when the quick look is used).
+- **Save** is a plain tap here, not a hold, because a new quick look overwrites nothing. Cancel closes the sheet.
+
+### Flash
+- Buttons: **All**, plus **one per group** (Front, Key, Back, Drum, B8), in the bottom bar. They fit at 58 px wide with Master at 220 px.
+- While held, the groups go to full **white**, whatever colour they had.
+- A pressed button turns quiet grey, not bright, so it doesn't light the operator's face.
+
+### Top bar
+Only the state that matters right now takes extra room; everything else is quiet grey.
+- **Normal:** name of what's on stage, Fade menu, connection, clock, ⚙.
+- **Changed:** an amber "changed" after the name.
+- **Fading:** "Song 3 → Song 4", a thin progress bar and the time left (today's fade countdown, moved here).
+- **Flash held:** "Flash: Key" while held.
+- **Problem with the lights** (node not answering, or another desk also sending): an amber message, e.g. "Lights not answering: check the DMX box (192.168.0.114)", replacing the quiet items until it's fixed.
+- **Send DMX off:** "Not sending to the lights (Lightkey has them)". **There's no Take over button here: turning sending back on stays in Settings, behind the PIN.**
+- Losing the tablet's own connection keeps today's red banner across the top: the one thing allowed to be loud.
 
 ## Left to the builder
 

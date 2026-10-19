@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Operator page, detailed v3</title>
+<title>Operator page sketch</title>
 <style>
   :root {
     --bg: #0b0c0e; --panel: #15171b; --raised: #1d2026; --line: #2c3038;
@@ -120,19 +120,33 @@
   .omenu button.red { color: #d98a8a; }
   .omenu button.sure { background: var(--danger); color: #f2d6d6; }
   .omenu input { font: inherit; font-size: 17px; color: var(--text); background: #111317; border: 1px solid var(--line); border-radius: 7px; padding: 9px; margin: 4px; }
+  .newq { border-style: dashed; color: var(--dim); background: transparent; grid-column: span 2; }
+  .qgrid { overflow: hidden; }
+  .seg { display: flex; gap: 6px; }
+  .seg button { padding: 10px 16px; font-size: 15px; background: transparent; color: var(--dim); }
+  .seg button.on { background: var(--raised); color: #e3e6ea; border-color: #8e959f; }
+  .gpick { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .gpick button { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px; min-height: 74px; font-size: 14px; text-align: left; }
+  .gpick button i { width: 100%; height: 8px; border-radius: 4px; opacity: .6; }
+  .gpick button.off { opacity: .4; border-style: dashed; }
+  .gpick button .st { font-size: 12px; color: var(--dim); }
+  .nq input { font: inherit; font-size: 18px; color: var(--text); background: #111317; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; width: 100%; }
   .item.holding { background: #1f2a3a; transition: background .6s; }
   .pct { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
 
   /* bottom bar */
   .bottom { grid-column: 1 / 3; display: flex; align-items: stretch; gap: 8px; }
-  .master { width: 280px; display: flex; flex-direction: column; justify-content: center; gap: 6px; padding: 8px 12px; }
+  .master { width: 220px; display: flex; flex-direction: column; justify-content: center; gap: 6px; padding: 8px 12px; }
   .master .lab { display: flex; justify-content: space-between; font-size: 13px; color: var(--dim); }
   .master .lab b { color: var(--text); }
   .master .bar { height: 26px; }
   .flash { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
   .flash .quiet { padding: 0 4px; }
-  .flash button { width: 72px; height: 100%; font-size: 15px; }
-  .flash button:active, .flash button.down { background: #dfe3ea; color: #0b0c0e; }
+  .flash button { width: 64px; height: 100%; font-size: 15px; touch-action: none; }
+  .flash.each button { width: 58px; font-size: 14px; }
+  .flash button.down { background: #3a4352; border-color: #8e959f; color: #fff; }
+  .act { min-width: 84px !important; }
+  .next { min-width: 160px !important; }
   .spacer { flex: 1; }
   .act { min-width: 92px; font-size: 16px; }
   .next { min-width: 190px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; padding: 0 14px; }
@@ -142,8 +156,9 @@
 </style>
 </head>
 <body>
-<p class="hint">Version 3: editing the running order. Two ways to try, switch below. <b>＋ Add song</b> puts a new song after the current one, holding what's on stage now (works in both).</p>
-<p class="toggle">Editing style: <label><input type="radio" name="emode" value="edit" checked> Edit button (list goes into edit mode)</label><label><input type="radio" name="emode" value="hold"> Hold a song for a menu</label></p>
+<p class="hint">Operator page sketch (agreed 19 Oct 2026; chosen options are pre-selected). Flash: Press and hold a Flash button and watch the stage preview (top left). Let go and it drops back. Compare the two choices below.</p>
+<p class="toggle">Buttons: <label><input type="radio" name="fset" value="few"> All, Key, Bars</label><label><input type="radio" name="fset" value="each" checked> All + one per group</label>
+&nbsp;&nbsp; Flash colour: <label><input type="radio" name="fcol" value="cur"> the group's current colour (white if off)</label><label><input type="radio" name="fcol" value="white" checked> always white</label></p>
 <div class="wrap" id="wrap">
 <div class="ipad">
 
@@ -168,7 +183,7 @@
   <div class="right">
     <div class="panel quick">
       <div class="head" style="padding-bottom:0">
-        <div class="tabs"><button class="tab on">Plain</button><button class="tab">Colours</button><button class="tab">Effects</button></div>
+        <div class="tabs"><button class="tab on" data-qt="Plain">Plain</button><button class="tab" data-qt="Colours">Colours</button><button class="tab" data-qt="Effects">Effects</button></div>
         <span class="more">swipe for more ›</span>
       </div>
       <div class="qgrid" id="quick"></div>
@@ -181,6 +196,13 @@
         <button class="save" id="save"><span class="fill" id="saveFill"></span><span>Save to Song 3 <small>hold</small></span></button>
       </div>
       <div class="rows" id="rows"></div>
+      <div class="picker nq" id="nq" hidden>
+        <div class="phead"><h2>New quick look from the stage</h2><button class="ghost" id="nqCancel">Cancel</button><button class="act" id="nqSave" style="min-width:96px;min-height:44px">Save</button></div>
+        <p class="lab2">Name</p><input id="nqName" value="">
+        <p class="lab2">Tab</p><div class="seg" id="nqTab"><button data-t="Plain">Plain</button><button data-t="Colours">Colours</button><button data-t="Effects">Effects</button></div>
+        <p class="lab2">Groups it sets <span style="text-transform:none;letter-spacing:0;font-weight:400">· tap to leave a group out; left-out groups keep what they have</span></p>
+        <div class="gpick" id="nqGroups"></div>
+      </div>
       <div class="picker" id="picker" hidden>
         <div class="phead">
           <h2 id="pTitle">Key lights</h2>
@@ -200,7 +222,7 @@
 
   <div class="bottom">
     <div class="panel master"><div class="lab"><span>Master</span><b id="mPct">100%</b></div><div class="bar" id="master"><span class="lvl" style="background:#9aa3ad"></span><span class="handle"></span></div></div>
-    <div class="panel flash"><span class="quiet">Flash</span><button data-f="all">All</button><button data-f="key">Key</button><button data-f="bars">Bars</button></div>
+    <div class="panel flash" id="flash"></div>
     <div class="spacer"></div>
     <button class="act">Undo</button>
     <button class="act next" id="next"><small>Next</small><span id="nextName">Song 4</span></button>
@@ -225,13 +247,14 @@ const order = [
   { name: 'Sermon', g: look('warm', 'warm', 'blue', 'off', 'blue', [100, 45, 40, 0, 40]) },
   { name: 'Midweek calm', g: look('warm', 'warm', 'orange', 'off', 'orange', [50, 30, 35, 0, 30]) },
 ];
+let qtab = 'Plain';
 const quick = [
-  { name: 'Walk-in', g: order[1].g }, { name: 'Worship', g: look('warm', 'cool', 'violet', 'violet', 'violet') },
-  { name: 'Response', g: look('warm', 'warm', 'orange', 'orange', 'orange') }, { name: 'Prayer', g: look('warm', 'warm', 'blue', 'off', 'blue', [60, 40, 50, 0, 50]) },
-  { name: 'All white', g: look('cool', 'cool', 'cool', 'cool', 'cool') }, { name: 'Key low', partial: true, g: [null, { c: 'warm', lv: 40 }, null, null, null] },
-  { name: 'Warm', g: look('warm', 'warm', 'warm', 'warm', 'warm') }, { name: 'Cool', g: look('cool', 'cool', 'cool', 'cool', 'cool') },
-  { name: 'Dim', g: look('warm', 'warm', 'warm', 'off', 'warm', [40, 30, 30, 0, 30]) }, { name: 'Front only', g: look('warm', 'off', 'off', 'off', 'off', [100, 0, 0, 0, 0]) },
-  { name: 'Candle', g: look('warm', 'warm', 'orange', 'off', 'orange', [50, 30, 40, 0, 40]) }, { name: 'Evening', g: look('warm', 'warm', 'violet', 'off', 'blue', [60, 40, 50, 0, 50]) },
+  { name: 'Walk-in', tab: 'Colours', g: order[1].g }, { name: 'Worship', tab: 'Colours', g: look('warm', 'cool', 'violet', 'violet', 'violet') },
+  { name: 'Response', tab: 'Colours', g: look('warm', 'warm', 'orange', 'orange', 'orange') }, { name: 'Prayer', tab: 'Colours', g: look('warm', 'warm', 'blue', 'off', 'blue', [60, 40, 50, 0, 50]) },
+  { name: 'All white', tab: 'Plain', g: look('cool', 'cool', 'cool', 'cool', 'cool') }, { name: 'Key low', tab: 'Plain', partial: true, g: [null, { c: 'warm', lv: 40 }, null, null, null] },
+  { name: 'Warm', tab: 'Plain', g: look('warm', 'warm', 'warm', 'warm', 'warm') }, { name: 'Cool', tab: 'Plain', g: look('cool', 'cool', 'cool', 'cool', 'cool') },
+  { name: 'Dim', tab: 'Plain', g: look('warm', 'warm', 'warm', 'off', 'warm', [40, 30, 30, 0, 30]) }, { name: 'Front only', tab: 'Plain', g: look('warm', 'off', 'off', 'off', 'off', [100, 0, 0, 0, 0]) },
+  { name: 'Candle', tab: 'Colours', g: look('warm', 'warm', 'orange', 'off', 'orange', [50, 30, 40, 0, 40]) }, { name: 'Evening', tab: 'Colours', g: look('warm', 'warm', 'violet', 'off', 'blue', [60, 40, 50, 0, 50]) },
 ];
 let cur = 3, live = structuredClone(order[3].g), changed = false;
 
@@ -246,7 +269,8 @@ function render() {
   $('back').style.visibility = changed ? 'visible' : 'hidden';
   $('nextName').textContent = order[(cur + 1) % order.length].name;
   renderOrder();
-  $('quick').innerHTML = quick.map((q, i) => `<button class="q" data-q="${i}">${q.name}<span class="sw" style="background:${swatch(q.g)}"></span></button>`).join('');
+  $('quick').innerHTML = quick.map((q, i) => q.tab !== qtab ? '' : `<button class="q" data-q="${i}">${q.name}<span class="sw" style="background:${swatch(q.g)}"></span></button>`).join('') + (quick.some((q) => q.tab === qtab) ? '' : '<span class="quiet" style="align-self:center;padding:0 6px">None yet.</span>') + '<button class="q newq" id="newq">＋ Save stage as quick look</button>';
+  document.querySelectorAll('[data-qt]').forEach((t) => t.classList.toggle('on', t.dataset.qt === qtab));
   $('rows').innerHTML = GROUPS.map((g, i) => {
     const x = live[i];
     return `<div class="row"><span class="g">${g}</span><button class="chip" data-g="${i}"><i style="background:${col(x)}"></i>${nm(x)}</button>
@@ -274,7 +298,7 @@ function openPicker(g) { pg = g; $('picker').hidden = false; renderPicker(); }
 function hueAt(p) { const stops = ['#ff0000', '#ffc800', '#00ff00', '#00ffc8', '#0000ff', '#8c00ff', '#ff008c', '#ff0000']; return stops[Math.round(p * (stops.length - 1))]; }
 function cctAt(p) { return ['#ffb46b', '#ffd2a1', '#ffeedd', '#f8f6f6', '#f4f8ff'][Math.round(p * 4)]; }
 function drawStage() {
-  const at = (l, t, w, h, i, r) => { const x = live[i]; const col = C[x.c]; return `<i style="left:${l}%;top:${t}%;width:${w}px;height:${h}px;background:${col};opacity:${col === '#000000' ? 0 : 0.15 + x.lv / 130};${r ? 'border-radius:50%;' : ''}box-shadow:0 0 ${8 + x.lv / 8}px ${col}"></i>`; };
+  const at = (l, t, w, h, i, r) => { const x = shown(i); const col = C[x.c] ?? x.c; return `<i style="left:${l}%;top:${t}%;width:${w}px;height:${h}px;background:${col};opacity:${col === '#000000' ? 0 : 0.15 + x.lv / 130};${r ? 'border-radius:50%;' : ''}box-shadow:0 0 ${8 + x.lv / 8}px ${col}"></i>`; };
   $('stage').innerHTML = [at(8, 14, 50, 6, 2), at(30, 14, 50, 6, 2), at(52, 14, 50, 6, 2), at(74, 14, 50, 6, 2), at(80, 40, 28, 30, 3), at(6, 44, 40, 5, 4),
     at(32, 48, 34, 6, 1), at(54, 48, 34, 6, 1), at(14, 80, 10, 10, 0, 1), at(36, 80, 10, 10, 0, 1), at(58, 80, 10, 10, 0, 1), at(80, 80, 10, 10, 0, 1)].join('') +
     '<span class="quiet" style="position:absolute;left:10px;bottom:6px;font-size:11px">Stage</span>';
@@ -282,14 +306,15 @@ function drawStage() {
 document.addEventListener('click', (e) => {
   if (orderClick(e)) return;
   const item = e.target.closest('.item'); if (item) { cur = +item.dataset.i; live = structuredClone(order[cur].g); changed = false; render(); return; }
-  const q = e.target.closest('.q'); if (q) { const Q = quick[+q.dataset.q]; Q.g.forEach((x, i) => { if (x) live[i] = { ...x }; }); changed = true; render(); return; }
+  const q = e.target.closest('.q[data-q]'); if (q) { const Q = quick[+q.dataset.q]; Q.g.forEach((x, i) => { if (x) live[i] = { ...x }; }); changed = true; render(); return; }
   if (e.target.closest('#back')) { live = structuredClone(order[cur].g); changed = false; render(); return; }
   if (e.target.closest('#next')) { cur = (cur + 1) % order.length; live = structuredClone(order[cur].g); changed = false; render(); }
   const chip = e.target.closest('.chip'); if (chip) { openPicker(+chip.dataset.g); return; }
   if (e.target.closest('#pDone')) { pg = null; $('picker').hidden = true; return; }
   const pc = e.target.closest('.pc'); if (pc) { live[pg].c = pc.dataset.k; if (pc.dataset.k !== 'off' && live[pg].lv === 0) live[pg].lv = 80; changed = true; render(); return; }
   const pt = e.target.closest('[data-pt]'); if (pt) { document.querySelectorAll('[data-pt]').forEach((t) => t.classList.toggle('on', t === pt)); $('pCol').hidden = pt.dataset.pt !== 'col'; $('pFx').hidden = pt.dataset.pt !== 'fx'; return; }
-  const tab = e.target.closest('.tab'); if (tab) { document.querySelectorAll('.quick .tab').forEach((t) => t.classList.toggle('on', t === tab)); }
+  const qt = e.target.closest('[data-qt]'); if (qt) { qtab = qt.dataset.qt; render(); return; }
+  if (newqClick(e)) return;
 });
 document.querySelectorAll('input[name=dim]').forEach((r) => r.addEventListener('change', () => document.body.classList.toggle('grey', r.value === 'grey' && r.checked)));
 // "any colour" strip
@@ -308,10 +333,18 @@ function move(e) { const r = drag.getBoundingClientRect(); const v = Math.round(
 let t0 = 0, raf = 0;
 $('save').addEventListener('pointerdown', () => { if (!changed) return; t0 = performance.now(); const step = () => { const p = Math.min(1, (performance.now() - t0) / 1000); $('saveFill').style.width = p * 100 + '%'; if (p < 1) raf = requestAnimationFrame(step); else { order[cur].g = structuredClone(live); changed = false; render(); $('saveFill').style.width = 0; } }; raf = requestAnimationFrame(step); });
 ['pointerup', 'pointerleave'].forEach((ev) => $('save').addEventListener(ev, () => { cancelAnimationFrame(raf); $('saveFill').style.width = 0; }));
-// flash
-document.querySelectorAll('.flash button').forEach((b) => { b.addEventListener('pointerdown', () => b.classList.add('down')); ['pointerup', 'pointerleave'].forEach((ev) => b.addEventListener(ev, () => b.classList.remove('down'))); });
+// flash: while held, the groups go to full; let go and they drop back
+const FSETS = { few: [['All', [0, 1, 2, 3, 4]], ['Key', [1]], ['Bars', [2, 4]]], each: [['All', [0, 1, 2, 3, 4]], ['Front', [0]], ['Key', [1]], ['Back', [2]], ['Drum', [3]], ['B8', [4]]] };
+let fset = 'each', fwhite = true; const flashG = new Set();
+function shown(i) { const x = live[i]; if (!flashG.has(i)) return x; const dark = x.c === 'off' || x.lv === 0; return { c: fwhite || dark ? (i === 0 ? 'c6500' : 'cool') : x.c, lv: 100 }; }
+function drawFlash() { $('flash').className = 'panel flash' + (fset === 'each' ? ' each' : ''); $('flash').innerHTML = '<span class="quiet">Flash</span>' + FSETS[fset].map(([n], k) => `<button data-fk="${k}">${n}</button>`).join(''); }
+document.addEventListener('pointerdown', (e) => { const b = e.target.closest('[data-fk]'); if (!b) return; b.classList.add('down'); FSETS[fset][+b.dataset.fk][1].forEach((i) => flashG.add(i)); drawStage(); });
+['pointerup', 'pointercancel'].forEach((ev) => document.addEventListener(ev, () => { if (!flashG.size) return; flashG.clear(); document.querySelectorAll('[data-fk].down').forEach((b) => b.classList.remove('down')); drawStage(); }));
+document.querySelectorAll('input[name=fset]').forEach((r) => r.addEventListener('change', () => { if (r.checked) { fset = r.value; drawFlash(); } }));
+document.querySelectorAll('input[name=fcol]').forEach((r) => r.addEventListener('change', () => { if (r.checked) fwhite = r.value === 'white'; }));
+drawFlash();
 // ---- running order editing ----
-let emode = 'edit', editing = false, sureDel = null, menuFor = null, menuState = '', suppressClick = false;
+let emode = 'edit'; const _unused = 0; let editing = false, sureDel = null, menuFor = null, menuState = '', suppressClick = false;
 document.querySelectorAll('input[name=emode]').forEach((r) => r.addEventListener('change', () => { if (r.checked) { emode = r.value; editing = false; closeMenu(); render(); } }));
 const keepCur = (fn) => { const o = order[cur]; fn(); const i = order.indexOf(o); if (i >= 0) cur = i; else { cur = Math.min(cur, order.length - 1); changed = true; } };
 function renderOrder() {
@@ -388,6 +421,24 @@ function menuAction(a) {
   if (a === 'dup') keepCur(() => order.splice(i + 1, 0, { name: order[i].name + ' (copy)', g: structuredClone(order[i].g) }));
   if (a === 'del') { if (menuState !== 'del') { menuState = 'del'; drawMenu(); return; } keepCur(() => order.splice(i, 1)); }
   closeMenu(); render();
+}
+// ---- new quick look ----
+let nqT = 'Colours', nqG = [];
+function drawNq() {
+  document.querySelectorAll('#nqTab button').forEach((b) => b.classList.toggle('on', b.dataset.t === nqT));
+  $('nqGroups').innerHTML = GROUPS.map((g, i) => `<button class="${nqG[i] ? '' : 'off'}" data-ng="${i}"><span>${g}</span><i style="background:${col(live[i])}"></i><span class="st">${nqG[i] ? nm(live[i]) + ' · ' + live[i].lv + '%' : 'left out'}</span></button>`).join('');
+}
+function newqClick(e) {
+  if (e.target.closest('#newq')) { nqT = qtab; nqG = GROUPS.map(() => true); $('nqName').value = ''; $('nqName').placeholder = 'e.g. Blue and warm'; $('picker').hidden = true; pg = null; $('nq').hidden = false; drawNq(); setTimeout(() => $('nqName').focus(), 0); return true; }
+  const t = e.target.closest('#nqTab button'); if (t) { nqT = t.dataset.t; drawNq(); return true; }
+  const g = e.target.closest('[data-ng]'); if (g) { nqG[+g.dataset.ng] = !nqG[+g.dataset.ng]; drawNq(); return true; }
+  if (e.target.closest('#nqCancel')) { $('nq').hidden = true; return true; }
+  if (e.target.closest('#nqSave')) {
+    const name = $('nqName').value.trim() || `Quick look ${quick.length + 1}`;
+    quick.push({ name, tab: nqT, g: live.map((x, i) => nqG[i] ? { ...x } : null) });
+    qtab = nqT; $('nq').hidden = true; render(); return true;
+  }
+  return false;
 }
 // fit to window
 function fit() { const s = Math.min(1, (innerWidth - 24) / 1080, (innerHeight - 60) / 810); $('wrap').style.transform = `scale(${s})`; $('wrap').style.height = 810 * s + 'px'; }

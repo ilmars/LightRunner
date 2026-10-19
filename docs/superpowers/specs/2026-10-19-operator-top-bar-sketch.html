@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Top bar sketch</title>
+<style>body { background: #050607; color: #c9ccd2; font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 16px; } .subtitle { color: #8b949e; }</style>
+</head>
+<body>
+<style>
+  .tb { width: 1056px; max-width: 100%; height: 44px; background: #0b0c0e; border: 1px solid #22252b; border-radius: 10px; display: flex; align-items: center; gap: 18px; padding: 0 14px; font: 16px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #c9ccd2; margin: 6px 0 4px; box-sizing: border-box; }
+  .tb .now { font-size: 22px; font-weight: 700; flex: 1; white-space: nowrap; }
+  .tb .ch { color: #c98a2a; font-size: 14px; font-weight: 600; margin-left: 8px; }
+  .tb .q { color: #7d828c; font-size: 14px; white-space: nowrap; }
+  .tb .q b { color: #c9ccd2; font-weight: 600; }
+  .tb .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; background: #2f9e5b; }
+  .tb .gear { color: #7d828c; font-size: 20px; }
+  .tb .bar { display: inline-block; width: 110px; height: 5px; background: #2c3038; border-radius: 3px; vertical-align: middle; margin: 0 8px; position: relative; overflow: hidden; }
+  .tb .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 40%; background: #6aa2ff; opacity: .7; }
+  .tb.warn { border-color: #5a4320; }
+  .tb .w { color: #e0b46a; font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .tb .w .dot { background: #c98a2a; }
+  .tb.off { border-color: #3a2a4a; }
+  .tb .o { color: #b9a3d9; font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .tb .o button { font: inherit; font-size: 14px; color: #c9ccd2; background: #1d2026; border: 1px solid #2c3038; border-radius: 8px; padding: 5px 10px; margin-left: 8px; }
+  .tb.flash { border-color: #8e959f; }
+  .cap { font-size: 13px; color: #8b949e; margin: 0 0 14px; }
+</style>
+
+<h2>Top bar: its everyday look and the states that happen now and then</h2>
+<p class="subtitle">Real width. Only the state that matters right now takes extra space. Everything else stays quiet grey.</p>
+
+<div class="tb"><span class="now">Song 3</span><span class="q">Fade <b>Auto</b></span><span class="q"><span class="dot"></span>Connected</span><span class="q">10:42</span><span class="gear">⚙</span></div>
+<p class="cap"><b>Normal.</b> What's on stage, the Fade menu, the connection, the clock and settings.</p>
+
+<div class="tb"><span class="now">Song 3<span class="ch">changed</span></span><span class="q">Fade <b>Auto</b></span><span class="q"><span class="dot"></span>Connected</span><span class="q">10:42</span><span class="gear">⚙</span></div>
+<p class="cap"><b>Changed.</b> A quick look, colour or dimmer change hasn't been saved yet.</p>
+
+<div class="tb"><span class="now">Song 3 → Song 4</span><span class="q">fading<span class="bar"><i></i></span>2.4 s</span><span class="q">Fade <b>Auto</b></span><span class="q"><span class="dot"></span>Connected</span><span class="q">10:42</span><span class="gear">⚙</span></div>
+<p class="cap"><b>Fading.</b> Shows where it's going and the time left (today's fade countdown, moved up here).</p>
+
+<div class="tb flash"><span class="now">Song 3</span><span class="q" style="color:#e3e6ea">Flash: Key</span><span class="q">Fade <b>Auto</b></span><span class="q"><span class="dot"></span>Connected</span><span class="q">10:42</span><span class="gear">⚙</span></div>
+<p class="cap"><b>Flash held.</b> Says what's flashing while you hold it.</p>
+
+<div class="tb warn"><span class="now">Song 3</span><span class="w"><span class="dot"></span>Lights not answering: check the DMX box (192.168.0.114)</span><span class="q">10:42</span><span class="gear">⚙</span></div>
+<p class="cap"><b>Problem with the lights.</b> The node stops answering, or another desk is also sending. It replaces the quiet items until it's fixed.</p>
+
+<div class="tb off"><span class="now">Song 3</span><span class="o">Not sending to the lights (Lightkey has them)<button>Take over</button></span><span class="q">10:42</span><span class="gear">⚙</span></div>
+<p class="cap"><b>Send DMX off.</b> Light Runner has handed the lights to Lightkey. Decided: no Take over button here; turning sending back on stays in Settings, behind the PIN.</p>
+
+<p class="cap">Losing the tablet's own connection keeps today's red banner across the top. It's the one thing allowed to be loud.</p>
+
+</body>
+</html>
