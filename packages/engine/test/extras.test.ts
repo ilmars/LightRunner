@@ -182,6 +182,25 @@ test('a slider drag (Any colour sends that continue the first) is one Undo step'
   assert.equal(e.liveState(5, 'ok').groups.audience.preset, 'aud-amber');
 });
 
+test('two drags are two Undo steps, even when the second starts on the colour the first ended on', () => {
+  const e = new Engine(extrasShow());
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-amber', fade: 0 }, 0);
+  // Drag A.
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#ff0000', white: 0.1 }, 1);
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#ff0000', white: 0.2, fade: 0.2, continues: true }, 1.1);
+  // Drag B starts where A ended (no change, so no step of its own), then moves on.
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#ff0000', white: 0.2 }, 2);
+  assert.equal(e.recorded, false);
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#ff0000', white: 0.3, fade: 0.2, continues: true }, 2.1);
+  assert.equal(e.recorded, true, 'drag B gets its own step');
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#ff0000', white: 0.4, fade: 0.2, continues: true }, 2.2);
+  assert.equal(e.recorded, false);
+  e.apply({ type: 'undo' }, 3);
+  assert.equal(e.liveState(3, 'ok').groups.audience.preset, 'live:audience:#ff0000:w20', 'the first Undo takes back drag B only');
+  e.apply({ type: 'undo' }, 4);
+  assert.equal(e.liveState(4, 'ok').groups.audience.preset, 'aud-amber');
+});
+
 test('a continued Any colour send after something else changed the group is its own Undo step', () => {
   const e = new Engine(extrasShow());
   e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-amber', fade: 0 }, 0);

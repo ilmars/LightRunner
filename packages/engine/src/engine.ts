@@ -280,6 +280,8 @@ export class Engine {
         return error;
       }
     }
+    // A send that doesn't continue starts a new drag, so it never joins the last one's step.
+    if (cmd.type === 'groupColour' && !cmd.continues) this.lastColourStep = null;
     if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || cmd.type === 'groupColour' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') {
       const before = this.snapshot();
       const error = this.run(cmd, now);
