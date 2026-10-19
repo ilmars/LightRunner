@@ -1,14 +1,18 @@
-// Rendering a preset's layer stack for one fixture. Every layer is a pure
-// function of effect time, the fixture's position in its group and its
+// Rendering a preset's layer stack for one segment. Every layer is a pure
+// function of effect time, the segment's position in its group's line and its
 // parameters. Phase 1 has static layers only; Phase 2 adds effects here.
 
 import { resolveColour, type Layer, type Palette, type Preset } from '../../shared/src/index.ts';
 import { copy, dark, fromHex, type Light } from './light.ts';
 
 export interface LayerContext {
-  /** Fixture position in its group, 0-based. */
+  /**
+   * The segment's position in its group's line, 0-based. The line is the group's
+   * fixtures in group order, each fixture's segments in order (backwards when the
+   * fixture is reversed).
+   */
   index: number;
-  /** Number of fixtures in the group. */
+  /** Number of segments in the group's line. */
   count: number;
   /** Effect time in seconds, already scaled by the speed dial. */
   time: number;

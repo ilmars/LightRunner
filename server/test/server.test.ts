@@ -839,10 +839,14 @@ test('the rig: the layout says which groups have white, amber and UV, and Any co
     // The engine's Basic light (#ffd2a0, half white, at 80 %) as an Any colour pick would make it.
     assert.deepEqual(layout.basicLight, { hex: '#cca880', white: 0.4, amber: 0, uv: 0 });
 
-    // Visualiser frames: one RGB triple per fixture, in layout order.
+    // Visualiser frames: one RGB triple per segment, fixtures in layout order.
+    const segments = (id: string) => layout.fixtures.find((f: any) => f.id === id).segments;
+    assert.deepEqual(['p1', 'b1', 'b3', 'l1', 'b8'].map(segments), [1, 3, 8, 1, 4]);
+    assert.ok(layout.fixtures.every((f: any) => f.reversed === false));
     let frame: Uint8Array | null = null;
     t.ws.on('message', (data, isBinary) => { if (isBinary) frame = new Uint8Array(data as Buffer); });
-    const b1 = layout.fixtures.findIndex((f: any) => f.id === 'b1') * 3;
+    const b1At = layout.fixtures.findIndex((f: any) => f.id === 'b1');
+    const b1 = layout.fixtures.slice(0, b1At).reduce((n: number, f: any) => n + f.segments, 0) * 3;
     assert.equal(await t.send({ type: 'groupColour', group: 'key-lights', colour: '#000000', amber: 1, fade: 0 }), null);
     await waitFor(() => t.state()?.groups['key-lights'].preset === 'live:key-lights:#000000:a100', 2000, 'the live colour');
     frame = null;
@@ -891,7 +895,7 @@ test('the layout gives each item its entries, and the preview picture is served'
 
   const ok = await api(app, 'GET', `/api/looks/${item.id}/visual`);
   assert.equal(ok.status, 200);
-  assert.equal(ok.body.visual.length, layout.fixtures.length * 3);
+  assert.equal(ok.body.visual.length, layout.fixtures.reduce((n: number, f: any) => n + f.segments, 0) * 3);
   const missing = await api(app, 'GET', '/api/looks/no-such-look/visual');
   assert.equal(missing.status, 404);
 }));

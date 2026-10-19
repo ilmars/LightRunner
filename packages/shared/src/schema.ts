@@ -56,6 +56,8 @@ export const Fixture = z.object({
   w: unit.optional(),
   h: unit.optional(),
   gamma: z.number().min(1).max(4).optional(),
+  /** Hung the other way round: its segments run backwards along a group's line. */
+  reversed: z.boolean().optional(),
 });
 export type Fixture = z.infer<typeof Fixture>;
 

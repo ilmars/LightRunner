@@ -5,8 +5,17 @@ import { copy, dark, withoutUv, type Light } from './light.ts';
 
 const scratch = dark();
 
+/** The roles that repeat once per segment in a fixture type with several segments. */
+const COLOUR_ROLES: readonly ChannelRole[] = ['red', 'green', 'blue', 'white', 'amber', 'uv'];
+
 interface PlannedChannel {
   role: ChannelRole;
+  /**
+   * The segment this channel belongs to, 0-based. −1 for a fixture-wide channel:
+   * dimmer, strobe, cct and the others, and a colour that appears only once in a
+   * fixture type with several segments.
+   */
+  cell: number;
   /** Offset of this channel inside the universe (0-based). */
   at: number;
   /** Offset of the fine byte, or -1 for 8-bit. */
@@ -24,6 +33,8 @@ export interface ChannelPlan {
   hasUv: boolean;
   /** Has a channel that makes visible colour (red, green, blue, white or amber). */
   hasColour: boolean;
+  /** Number of segments: the most times any colour role repeats, at least 1. */
+  cells: number;
   gamma: number;
 }
 
@@ -41,8 +52,19 @@ export function planChannels(fixture: Fixture, profile: Profile, defaultGamma: n
       }
       return;
     }
-    channels.push({ role: ch.role, at: base + n, fineAt: -1, fixed: ch.default ?? 0, kelvin: ch.kelvin ?? null });
+    channels.push({ role: ch.role, at: base + n, fineAt: -1, cell: -1, fixed: ch.default ?? 0, kelvin: ch.kelvin ?? null });
   });
+  // The n-th red (green, blue ...) belongs to segment n.
+  const seen = new Map<ChannelRole, number>();
+  for (const c of channels) {
+    if (!COLOUR_ROLES.includes(c.role)) continue;
+    const k = seen.get(c.role) ?? 0;
+    c.cell = k;
+    seen.set(c.role, k + 1);
+  }
+  const cells = Math.max(1, ...seen.values());
+  // In a fixture type with several segments, a colour that appears once is fixture-wide.
+  if (cells > 1) for (const c of channels) if (seen.get(c.role) === 1) c.cell = -1;
   const has = (role: ChannelRole) => channels.some((c) => c.role === role);
   return {
     universe: fixture.universe,
@@ -52,6 +74,7 @@ export function planChannels(fixture: Fixture, profile: Profile, defaultGamma: n
     hasAmber: has('amber'),
     hasUv: has('uv'),
     hasColour: (['red', 'green', 'blue', 'white', 'amber'] as const).some(has),
+    cells,
     gamma: fixture.gamma ?? profile.gamma ?? defaultGamma,
   };
 }
@@ -73,17 +96,41 @@ function put(buf: Uint8Array, ch: PlannedChannel, v: number): void {
   }
 }
 
+/** Reused by writeFixture and writeCells so writing a frame allocates nothing. */
+const sameLights: Light[] = [];
+const uvFree: Light[] = [];
+const usable: Light[] = [];
+
 /**
- * Write one fixture into its universe buffer. Gamma is applied per channel
- * so slow fades look even at the dark end. Fixtures with a dimmer channel get
- * intensity on the dimmer and colour on the colour channels; others get both
- * multiplied together on the colour channels.
+ * Write one fixture into its universe buffer, every segment the same light.
+ * See writeCells.
  */
 export function writeFixture(buf: Uint8Array, plan: ChannelPlan, light: Light): void {
+  sameLights.length = 0;
+  for (let k = 0; k < plan.cells; k++) sameLights.push(light);
+  writeCells(buf, plan, sameLights);
+}
+
+/**
+ * Write one fixture into its universe buffer, one light per segment. Gamma is
+ * applied per channel so slow fades look even at the dark end. Fixtures with a
+ * dimmer channel get the brightest segment's intensity on the dimmer, and each
+ * segment's colour scaled by its share of that; others get colour and
+ * intensity multiplied together on each segment's colour channels. A
+ * fixture-wide colour channel (and colour temperature) follows the brightest segment.
+ */
+export function writeCells(buf: Uint8Array, plan: ChannelPlan, lights: readonly Light[]): void {
   // The engine has already taken UV out for fixtures that can't make it; this keeps a direct call right too.
-  if (!plan.hasUv && light.u > 0) light = withoutUv(copy(scratch, light));
+  const cells = plan.hasUv ? lights : withoutUvAll(lights);
+  let top = 0, brightest = 0;
+  for (let k = 0; k < cells.length; k++) {
+    if (cells[k].i > top) {
+      top = cells[k].i;
+      brightest = k;
+    }
+  }
   // Fully dark writes zeros everywhere, so Blackout looks like Blackout on any desk monitor.
-  if (light.i <= 0) {
+  if (top <= 0) {
     for (const ch of plan.channels) {
       const fixed = ch.role === 'strobe' || ch.role === 'other';
       buf[ch.at] = fixed ? ch.fixed : 0;
@@ -92,18 +139,19 @@ export function writeFixture(buf: Uint8Array, plan: ChannelPlan, light: Light): 
     return;
   }
   const g = plan.gamma;
-  // A fixture without a white channel makes white from red, green and blue;
-  // one without an amber channel makes amber from red and green.
-  const fold = plan.hasWhite ? 0 : light.w;
-  const amber = plan.hasAmber ? 0 : light.a;
-  const level = plan.hasDimmer ? 1 : light.i;
-  const col = (c: number, a: number) => Math.pow(Math.min(1, c + fold + a) * level, g);
   for (const ch of plan.channels) {
+    const light = ch.cell >= 0 && ch.cell < cells.length ? cells[ch.cell] : cells[brightest];
+    // A fixture without a white channel makes white from red, green and blue;
+    // one without an amber channel makes amber from red and green.
+    const fold = plan.hasWhite ? 0 : light.w;
+    const amber = plan.hasAmber ? 0 : light.a;
+    // With a dimmer at the brightest segment's intensity, the colour carries the rest.
+    const level = plan.hasDimmer ? light.i / top : light.i;
     switch (ch.role) {
-      case 'dimmer': put(buf, ch, Math.pow(light.i, g)); break;
-      case 'red': put(buf, ch, col(light.r, amber)); break;
-      case 'green': put(buf, ch, col(light.g, amber * AMBER_GREEN)); break;
-      case 'blue': put(buf, ch, col(light.b, 0)); break;
+      case 'dimmer': put(buf, ch, Math.pow(top, g)); break;
+      case 'red': put(buf, ch, Math.pow(Math.min(1, light.r + fold + amber) * level, g)); break;
+      case 'green': put(buf, ch, Math.pow(Math.min(1, light.g + fold + amber * AMBER_GREEN) * level, g)); break;
+      case 'blue': put(buf, ch, Math.pow(Math.min(1, light.b + fold) * level, g)); break;
       case 'white': put(buf, ch, Math.pow(light.w * level, g)); break;
       case 'amber': put(buf, ch, Math.pow(light.a * level, g)); break;
       case 'uv': put(buf, ch, Math.pow(light.u * level, g)); break;
@@ -115,6 +163,24 @@ export function writeFixture(buf: Uint8Array, plan: ChannelPlan, light: Light): 
       default: buf[ch.at] = ch.fixed;
     }
   }
+}
+
+/** The lights as a fixture without UV shows them, copying only the ones that have UV. */
+function withoutUvAll(lights: readonly Light[]): readonly Light[] {
+  let any = false;
+  for (const l of lights) if (l.u > 0) any = true;
+  if (!any) return lights;
+  usable.length = 0;
+  for (let k = 0; k < lights.length; k++) {
+    const l = lights[k];
+    if (l.u <= 0) {
+      usable.push(l);
+      continue;
+    }
+    if (!uvFree[k]) uvFree[k] = dark();
+    usable.push(withoutUv(copy(uvFree[k], l)));
+  }
+  return usable;
 }
 
 /**

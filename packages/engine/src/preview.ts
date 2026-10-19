@@ -8,9 +8,10 @@ import { Engine } from './engine.ts';
 const SETTLED = 60;
 
 /**
- * The look at rest, as the visualiser draws it: 3 bytes (RGB) per fixture in show order,
- * the same order as the engine's fixtures. Master is 1, so nothing is dimmed, and a
- * group the look doesn't set stays dark. The safe look runs as Basic lights does.
+ * The look at rest, as the visualiser draws it: 3 bytes (RGB) per segment, fixtures in
+ * show order (the same order as the engine's fixtures), each fixture's segments in order.
+ * Master is 1, so nothing is dimmed, and a group the look doesn't set stays dark. The safe
+ * look runs as Basic lights does.
  */
 export function settledVisual(show: Show, lookId: string): Uint8Array {
   const engine = new Engine(show, 0);

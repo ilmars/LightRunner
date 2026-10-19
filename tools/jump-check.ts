@@ -1,9 +1,9 @@
 // Runs the engine headless through hours of random look, preset, manual,
 // Safe, Blackout and Any colour changes (Flash is left out: it snaps by design), tapping mid-fade on purpose, and reports the
-// largest jump in how bright any fixture looks (its brightest written colour
+// largest jump in how bright any segment of any fixture looks (its brightest written colour
 // channel times its intensity) between two frames.
 //
-// The spec's rule: no fixture jumps more than 5% during any fade, including
+// The spec's rule: no fixture (no segment of one) jumps more than 5% during any fade, including
 // interruptions and manual release. Manual takeover, master moves and Any
 // colour drags follow the finger on purpose (0.2 s), so frames right after
 // those are not judged.
@@ -85,7 +85,10 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
 }
 
 const engine = new Engine(show, 0);
-const ids = engine.fixtureIds();
+// One name per segment, in the order of visibleLevels(): "b3" or "b3 segment 2".
+const counts = engine.segmentCounts();
+const ids = engine.fixtureIds().flatMap((id, f) =>
+  counts[f] === 1 ? [id] : Array.from({ length: counts[f] }, (_, c) => `${id} segment ${c + 1}`));
 let prev = engine.visibleLevels();
 let worst = 0;
 let worstAt = '';

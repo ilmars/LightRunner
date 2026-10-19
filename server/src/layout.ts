@@ -2,6 +2,7 @@
 
 import { SAFE_LIGHT, canRecolour, findProfile, groupIsWhiteOnly, presetUsers, resolveColour } from '../../packages/shared/src/index.ts';
 import type { ChannelRole, GroupKind, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
+import { planChannels } from '../../packages/engine/src/index.ts';
 
 export interface OperatorLook {
   id: string;
@@ -75,8 +76,11 @@ export interface OperatorLayout {
   basicLight: LiveLight;
   /** The colour pages draw for the built-in Basic light. */
   basicSwatch: string;
-  /** In the same order as the bytes of each visualiser frame. */
-  fixtures: { id: string; name: string; x: number; y: number; w: number | null; h: number | null }[];
+  /**
+   * In the same order as the bytes of each visualiser frame: 3 bytes per segment,
+   * `segments` of them for each fixture. `reversed` fixtures run backwards along a group's line.
+   */
+  fixtures: { id: string; name: string; x: number; y: number; w: number | null; h: number | null; segments: number; reversed: boolean }[];
   /** Fixture ids of each group, for tapping a group on the mini visualiser. */
   members: Record<string, string[]>;
   manualForOperators: boolean;
@@ -143,7 +147,10 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     }),
     fixtures: fixtureOrder.flatMap((id) => {
       const f = byId.get(id);
-      return f ? [{ id, name: f.name, x: f.x, y: f.y, w: f.w ?? null, h: f.h ?? null }] : [];
+      const profile = f ? findProfile(show, f.profile) : undefined;
+      if (!f || !profile) return [];
+      const segments = planChannels(f, profile, show.settings.gamma).cells;
+      return [{ id, name: f.name, x: f.x, y: f.y, w: f.w ?? null, h: f.h ?? null, segments, reversed: f.reversed ?? false }];
     }),
     members: Object.fromEntries(show.groups.map((g) => [g.id, g.fixtures])),
     manualForOperators: show.operator.manualForOperators,

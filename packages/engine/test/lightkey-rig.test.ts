@@ -7,6 +7,11 @@ import { kelvinOf } from '../src/output.ts';
 
 const show = () => parseShow(JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8')));
 const dmx = (v: number) => Math.round(Math.pow(v, 2.2) * 255);
+/** Where a fixture's first segment is in the visual and in visibleLevels(). */
+const segmentAt = (e: Engine, id: string) => {
+  const counts = e.segmentCounts();
+  return counts.slice(0, e.fixtureIds().indexOf(id)).reduce((a, b) => a + b, 0);
+};
 
 test('warm colours give warm colour temperature, blue gives cool', () => {
   assert.ok(kelvinOf(fromHex('#ffb46b')) < 3400);
@@ -53,7 +58,7 @@ test('Any colour with white, amber and UV lights those LEDs of the SixBar 500, a
   // P1 AS600B: amber makes it warmer than the same white without.
   assert.ok(u[1]! < plainCct, `cct ${u[1]} vs ${plainCct}`);
   // The visualiser shows B1 with the amber and white added in.
-  const b1 = e.fixtureIds().indexOf('b1') * 3;
+  const b1 = segmentAt(e, 'b1') * 3;
   const vis = Array.from(frame.visual.slice(b1, b1 + 3));
   assert.ok(vis[0] === 255 && vis[1]! > 100 && vis[2]! > 100, `b1 visual ${vis}`);
 });
@@ -61,23 +66,24 @@ test('Any colour with white, amber and UV lights those LEDs of the SixBar 500, a
 test('UV on bars without UV LEDs: dark, no violet in the visualiser, and a fade to red stays under 5% per frame', () => {
   const e = new Engine(show());
   const b6 = e.fixtureIds().indexOf('b6');
-  const b1 = e.fixtureIds().indexOf('b1');
+  const b6At = segmentAt(e, 'b6');
+  const b1At = segmentAt(e, 'b1');
   e.apply({ type: 'groupColour', group: 'background', colour: '#000000', uv: 1, fade: 0 }, 0);
   e.apply({ type: 'groupColour', group: 'key-lights', colour: '#000000', uv: 1, fade: 0 }, 0);
   let frame = e.frame(0.5);
   // B6 SonicPulse (no UV): nothing to show, so dark; B1 SixBar (UV LEDs): UV and a faint violet on the stage view.
   assert.equal(e.lights()[b6]!.i, 0);
   assert.equal(frame.universes.get(1)![164], 0, 'B6 dimmer');
-  assert.deepEqual(Array.from(frame.visual.slice(b6 * 3, b6 * 3 + 3)), [0, 0, 0]);
+  assert.deepEqual(Array.from(frame.visual.slice(b6At * 3, (b6At + 8) * 3)), new Array(24).fill(0));
   assert.equal(frame.universes.get(1)![14], 255, 'B1 UV');
-  assert.ok(frame.visual[b1 * 3 + 2]! > 0);
+  assert.ok(frame.visual[b1At * 3 + 2]! > 0);
   // Fading the bars from UV to red brings red up smoothly (it used to jump about 14 % a frame half way).
   e.apply({ type: 'groupColour', group: 'background', colour: '#ff0000', fade: 1 }, 1);
-  let prev = e.visibleLevels()[b6]!;
+  let prev = e.visibleLevels()[b6At]!;
   let worst = 0;
   for (let t = 1; t <= 3 + 1e-9; t += 0.025) {
     frame = e.frame(t);
-    const now = e.visibleLevels()[b6]!;
+    const now = e.visibleLevels()[b6At]!;
     worst = Math.max(worst, Math.abs(now - prev));
     prev = now;
   }

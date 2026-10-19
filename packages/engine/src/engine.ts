@@ -10,10 +10,11 @@ import {
 import { Crossfade, Ramp } from './fade.ts';
 import { compilePreset, fixedPreset, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
 import { copy, dark, fromHex, mix, mix2, withoutUv, type Light } from './light.ts';
-import { planChannels, visibleLevel, visualOf, writeFixture, writeSmoke, type ChannelPlan } from './output.ts';
+import { planChannels, visibleLevel, visualOf, writeCells, writeSmoke, type ChannelPlan } from './output.ts';
 
 /** Safe's fixed warm white stage wash. */
 const SAFE_LIGHT = fromHex(SAFE_COLOUR.hex, SAFE_COLOUR.white, SAFE_COLOUR.intensity);
+const DARK = dark();
 /** Flash: full white, snapping on and off. */
 const FLASH_LIGHT = fromHex('#ffffff');
 const SAFE_FADE = 1;
@@ -93,7 +94,12 @@ class GroupRun {
   readonly id: string;
   /** Fixture indices, in group order. */
   fixtures: number[] = [];
-  /** Fixture index → position in this group. */
+  /**
+   * The group's line of segments: its fixtures in group order, each fixture's
+   * segments in order (backwards when it is reversed). The fixture of each segment.
+   */
+  line: number[] = [];
+  /** Fixture index → where its segments start in the line. */
   position = new Map<number, number>();
   presets = new Crossfade<PresetRun>();
   manual: ManualRun | null = null;
@@ -106,18 +112,23 @@ class GroupRun {
   smoke = false;
   /** A smoke group's output this frame. */
   smokeOut = 0;
-  /** This group's light for each of its fixtures, in group order. */
+  /** This group's light for each segment of its line. */
   out: Light[] = [];
 
   constructor(id: string) {
     this.id = id;
   }
 
-  setFixtures(fixtures: number[]): void {
+  setFixtures(fixtures: number[], runs: readonly FixtureRun[]): void {
     this.fixtures = fixtures;
-    this.position = new Map(fixtures.map((f, k) => [f, k]));
-    while (this.out.length < fixtures.length) this.out.push(dark());
-    this.out.length = fixtures.length;
+    this.position = new Map();
+    this.line = [];
+    for (const f of fixtures) {
+      this.position.set(f, this.line.length);
+      for (let c = 0; c < runs[f].cells.length; c++) this.line.push(f);
+    }
+    while (this.out.length < this.line.length) this.out.push(dark());
+    this.out.length = this.line.length;
   }
 }
 
@@ -129,12 +140,28 @@ class FixtureRun {
   manual: ManualRun | null = null;
   /** Smoke groups this fixture is in. When there are any, only they drive it. */
   smokeGroups: GroupRun[] = [];
-  /** Final light after manual and master, before gamma. */
-  light: Light = dark();
+  /** Hung the other way round: its segments run backwards along a group's line. */
+  reversed = false;
+  /** Where this fixture's first segment is in the visual, counted in segments. */
+  visualAt = 0;
+  /** Final light of each segment after manual and master, before gamma. */
+  cells: Light[] = [];
 
   constructor(id: string, plan: ChannelPlan) {
     this.id = id;
     this.plan = plan;
+    this.setPlan(plan);
+  }
+
+  /** The fixture's first segment (the whole fixture when it has one). */
+  get light(): Light {
+    return this.cells[0]!;
+  }
+
+  setPlan(plan: ChannelPlan): void {
+    this.plan = plan;
+    while (this.cells.length < plan.cells) this.cells.push(dark());
+    this.cells.length = plan.cells;
   }
 }
 
@@ -161,7 +188,7 @@ function sameLight(a: CompiledPreset, b: CompiledPreset): boolean {
 export interface Frame {
   /** DMX data per universe, 512 bytes each. */
   universes: Map<number, Uint8Array>;
-  /** Display colour per fixture (show order), 3 bytes RGB each, for the visualiser. */
+  /** Display colour per segment, 3 bytes RGB each, for the visualiser: fixtures in show order, each fixture's segments in channel order. */
   visual: Uint8Array;
 }
 
@@ -201,6 +228,10 @@ export class Engine {
   private scratch: Light[] = [];
   private scratchWeights: number[] = [];
   private scratchLights: Light[] = [];
+  /** A fixture's owning groups this frame, where its segments start in each, and their weights. */
+  private scratchOwners: GroupRun[] = [];
+  private scratchStarts: number[] = [];
+  private scratchOwnerWeights: number[] = [];
 
   constructor(show: Show, now = 0) {
     this.setShow(show, now);
@@ -222,7 +253,8 @@ export class Engine {
       if (!profile) continue;
       const plan = planChannels(f, profile, show.settings.gamma);
       const run = oldFixtures.get(f.id) ?? new FixtureRun(f.id, plan);
-      run.plan = plan;
+      run.setPlan(plan);
+      run.reversed = f.reversed ?? false;
       this.fixtureIndex.set(f.id, this.fixtures.length);
       this.fixtures.push(run);
     }
@@ -245,7 +277,7 @@ export class Engine {
         this.puffStart.delete(g.id);
       }
       run.smoke = smoke;
-      run.setFixtures(g.fixtures.map((id) => this.fixtureIndex.get(id)).filter((i): i is number => i !== undefined));
+      run.setFixtures(g.fixtures.map((id) => this.fixtureIndex.get(id)).filter((i): i is number => i !== undefined), this.fixtures);
       // A colour edited while it is lit fades to the new colour instead of snapping.
       const lit = this.editedColour(run, before, now);
       // Running presets pick up edits; deleted ones keep running until they fade out.
@@ -274,7 +306,12 @@ export class Engine {
     for (const f of this.fixtures) {
       if (!this.universes.has(f.plan.universe)) this.universes.set(f.plan.universe, new Uint8Array(512));
     }
-    this.visual = new Uint8Array(this.fixtures.length * 3);
+    let segments = 0;
+    for (const f of this.fixtures) {
+      f.visualAt = segments;
+      segments += f.cells.length;
+    }
+    this.visual = new Uint8Array(segments * 3);
 
     for (const id of this.flash) if (!this.groups.has(id)) this.flash.delete(id);
     for (const id of this.puffStart.keys()) if (!this.flash.has(id)) this.puffStart.delete(id);
@@ -753,13 +790,14 @@ export class Engine {
       for (const w of mix0) w.item.time += dt * speed;
       const level = group.level.value(now);
       const manual = this.liveManual(group, now, dt);
-      ctx.count = group.fixtures.length;
-      for (let k = 0; k < group.fixtures.length; k++) {
+      // One light per segment of the group's line.
+      ctx.count = group.line.length;
+      for (let k = 0; k < group.line.length; k++) {
         ctx.index = k;
         const out = group.out[k];
         // A fixture without UV mixes only the light it can make, so its intensity is what it shows.
-        const noUv = !this.fixtures[group.fixtures[k]!]!.plan.hasUv;
-        if (mix0.length === 0) copy(out, dark());
+        const noUv = !this.fixtures[group.line[k]!]!.plan.hasUv;
+        if (mix0.length === 0) copy(out, DARK);
         else {
           parts.length = 0;
           weights.length = 0;
@@ -777,40 +815,54 @@ export class Engine {
       }
     }
 
-    // 4–6. Each fixture takes its owning group's light, then manual and master, then gamma and channels.
+    // 4–6. Each segment of a fixture takes its owning groups' light, then manual and master, then gamma and channels.
     const master = this.master.value(now);
     const flashing = this.flashed.size > 0 && !blackedOut;
+    const from = this.scratchOwners, starts = this.scratchStarts, ownerWeights = this.scratchOwnerWeights;
     for (const buf of this.universes.values()) buf.fill(0);
     for (let f = 0; f < this.fixtures.length; f++) {
       const run = this.fixtures[f];
       if (run.smokeGroups.length) {
-        this.frameSmoke(f, run);
+        this.frameSmoke(run);
         continue;
       }
       const owners = run.owners.weights(now);
-      parts.length = 0;
-      weights.length = 0;
+      from.length = 0;
+      starts.length = 0;
+      ownerWeights.length = 0;
       for (const o of owners) {
         const group = this.groups.get(o.item);
-        const pos = group?.position.get(f);
-        if (!group || pos === undefined) continue;
-        parts.push(group.out[pos]);
-        weights.push(o.weight);
+        const start = group?.position.get(f);
+        if (!group || start === undefined) continue;
+        from.push(group);
+        starts.push(start);
+        ownerWeights.push(o.weight);
       }
-      const light = run.light;
-      if (parts.length === 0) copy(light, dark());
-      else if (parts.length === 1) copy(light, parts[0]);
-      else mix(light, parts, weights);
       const manual = this.liveManual(run, now, dt);
-      if (manual) mix2(light, light, manual.current, manual.weight.value(now));
-      if (!run.plan.hasUv) withoutUv(light);
-      light.i *= master;
+      const manualWeight = manual ? manual.weight.value(now) : 0;
       // Flash overrides everything above, but not Blackout.
-      if (flashing && this.flashed.has(f)) copy(light, FLASH_LIGHT);
+      const flash = flashing && this.flashed.has(f);
+      const cells = run.cells, n = cells.length;
+      for (let c = 0; c < n; c++) {
+        // Where this segment sits in each group's line.
+        const slot = run.reversed ? n - 1 - c : c;
+        const light = cells[c];
+        if (from.length === 0) copy(light, DARK);
+        else if (from.length === 1) copy(light, from[0].out[starts[0] + slot]);
+        else {
+          parts.length = 0;
+          for (let j = 0; j < from.length; j++) parts.push(from[j].out[starts[j] + slot]);
+          mix(light, parts, ownerWeights);
+        }
+        if (manual) mix2(light, light, manual.current, manualWeight);
+        if (!run.plan.hasUv) withoutUv(light);
+        light.i *= master;
+        if (flash) copy(light, FLASH_LIGHT);
+        visualOf(light, this.visual, (run.visualAt + c) * 3);
+      }
 
       const buf = this.universes.get(run.plan.universe);
-      if (buf) writeFixture(buf, run.plan, light);
-      visualOf(light, this.visual, f * 3);
+      if (buf) writeCells(buf, run.plan, cells);
     }
     return { universes: this.universes, visual: this.visual };
   }
@@ -819,16 +871,17 @@ export class Engine {
    * A smoke machine: the highest output of its smoke groups, untouched by
    * Master, Flash and any light group it is also in. Shown as quiet grey.
    */
-  private frameSmoke(f: number, run: FixtureRun): void {
+  private frameSmoke(run: FixtureRun): void {
     let level = 0;
     for (const g of run.smokeGroups) level = Math.max(level, g.smokeOut);
-    const light = run.light;
-    copy(light, dark());
-    light.i = level;
+    for (const light of run.cells) {
+      copy(light, DARK);
+      light.i = level;
+    }
     const buf = this.universes.get(run.plan.universe);
     if (buf) writeSmoke(buf, run.plan, level);
     const grey = Math.round(level * 140);
-    this.visual[f * 3] = this.visual[f * 3 + 1] = this.visual[f * 3 + 2] = grey;
+    this.visual.fill(grey, run.visualAt * 3, (run.visualAt + run.cells.length) * 3);
   }
 
   /** The holder's manual override if it still has weight; clears it once released. */
@@ -843,14 +896,24 @@ export class Engine {
     return m;
   }
 
-  /** Final light of every fixture (after master, before gamma), in show order. */
+  /** Final light of every fixture's first segment (after master, before gamma), in show order. */
   lights(): readonly Light[] {
     return this.fixtures.map((f) => f.light);
   }
 
-  /** How bright each fixture looks (its brightest written colour channel × intensity), in show order. */
+  /** How many segments each fixture has, in show order. */
+  segmentCounts(): number[] {
+    return this.fixtures.map((f) => f.cells.length);
+  }
+
+  /**
+   * How bright each segment looks (its brightest written colour channel × intensity):
+   * fixtures in show order, each fixture's segments in order, as in the visual.
+   */
   visibleLevels(): number[] {
-    return this.fixtures.map((f) => visibleLevel(f.plan, f.light));
+    const out: number[] = [];
+    for (const f of this.fixtures) for (const light of f.cells) out.push(visibleLevel(f.plan, light));
+    return out;
   }
 
   fixtureIds(): string[] {
