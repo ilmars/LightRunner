@@ -105,6 +105,23 @@ function send(cmd) {
   return ref;
 }
 
+// ---- Groups: lights, and smoke or haze machines ----
+
+/** A smoke or haze machine: a level and a Puff button, no colour, no Flash, never set by a look. */
+const isSmoke = (group) => group?.kind === 'smoke';
+const lightGroups = () => (layout?.groups ?? []).filter((g) => !isSmoke(g));
+
+/** Colour-strip blocks for a look, one per light group (smoke groups have no colour). */
+function stripBlocks(colours) {
+  const blocks = [];
+  (colours ?? []).forEach((c, i) => {
+    const group = layout.groups[i];
+    if (isSmoke(group)) return;
+    blocks.push({ colour: c, name: group?.name ?? '' });
+  });
+  return blocks;
+}
+
 // ---- Running order ----
 
 const isBasic = (item) => item.id === layout?.basicLights;
@@ -182,12 +199,12 @@ function buildPlainRows(order) {
     const b = el('button', basic ? 'item fixed' : 'item');
     // A thin strip: one block per group, the colour this item gives it.
     const strip = el('span', 'strip');
-    (item.colours ?? []).forEach((c, i) => {
-      const block = el('i', c ? null : 'unset');
-      if (c) block.style.background = c;
-      block.title = layout.groups[i]?.name ?? '';
+    for (const { colour, name } of stripBlocks(item.colours)) {
+      const block = el('i', colour ? null : 'unset');
+      if (colour) block.style.background = colour;
+      block.title = name;
       strip.append(block);
-    });
+    }
     const mark = el('span', 'mark', 'changed');
     mark.hidden = true;
     b.append(strip, el('span', 'name', item.name), mark);
@@ -553,10 +570,19 @@ function render() {
     $('fadeFill').style.width = `${Math.round(state.lookProgress * 100)}%`;
     $('fadeLeft').textContent = `${state.lookFadeLeft.toFixed(1)} s`;
   }
-  // Flash does nothing during Blackout, so the bar doesn't claim it.
-  const flashing = blackedOut ? [] : state.flashing ?? [];
+  // Flash does nothing during Blackout, so the bar doesn't claim it. A Puff shows as smoke, not as a flash.
+  const groupOf = (id) => layout.groups.find((g) => g.id === id);
+  const held = blackedOut ? [] : state.flashing ?? [];
+  const flashing = held.filter((id) => !isSmoke(groupOf(id)));
   $('flashNote').hidden = !flashing.length;
-  $('flashNote').textContent = `Flash: ${flashing.map((id) => layout.groups.find((g) => g.id === id)?.name ?? id).join(', ')}`;
+  $('flashNote').textContent = `Flash: ${flashing.map((id) => groupOf(id)?.name ?? id).join(', ')}`;
+  // A quiet readout while any smoke machine is running (the highest, if there are several).
+  let smoke = 0;
+  for (const g of layout.groups) {
+    if (isSmoke(g)) smoke = Math.max(smoke, held.includes(g.id) ? 1 : state.groups?.[g.id]?.level ?? 0);
+  }
+  $('smokeNote').hidden = smoke <= 0;
+  $('smokeNote').textContent = `Smoke: ${Math.round(smoke * 100)} %`;
   const top = $('topBar');
   top.classList.toggle('problem', lost);
   top.classList.toggle('off', off);
@@ -703,7 +729,8 @@ function stageItem() {
   return k >= 0 ? layout.runningOrder[k] : null;
 }
 
-// One entry per group: { group, chip, sw, chipName, dim, slab, pct, dragging, holdUntil }.
+// One entry per group: { group, smoke, chip, sw, chipName, dim, slab, pct, dragging, holdUntil }.
+// A smoke group's row has no chip (a "Smoke" label and a Puff button instead).
 let detailRows = [];
 
 function showLevel(row, v) {
@@ -721,26 +748,36 @@ function buildDetails() {
   root.replaceChildren();
   detailRows = [];
   for (const group of layout.groups) {
-    const box = el('div', 'row');
-    const sw = el('i');
-    const chipName = el('span');
-    const chip = el('button', 'chip');
-    chip.append(sw, chipName);
-    chip.setAttribute('aria-label', `${group.name}: choose colour`);
+    const smoke = isSmoke(group);
+    const box = el('div', smoke ? 'row smoke' : 'row');
     const slab = el('span', 'ds-fill-slab');
     const pct = el('span', 'pct');
     const dim = el('div', 'ds-fill');
     dim.setAttribute('role', 'slider');
-    dim.setAttribute('aria-label', `${group.name} dimmer`);
+    dim.setAttribute('aria-label', smoke ? `${group.name} smoke level` : `${group.name} dimmer`);
     dim.setAttribute('aria-valuemin', '0');
     dim.setAttribute('aria-valuemax', '100');
     dim.append(slab);
-    box.append(el('span', 'g', group.name), chip, pct, dim);
+    const row = { group, smoke, dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
+    if (smoke) {
+      // No colour to pick: a plain "Smoke" label, and Puff (hold) for a burst at full.
+      const puff = el('button', 'puff', 'Puff');
+      puff.setAttribute('aria-label', `Puff ${group.name} (hold)`);
+      wireHold(puff, [group.id]);
+      box.append(el('span', 'g', group.name), el('span', 'smoke-tag', 'Smoke'), pct, puff, dim);
+    } else {
+      const sw = el('i');
+      const chipName = el('span');
+      const chip = el('button', 'chip');
+      chip.append(sw, chipName);
+      chip.setAttribute('aria-label', `${group.name}: choose colour`);
+      chip.addEventListener('click', () => openPicker(group.id));
+      Object.assign(row, { chip, sw, chipName });
+      box.append(el('span', 'g', group.name), chip, pct, dim);
+    }
     root.append(box);
-    const row = { group, chip, sw, chipName, dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
     detailRows.push(row);
     showLevel(row, 0);
-    chip.addEventListener('click', () => openPicker(group.id));
     wireDimmer(row);
   }
   // A new layout can drop the group the picker was showing.
@@ -793,6 +830,11 @@ function renderDetails() {
   const now = performance.now();
   for (const row of detailRows) {
     const s = state.groups?.[row.group.id];
+    if (row.smoke) {
+      // The slider shows the smoke's own level; a Puff doesn't move it.
+      if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
+      continue;
+    }
     const info = presetInfo(row.group, s?.preset);
     row.sw.style.background = info.colour ?? '#0d0e11';
     row.chipName.textContent = info.name;
@@ -888,6 +930,7 @@ function renderPicker() {
 }
 
 function openPicker(groupId) {
+  if (isSmoke(layout?.groups.find((g) => g.id === groupId))) return;
   closeSheet();
   if (picker.group !== groupId) {
     $('pAnyH').hidden = true;
@@ -980,12 +1023,12 @@ function buildQuick() {
     b.append(el('span', 'qname', q.name));
     // A thin strip along the bottom: one block per group, the colour this quick look gives it.
     const strip = el('span', 'qstrip');
-    (q.colours ?? []).forEach((c, i) => {
+    for (const { colour, name } of stripBlocks(q.colours)) {
       const block = el('i');
-      if (c) block.style.background = c;
-      block.title = layout.groups[i]?.name ?? '';
+      if (colour) block.style.background = colour;
+      block.title = name;
       strip.append(block);
-    });
+    }
     b.append(strip);
     b.addEventListener('click', () => send({ type: 'quickLook', id: q.id }));
     grid.append(b);
@@ -1024,9 +1067,10 @@ function buildSheetGroups() {
   const root = $('qsGroups');
   root.replaceChildren();
   if (!layout) return;
-  const ids = new Set(layout.groups.map((g) => g.id));
+  // A quick look never sets smoke, so smoke groups aren't offered.
+  const ids = new Set(lightGroups().map((g) => g.id));
   for (const id of [...qs.left]) if (!ids.has(id)) qs.left.delete(id);
-  for (const group of layout.groups) {
+  for (const group of lightGroups()) {
     const b = el('button');
     b.dataset.group = group.id;
     const line = el('span', 'gs');
@@ -1076,7 +1120,7 @@ $('qsName').addEventListener('keydown', (ev) => {
 // A plain tap: a new quick look overwrites nothing. The sheet closes when the server says yes.
 $('qsSave').addEventListener('click', () => {
   if (pendingSave !== null || !layout) return;
-  const groups = layout.groups.map((g) => g.id).filter((id) => !qs.left.has(id));
+  const groups = lightGroups().map((g) => g.id).filter((id) => !qs.left.has(id));
   // The server would say this too, but in less friendly words.
   if (!groups.length) {
     toast('pick at least one group');
@@ -1135,29 +1179,39 @@ function flashOff(pointerId) {
 
 const flashAllOff = () => { for (const id of [...flashHeld.keys()]) flashOff(id); };
 
+/**
+ * Holding the button flashes the groups; letting go (or losing the finger) puts
+ * them out. Flash buttons and a smoke group's Puff both work this way.
+ */
+function wireHold(b, groups) {
+  b.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    if (flashHeld.has(ev.pointerId)) return;
+    // Keep getting the release when the finger slides off the button.
+    try { b.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    if (send({ type: 'flash', groups, on: true }) === null) return;
+    flashHeld.set(ev.pointerId, { button: b, groups });
+    b.classList.add('down');
+  });
+  const end = (ev) => flashOff(ev.pointerId);
+  for (const name of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) b.addEventListener(name, end);
+  b.addEventListener('contextmenu', (ev) => ev.preventDefault());
+}
+
 function buildFlash() {
   flashAllOff();
   const root = $('flashArea');
   root.replaceChildren(el('span', 'flash-label', 'Flash'));
-  const labels = flashLabels(layout.groups);
-  const buttons = [['All', layout.groups.map((g) => g.id), 'All lights']];
-  layout.groups.forEach((g, i) => buttons.push([labels[i], [g.id], g.name]));
+  // Smoke machines have Puff in the details instead, and "All" never includes them.
+  const lights = lightGroups();
+  const labels = flashLabels(lights);
+  const buttons = [['All', lights.map((g) => g.id), 'All lights']];
+  lights.forEach((g, i) => buttons.push([labels[i], [g.id], g.name]));
   for (const [text, groups, full] of buttons) {
     const b = el('button', null, text);
     b.setAttribute('aria-label', `Flash ${full} (hold)`);
     root.append(b);
-    b.addEventListener('pointerdown', (ev) => {
-      ev.preventDefault();
-      if (flashHeld.has(ev.pointerId)) return;
-      // Keep getting the release when the finger slides off the button.
-      try { b.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
-      if (send({ type: 'flash', groups, on: true }) === null) return;
-      flashHeld.set(ev.pointerId, { button: b, groups });
-      b.classList.add('down');
-    });
-    const end = (ev) => flashOff(ev.pointerId);
-    for (const name of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) b.addEventListener(name, end);
-    b.addEventListener('contextmenu', (ev) => ev.preventDefault());
+    wireHold(b, groups);
   }
 }
 
