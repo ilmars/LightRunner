@@ -664,18 +664,47 @@ const master = (() => {
 const NEUTRAL = '#5a5f69';
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
-/** `live:<group>:<#rrggbb>` is a colour picked with Any colour. */
-function liveColour(id) {
-  const m = /^live:([^:]+):(#[0-9a-f]{6})$/i.exec(id ?? '');
-  return m ? m[2].toLowerCase() : null;
+/**
+ * `live:<group>:<#rrggbb>` is a colour picked with Any colour, optionally
+ * followed by white, amber and UV in percent (`:w40:a20:u5`, zeros left out).
+ */
+function parseLive(id) {
+  const m = /^live:([^:]+):(#[0-9a-f]{6})(?::w(\d{1,3}))?(?::a(\d{1,3}))?(?::u(\d{1,3}))?$/i.exec(id ?? '');
+  if (!m) return null;
+  const level = (v) => (v === undefined ? 0 : Math.min(100, Number(v)) / 100);
+  return { colour: m[2].toLowerCase(), white: level(m[3]), amber: level(m[4]), uv: level(m[5]) };
+}
+
+/** The colour to show for a colour with white, amber and UV, as the stage preview draws them. */
+function displayColour(hex, x) {
+  if (!x.white && !x.amber && !x.uv) return hex;
+  const n = parseInt(hex.slice(1), 16);
+  const rgb = [
+    ((n >> 16) & 255) / 255 + x.white + x.amber + 0.25 * x.uv,
+    ((n >> 8) & 255) / 255 + x.white + (0xbf / 255) * x.amber,
+    (n & 255) / 255 + x.white + 0.4 * x.uv,
+  ];
+  const scale = 1 / Math.max(1, ...rgb);
+  return `#${rgb.map((c) => Math.round(c * scale * 255).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** What a group runs, as an Any colour pick would make it: { colour, white, amber, uv }. */
+function runningLight(group, id) {
+  const live = parseLive(id);
+  if (live) return live;
+  // Basic light: #ffd2a0 with half white, at 80 %.
+  if (id === '__safe') return { colour: '#cca880', white: 0.4, amber: 0, uv: 0 };
+  const light = group?.presets.find((x) => x.id === id)?.light;
+  if (light) return { colour: light.hex, white: light.white, amber: light.amber, uv: light.uv };
+  return { colour: '#000000', white: 0, amber: 0, uv: 0 };
 }
 
 /** Name and colour to show for a preset id of a group (never throws on an id the layout doesn't list). */
 function presetInfo(group, id) {
   if (id === null || id === undefined || id === '__blackout') return { name: 'Off', colour: null };
   if (id === '__safe') return { name: 'Basic light', colour: '#ffd2a0' };
-  const hex = liveColour(id);
-  if (hex) return { name: 'Custom', colour: hex };
+  const live = parseLive(id);
+  if (live) return { name: 'Custom', colour: displayColour(live.colour, live) };
   const p = group?.presets.find((x) => x.id === id);
   if (p) return { name: p.name, colour: p.swatch ?? NEUTRAL };
   return { name: 'Custom', colour: NEUTRAL };
@@ -874,9 +903,86 @@ function buildPickerGrid() {
   $('pAnyLab').textContent = row.group.whiteOnly ? 'Any white, warm to cool' : 'Any colour';
   $('pAny').className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'}`;
   $('pAny').setAttribute('aria-label', $('pAnyLab').textContent);
+  buildExtras(row.group);
 }
 
-/** Keeps "current", the highlighted swatch and the dimmer in step with the live state. */
+// White, Amber and UV under the Any colour strip, for groups whose fixtures have them.
+const EXTRAS = [
+  { key: 'white', label: 'White', tint: '#f4f8ff' },
+  { key: 'amber', label: 'Amber', tint: '#ffbf00' },
+  { key: 'uv', label: 'UV', tint: '#8c5cff' },
+];
+// One entry per slider shown: { key, dim, slab, pct, value, dragging, holdUntil }.
+let extraRows = [];
+// The colour the group runs, which a slider move sends again with the new levels.
+let pickerColour = '#000000';
+
+function buildExtras(group) {
+  const box = $('pExtras');
+  box.replaceChildren();
+  extraRows = [];
+  for (const x of EXTRAS) {
+    if (!group.extras?.[x.key]) continue;
+    const slab = el('span', 'ds-fill-slab');
+    const dim = el('div', 'ds-fill');
+    dim.setAttribute('role', 'slider');
+    dim.setAttribute('aria-label', `${group.name} ${x.label}`);
+    dim.setAttribute('aria-valuemin', '0');
+    dim.setAttribute('aria-valuemax', '100');
+    dim.style.setProperty('--c', x.tint);
+    dim.append(slab);
+    const pct = el('span', 'pct');
+    const cell = el('div', 'xcell');
+    cell.append(el('span', 'lab2', x.label), pct, dim);
+    box.append(cell);
+    const row = { key: x.key, dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
+    extraRows.push(row);
+    showLevel(row, 0);
+    wireExtra(row);
+  }
+  box.hidden = extraRows.length === 0;
+}
+
+/** The levels the sliders show; extras the group has no slider for are 0. */
+function extraLevels() {
+  const out = { white: 0, amber: 0, uv: 0 };
+  for (const r of extraRows) out[r.key] = Math.round(r.value * 100) / 100;
+  return out;
+}
+
+function sendColour(hex) {
+  if (picker.group) send({ type: 'groupColour', group: picker.group, colour: hex, ...extraLevels() });
+}
+
+/** Same feel as the group dimmers: the level moves relative to where the finger started. */
+function wireExtra(row) {
+  const out = throttle(() => sendColour(pickerColour));
+  let startX = 0, startV = 0;
+  row.dim.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    row.dragging = true;
+    try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    row.dim.classList.add('ds-dragging');
+    startX = ev.clientX;
+    startV = row.value;
+  });
+  row.dim.addEventListener('pointermove', (ev) => {
+    if (!row.dragging) return;
+    showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
+    out.push();
+  });
+  const end = () => {
+    if (!row.dragging) return;
+    row.dragging = false;
+    row.dim.classList.remove('ds-dragging');
+    row.holdUntil = performance.now() + 600;
+    if (row.value !== startV) out.end();
+  };
+  row.dim.addEventListener('pointerup', end);
+  row.dim.addEventListener('pointercancel', end);
+}
+
+/** Keeps "current", the highlighted swatch, the dimmer and the White, Amber and UV sliders in step with the live state. */
 function renderPicker() {
   const row = pickerRow();
   if (!row) return;
@@ -885,6 +991,10 @@ function renderPicker() {
   $('pCurSw').style.background = info.colour ?? '#0d0e11';
   $('pCurText').textContent = `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
+  const running = runningLight(row.group, s?.preset);
+  pickerColour = running.colour;
+  const now = performance.now();
+  for (const r of extraRows) if (!r.dragging && now >= r.holdUntil) showLevel(r, running[r.key]);
 }
 
 function openPicker(groupId) {
@@ -918,11 +1028,10 @@ $('pDone').addEventListener('click', closePicker);
 for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('click', () => showPickerTab(t.dataset.pt));
 
 // Any colour: picking sends right away; moves are throttled and the last one always goes.
+// The White, Amber and UV sliders' levels go with it.
 (() => {
   const strip = $('pAny');
-  const out = throttle((hex) => {
-    if (picker.group) send({ type: 'groupColour', group: picker.group, colour: hex });
-  });
+  const out = throttle((hex) => sendColour(hex));
   let dragging = false;
   const pick = (ev) => {
     const r = strip.getBoundingClientRect();
