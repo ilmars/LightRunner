@@ -794,6 +794,11 @@ function wireDimmer(row) {
   let startX = 0, startV = 0;
   row.dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
+    // The server refuses smoke during Blackout; say so once and leave the slider where it is.
+    if (row.smoke && state?.look === 'blackout') {
+      toast('Blackout is on.');
+      return;
+    }
     row.dragging = true;
     try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     row.dim.classList.add('ds-dragging');

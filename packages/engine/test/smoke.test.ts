@@ -103,6 +103,37 @@ test('Blackout turns smoke off; Puff and the next look leave it off', () => {
   assert.equal(dmxAt(e, 10), 0);
 });
 
+test('the smoke slider is refused during Blackout', () => {
+  const e = new Engine(hazeShow());
+  e.apply({ type: 'look', id: 'worship' }, 0);
+  e.apply({ type: 'blackout' }, 1);
+  assert.equal(e.apply({ type: 'groupLevel', group: 'haze', value: 0.8 }, 2), 'Blackout is on.');
+  assert.equal(dmxAt(e, 3), 0);
+  assert.equal(e.liveState(3, 'ok').groups.haze.level, 0);
+  // Light dimmers still move in Blackout, as before.
+  assert.equal(e.apply({ type: 'groupLevel', group: 'back-wall', value: 0.5 }, 3), null);
+  e.apply({ type: 'look', id: 'worship' }, 4);
+  assert.equal(e.apply({ type: 'groupLevel', group: 'haze', value: 0.8 }, 5), null, 'after Blackout it works again');
+});
+
+test('a Puff held longer than 15 s ends by itself', () => {
+  const e = new Engine(hazeShow());
+  e.apply({ type: 'look', id: 'worship' }, 0);
+  e.apply({ type: 'groupLevel', group: 'haze', value: 0.2 }, 0);
+  e.apply({ type: 'flash', groups: ['haze'], on: true }, 10);
+  assert.equal(dmxAt(e, 10.025), 255);
+  // Another "on" while it is held doesn't start the 15 s again.
+  e.apply({ type: 'flash', groups: ['haze'], on: true }, 20);
+  assert.equal(dmxAt(e, 24.9), 255);
+  assert.ok(close(smokeAt(e, 25), 0.2), 'back to its slider after 15 s');
+  assert.deepEqual(e.liveState(25, 'ok').flashing, []);
+  assert.ok(close(smokeAt(e, 40), 0.2), 'and it stays there while the button is still down');
+  // Letting go and holding again gives a new Puff.
+  e.apply({ type: 'flash', groups: ['haze'], on: false }, 41);
+  e.apply({ type: 'flash', groups: ['haze'], on: true }, 42);
+  assert.equal(dmxAt(e, 42.025), 255);
+});
+
 test('Flash of several groups (All) leaves smoke out', () => {
   const e = new Engine(hazeShow());
   e.apply({ type: 'look', id: 'worship' }, 0);
@@ -222,4 +253,19 @@ test('a group that becomes a smoke group goes off', () => {
   const s = e.liveState(5, 'ok');
   assert.equal(s.groups.haze.level, 0);
   assert.deepEqual(s.flashing, []);
+});
+
+test('a group that stops being a smoke group comes back at full, not at its smoke level', () => {
+  const smoke = hazeShow();
+  const e = new Engine(smoke);
+  e.apply({ type: 'groupLevel', group: 'haze', value: 0.3 }, 0);
+  e.frame(1);
+  const light = structuredClone(smoke);
+  light.groups.find((g) => g.id === 'haze')!.kind = 'light';
+  e.setShow(light, 1);
+  assert.equal(e.liveState(1, 'ok').groups.haze.level, 1);
+  // As a light it is dark until something sets it (it has run no preset).
+  assert.equal(dmxAt(e, 1), 0);
+  e.apply({ type: 'safe' }, 1);
+  assert.ok(dmxAt(e, 4) > 0, 'now Basic lights drives it, as the Patch hint warns');
 });

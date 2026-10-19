@@ -36,6 +36,8 @@ const DEFAULT_FADE = 3;
 
 /** A held Puff runs a smoke machine at this level, whatever its slider says. */
 const PUFF_LEVEL = 1;
+/** A Puff held longer than this (seconds) ends by itself, even with the button still down. */
+const PUFF_MAX = 15;
 /** Basic lights and Blackout turn smoke off over this long (keeps the 5% rule). */
 const SMOKE_OFF = 1;
 
@@ -166,6 +168,8 @@ export class Engine {
   /** Groups being flashed, and the fixtures in them (recomputed when either changes). */
   private flash = new Set<string>();
   private flashed = new Set<number>();
+  /** When each smoke group's Puff started, for the PUFF_MAX cap. */
+  private puffStart = new Map<string, number>();
 
   private master = new Ramp(1);
   private speed = new Ramp(1);
@@ -221,6 +225,11 @@ export class Engine {
         run.presets = new Crossfade<PresetRun>();
         run.manual = null;
         this.flash.delete(g.id);
+      } else if (!smoke && run.smoke) {
+        // Back to a light group: a light's dimmer starts at full, not at whatever the smoke was.
+        run.level.set(1, now, 0);
+        this.flash.delete(g.id);
+        this.puffStart.delete(g.id);
       }
       run.smoke = smoke;
       run.setFixtures(g.fixtures.map((id) => this.fixtureIndex.get(id)).filter((i): i is number => i !== undefined));
@@ -252,6 +261,7 @@ export class Engine {
     this.visual = new Uint8Array(this.fixtures.length * 3);
 
     for (const id of this.flash) if (!this.groups.has(id)) this.flash.delete(id);
+    for (const id of this.puffStart.keys()) if (!this.flash.has(id)) this.puffStart.delete(id);
     this.updateFlashed();
     this.adoptSaved();
   }
@@ -379,8 +389,12 @@ export class Engine {
       case 'flash': {
         for (const id of cmd.groups) if (!this.groups.has(id)) return `unknown group "${id}"`;
         for (const id of cmd.groups) {
+          const smoke = this.groups.get(id)!.smoke;
           // A smoke group's flash is its Puff, and only happens on its own: Flash All never puffs.
-          if (cmd.on && this.groups.get(id)!.smoke && cmd.groups.length > 1) continue;
+          if (cmd.on && smoke && cmd.groups.length > 1) continue;
+          // The 15 s cap counts from the start of a Puff; another "on" while it is held doesn't restart it.
+          if (cmd.on && smoke && !this.flash.has(id)) this.puffStart.set(id, now);
+          if (!cmd.on) this.puffStart.delete(id);
           if (cmd.on) this.flash.add(id);
           else this.flash.delete(id);
         }
@@ -399,6 +413,8 @@ export class Engine {
       case 'groupLevel': {
         const group = this.groups.get(cmd.group);
         if (!group) return `unknown group "${cmd.group}"`;
+        // Blackout keeps smoke off: its slider waits until the lights are back, like Puff.
+        if (group.smoke && this.look === BLACKOUT) return 'Blackout is on.';
         group.level.set(cmd.value, now, SMOOTH);
         return null;
       }
@@ -615,6 +631,12 @@ export class Engine {
     const blackedOut = this.look === BLACKOUT;
     for (const group of this.groups.values()) {
       if (group.smoke) {
+        // A Puff that has run its 15 s ends here, as if the button had been let go.
+        const started = this.puffStart.get(group.id);
+        if (started !== undefined && now - started >= PUFF_MAX) {
+          this.flash.delete(group.id);
+          this.puffStart.delete(group.id);
+        }
         // Puff (its own flash) runs it at full, but not during Blackout.
         group.smokeOut = this.flash.has(group.id) && !blackedOut ? PUFF_LEVEL : group.level.value(now);
         continue;
