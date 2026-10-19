@@ -8,8 +8,8 @@
    with a page's own classes. */
 :root {
   /* Page and panels, darkest to lightest. */
-  --ds-bg: #0A0F1B;
-  --ds-bg-deep: #070B14;
+  --ds-bg: #0F1625;
+  --ds-bg-deep: #0C121F;
   --ds-surface: #121A2B;
   --ds-surface-hi: #162034;
   /* Translucent layers on top of a panel. */
@@ -39,7 +39,7 @@
   --ds-r-tile: 12px;
   --ds-r-small: 10px;
   --ds-r-pill: 999px;
-  --ds-gap: 12px;
+  --ds-gap: 10px;
   --ds-gap-tight: 8px;
   --ds-pad: 14px;
   --ds-target: 44px;

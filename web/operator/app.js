@@ -517,6 +517,10 @@ function lookName(id) {
   return layout.runningOrder.find((i) => i.id === id)?.name ?? layout.looks.find((l) => l.id === id)?.name ?? (id ? 'Deleted item' : '—');
 }
 
+/** The full explanation behind the short status label in the top bar. */
+let outputDetail = '';
+$('outputNote').addEventListener('click', () => toast(outputDetail, true));
+
 function render() {
   if (!state || !layout) return;
   const blackedOut = state.look === 'blackout';
@@ -535,9 +539,13 @@ function render() {
   note.hidden = !(lost || off);
   note.classList.toggle('problem', lost);
   note.classList.toggle('off', off);
-  $('outputText').textContent = lost
+  // A short label; the full explanation on hover (title) or tap (a message).
+  const otherDesk = lost && /another desk/i.test(state.outputProblem ?? '');
+  $('outputText').textContent = !lost ? 'DMX output inactive' : otherDesk ? 'Another desk is sending' : 'Lights not answering';
+  outputDetail = lost
     ? state.outputProblem ?? 'Lights not answering. Check the lighting network box.'
-    : 'Not sending to the lights (Lightkey has them)';
+    : 'Light Runner is not sending to the lights (Lightkey has them). Turn Send DMX on in Settings.';
+  note.title = outputDetail;
   $('quiet').hidden = lost || off;
 
   $('fading').hidden = !fading;

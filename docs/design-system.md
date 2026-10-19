@@ -14,7 +14,7 @@ How the direction was agreed with Ilmārs (19 Oct 2026):
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `--ds-bg` / `--ds-bg-deep` | `#0A0F1B` / `#070B14` | Page background, with a soft radial glow from the top (`#16213a`) |
+| `--ds-bg` / `--ds-bg-deep` | `#0F1625` / `#0C121F` | Page background, close to the panels' tone so the page reads as one surface; soft radial glow from the top (`#18233b`) |
 | `--ds-surface` / `--ds-surface-hi` | `#121A2B` / `#162034` | Solid surface tones |
 | `--ds-panel-fill` | translucent `rgba(27,37,60,.78)` to `rgba(17,24,40,.78)` | Panels (glass) |
 | `--ds-tile-fill` | `rgba(148,170,210,.055)` | Tiles and buttons at rest |
@@ -43,7 +43,7 @@ The first suggested palette was measured at about 4× the old screen's average b
 | Token | Value |
 | --- | --- |
 | `--ds-r-panel` / `--ds-r-tile` / `--ds-r-small` / `--ds-r-pill` | 18 / 12 / 10 / 999 px |
-| `--ds-gap` / `--ds-gap-tight` | 12 / 8 px |
+| `--ds-gap` / `--ds-gap-tight` | 10 / 8 px |
 | `--ds-target` | 44 px minimum touch target |
 | `--ds-shadow-raise` | Panels: faint edge plus a very soft far shadow |
 | `--ds-shadow-low`, `--ds-shadow-inset` | Controls: faint edge only |
@@ -76,6 +76,8 @@ The first suggested palette was measured at about 4× the old screen's average b
 
 - **Surfaces:** glass panels on the background. Group zones in Details are flat and divided by a faint line, not cards inside a card. The bottom bar is one strip whose groups are divided by faint lines.
 - **Levels:** a clear number on the right of the group's header line, never drawn over the slider. 0 % is muted.
+- **Details adapt to the rig:** with few groups each zone grows into the spare room (up to 124 px, the slider up to 64 px tall); with many groups they shrink back to their content (slider 44 px) and the list scrolls, so capacity isn't lost.
+- **Quick looks** keep a fixed two rows (12 looks before scrolling), so the layout doesn't jump when switching tabs.
 - **Running order:**
   - on stage: blue-tinted glass with a blue edge
   - changed: an amber dot and "changed"
@@ -86,7 +88,8 @@ The first suggested palette was measured at about 4× the old screen's average b
   - Master below 100 %: amber value and an amber fill.
   - Blackout: faint red at rest, filling red while held. While it's on, strong red glass on the button and the whole top bar.
   - Problems with the lights: an amber strip on the top bar.
-  - Send DMX off: a violet strip.
+  - Send DMX off: an amber pill, **DMX output inactive**, with a faint amber strip on the top bar. Hover or tap the pill for the full explanation.
+  - Lights not answering, or another desk is sending: the same amber pill with that short label; the full message on hover or tap.
 
   Colour is only used where it says something.
 
