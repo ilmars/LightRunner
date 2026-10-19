@@ -105,6 +105,8 @@ export const Preset = z.object({
   layers: z.array(Layer).min(1).max(8),
   fade: seconds.default(3),
   swatch: hex.optional(),
+  /** Made by Save from an "Any colour" pick; never shown as a swatch. */
+  custom: z.boolean().optional(),
 });
 export type Preset = z.infer<typeof Preset>;
 
@@ -112,6 +114,8 @@ export const LookEntry = z.object({
   group: id,
   preset: id,
   fade: seconds.optional(),
+  /** Group level the look sets, 0..1. Missing means full. */
+  level: unit.optional(),
 });
 export type LookEntry = z.infer<typeof LookEntry>;
 
@@ -126,11 +130,21 @@ export type Look = z.infer<typeof Look>;
 
 // ---- Layout and settings ----
 
+export const QuickTab = z.enum(['plain', 'colours', 'effects']);
+export type QuickTab = z.infer<typeof QuickTab>;
+
+export const QuickLook = z.object({ look: id, tab: QuickTab });
+export type QuickLook = z.infer<typeof QuickLook>;
+
 export const OperatorLayout = z.object({
   looks: z.array(id).default([]),
   groups: z.array(id).default([]),
   safeLook: id.optional(),
   manualForOperators: z.boolean().default(false),
+  /** The service's looks in order, as look ids. The first is always the safe look ("Basic lights"). */
+  runningOrder: z.array(id).default([]),
+  /** Looks offered under "Quick looks", each on a tab. */
+  quickLooks: z.array(QuickLook).default([]),
 });
 export type OperatorLayout = z.infer<typeof OperatorLayout>;
 
@@ -168,7 +182,7 @@ export const Show = z.object({
   palettes: z.array(Palette).default([]),
   presets: z.array(Preset),
   looks: z.array(Look),
-  operator: OperatorLayout.default({ looks: [], groups: [], manualForOperators: false }),
+  operator: OperatorLayout.default({ looks: [], groups: [], manualForOperators: false, runningOrder: [], quickLooks: [] }),
   settings: Settings.default({ output: { kind: 'artnet', host: '2.255.255.255' }, outputEnabled: true, frameRate: 40, gamma: 2.2 }),
   stage: StagePlan.default({ grid: 10 }),
 });
@@ -229,6 +243,8 @@ export function checkReferences(show: Show): string[] {
   }
   for (const l of show.operator.looks) if (!looks.has(l)) problems.push(`operator layout lists unknown look "${l}"`);
   for (const g of show.operator.groups) if (!groups.has(g)) problems.push(`operator layout lists unknown group "${g}"`);
+  for (const l of show.operator.runningOrder) if (!looks.has(l)) problems.push(`running order lists unknown look "${l}"`);
+  for (const q of show.operator.quickLooks) if (!looks.has(q.look)) problems.push(`quick looks list unknown look "${q.look}"`);
   if (show.operator.safeLook && !looks.has(show.operator.safeLook)) problems.push(`Safe uses unknown look "${show.operator.safeLook}"`);
   return problems;
 }

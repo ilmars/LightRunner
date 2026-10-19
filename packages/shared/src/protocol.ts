@@ -88,3 +88,16 @@ export interface RuntimeState {
 
 export const SAFE = 'safe';
 export const BLACKOUT = 'blackout';
+
+/**
+ * A preset id that stands for "this group in this exact colour" (the Any colour
+ * pick). It is not a preset in the show; Save turns it into a custom one.
+ */
+export function livePresetId(group: string, colour: string): string {
+  return `live:${group}:${colour.toLowerCase()}`;
+}
+
+export function parseLivePreset(id: string): { group: string; colour: string } | null {
+  const m = /^live:([^:]+):(#[0-9a-f]{6})$/.exec(id);
+  return m ? { group: m[1]!, colour: m[2]! } : null;
+}

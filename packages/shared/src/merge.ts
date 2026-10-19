@@ -158,6 +158,8 @@ function cascadeRemove(show: Show, kind: ItemKind, id: string): void {
       break;
     case 'look':
       show.operator.looks = show.operator.looks.filter((l) => l !== id);
+      show.operator.runningOrder = show.operator.runningOrder.filter((l) => l !== id);
+      show.operator.quickLooks = show.operator.quickLooks.filter((q) => q.look !== id);
       if (show.operator.safeLook === id) show.operator.safeLook = undefined;
       break;
   }

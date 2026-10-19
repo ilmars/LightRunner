@@ -58,6 +58,6 @@ test('colour temperature, fine channels and 2D matrices', () => {
   // The profile is valid in a show.
   const show = { ...lightkeyShow(), profiles: [simple] };
   show.fixtures = [{ id: 'p', name: 'Panel', profile: simple.id, universe: 1, address: 1, x: 0.5, y: 0.5 }];
-  show.groups = []; show.presets = []; show.looks = []; show.operator = { looks: [], groups: [], manualForOperators: false };
+  show.groups = []; show.presets = []; show.looks = []; show.operator = { looks: [], groups: [], manualForOperators: false, runningOrder: [], quickLooks: [] };
   parseShow(show);
 });
