@@ -63,19 +63,20 @@ type Poll = (hosts: string[]) => Promise<Map<string, NodeHealth>>;
  * Polls every node DMX goes to unicast, every few seconds. Reports a problem
  * after three missed polls in a row (a single lost UDP reply is normal), or
  * when a node says it is merging another source. With several nodes their
- * problems are joined into one message, each naming its node.
+ * problems are joined into one message, each naming its node. `otherDesk` says
+ * whether every problem is another desk sending (no node is missing).
  */
 export class NodeWatch {
-  private readonly nodes = new Map<string, { misses: number; problem: string | null }>();
+  private readonly nodes = new Map<string, { misses: number; problem: string | null; otherDesk: boolean }>();
   private timer: NodeJS.Timeout | null = null;
   private busy = false;
   private paused = 0;
   private problem: string | null = null;
-  private readonly onChange: (problem: string | null) => void;
+  private readonly onChange: (problem: string | null, otherDesk: boolean) => void;
   private readonly everyMs: number;
   private readonly poll: Poll;
 
-  constructor(onChange: (problem: string | null) => void, everyMs = 4000, poll: Poll = (hosts) => pollNodes(hosts)) {
+  constructor(onChange: (problem: string | null, otherDesk: boolean) => void, everyMs = 4000, poll: Poll = (hosts) => pollNodes(hosts)) {
     this.onChange = onChange;
     this.everyMs = everyMs;
     this.poll = poll;
@@ -89,7 +90,7 @@ export class NodeWatch {
     if (same) return;
     for (const h of [...this.nodes.keys()]) if (!next.includes(h)) this.nodes.delete(h);
     const added = next.filter((h) => !this.nodes.has(h));
-    for (const h of added) this.nodes.set(h, { misses: 0, problem: null });
+    for (const h of added) this.nodes.set(h, { misses: 0, problem: null, otherDesk: false });
     this.report();
     if (!this.nodes.size) {
       if (this.timer) clearInterval(this.timer);
@@ -122,8 +123,10 @@ export class NodeWatch {
         if (h.seen) {
           node.misses = 0;
           node.problem = h.merging ? `Another desk is also sending to ${h.name ?? host}` : null;
+          node.otherDesk = h.merging;
         } else if (++node.misses >= 3) {
           node.problem = `Art-Net node ${host} is not answering`;
+          node.otherDesk = false;
         }
       }
       this.report();
@@ -133,10 +136,10 @@ export class NodeWatch {
   }
 
   private report(): void {
-    const problems = [...this.nodes.values()].map((n) => n.problem).filter(Boolean);
-    const problem = problems.length ? problems.join('. ') : null;
+    const failing = [...this.nodes.values()].filter((n) => n.problem);
+    const problem = failing.length ? failing.map((n) => n.problem).join('. ') : null;
     if (problem === this.problem) return;
     this.problem = problem;
-    this.onChange(problem);
+    this.onChange(problem, failing.length > 0 && failing.every((n) => n.otherDesk));
   }
 }

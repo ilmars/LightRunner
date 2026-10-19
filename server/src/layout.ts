@@ -61,6 +61,8 @@ export interface OperatorLayout {
   groups: OperatorGroup[];
   /** The engine's own Basic light (a group Basic lights doesn't list), as an Any colour pick would make it. */
   basicLight: LiveLight;
+  /** The colour pages draw for the built-in Basic light. */
+  basicSwatch: string;
   /** In the same order as the bytes of each visualiser frame. */
   fixtures: { id: string; name: string; x: number; y: number; w: number | null; h: number | null }[];
   /** Fixture ids of each group, for tapping a group on the mini visualiser. */
@@ -105,6 +107,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     quickLooks: show.operator.quickLooks.flatMap((q) => describe(q.look).map((l) => ({ ...l, tab: q.tab }))),
     basicLights: show.operator.safeLook ?? null,
     basicLight: liveLight(SAFE_LIGHT, SAFE_LIGHT.intensity),
+    basicSwatch: SAFE_LIGHT.hex,
     groups: groupIds.flatMap((id) => {
       const g = show.groups.find((x) => x.id === id);
       if (!g) return [];

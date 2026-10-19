@@ -96,6 +96,18 @@ test('a colour a group already lists is not added again', () => {
   assert.ok(!all.ids.some((id) => all.show.presets.find((p) => p.id === id)!.group === 'key-lights'));
 });
 
+test('a listed colour with amber or UV is not the plain colour', () => {
+  const s = rig();
+  s.presets.push({ id: 'amber-red', name: 'Amber red', group: 'key-lights', fade: 3, swatch: '#ff4800', layers: [{ kind: 'static', colour: { hex: '#ff0000', amber: 0.6 }, intensity: 1 }] });
+  s.presets.push({ id: 'uv-blue', name: 'UV blue', group: 'key-lights', fade: 3, swatch: '#4040ff', layers: [{ kind: 'static', colour: { hex: '#0000ff', uv: 0.5 }, intensity: 1 }] });
+  s.presets = s.presets.filter((p) => p.group !== 'key-lights' || !['#ff0000', '#0000ff'].includes(p.swatch ?? ''));
+  for (const colour of ['#ff0000', '#0000ff']) {
+    const { show, ids } = addColour(s, { group: 'key-lights', colour, name: '', allGroups: false });
+    assert.equal(ids.length, 1);
+    assert.deepEqual(show.presets.find((p) => p.id === ids[0])!.layers[0]!.colour, { hex: colour });
+  }
+});
+
 test('nothing left to add is an error', () => {
   const once = addColour(rig(), { group: 'background', colour: '#2a4b9c', name: 'Deep blue', allGroups: true }).show;
   assert.throws(() => addColour(once, { group: 'background', colour: '#2a4b9c', name: 'Deep blue', allGroups: true }), /every group already has that colour/);
@@ -182,7 +194,12 @@ test('a colour change keeps the other channels of the colour, also from a palett
   s.presets.push({ id: 'warm-mix', name: 'Warm mix', group: 'key-lights', fade: 3, swatch: '#112233', layers: [{ kind: 'static', colour: { hex: '#112233', white: 0.4 }, intensity: 0.8 }] });
   const mixed = preset(editColour(s, { preset: 'warm-mix', colour: '#445566', sameName: false }).show, 'warm-mix');
   assert.deepEqual(mixed.layers, [{ kind: 'static', colour: { hex: '#445566', white: 0.4 }, intensity: 0.8 }]);
-  assert.equal(mixed.swatch, '#445566');
+  // The swatch shows the white mixed in, as the stage shows it.
+  assert.equal(mixed.swatch, '#aabbcc');
+  s.presets.push({ id: 'amber-red', name: 'Amber red', group: 'key-lights', fade: 3, swatch: '#ff0000', layers: [{ kind: 'static', colour: { hex: '#ff0000', amber: 0.6 }, intensity: 1 }] });
+  const amber = preset(editColour(s, { preset: 'amber-red', colour: '#ff0000', sameName: false }).show, 'amber-red');
+  assert.deepEqual(amber.layers[0]!.colour, { hex: '#ff0000', amber: 0.6 });
+  assert.equal(amber.swatch, '#ff4800');
   // A palette colour becomes a hex colour that carries the palette entry's white.
   const palette = s.palettes.find((p) => p.id === 'lightkey')!;
   palette.colours[7] = { hex: '#0000ff', white: 0.3 };

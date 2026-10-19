@@ -3,9 +3,9 @@
 // same code drives output, tests, blind preview and the soak test.
 
 import {
-  BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, findProfile, livePresetId, parseLivePreset,
+  BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, displayColour, findProfile, livePresetId, parseLivePreset,
   type StageCommand, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
-  type Palette, type Preset, type RuntimeState, type Show,
+  type GroupStatus, type Palette, type Preset, type RuntimeState, type Show,
 } from '../../shared/src/index.ts';
 import { Crossfade, Ramp } from './fade.ts';
 import { compilePreset, fixedPreset, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
@@ -136,6 +136,14 @@ class FixtureRun {
     this.id = id;
     this.plan = plan;
   }
+}
+
+/** An Any colour pick as the operator page shows it, or null for any other preset. */
+function liveView(preset: string | null): GroupStatus['live'] {
+  const live = preset ? parseLivePreset(preset) : null;
+  if (!live) return null;
+  const { colour, white = 0, amber = 0, uv = 0 } = live;
+  return { colour, white, amber, uv, display: displayColour(colour, live) };
 }
 
 function smokeRefusal(name: string): string {
@@ -358,8 +366,9 @@ export class Engine {
     const liveOf = (old: Preset | undefined, group: string): string | null => {
       if (!old || old.group !== group || old.layers.length !== 1) return null;
       const layer = old.layers[0]!;
-      if (!('hex' in layer.colour) || layer.colour.white || layer.intensity !== 1) return null;
-      return livePresetId(group, layer.colour.hex);
+      if (!('hex' in layer.colour) || layer.intensity !== 1) return null;
+      // White, amber and UV go with it, so the stage keeps the same light.
+      return livePresetId(group, layer.colour.hex, layer.colour);
     };
     for (const group of this.groups.values()) {
       const key = group.presets.currentKey;
@@ -861,6 +870,7 @@ export class Engine {
         manual: g.manual !== null && !g.manual.releasing,
         progress: g.presets.progress(now),
         level: g.level.target,
+        live: liveView(preset),
       };
     }
     return {
@@ -878,6 +888,7 @@ export class Engine {
       speed: this.speed.target,
       output,
       outputProblem: null,
+      outputProblemKind: null,
     };
   }
 

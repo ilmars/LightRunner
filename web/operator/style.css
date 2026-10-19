@@ -431,6 +431,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .toast.quiet { background: var(--ds-glass); color: var(--ds-text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -12px rgba(0, 0, 0, 0.7); }
 [hidden] { display: none !important; }
 
+/* ---- Between a phone and the iPad in landscape (an iPad upright, a smaller window) ----
+   The bottom bar doesn't fit on one line: Flash gets its own line above Master and the buttons. */
+@media (min-width: 701px) and (max-width: 1079px) and (min-height: 501px) {
+  body { grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: 44px minmax(0, 1fr) auto; }
+  .bottom {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; grid-template-rows: 52px 60px;
+    grid-template-areas: "flash flash flash flash" "master undo next blackout";
+  }
+  .master { grid-area: master; width: auto; }
+  .flash-area { grid-area: flash; border: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding: 0 0 6px; }
+  .flash-area button { flex: 1 1 0; width: auto; min-width: 0; }
+  .undo { grid-area: undo; } .next { grid-area: next; } .blackout { grid-area: blackout; }
+}
+
 /* ---- Phone remote: narrow screens (portrait phones, and phones on their side) ----
    The same page as a remote in the director's hand: Order, Groups and Looks tabs,
    Master and the dock (Undo, Blackout, Next) always visible, and nothing that saves
@@ -445,7 +459,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .topbar { grid-column: 1; min-height: 44px; gap: 10px; padding: 0 2px 0 6px; }
   .now-name { font-size: 22px; }
   #quiet, .clock, .gear { display: none !important; }
-  .output-note { width: 36px; min-height: 36px; padding: 0; justify-content: center; max-width: none; }
+  .output-note { width: 44px; min-height: 44px; padding: 0; justify-content: center; max-width: none; }
   .output-note #outputText, .output-note .info { display: none; }
   .output-note .dot { margin: 0; }
 
@@ -454,7 +468,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
     background: rgba(148, 170, 210, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
   }
   .phone-tabs button {
-    flex: 1; min-height: 40px; border: 0; border-radius: var(--ds-r-small); background: transparent;
+    flex: 1; min-height: 44px; border: 0; border-radius: var(--ds-r-small); background: transparent;
     color: var(--ds-muted); font-size: 15px; font-weight: 500;
   }
   .phone-tabs button.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }

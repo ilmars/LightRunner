@@ -105,13 +105,16 @@ export class App {
   private ready!: Promise<void>;
   private readonly sessions = new Sessions();
   private outputProblem: string | null = null;
+  /** Every node-watch problem is another desk sending (no node missing). */
+  private otherDeskOnly = false;
   private readonly identifyTimers = new Map<string, NodeJS.Timeout>();
   private ofl!: OflClient;
   /** Files waiting for someone to pick what to take from them. */
   private readonly imports = new Map<string, { show: Show; scope: Scope; at: number }>();
-  private readonly nodeWatch = new NodeWatch((problem) => {
+  private readonly nodeWatch = new NodeWatch((problem, otherDesk) => {
     if (problem !== this.outputProblem) this.log(problem ? `DMX: ${problem}` : 'DMX: node answering again');
     this.outputProblem = problem;
+    this.otherDeskOnly = otherDesk;
     this.publishState();
   });
 
@@ -198,9 +201,10 @@ export class App {
     // The worker names outputs it can't send to; the node watch names nodes that don't answer.
     const problem = [state.outputProblem, this.outputProblem].filter(Boolean).join('. ') || null;
     const canUndo = state.canUndo || this.undoLog.some((step) => step !== 'stage');
-    const merged: LiveState = problem && state.output === 'ok'
-      ? { ...state, canUndo, output: 'lost', outputProblem: problem }
-      : { ...state, canUndo, outputProblem: problem };
+    const output = problem && state.output === 'ok' ? 'lost' : state.output;
+    // A worker problem (an output it can't send to) is never another desk.
+    const kind = output !== 'lost' ? null : !state.outputProblem && this.outputProblem && this.otherDeskOnly ? 'other-desk' : 'not-answering';
+    const merged: LiveState = { ...state, canUndo, output, outputProblem: problem, outputProblemKind: kind };
     this.latestState = merged;
     this.broadcast(JSON.stringify({ type: 'state', state: merged }));
   }

@@ -237,7 +237,7 @@ function buildPlainRows(order) {
     // gives it, whites drawn as whites. Basic lights' groups without a saved colour run the built-in warm light.
     const strip = el('span', 'dots');
     for (const { colour: c, name } of stripBlocks(item.colours)) {
-      const colour = c ?? (basic ? '#ffd2a0' : null);
+      const colour = c ?? (basic ? layout.basicSwatch : null);
       const dot = el('i', colour ? null : 'unset');
       if (colour) dot.style.background = shown(colour);
       dot.title = name;
@@ -595,7 +595,7 @@ function render() {
   note.classList.toggle('problem', lost);
   note.classList.toggle('off', off);
   // A short label; the full explanation on hover (title) or tap (a message).
-  const otherDesk = lost && /another desk/i.test(state.outputProblem ?? '');
+  const otherDesk = lost && state.outputProblemKind === 'other-desk';
   $('outputText').textContent = !lost ? 'DMX output inactive' : otherDesk ? 'Another desk is sending' : 'Lights not answering';
   outputDetail = lost
     ? state.outputProblem ?? 'Lights not answering. Check the lighting network box.'
@@ -729,53 +729,30 @@ const NEUTRAL = '#5a5f69';
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
 /**
- * `live:<group>:<#rrggbb>` is a colour picked with Any colour, optionally
- * followed by white, amber and UV in percent (`:w40:a20:u5`, zeros left out).
+ * The colour of a plain Any colour pick (no white, amber or UV) a group runs, or null. "Add to
+ * colours" keeps only plain colours for now; a pick with extras stays a live colour.
+ * `s` is the group's live status; the server reads Any colour picks for the page (`s.live`).
  */
-/**
- * The colour of a plain Any colour pick (no white, amber or UV), or null. "Add to colours"
- * keeps only plain colours for now; a pick with extras stays a live colour.
- */
-function liveColour(id) {
-  const live = parseLive(id);
+function liveColour(s) {
+  const live = s?.live;
   return live && !live.white && !live.amber && !live.uv ? live.colour : null;
 }
 
-function parseLive(id) {
-  const m = /^live:([^:]+):(#[0-9a-f]{6})(?::w(\d{1,3}))?(?::a(\d{1,3}))?(?::u(\d{1,3}))?$/i.exec(id ?? '');
-  if (!m) return null;
-  const level = (v) => (v === undefined ? 0 : Math.min(100, Number(v)) / 100);
-  return { colour: m[2].toLowerCase(), white: level(m[3]), amber: level(m[4]), uv: level(m[5]) };
-}
-
-/** The colour to show for a colour with white, amber and UV, as the stage preview draws them. */
-function displayColour(hex, x) {
-  if (!x.white && !x.amber && !x.uv) return hex;
-  const n = parseInt(hex.slice(1), 16);
-  const rgb = [
-    ((n >> 16) & 255) / 255 + x.white + x.amber + 0.25 * x.uv,
-    ((n >> 8) & 255) / 255 + x.white + (0xbf / 255) * x.amber,
-    (n & 255) / 255 + x.white + 0.4 * x.uv,
-  ];
-  const scale = 1 / Math.max(1, ...rgb);
-  return `#${rgb.map((c) => Math.round(c * scale * 255).toString(16).padStart(2, '0')).join('')}`;
-}
-
 /** What a group runs, as an Any colour pick would make it: { colour, white, amber, uv }. */
-function runningLight(group, id) {
-  const live = parseLive(id);
-  if (live) return live;
+function runningLight(group, s) {
+  if (s?.live) return s.live;
+  const id = s?.preset;
   const light = id === '__safe' ? layout.basicLight : group?.presets.find((x) => x.id === id)?.light;
   if (light) return { colour: light.hex, white: light.white, amber: light.amber, uv: light.uv };
   return { colour: '#000000', white: 0, amber: 0, uv: 0 };
 }
 
-/** Name and colour to show for a preset id of a group (never throws on an id the layout doesn't list). */
-function presetInfo(group, id) {
+/** Name and colour to show for what a group runs (never throws on an id the layout doesn't list). */
+function presetInfo(group, s) {
+  const id = s?.preset;
   if (id === null || id === undefined || id === '__blackout') return { name: 'Off', colour: null };
-  if (id === '__safe') return { name: 'Basic light', colour: '#ffd2a0' };
-  const live = parseLive(id);
-  if (live) return { name: 'Custom', colour: displayColour(live.colour, live) };
+  if (id === '__safe') return { name: 'Basic light', colour: layout.basicSwatch };
+  if (s.live) return { name: 'Custom', colour: s.live.display };
   const p = group?.presets.find((x) => x.id === id);
   if (p) return { name: p.name, colour: p.swatch ?? NEUTRAL };
   return { name: 'Custom', colour: NEUTRAL };
@@ -914,7 +891,7 @@ function renderDetails() {
       if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
       continue;
     }
-    const info = presetInfo(row.group, s?.preset);
+    const info = presetInfo(row.group, s);
     row.sw.style.background = shown(info.colour) ?? '#0d0e11';
     row.chipName.textContent = info.name;
     // The slider carries a little of the group's colour.
@@ -1110,13 +1087,13 @@ function renderPicker() {
   const row = pickerRow();
   if (!row) return;
   const s = state.groups?.[row.group.id];
-  const info = presetInfo(row.group, s?.preset);
+  const info = presetInfo(row.group, s);
   $('pCurSw').style.background = shown(info.colour) ?? '#0d0e11';
   $('pCurText').textContent = `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
-  const running = runningLight(row.group, s?.preset);
+  const running = runningLight(row.group, s);
   pickerColour = running.colour;
-  pickerLive = parseLive(s?.preset) !== null;
+  pickerLive = !!s?.live;
   const now = performance.now();
   for (const r of extraRows) if (!r.dragging && now >= r.holdUntil) showLevel(r, running[r.key]);
   renderAddColour();
@@ -1128,8 +1105,7 @@ function renderPicker() {
 /** The colour the picker's group runs live from the strip, or null. */
 function liveOfPicker() {
   const row = pickerRow();
-  const hex = row ? liveColour(state?.groups?.[row.group.id]?.preset) : null;
-  return hex;
+  return row ? liveColour(state?.groups?.[row.group.id]) : null;
 }
 
 /** Shows the pill while the group runs a strip colour that isn't a swatch yet; keeps the form in step. */
@@ -1361,7 +1337,7 @@ function disarmDelete() {
 }
 
 $('pEditBtn').addEventListener('click', () => setEditMode(!picker.edit));
-$('peCancel').addEventListener('click', closeEditor);
+$('peCancel').addEventListener('click', () => closeEditor());
 $('peName').addEventListener('keydown', (ev) => {
   ev.stopPropagation();
   if (ev.key === 'Enter') $('peName').blur();
@@ -1510,7 +1486,7 @@ function renderSheet() {
   for (const b of $('qsGroups').children) {
     const group = layout.groups.find((g) => g.id === b.dataset.group);
     const s = state?.groups?.[b.dataset.group];
-    const info = presetInfo(group, s?.preset);
+    const info = presetInfo(group, s);
     const left = qs.left.has(b.dataset.group);
     b.classList.toggle('off', left);
     b.setAttribute('aria-pressed', String(!left));
@@ -1767,8 +1743,10 @@ function applyPhone() {
   const flash = $('flashArea');
   if (phone) {
     $('details').insertBefore(flash, $('groupRows'));
-    // Editing belongs to the iPad.
+    // Editing belongs to the iPad: the running order's, and the colour list's (its buttons are hidden here,
+    // and in Edit a swatch tap opens the editor instead of setting the colour).
     if (editing) setEditing(false);
+    if (picker.edit) setEditMode(false);
     closeSheet();
   } else if (flash.parentElement !== $('masterFader').parentElement) {
     $('masterFader').after(flash);

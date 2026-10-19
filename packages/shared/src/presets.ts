@@ -2,7 +2,7 @@
 // Like runningorder.ts: the input is never changed, bad input throws an Error
 // with a plain message the page can show as it is.
 
-import { HEX_COLOUR } from './protocol.ts';
+import { HEX_COLOUR, displayColour } from './protocol.ts';
 import { cleanName, uniqueId } from './runningorder.ts';
 import { findProfile } from './schema.ts';
 import type { Layer, Preset, Show } from './schema.ts';
@@ -27,13 +27,13 @@ export interface AddColour {
   allGroups: boolean;
 }
 
-/** The plain light (hex, white, intensity) a preset's only layer makes, palette colours looked up; null for anything else. */
+/** The light (hex, white, amber, UV, intensity) a preset's only layer makes, palette colours looked up; null for anything else. */
 function plainLight(show: Show, preset: Preset): string | null {
   if (preset.layers.length !== 1) return null;
   const layer = preset.layers[0]!;
   const spec = layer.colour;
   const c = 'palette' in spec ? show.palettes.find((p) => p.id === spec.palette)?.colours[spec.index] : spec;
-  return c ? JSON.stringify([c.hex.toLowerCase(), c.white ?? 0, layer.intensity]) : null;
+  return c ? JSON.stringify([c.hex.toLowerCase(), c.white ?? 0, c.amber ?? 0, c.uv ?? 0, layer.intensity]) : null;
 }
 
 /** "Colour 4" after "Colour 3": one more than the highest number in use among these presets. */
@@ -64,7 +64,7 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
     : [input.group];
 
   const layer: Layer = { kind: 'static', colour: { hex: colour }, intensity: 1 };
-  const wanted = JSON.stringify([colour, 0, 1]);
+  const wanted = JSON.stringify([colour, 0, 0, 0, 1]);
   // One name for the whole set, numbered after the highest "Colour N" in any of the groups.
   const name = input.name.trim() ? cleanName(input.name) : nextColourName(out.presets.filter((p) => targets.includes(p.group)));
   const ids: string[] = [];
@@ -140,8 +140,10 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
     if (name !== undefined) p.name = name;
     // An Off (or other kind of) colour of the same name only takes the new name.
     if (colour !== undefined && canRecolour(p)) {
-      p.layers = [recoloured(out, p.layers[0]!, colour)];
-      p.swatch = colour;
+      const layer = recoloured(out, p.layers[0]!, colour);
+      p.layers = [layer];
+      // The swatch shows what the stage does, white, amber and UV included (as a saved Any colour pick does).
+      p.swatch = 'hex' in layer.colour ? displayColour(colour, layer.colour) : colour;
     }
     if (JSON.stringify(p) !== before) ids.push(p.id);
   }

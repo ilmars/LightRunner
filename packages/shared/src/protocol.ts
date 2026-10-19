@@ -90,6 +90,8 @@ export interface GroupStatus {
   /** Fade progress 0..1, 1 when settled. */
   progress: number;
   level: number;
+  /** When the preset is an Any colour pick: its colour, white, amber and UV (0 when absent), and the colour to draw. */
+  live: { colour: string; white: number; amber: number; uv: number; display: string } | null;
 }
 
 export type OutputStatus = 'ok' | 'lost' | 'off';
@@ -118,6 +120,11 @@ export interface LiveState {
   output: OutputStatus;
   /** Why output is lost, in plain words (node not answering, another desk sending). */
   outputProblem: string | null;
+  /**
+   * What kind of problem, for the short label on the operator page: "other-desk" only when
+   * every problem is another desk sending; anything else lost is "not-answering".
+   */
+  outputProblemKind: 'other-desk' | 'not-answering' | null;
 }
 
 /** What is saved to disk so a restart restores the stage as it was. */

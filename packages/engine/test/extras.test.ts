@@ -236,3 +236,19 @@ test('Save adopts a live colour with amber when the custom preset has the same a
   assert.equal(e.liveState(2.05, 'ok').groups.audience.preset, 'custom-1');
   assert.equal(e.liveState(2.05, 'ok').lookChanged, false);
 });
+
+test('a lit colour with amber that the show no longer has carries on live with its amber, with no visible change', () => {
+  const withAmber = () => {
+    const show = demoShow();
+    show.presets.push({ id: 'aud-amber', name: 'Amber red', group: 'audience', fade: 3, swatch: '#ff4800', layers: [{ kind: 'static', colour: { hex: '#ff0000', amber: 0.5, uv: 0.2 }, intensity: 1 }] });
+    return show;
+  };
+  const e = new Engine(withAmber());
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-amber', fade: 0 }, 0);
+  e.frame(1);
+  const before = Array.from(e.frame(1.025).universes.get(0)!);
+  e.setShow(demoShow(), 1.025); // e.g. Compare with a file removed it
+  assert.deepEqual(Array.from(e.frame(1.025).universes.get(0)!), before);
+  assert.equal(e.liveState(1.025, 'ok').groups.audience.preset, 'live:audience:#ff0000:a50:u20');
+  assert.deepEqual(e.liveState(1.025, 'ok').groups.audience.live, { colour: '#ff0000', white: 0, amber: 0.5, uv: 0.2, display: '#ff3e0d' });
+});
