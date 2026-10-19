@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { EffectLayer, findProfile, parseShow, type Preset, type Show } from '../../shared/src/index.ts';
 import { Engine } from '../src/index.ts';
-import { compileEffect, cyclesPerSecond, renderEffect, safeRate, type CompiledEffect } from '../src/effects.ts';
+import { compileEffect, cyclesPerSecond, rateChecks, renderEffect, safeRate, type CompiledEffect } from '../src/effects.ts';
 import { dark, type Light } from '../src/light.ts';
 import { planChannels, visibleLevel } from '../src/output.ts';
 import { FRAME, beyondOwnMotion, lightOf, segmentsOf } from './helpers.ts';
@@ -219,9 +219,53 @@ test('light safety: a hard chase at 1 beat a cycle and 240 bpm is slowed to 3 ri
   // A soft colour fade at the same tempo changes colour, not brightness: not slowed.
   const fade = fx({ effect: 'colourFade', colours: [RED, BLUE], speed: { beats: 1 } });
   assert.equal(safeRate(fade, cyclesPerSecond(fade, 4, 1)), 4);
-  // A soft one-colour wave at 1 beat and 180 bpm (3 a second) is right at the limit, so it is not slowed.
+  // A soft one-colour wave may change a segment 6 times in exactly 3 cycles. It runs at up to 95 % of
+  // that, leaving room for frames that come a few milliseconds early or late.
   const wave = fx({ effect: 'wave', speed: { beats: 1 } });
-  assert.equal(safeRate(wave, cyclesPerSecond(wave, 3, 1)), 3);
+  assert.ok(Math.abs(wave.maxRate - 2.85) < 1e-9, `${wave.maxRate}`);
+  assert.equal(safeRate(wave, wave.maxRate), wave.maxRate, 'at 95 % of the bound: not slowed');
+  // At 1 beat and 180 bpm (3 a second, right at the exact bound) it is slowed.
+  assert.equal(safeRate(wave, cyclesPerSecond(wave, 3, 1)), 1.5);
+  assert.ok(changesPerSecond(wave, 7, wave.maxRate) <= 6);
+});
+
+test('light safety: the margin holds when frames come up to 3 ms early or late', () => {
+  // Each effect at the fastest rate it allows, sampled at frames 22 to 28 ms apart (the phase
+  // follows the real time, as advancePhases does). Counted over any full second of frames,
+  // with no allowance for the sampling, a segment never changes more than 6 times.
+  let seed = 7;
+  const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  for (const f of [
+    fx({ effect: 'wave', speed: { beats: 1 } }),
+    fx({ effect: 'chase', edge: 'hard', speed: { beats: 1 } }),
+    fx({ effect: 'meteor', speed: { beats: 1 } }),
+    fx({ effect: 'yoyo', edge: 'hard', size: 0.3, speed: { beats: 1 } }),
+    fx({ effect: 'breathe', colours: [RED, DIM], size: 0.9, speed: { beats: 1 } }),
+    fx({ effect: 'sparkle', edge: 'hard', colours: [WHITE, OFF], speed: { beats: 1 } }),
+  ]) {
+    for (let k = 0; k < 8; k++) {
+      const changes: number[] = [];
+      let t = random() * 0.025, lo = at(f, k, 8, f.maxRate * t).i, hi = lo, dir = 0;
+      while (t < 8) {
+        t += 0.022 + random() * 0.006;
+        const v = at(f, k, 8, f.maxRate * t).i;
+        const counts = dir !== 0;
+        let changed = false;
+        if (dir !== -1 && hi - v >= 0.2) { dir = -1; changed = true; }
+        else if (dir !== 1 && v - lo >= 0.2) { dir = 1; changed = true; }
+        if (changed) {
+          if (counts) changes.push(t);
+          lo = hi = v;
+        }
+        lo = Math.min(lo, v);
+        hi = Math.max(hi, v);
+      }
+      for (let a = 0, b = 0; a < changes.length; a++) {
+        while (b < changes.length && changes[b]! < changes[a]! + 1) b++;
+        assert.ok(b - a <= 6, `${f.effect}, segment ${k}: ${b - a} changes in a second at ${f.maxRate} cycles a second`);
+      }
+    }
+  }
 });
 
 test('light safety: effects that bunch their changes are slowed for the worst second (regressions)', () => {
@@ -402,6 +446,33 @@ test('Basic lights stays still even when its look lists an effect', () => {
   e.frame(3.3);
   assert.deepEqual(e.visibleLevels(), before);
   assert.ok(segmentsOf(e, 'b6').every((v) => v > 0.5), 'the background gets the warm wash instead');
+});
+
+test('a show edit only works out the safe rate of new or changed effects', () => {
+  // 200 six-colour waves, each a little different, as a show that has been used for a while holds.
+  const colours = [RED, { hex: '#202020' }, WHITE, OFF, BLUE, GREEN];
+  const many = Array.from({ length: 200 }, (_, n) => effectPreset(`bg-wave-${n}`, BG, { effect: 'wave', colours, size: 0.2 + n / 400 }));
+  const show = effectsShow(...many);
+  const start = rateChecks.count;
+  const e = new Engine(show, 0);
+  assert.equal(rateChecks.count - start, 200, 'each effect is measured once');
+  // The same show again (any show edit that leaves the effects alone) measures none.
+  const t0 = performance.now();
+  e.setShow(structuredClone(show), 1);
+  const took = performance.now() - t0;
+  assert.equal(rateChecks.count - start, 200);
+  assert.ok(took < 20, `setShow took ${took.toFixed(1)} ms`);
+  // A changed effect is measured; one that only runs at another speed isn't (the rate doesn't depend on it).
+  const edited = structuredClone(show);
+  edited.presets.find((p) => p.id === 'bg-wave-3')!.layers = [EffectLayer.parse({ kind: 'effect', effect: 'wave', colours, size: 0.9, speed: { beats: 4 } })];
+  edited.presets.find((p) => p.id === 'bg-wave-4')!.layers = [EffectLayer.parse({ kind: 'effect', effect: 'wave', colours, size: 0.2 + 4 / 400, speed: { beats: 2 } })];
+  e.setShow(edited, 2);
+  assert.equal(rateChecks.count - start, 201);
+  // Rates no show uses any more are forgotten: the store holds one show's.
+  e.setShow(stage(), 3);
+  const before = rateChecks.count;
+  e.setShow(show, 4);
+  assert.equal(rateChecks.count - before, 200);
 });
 
 test('an effect edited while it runs fades to the new settings and keeps its place', () => {

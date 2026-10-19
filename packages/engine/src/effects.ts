@@ -4,7 +4,7 @@
 //
 // Light safety lives here too: no segment's brightness may rise and fall by
 // 20 % or more more than 3 times in any second. safeRate() halves an effect's
-// rate (again, if needed) until it doesn't.
+// rate (again, if needed) until it doesn't, with a margin for frame timing.
 
 import { resolveColour, type EffectKind, type EffectLayer, type EffectSpeed, type Palette } from '../../shared/src/index.ts';
 import { copy, dark, fromHex, type Light } from './light.ts';
@@ -23,6 +23,12 @@ const SPARKLE_SLOTS = 8;
 const SPARKLE_BASE = 0.4;
 /** Samples per cycle when the safe rate is measured from the effect itself. */
 const SAMPLES = 1024;
+/**
+ * The share of the exact bound an effect may run at. Frames come up to a few
+ * milliseconds early or late, which can squeeze a 4th rise into a second run
+ * right at the bound; 5 % below it leaves room for that.
+ */
+const MARGIN = 0.95;
 
 /** An effect layer with its colours looked up once, so rendering does no lookups. */
 export interface CompiledEffect {
@@ -36,14 +42,51 @@ export interface CompiledEffect {
   edge: EffectLayer['edge'];
   intensity: number;
   /**
-   * The fastest rate (cycles per second) at which no segment changes brightness by
-   * 20 % or more, one way and then the other, more than 6 times in any one second.
-   * Infinity when its brightness never moves that much.
+   * The fastest rate (cycles per second) it may run at: 95 % of the rate at which no
+   * segment changes brightness by 20 % or more, one way and then the other, more than
+   * 6 times in any one second. Infinity when its brightness never moves that much.
    */
   maxRate: number;
 }
 
-export function compileEffect(layer: EffectLayer, palettes: ReadonlyMap<string, Palette>): CompiledEffect {
+/** How many times an effect's safe rate has been worked out (not found in a SafeRates), for tests. */
+export const rateChecks = { count: 0 };
+
+/**
+ * Safe rates already worked out, by what the rate depends on: the effect's settings
+ * and looked-up colours (not its speed). Measuring an effect takes up to a few tenths of a
+ * millisecond, and the DMX worker compiles every preset on each show edit, so an
+ * edit only measures new or changed effects. prune() keeps only the rates asked
+ * for since the last prune, so the store never holds more than one show's (and
+ * the live effects made since).
+ */
+export class SafeRates {
+  private kept = new Map<string, number>();
+  private used = new Map<string, number>();
+
+  rate(fx: CompiledEffect): number {
+    const key = JSON.stringify([
+      fx.effect, fx.colours.map((c) => [c.r, c.g, c.b, c.w, c.a, c.u, c.i]), fx.direction, fx.waves, fx.size, fx.edge, fx.intensity,
+    ]);
+    let rate = this.used.get(key) ?? this.kept.get(key);
+    if (rate === undefined) rate = fastestRate(fx);
+    this.used.set(key, rate);
+    return rate;
+  }
+
+  /** Forget the rates nothing asked for since the last prune. */
+  prune(): void {
+    this.kept = this.used;
+    this.used = new Map();
+  }
+}
+
+function fastestRate(fx: CompiledEffect): number {
+  rateChecks.count++;
+  return MARGIN * fastestSafeRate(fx);
+}
+
+export function compileEffect(layer: EffectLayer, palettes: ReadonlyMap<string, Palette>, rates?: SafeRates): CompiledEffect {
   const colours = layer.colours.map((spec) => {
     const c = resolveColour(spec, palettes);
     return fromHex(c.hex, c);
@@ -61,7 +104,7 @@ export function compileEffect(layer: EffectLayer, palettes: ReadonlyMap<string, 
     intensity: layer.intensity,
     maxRate: Infinity,
   };
-  fx.maxRate = fastestSafeRate(fx);
+  fx.maxRate = rates ? rates.rate(fx) : fastestRate(fx);
   return fx;
 }
 
@@ -73,7 +116,7 @@ export function cyclesPerSecond(fx: CompiledEffect, beatsPerSecond: number, spee
 /**
  * The rate actually used: `cyclesPerSecond`, halved (again, if needed) while one
  * segment's brightness would rise and fall by 20 % or more more than 3 times in
- * any one second (see maxRate). Colour changes at the same brightness don't
+ * any one second, with a 5 % margin (see maxRate). Colour changes at the same brightness don't
  * count, so they are never slowed.
  */
 export function safeRate(fx: CompiledEffect, cyclesPerSecond: number): number {

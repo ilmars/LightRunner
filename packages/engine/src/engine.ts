@@ -8,6 +8,7 @@ import {
   type StageCommand, type EffectLayer, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
   type GroupStatus, type Palette, type Preset, type RuntimeState, type Show,
 } from '../../shared/src/index.ts';
+import { SafeRates } from './effects.ts';
 import { Crossfade, Ramp } from './fade.ts';
 import { advancePhases, compilePreset, fixedPreset, moves, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
 import { copy, dark, fromHex, mix, mix2, withoutUv, type Light } from './light.ts';
@@ -273,6 +274,8 @@ export class Engine {
    */
   private liveEffects = new Map<string, EffectLayer>();
   private liveCompiled = new Map<string, CompiledPreset>();
+  /** Effects' safe rates, kept from one show edit to the next so only new or changed effects are measured. */
+  private rates = new SafeRates();
   /** The `n` of the next live effect id. */
   private nextEffect = 1;
   private lastLook: string | null = null;
@@ -296,7 +299,8 @@ export class Engine {
     const before = this.show as Show | undefined;
     this.show = show;
     const palettes = new Map<string, Palette>(show.palettes.map((p) => [p.id, p]));
-    this.presets = new Map(show.presets.map((p) => [p.id, compilePreset(p, palettes)]));
+    this.presets = new Map(show.presets.map((p) => [p.id, compilePreset(p, palettes, this.rates)]));
+    this.rates.prune();
     this.looks = new Map(show.looks.map((l) => [l.id, l]));
 
     const oldFixtures = new Map(this.fixtures.map((f) => [f.id, f]));
@@ -610,7 +614,7 @@ export class Engine {
     const layer = structuredClone(effect);
     const group = parseLiveEffect(id)!.group;
     this.liveEffects.set(id, layer);
-    this.liveCompiled.set(id, compilePreset({ id, name: 'Custom effect', group, layers: [layer], fade: DEFAULT_FADE }, new Map()));
+    this.liveCompiled.set(id, compilePreset({ id, name: 'Custom effect', group, layers: [layer], fade: DEFAULT_FADE }, new Map(), this.rates));
   }
 
   /** Forget the live effects nothing names any more: not a group's mix, Blackout's memory or an Undo step. */

@@ -3,7 +3,7 @@
 // parameters: static layers are one colour, effect layers move (effects.ts).
 
 import { resolveColour, type Layer, type Palette, type Preset } from '../../shared/src/index.ts';
-import { compileEffect, cyclesPerSecond, renderEffect, safeRate, type CompiledEffect } from './effects.ts';
+import { compileEffect, cyclesPerSecond, renderEffect, safeRate, type CompiledEffect, type SafeRates } from './effects.ts';
 import { copy, dark, fromHex, type Light } from './light.ts';
 
 export interface LayerContext {
@@ -36,17 +36,18 @@ export interface CompiledPreset {
   layers: CompiledLayer[];
 }
 
-export function compilePreset(preset: Preset, palettes: ReadonlyMap<string, Palette>): CompiledPreset {
+/** `rates` keeps effects' safe rates between compiles, so an unchanged effect isn't measured again. */
+export function compilePreset(preset: Preset, palettes: ReadonlyMap<string, Palette>, rates?: SafeRates): CompiledPreset {
   return {
     id: preset.id,
     group: preset.group,
     fade: preset.fade,
-    layers: preset.layers.map((l) => compileLayer(l, palettes)),
+    layers: preset.layers.map((l) => compileLayer(l, palettes, rates)),
   };
 }
 
-function compileLayer(layer: Layer, palettes: ReadonlyMap<string, Palette>): CompiledLayer {
-  if (layer.kind === 'effect') return compileEffect(layer, palettes);
+function compileLayer(layer: Layer, palettes: ReadonlyMap<string, Palette>, rates?: SafeRates): CompiledLayer {
+  if (layer.kind === 'effect') return compileEffect(layer, palettes, rates);
   const c = resolveColour(layer.colour, palettes);
   return { kind: 'static', light: fromHex(c.hex, c, layer.intensity) };
 }
