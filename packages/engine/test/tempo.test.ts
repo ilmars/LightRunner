@@ -95,3 +95,53 @@ test('changing tempo never moves the phase back or jumps it', () => {
   assert.ok(least >= 0, `went back by ${least}`);
   assert.ok(worst <= (180 / 60) * FRAME + 1e-9, `stepped ${worst}`);
 });
+
+test('tempo commands within 3 s of each other are one Undo step', () => {
+  const e = new Engine(tempoShow());
+  e.apply({ type: 'look', id: 'worship' }, 0);
+  const recorded: boolean[] = [];
+  // Tapping along: five tempo commands 0.4 s apart.
+  [100, 104, 108, 112, 116].forEach((bpm, k) => {
+    assert.equal(e.apply({ type: 'tempo', bpm }, 1 + k * 0.4), null);
+    recorded.push(e.recorded);
+  });
+  assert.deepEqual(recorded, [true, false, false, false, false]);
+  assert.equal(e.liveState(3, 'off').tempo, 116);
+  // One Undo puts back the tempo from before the whole run, and leaves the look.
+  assert.equal(e.apply({ type: 'undo' }, 4), null);
+  assert.equal(e.liveState(4, 'off').tempo, 90);
+  assert.equal(e.liveState(4, 'off').look, 'worship');
+
+  // A tempo command more than 3 s after the last is its own step, and the run goes on from it.
+  e.apply({ type: 'tempo', bpm: 100 }, 10);
+  e.apply({ type: 'tempo', bpm: 110 }, 11);
+  e.apply({ type: 'tempo', bpm: 120 }, 15);
+  assert.equal(e.recorded, true);
+  e.apply({ type: 'tempo', bpm: 125 }, 16);
+  assert.equal(e.recorded, false);
+  e.apply({ type: 'undo' }, 17);
+  assert.equal(e.liveState(17, 'off').tempo, 110);
+  e.apply({ type: 'undo' }, 18);
+  assert.equal(e.liveState(18, 'off').tempo, 90);
+});
+
+test('another step between tempo commands ends the run', () => {
+  const e = new Engine(tempoShow());
+  e.apply({ type: 'look', id: 'worship' }, 0);
+  e.apply({ type: 'tempo', bpm: 100 }, 1);
+  e.apply({ type: 'groupPreset', group: 'pulpit', preset: 'pulpit-on' }, 1.5);
+  assert.equal(e.recorded, true);
+  e.apply({ type: 'tempo', bpm: 110 }, 2);
+  assert.equal(e.recorded, true, 'a tempo command after another step starts a new run');
+  e.apply({ type: 'undo' }, 3);
+  assert.equal(e.liveState(3, 'off').tempo, 100);
+  // After an Undo a tempo command starts a new run too.
+  e.apply({ type: 'tempo', bpm: 130 }, 3.5);
+  assert.equal(e.recorded, true);
+  // A look in the middle does as well, and takes its own tempo.
+  e.apply({ type: 'look', id: 'word' }, 4);
+  e.apply({ type: 'tempo', bpm: 140 }, 4.5);
+  assert.equal(e.recorded, true);
+  e.apply({ type: 'undo' }, 5);
+  assert.equal(e.liveState(5, 'off').tempo, 150);
+});

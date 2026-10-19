@@ -19,7 +19,7 @@ Last updated: 19 Oct 2026. Update this file whenever a feature lands or a priori
 | HTTP API | Looks, presets, manual, release, back to look, Basic lights (`POST /api/safe` starts it), Blackout, master, speed, group level, undo, fade time, state, looks list; local network only | 4 (HTTP part) |
 | Tools | Lightkey importer, jump check (no fixture steps >5% per frame over hours of random changes), timing probe | — |
 
-Tests: 302 (`npm test`): 301 pass, 1 is skipped (the Lightkey project test, needs `LIGHTKEY_PROJECT`).
+Tests: 305 (`npm test`): 304 pass, 1 is skipped (the Lightkey project test, needs `LIGHTKEY_PROJECT`).
 
 ## Not built yet (in rough priority order)
 
@@ -40,7 +40,7 @@ Tests: 302 (`npm test`): 301 pass, 1 is skipped (the Lightkey project test, need
 - Each Save of an Any colour adds a hidden custom preset; old ones aren't cleaned up. The same goes for a changed effect (a hidden "Custom effect").
 - "Compare with a file" lists the ready-made effects as removed when the file has none of them (they are not ticked; applying it would delete them).
 - Effects haven't met the real rig yet: speeds, sizes and the 3-flashes-a-second limit are checked on the engine and in a browser, not in the dark room. Whether a bar needs Reversed is for the owner to check at the church.
-- Each tempo step is one Undo step (a held − or + sends at most 4 a second), so a long hold or many taps can fill the 20 Undo steps.
+- In Preview, a held − or + (or tapping along) saves the show on every send, up to 4 a second; the edits are one Undo step, but each is still a write of the show file.
 - The tempo control is part of the top bar's quiet items, so it hides with them when Send DMX is off or the lights aren't answering.
 - Not yet tried on a real phone: the phone remote was checked in a browser at phone sizes only.
 - Not yet tried on the real iPad: finger drag in the running order, the on-screen keyboard over the quick-look sheet, two fingers on Flash, pointer capture on iOS Safari, the White, Amber and UV slider tints in the dark room.

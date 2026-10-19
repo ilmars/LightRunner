@@ -1031,6 +1031,33 @@ test('Save stores the stage tempo in the song, and itemTempo changes the song an
   await waitFor(() => t.state()?.tempo === 88, 2000, 'the song\'s tempo');
 }));
 
+test('itemTempo edits of one song within 3 s are one Undo step; another song or another edit splits them', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const [, song, other] = t.order();
+  for (const bpm of [100, 104, 108]) assert.equal(await t.send({ type: 'itemTempo', item: song, bpm }), null);
+  assert.equal(savedLook(dir, song!)!.tempo, 108);
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(savedLook(dir, song!)!.tempo, undefined, 'one Undo takes back the whole run');
+  await sleep(60);
+  assert.equal(t.state().canUndo, false);
+
+  // Another song starts a new step, and so does a different edit in between.
+  assert.equal(await t.send({ type: 'itemTempo', item: song, bpm: 90 }), null);
+  assert.equal(await t.send({ type: 'itemTempo', item: other, bpm: 95 }), null);
+  assert.equal(await t.send({ type: 'itemTempo', item: other, bpm: 96 }), null);
+  assert.equal(await t.send({ type: 'renameItem', id: song, name: 'Renamed' }), null);
+  assert.equal(await t.send({ type: 'itemTempo', item: song, bpm: 91 }), null);
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(savedLook(dir, song!)!.tempo, 90);
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.notEqual(savedLook(dir, song!)!.name, 'Renamed');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(savedLook(dir, other!)!.tempo, undefined, 'the other song\'s two edits are one step');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(savedLook(dir, song!)!.tempo, undefined);
+}));
+
 test('the effects list: add, edit, rename and delete over the wire, and the layout shows effects', () => withApp(async (app, dir) => {
   const t = await tablet(app);
   const layout = await waitFor(t.layout);

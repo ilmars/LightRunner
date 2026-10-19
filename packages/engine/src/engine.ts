@@ -37,6 +37,8 @@ const MANUAL_OUT = 1;
 const DEFAULT_FADE = 3;
 /** The stage tempo (beats per minute) until a look or the tempo command sets one. */
 const DEFAULT_TEMPO = 120;
+/** Tempo commands this close together (seconds) are one Undo step. */
+const TEMPO_RUN_SECONDS = 3;
 
 /** A held Puff runs a smoke machine at this level, whatever its slider says. */
 const PUFF_LEVEL = 1;
@@ -258,6 +260,8 @@ export class Engine {
   recorded = false;
   /** The group and live preset of the last Any colour (or live effect) send that added an Undo step, for the drag it starts. */
   private lastColourStep: { group: string; key: string } | null = null;
+  /** When the last tempo command of the current run was applied (stage seconds), or null when there is no run to join. */
+  private tempoRunAt: number | null = null;
   /**
    * Live effects (groupEffect) by their `fx:<group>:<n>` id, and their compiled presets. Kept while
    * the stage, Blackout or an Undo step still names them (see pruneLiveEffects).
@@ -495,6 +499,7 @@ export class Engine {
     this.recorded = false;
     if (cmd.type === 'undo') {
       this.lastColourStep = null;
+      this.tempoRunAt = null;
       return this.undo(now);
     }
     // A later send of the same Any colour (or effect) drag joins the drag's one Undo step,
@@ -510,9 +515,17 @@ export class Engine {
         return error;
       }
     }
+    // Tempo commands within 3 s of the last one (tapping along, or holding + or −) join that run's one Undo step.
+    if (cmd.type === 'tempo' && this.tempoRunAt !== null && now - this.tempoRunAt <= TEMPO_RUN_SECONDS && this.history.length) {
+      const error = this.run(cmd, now);
+      if (!error) this.tempoRunAt = now;
+      return error;
+    }
     // A send that doesn't continue starts a new drag, so it never joins the last one's step.
     if (drag && !cmd.continues) this.lastColourStep = null;
     if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || drag || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook' || cmd.type === 'tempo') {
+      // Any other step ends a run of tempo commands.
+      if (cmd.type !== 'tempo') this.tempoRunAt = null;
       const before = this.snapshot();
       const error = this.run(cmd, now);
       const after = this.snapshot();
@@ -522,6 +535,7 @@ export class Engine {
         this.recorded = true;
         const key = drag ? this.groups.get(cmd.group)?.presets.currentKey : null;
         this.lastColourStep = key && drag ? { group: cmd.group, key } : null;
+        this.tempoRunAt = cmd.type === 'tempo' ? now : null;
       }
       // Only once the Undo step is kept: it may be all that still names the effect the group ran before.
       if (cmd.type === 'groupEffect') this.pruneLiveEffects();

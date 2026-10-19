@@ -60,6 +60,8 @@ const MIME: Record<string, string> = {
 
 /** Steps the Undo list keeps, as the engine does. */
 const UNDO_KEPT = 20;
+/** Preview tempo edits of one song this close together (ms) are one Undo step. */
+const TEMPO_RUN_MS = 3000;
 
 class HttpError extends Error {
   readonly status: number;
@@ -91,6 +93,8 @@ export class App {
    * before an operator edit, or 'stage' for a step the engine keeps itself.
    */
   private undoLog: (Show | 'stage')[] = [];
+  /** The last itemTempo edit, so a run of them joins one Undo step: its song, when, and the Undo entry it made. */
+  private tempoEdit: { item: string; at: number; step: Show | 'stage' } | null = null;
   /**
    * The first operator edit after start or after a programmer save keeps a
    * backup; the rest of a rehearsal's edits don't, so they can't push the
@@ -385,7 +389,12 @@ export class App {
       }
     }
     await this.operatorSave(next);
-    this.remember(before);
+    // Tempo edits of one song within 3 s of each other (tapping along, a held + or −) are one Undo step.
+    const at = Date.now();
+    const joins = cmd.type === 'itemTempo' && this.tempoEdit !== null && this.tempoEdit.item === cmd.item
+      && at - this.tempoEdit.at <= TEMPO_RUN_MS && this.undoLog.at(-1) === this.tempoEdit.step;
+    if (!joins) this.remember(before);
+    this.tempoEdit = cmd.type === 'itemTempo' ? { item: cmd.item, at, step: this.undoLog.at(-1)! } : null;
     // Undo lights up at once, without waiting for the engine's next state.
     this.publishState();
   }
