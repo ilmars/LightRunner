@@ -58,6 +58,34 @@ test('Any colour with white, amber and UV lights those LEDs of the SixBar 500, a
   assert.ok(vis[0] === 255 && vis[1]! > 100 && vis[2]! > 100, `b1 visual ${vis}`);
 });
 
+test('UV on bars without UV LEDs: dark, no violet in the visualiser, and a fade to red stays under 5% per frame', () => {
+  const e = new Engine(show());
+  const b6 = e.fixtureIds().indexOf('b6');
+  const b1 = e.fixtureIds().indexOf('b1');
+  e.apply({ type: 'groupColour', group: 'background', colour: '#000000', uv: 1, fade: 0 }, 0);
+  e.apply({ type: 'groupColour', group: 'key-lights', colour: '#000000', uv: 1, fade: 0 }, 0);
+  let frame = e.frame(0.5);
+  // B6 SonicPulse (no UV): nothing to show, so dark; B1 SixBar (UV LEDs): UV and a faint violet on the stage view.
+  assert.equal(e.lights()[b6]!.i, 0);
+  assert.equal(frame.universes.get(1)![164], 0, 'B6 dimmer');
+  assert.deepEqual(Array.from(frame.visual.slice(b6 * 3, b6 * 3 + 3)), [0, 0, 0]);
+  assert.equal(frame.universes.get(1)![14], 255, 'B1 UV');
+  assert.ok(frame.visual[b1 * 3 + 2]! > 0);
+  // Fading the bars from UV to red brings red up smoothly (it used to jump about 14 % a frame half way).
+  e.apply({ type: 'groupColour', group: 'background', colour: '#ff0000', fade: 1 }, 1);
+  let prev = e.visibleLevels()[b6]!;
+  let worst = 0;
+  for (let t = 1; t <= 3 + 1e-9; t += 0.025) {
+    frame = e.frame(t);
+    const now = e.visibleLevels()[b6]!;
+    worst = Math.max(worst, Math.abs(now - prev));
+    prev = now;
+  }
+  assert.ok(worst < 0.05, `largest visible step ${worst}`);
+  assert.equal(prev, 1);
+  assert.equal(frame.universes.get(1)![171], 255, 'B6 red');
+});
+
 test('key lights are off in Walk-in while the front lights sit at half', () => {
   const e = new Engine(show());
   e.apply({ type: 'look', id: 'walk-in' }, 0);

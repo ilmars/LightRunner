@@ -91,6 +91,25 @@ export function mix(out: Light, parts: readonly Light[], weights: readonly numbe
   return out;
 }
 
+/**
+ * The light as a fixture without UV shows it: UV taken out, the rest scaled
+ * back so its brightest channel is 1, and the intensity lowered to what is
+ * left. UV alone becomes dark. Changes `l` in place.
+ */
+export function withoutUv(l: Light): Light {
+  if (l.u <= 0) return l;
+  const seen = Math.max(l.r, l.g, l.b, l.w, l.a);
+  const top = Math.max(seen, l.u);
+  l.u = 0;
+  if (seen <= 0) {
+    l.i = 0;
+    return l;
+  }
+  l.i *= seen / top;
+  l.r /= seen; l.g /= seen; l.b /= seen; l.w /= seen; l.a /= seen;
+  return l;
+}
+
 /** Mix two lights: `a` at weight 1 − t, `b` at weight t. */
 export function mix2(out: Light, a: Light, b: Light, t: number): Light {
   if (t <= 0) return copy(out, a);

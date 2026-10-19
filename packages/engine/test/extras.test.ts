@@ -48,7 +48,9 @@ test('without an amber channel, amber is made from red and green; UV without a U
   const uv = fromHex('#000000', { uv: 1 });
   assert.deepEqual(write(builtIn('generic-rgb'), uv), [0, 0, 0]);
   assert.deepEqual(write(builtIn('generic-rgbw'), uv), [0, 0, 0, 0]);
-  assert.deepEqual(write(builtIn('generic-drgb'), uv), [255, 0, 0, 0]);
+  assert.deepEqual(write(builtIn('generic-drgb'), uv), [0, 0, 0, 0]);
+  // UV next to a colour: the colour shows at its own brightness.
+  assert.deepEqual(write(builtIn('generic-drgb'), fromHex('#800000', { uv: 1 })), [dmx(0x80 / 255), 255, 0, 0]);
   // A plain dimmer can't make UV: UV alone leaves it dark, UV next to a colour doesn't change it.
   assert.deepEqual(write(builtIn('generic-dimmer'), uv), [0]);
   assert.deepEqual(write(builtIn('generic-dimmer'), fromHex('#000000', { white: 0.5, uv: 1 })), [dmx(0.5)]);
@@ -84,9 +86,15 @@ test('amber and UV mix as emitted light, like the colours', () => {
   assert.ok(close(up.a, 1) && close(up.r, 0) && close(up.i, 0.2));
 });
 
-/** The demo show with audience presets that use amber and UV. */
+/** The demo show with RGBWAUV audience fixtures and audience presets that use amber and UV. */
 function extrasShow() {
   const show = demoShow();
+  show.profiles.push(RGBWAUV);
+  for (const [id, address] of [['aud-1', 60], ['aud-2', 66]] as const) {
+    const f = show.fixtures.find((x) => x.id === id)!;
+    f.profile = RGBWAUV.id;
+    f.address = address;
+  }
   show.presets.push(
     { id: 'aud-amber', name: 'Amber', group: 'audience', fade: 3, layers: [{ kind: 'static', colour: { hex: '#ff0000', amber: 1 }, intensity: 1 }] },
     { id: 'aud-uv', name: 'UV', group: 'audience', fade: 3, layers: [{ kind: 'static', colour: { hex: '#0000ff', white: 0.4, uv: 1 }, intensity: 0.7 }] },

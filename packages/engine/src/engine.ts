@@ -9,8 +9,8 @@ import {
 } from '../../shared/src/index.ts';
 import { Crossfade, Ramp } from './fade.ts';
 import { compilePreset, fixedPreset, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
-import { copy, dark, fromHex, mix, mix2, type Light } from './light.ts';
-import { planChannels, visualOf, writeFixture, type ChannelPlan } from './output.ts';
+import { copy, dark, fromHex, mix, mix2, withoutUv, type Light } from './light.ts';
+import { planChannels, visibleLevel, visualOf, writeFixture, type ChannelPlan } from './output.ts';
 
 /** Safe's fixed warm white stage wash. */
 const SAFE_LIGHT = fromHex(SAFE_COLOUR.hex, SAFE_COLOUR.white, SAFE_COLOUR.intensity);
@@ -585,6 +585,8 @@ export class Engine {
       for (let k = 0; k < group.fixtures.length; k++) {
         ctx.index = k;
         const out = group.out[k];
+        // A fixture without UV mixes only the light it can make, so its intensity is what it shows.
+        const noUv = !this.fixtures[group.fixtures[k]!]!.plan.hasUv;
         if (mix0.length === 0) copy(out, dark());
         else {
           parts.length = 0;
@@ -592,7 +594,8 @@ export class Engine {
           for (let n = 0; n < mix0.length; n++) {
             ctx.time = mix0[n].item.time;
             if (!this.scratchLights[n]) this.scratchLights[n] = dark();
-            parts.push(renderPreset(this.scratchLights[n], mix0[n].item.preset, ctx));
+            const part = renderPreset(this.scratchLights[n], mix0[n].item.preset, ctx);
+            parts.push(noUv ? withoutUv(part) : part);
             weights.push(mix0[n].weight);
           }
           mix(out, parts, weights);
@@ -624,6 +627,7 @@ export class Engine {
       else mix(light, parts, weights);
       const manual = this.liveManual(run, now, dt);
       if (manual) mix2(light, light, manual.current, manual.weight.value(now));
+      if (!run.plan.hasUv) withoutUv(light);
       light.i *= master;
       // Flash overrides everything above, but not Blackout.
       if (flashing && this.flashed.has(f)) copy(light, FLASH_LIGHT);
@@ -650,6 +654,11 @@ export class Engine {
   /** Final light of every fixture (after master, before gamma), in show order. */
   lights(): readonly Light[] {
     return this.fixtures.map((f) => f.light);
+  }
+
+  /** How bright each fixture looks (its brightest written colour channel × intensity), in show order. */
+  visibleLevels(): number[] {
+    return this.fixtures.map((f) => visibleLevel(f.plan, f.light));
   }
 
   fixtureIds(): string[] {

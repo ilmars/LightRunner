@@ -1,7 +1,9 @@
 // Turning a fixture's abstract light into DMX channel values.
 
 import type { Fixture, Profile, ChannelRole } from '../../shared/src/index.ts';
-import type { Light } from './light.ts';
+import { copy, dark, withoutUv, type Light } from './light.ts';
+
+const scratch = dark();
 
 interface PlannedChannel {
   role: ChannelRole;
@@ -78,6 +80,8 @@ function put(buf: Uint8Array, ch: PlannedChannel, v: number): void {
  * multiplied together on the colour channels.
  */
 export function writeFixture(buf: Uint8Array, plan: ChannelPlan, light: Light): void {
+  // The engine has already taken UV out for fixtures that can't make it; this keeps a direct call right too.
+  if (!plan.hasUv && light.u > 0) light = withoutUv(copy(scratch, light));
   // Fully dark writes zeros everywhere, so Blackout looks like Blackout on any desk monitor.
   if (light.i <= 0) {
     for (const ch of plan.channels) {
@@ -94,17 +98,9 @@ export function writeFixture(buf: Uint8Array, plan: ChannelPlan, light: Light): 
   const amber = plan.hasAmber ? 0 : light.a;
   const level = plan.hasDimmer ? 1 : light.i;
   const col = (c: number, a: number) => Math.pow(Math.min(1, c + fold + a) * level, g);
-  // A fixture that only has a dimmer (or dimmer and colour temperature) shows
-  // the visible part of the light: UV it can't make leaves it dark. Without UV
-  // this is exactly 1, as before.
-  let visible = 1;
-  if (!plan.hasColour && !plan.hasUv && light.u > 0) {
-    const seen = Math.max(light.r, light.g, light.b, light.w, light.a);
-    visible = seen / Math.max(seen, light.u);
-  }
   for (const ch of plan.channels) {
     switch (ch.role) {
-      case 'dimmer': put(buf, ch, Math.pow(light.i * visible, g)); break;
+      case 'dimmer': put(buf, ch, Math.pow(light.i, g)); break;
       case 'red': put(buf, ch, col(light.r, amber)); break;
       case 'green': put(buf, ch, col(light.g, amber * AMBER_GREEN)); break;
       case 'blue': put(buf, ch, col(light.b, 0)); break;
@@ -119,6 +115,32 @@ export function writeFixture(buf: Uint8Array, plan: ChannelPlan, light: Light): 
       default: buf[ch.at] = ch.fixed;
     }
   }
+}
+
+/**
+ * How bright a fixture looks, 0..1: its brightest colour channel as written
+ * (before gamma, with white and amber folded in where there is no channel for
+ * them) times its intensity. A fixture with only a dimmer (or dimmer and
+ * colour temperature) looks as bright as its dimmer. The jump check judges this.
+ */
+export function visibleLevel(plan: ChannelPlan, light: Light): number {
+  if (!plan.hasUv && light.u > 0) light = withoutUv(copy(scratch, light));
+  if (light.i <= 0) return 0;
+  if (!plan.hasColour && !plan.hasUv) return light.i;
+  const fold = plan.hasWhite ? 0 : light.w;
+  const amber = plan.hasAmber ? 0 : light.a;
+  let top = 0;
+  for (const ch of plan.channels) {
+    switch (ch.role) {
+      case 'red': top = Math.max(top, light.r + fold + amber); break;
+      case 'green': top = Math.max(top, light.g + fold + amber * AMBER_GREEN); break;
+      case 'blue': top = Math.max(top, light.b + fold); break;
+      case 'white': top = Math.max(top, light.w); break;
+      case 'amber': top = Math.max(top, light.a); break;
+      case 'uv': top = Math.max(top, light.u); break;
+    }
+  }
+  return Math.min(1, top) * light.i;
 }
 
 /**
