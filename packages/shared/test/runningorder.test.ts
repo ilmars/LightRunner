@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  addSong, applyPicks, checkReferences, cleanName, deleteItem, ensureBasicLights, ensureRunningOrder, livePresetId, moveItem,
+  addSong, applyPicks, applyQuickLookToItem, setItemGroup, checkReferences, cleanName, deleteItem, ensureBasicLights, ensureRunningOrder, livePresetId, moveItem,
   parseLivePreset, parseShow, renameItem, saveItem, saveQuickLook, BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET,
   type Show, type Stage,
 } from '../src/index.ts';
@@ -379,4 +379,117 @@ test('Basic lights moves to the front and appears only once', () => {
   empty.operator.runningOrder = [];
   assert.deepEqual(ensureBasicLights(empty).operator.runningOrder, [safe]);
   assert.deepEqual(ensureBasicLights(s), s, 'a show that keeps the rule is left as it is');
+});
+
+// ---- Preview edits: change one song's group without touching the stage ----
+
+/** A demo show with a running order, and the song at place 1 (Basic lights is first). */
+const withSong = () => {
+  const s = ensureRunningOrder(demo());
+  return { show: s, song: s.operator.runningOrder[1]! };
+};
+const entryOf = (s: Show, itemId: string, group: string) => s.looks.find((l) => l.id === itemId)!.groups.find((e) => e.group === group);
+
+test('setItemGroup sets a preset and a level in a song, leaving the rest', () => {
+  const { show, song } = withSong();
+  const before = structuredClone(show);
+  const out = setItemGroup(show, song, { group: 'audience', preset: 'aud-blue', level: 0.4 });
+  assert.deepEqual(entryOf(out, song, 'audience'), { group: 'audience', preset: 'aud-blue', level: 0.4 });
+  const others = (s: Show) => s.looks.find((l) => l.id === song)!.groups.filter((e) => e.group !== 'audience');
+  assert.deepEqual(others(out), others(before));
+  assert.equal(nameOf(out, song), nameOf(before, song));
+  assert.deepEqual(show, before, 'the input show is not changed');
+  assert.deepEqual(checkReferences(out), []);
+  // The entry stays in its place.
+  assert.deepEqual(look(out, 'Song 1').groups.map((e) => e.group), look(before, 'Song 1').groups.map((e) => e.group));
+});
+
+test('setItemGroup keeps an Any colour as a new hidden Custom preset, with its amber', () => {
+  const { show, song } = withSong();
+  const out = setItemGroup(show, song, { group: 'back-wall', colour: '#ff0000', amber: 0.5 });
+  assert.equal(out.presets.length, show.presets.length + 1);
+  const entry = entryOf(out, song, 'back-wall')!;
+  const made = out.presets.find((p) => p.id === entry.preset)!;
+  assert.equal(made.custom, true);
+  assert.equal(made.name, 'Custom');
+  assert.equal(made.group, 'back-wall');
+  assert.deepEqual(made.layers[0]!.colour, { hex: '#ff0000', amber: 0.5 });
+  assert.deepEqual(checkReferences(out), []);
+});
+
+test('setItemGroup changes only the level of a group the song already sets, and adds a group it did not', () => {
+  const { show, song } = withSong();
+  const dimmed = setItemGroup(show, song, { group: 'audience', level: 0.25 });
+  assert.deepEqual(entryOf(dimmed, song, 'audience'), { ...entryOf(show, song, 'audience'), level: 0.25 });
+  // A group the song lists first has no entry yet: a preset adds one at the end.
+  const bare = structuredClone(show);
+  bare.looks.find((l) => l.id === song)!.groups = [];
+  const added = setItemGroup(bare, song, { group: 'pulpit', preset: 'pulpit-on' });
+  assert.deepEqual(look(added, 'Song 1').groups, [{ group: 'pulpit', preset: 'pulpit-on', level: 1 }]);
+});
+
+test('setItemGroup refuses a level for a group the song does not set, smoke, quick looks and both preset and colour', () => {
+  const { show, song } = withSong();
+  const bare = structuredClone(show);
+  bare.looks.find((l) => l.id === song)!.groups = [];
+  assert.throws(() => setItemGroup(bare, song, { group: 'audience', level: 0.5 }), { message: 'Give the group a colour first.' });
+  assert.throws(() => setItemGroup(show, 'walk-in', { group: 'audience', level: 0.5 }), { message: 'only running-order items can be changed here' });
+  assert.throws(() => setItemGroup(show, 'nope', { group: 'audience', level: 0.5 }), { message: 'only running-order items can be changed here' });
+  assert.throws(() => setItemGroup(show, song, { group: 'ghost', level: 0.5 }), { message: 'the show has no group "ghost"' });
+  const smoky = structuredClone(show);
+  smoky.groups.find((g) => g.id === 'pulpit')!.kind = 'smoke';
+  assert.throws(() => setItemGroup(smoky, song, { group: 'pulpit', level: 0.5 }), { message: "smoke machines aren't part of a song" });
+  assert.throws(() => setItemGroup(show, song, { group: 'audience', preset: 'aud-blue', colour: '#ff0000' }), { message: 'pick a colour or a preset, not both' });
+  assert.throws(() => setItemGroup(show, song, { group: 'audience' }), { message: 'nothing to change' });
+  assert.throws(() => setItemGroup(show, song, { group: 'audience', preset: 'pulpit-on' }), { message: 'unknown preset "pulpit-on" for group "audience"' });
+  assert.throws(() => setItemGroup(show, song, { group: 'audience', preset: 'nope' }), { message: 'unknown preset "nope" for group "audience"' });
+});
+
+test('Basic lights keeps its levels at full in setItemGroup and applyQuickLookToItem', () => {
+  const { show } = withSong();
+  const basic = show.operator.safeLook!;
+  const withPreset = setItemGroup(show, basic, { group: 'audience', preset: 'aud-blue', level: 0.3 });
+  assert.equal(entryOf(withPreset, basic, 'audience')!.level, 1);
+  const withColour = setItemGroup(show, basic, { group: 'audience', colour: '#00ff00', level: 0.3 });
+  assert.equal(entryOf(withColour, basic, 'audience')!.level, 1);
+  const quick = structuredClone(show);
+  quick.looks.find((l) => l.id === quick.operator.quickLooks[0]!.look)!.groups.forEach((e) => { e.level = 0.2; });
+  const out = applyQuickLookToItem(quick, basic, quick.operator.quickLooks[0]!.look);
+  for (const e of out.looks.find((l) => l.id === basic)!.groups) assert.equal(e.level, 1);
+  assert.ok(out.looks.find((l) => l.id === basic)!.groups.length > 0);
+});
+
+test('applyQuickLookToItem copies only the groups the quick look lists', () => {
+  const { show, song } = withSong();
+  const quickId = show.operator.quickLooks[0]!.look;
+  // A quick look that lists two of the song's four groups, one of them dimmed.
+  const quick = structuredClone(show);
+  quick.looks.find((l) => l.id === quickId)!.groups = [
+    { group: 'front-wash', preset: 'front-dim', level: 0.6 },
+    { group: 'audience', preset: 'aud-blue' },
+  ];
+  const before = structuredClone(quick);
+  const out = applyQuickLookToItem(quick, song, quickId);
+  assert.deepEqual(entryOf(out, song, 'front-wash'), { group: 'front-wash', preset: 'front-dim', level: 0.6 });
+  assert.deepEqual(entryOf(out, song, 'audience'), { group: 'audience', preset: 'aud-blue', level: 1 });
+  for (const group of ['back-wall', 'pulpit']) assert.deepEqual(entryOf(out, song, group), entryOf(before, song, group));
+  assert.deepEqual(quick, before, 'the input show is not changed');
+  assert.deepEqual(checkReferences(out), []);
+  assert.throws(() => applyQuickLookToItem(show, song, song), { message: 'that is not a quick look' });
+  assert.throws(() => applyQuickLookToItem(show, 'walk-in', quickId), { message: 'only running-order items can be changed here' });
+});
+
+test('applyQuickLookToItem skips a smoke group an older quick look lists', () => {
+  const { show, song } = withSong();
+  const quickId = show.operator.quickLooks[0]!.look;
+  const quick = structuredClone(show);
+  quick.groups.find((g) => g.id === 'pulpit')!.kind = 'smoke';
+  quick.looks.find((l) => l.id === quickId)!.groups = [
+    { group: 'front-wash', preset: 'front-dim', level: 0.6 },
+    { group: 'pulpit', preset: firstPreset(quick, 'pulpit') },
+  ];
+  const songBefore = entryOf(quick, song, 'pulpit');
+  const out = applyQuickLookToItem(quick, song, quickId);
+  assert.deepEqual(entryOf(out, song, 'front-wash'), { group: 'front-wash', preset: 'front-dim', level: 0.6 });
+  assert.deepEqual(entryOf(out, song, 'pulpit'), songBefore, 'the smoke group is left as it was');
 });

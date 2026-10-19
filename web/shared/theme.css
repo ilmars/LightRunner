@@ -162,6 +162,8 @@
   font-variant-numeric: tabular-nums; pointer-events: none;
 }
 .ds-fill.ds-dragging { box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+/* A slider that can't move here: faded, and a finger on it does nothing. */
+.ds-fill.ds-disabled { opacity: 0.4; pointer-events: none; }
 
 /* Segmented control (tabs, choices): a faint glass track; selected is tinted. */
 .ds-seg {

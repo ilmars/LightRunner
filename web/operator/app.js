@@ -71,11 +71,18 @@ function connect() {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'layout') {
       layout = msg.layout;
+      // Move Preview off an item that is gone (before the list is drawn, so the outline goes to the new one).
+      if (preview.on && !previewItem()) {
+        preview.item = defaultPreviewItem();
+        previewVisual = null;
+      }
       buildOrder();
       buildDetails();
       buildQuick();
       buildSheetGroups();
       buildFlash();
+      // The show changed (maybe this item): ask for its picture again.
+      if (preview.on) loadPreviewVisual();
       render();
     } else if (msg.type === 'state') {
       if (state && msg.state.look !== seenLook) previousLook = seenLook;
@@ -115,6 +122,8 @@ function setConnected(on) {
     addWanted = false;
     renames.clear();
     moves.clear();
+    // After a reconnect Preview is off, as after a reload.
+    setPreview(false);
   }
   if (!on && pendingEdit !== null) {
     pendingEdit = null;
@@ -212,6 +221,7 @@ function buildOrder() {
   const top = list.scrollTop;
   if (editing) buildEditRows(order);
   else buildPlainRows(order);
+  markSelected();
   list.scrollTop = top;
   if (addWanted && added.length) {
     addWanted = false;
@@ -246,7 +256,8 @@ function buildPlainRows(order) {
     const mark = el('span', 'mark', 'changed');
     mark.hidden = true;
     b.append(strip, el('span', 'name', item.name), mark);
-    b.addEventListener('click', () => start(item));
+    // In Preview a tap picks the item to look at; it starts nothing.
+    b.addEventListener('click', () => (preview.on ? selectItem(item.id) : start(item)));
     nodes.push(b);
     orderRows.push({ item, button: b, mark });
     if (basic && k < order.length - 1) nodes.push(el('div', 'sep'));
@@ -482,6 +493,8 @@ function finishDrag(cancelled) {
 
 function setEditing(on) {
   if (drag || on === editing) return;
+  // Editing the order and Preview don't mix.
+  if (on) setPreview(false);
   // On a tablet a tap on this button doesn't leave the field, so do it here: it sends the rename.
   if (document.activeElement instanceof HTMLElement && $('runningOrder').contains(document.activeElement)) document.activeElement.blur();
   editing = on;
@@ -496,6 +509,95 @@ function setEditing(on) {
   }
 }
 $('editBtn').addEventListener('click', () => setEditing(!editing));
+
+// ---- Preview: look at an item, and change it, without touching the stage ----
+// Only this tablet knows it is on; the server's stage and show are untouched by selecting.
+
+const preview = { on: false, item: null };
+// What the selected item looks like settled (3 bytes per fixture), or null until the server has answered.
+// While it is null the picture is drawn dark, never as the live stage.
+let previewVisual = null;
+// The "Preview" label's font and colour, read from the page once when Preview turns on.
+let previewLabel = null;
+// Counts the asks for a picture, so a slow answer for an earlier choice is dropped.
+let previewSeq = 0;
+
+/** The selected running-order item, or null. */
+function previewItem() {
+  return layout?.runningOrder.find((i) => i.id === preview.item) ?? null;
+}
+
+/** The item Preview opens on, and falls back to: what is on stage, else what Next would start. */
+const defaultPreviewItem = () => (stageItem() ?? nextItem() ?? layout?.runningOrder[0] ?? null)?.id ?? null;
+
+function markSelected() {
+  orderRows.forEach((row) => row.button.classList.toggle('selected', preview.on && row.item.id === preview.item));
+}
+
+function setPreview(on) {
+  if (on === preview.on) return;
+  if (on) {
+    if (!layout || phoneQuery.matches) return;
+    if (editing) {
+      setEditing(false);
+      if (editing) return;
+    }
+  }
+  preview.on = on;
+  preview.item = on ? defaultPreviewItem() : null;
+  // White, Amber and UV moves belong to what the picker showed before.
+  extrasMoved = false;
+  document.body.classList.toggle('preview', on);
+  $('topBar').classList.toggle('preview', on);
+  $('previewBtn').setAttribute('aria-pressed', String(on));
+  if (on) {
+    const style = getComputedStyle(document.body);
+    previewLabel = { font: `11px ${style.fontFamily}`, colour: style.getPropertyValue('--ds-muted').trim() || '#8F9AB0' };
+    // Things that work on other than the selected item: Save stage as quick look, the colour list's Edit and Add to colours.
+    closeSheet();
+    if (picker.edit) setEditMode(false);
+    if (picker.group && !$('pAdd').hidden) closeAddColour();
+    loadPreviewVisual();
+  } else {
+    // Drop any answer still on its way.
+    previewSeq++;
+    previewVisual = null;
+    drawStage();
+  }
+  markSelected();
+  render();
+}
+$('previewBtn').addEventListener('click', () => setPreview(!preview.on));
+
+function selectItem(id) {
+  if (!preview.on || preview.item === id) return;
+  preview.item = id;
+  previewVisual = null;
+  extrasMoved = false;
+  markSelected();
+  loadPreviewVisual();
+  render();
+}
+
+async function loadPreviewVisual() {
+  const seq = ++previewSeq;
+  if (!preview.on || !preview.item) {
+    previewVisual = null;
+    drawStage();
+    return;
+  }
+  let bytes = null;
+  try {
+    const res = await fetch(`/api/looks/${encodeURIComponent(preview.item)}/visual`);
+    if (res.ok) bytes = Uint8Array.from((await res.json()).visual);
+  } catch {
+    // Offline or the item is gone: the picture waits for the next layout.
+  }
+  if (seq !== previewSeq) return;
+  // A failed ask keeps the picture there was (dark when there was none yet).
+  if (bytes) previewVisual = bytes;
+  drawStage();
+}
 
 // A tap anywhere else takes back a "Delete" that was waiting for its second tap.
 document.addEventListener('pointerdown', (ev) => {
@@ -738,9 +840,45 @@ function liveColour(s) {
   return live && !live.white && !live.amber && !live.uv ? live.colour : null;
 }
 
+/**
+ * What the details panel shows for a group. Live: the stage's status (`state.groups`).
+ * In Preview: the selected item's saved entry, `{ preset, level, live: null, entry }`;
+ * `entry` is null when the item doesn't set the group ("not set"). Basic lights' unset
+ * groups run the built-in Basic light, at full.
+ */
+function groupStatus(group) {
+  if (!preview.on) return state?.groups?.[group.id];
+  const item = previewItem();
+  const k = layout.groups.findIndex((g) => g.id === group.id);
+  const entry = item?.entries?.[k] ?? null;
+  if (entry) return { preset: entry.preset, level: item.levels?.[k] ?? 1, live: null, entry };
+  if (item && isBasic(item) && !isSmoke(group)) return { preset: '__safe', level: 1, live: null, entry: null };
+  return { preset: null, level: 0, live: null, entry: null };
+}
+
+/** In Preview: the selected item doesn't set this group. */
+const notSet = (s) => s?.entry === null && s.preset === null;
+
+/** In Preview: a group's dimmer can't move (the item doesn't set the group, or Basic lights stays at full). */
+function dimmerLocked(group) {
+  if (!preview.on) return false;
+  const item = previewItem();
+  return !item || isBasic(item) || !groupStatus(group)?.entry;
+}
+
+/** Preview: changes one group of the selected item, saved straight into it; nothing goes on stage. */
+function sendItemGroup(group, change) {
+  if (!preview.on || !preview.item) return null;
+  return send({ type: 'itemGroup', item: preview.item, group, ...change });
+}
+
 /** What a group runs, as an Any colour pick would make it: { colour, white, amber, uv }. */
 function runningLight(group, s) {
   if (s?.live) return s.live;
+  if (s?.entry) {
+    const light = s.entry.light;
+    return light ? { colour: light.hex, white: light.white, amber: light.amber, uv: light.uv } : { colour: '#000000', white: 0, amber: 0, uv: 0 };
+  }
   const id = s?.preset;
   const light = id === '__safe' ? layout.basicLight : group?.presets.find((x) => x.id === id)?.light;
   if (light) return { colour: light.hex, white: light.white, amber: light.amber, uv: light.uv };
@@ -749,6 +887,8 @@ function runningLight(group, s) {
 
 /** Name and colour to show for what a group runs (never throws on an id the layout doesn't list). */
 function presetInfo(group, s) {
+  if (s?.entry) return { name: s.entry.name, colour: s.entry.swatch };
+  if (notSet(s)) return { name: 'not set', colour: null };
   const id = s?.preset;
   if (id === null || id === undefined || id === '__blackout') return { name: 'Off', colour: null };
   if (id === '__safe') return { name: 'Basic light', colour: layout.basicSwatch };
@@ -843,14 +983,19 @@ function buildDetails() {
 function wireDimmer(row) {
   const out = throttle((v) => send({ type: 'groupLevel', group: row.group.id, value: v }));
   let startX = 0, startV = 0;
+  // A Preview drag changes `item` (saved once on release); a live drag changes the stage.
+  let inPreview = false, item = null;
   row.dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
+    if (row.dim.classList.contains('ds-disabled')) return;
     // The server refuses smoke during Blackout; say so once and leave the slider where it is.
     if (row.smoke && state?.look === 'blackout') {
       toast('Blackout is on.');
       return;
     }
     row.dragging = true;
+    inPreview = preview.on;
+    item = preview.item;
     try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     row.dim.classList.add('ds-dragging');
     startX = ev.clientX;
@@ -859,7 +1004,8 @@ function wireDimmer(row) {
   row.dim.addEventListener('pointermove', (ev) => {
     if (!row.dragging) return;
     showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
-    out.push(row.value);
+    // In Preview the level is saved into the item once, when the finger lifts.
+    if (!inPreview) out.push(row.value);
   });
   const end = () => {
     if (!row.dragging) return;
@@ -867,15 +1013,19 @@ function wireDimmer(row) {
     row.dim.classList.remove('ds-dragging');
     // Keep what the finger set until the server has caught up with it.
     row.holdUntil = performance.now() + 600;
-    if (row.value !== startV) out.end(row.value);
+    if (row.value === startV) return;
+    if (!inPreview) out.end(row.value);
+    else if (preview.on && item && preview.item === item) sendItemGroup(row.group.id, { level: Math.round(row.value * 100) / 100 });
   };
   row.dim.addEventListener('pointerup', end);
   row.dim.addEventListener('pointercancel', end);
 }
 
 function renderDetails() {
-  const item = stageItem();
-  $('dTitle').textContent = item ? item.name : state.look === 'blackout' ? 'Blackout' : 'Details';
+  // In Preview the details are the selected item's, saved straight into it: no Save, no Back.
+  const item = preview.on ? null : stageItem();
+  if (preview.on) $('dTitle').textContent = previewItem()?.name ?? 'Details';
+  else $('dTitle').textContent = item ? item.name : state.look === 'blackout' ? 'Blackout' : 'Details';
   // Without an item on stage there is nothing to save into or go back to.
   $('backBtn').hidden = !item || !state.lookChanged;
   $('saveBtn').hidden = !item;
@@ -885,15 +1035,21 @@ function renderDetails() {
   }
   const now = performance.now();
   for (const row of detailRows) {
-    const s = state.groups?.[row.group.id];
     if (row.smoke) {
-      // The slider shows the smoke's own level; a Puff doesn't move it.
+      // The slider shows the smoke's own level; a Puff doesn't move it. (Hidden in Preview.)
+      const s = state.groups?.[row.group.id];
       if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
       continue;
     }
+    const s = groupStatus(row.group);
     const info = presetInfo(row.group, s);
     row.sw.style.background = shown(info.colour) ?? '#0d0e11';
     row.chipName.textContent = info.name;
+    row.chip.classList.toggle('unset', notSet(s));
+    const locked = dimmerLocked(row.group);
+    row.dim.classList.toggle('ds-disabled', locked);
+    if (locked) row.dim.setAttribute('aria-disabled', 'true');
+    else row.dim.removeAttribute('aria-disabled');
     // The slider carries a little of the group's colour.
     row.dim.style.setProperty('--c', info.colour && info.colour !== '#000000' ? shown(info.colour) : '#5a6478');
     if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
@@ -967,9 +1123,10 @@ function buildPickerGrid() {
     b.append(sw, el('span', null, p.name));
     b.classList.toggle('editable', picker.edit);
     b.classList.toggle('editing', colourEdit?.id === p.id);
-    // While editing, a tap opens the colour's editor and leaves the stage alone.
+    // While editing, a tap opens the colour's editor and leaves the stage alone. In Preview it goes into the item.
     b.addEventListener('click', () => {
       if (picker.edit) openEditor(row.group.presets.find((x) => x.id === p.id) ?? p);
+      else if (preview.on) sendItemGroup(row.group.id, { preset: p.id });
       else send({ type: 'groupPreset', group: row.group.id, preset: p.id });
     });
     grid.append(b);
@@ -1052,13 +1209,18 @@ function dragSender(sendOne) {
   return { start() { first = true; }, push: (v) => out.push(v), end: (v) => out.end(v) };
 }
 
-/** Same feel as the group dimmers: the level moves relative to where the finger started. */
+/**
+ * Same feel as the group dimmers: the level moves relative to where the finger started.
+ * In Preview nothing is sent while the finger moves; on release the item gets the colour with the new levels.
+ */
 function wireExtra(row) {
   const out = dragSender((_v, first) => sendColour(pickerColour, first, extraLevels()));
-  let startX = 0, startV = 0;
+  let startX = 0, startV = 0, inPreview = false, item = null;
   row.dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
     row.dragging = true;
+    inPreview = preview.on;
+    item = preview.item;
     try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     row.dim.classList.add('ds-dragging');
     startX = ev.clientX;
@@ -1069,14 +1231,18 @@ function wireExtra(row) {
     if (!row.dragging) return;
     showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
     if (row.value !== startV) extrasMoved = true;
-    out.push();
+    if (!inPreview) out.push();
   });
   const end = () => {
     if (!row.dragging) return;
     row.dragging = false;
     row.dim.classList.remove('ds-dragging');
     row.holdUntil = performance.now() + 600;
-    if (row.value !== startV) out.end();
+    if (row.value === startV) return;
+    if (!inPreview) out.end();
+    else if (preview.on && item && preview.item === item && picker.group) {
+      sendItemGroup(picker.group, { colour: pickerColour, ...extraLevels() });
+    }
   };
   row.dim.addEventListener('pointerup', end);
   row.dim.addEventListener('pointercancel', end);
@@ -1086,14 +1252,18 @@ function wireExtra(row) {
 function renderPicker() {
   const row = pickerRow();
   if (!row) return;
-  const s = state.groups?.[row.group.id];
+  const s = groupStatus(row.group);
   const info = presetInfo(row.group, s);
   $('pCurSw').style.background = shown(info.colour) ?? '#0d0e11';
-  $('pCurText').textContent = `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
+  $('pCurText').textContent = notSet(s) ? info.name : `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
   const running = runningLight(row.group, s);
   pickerColour = running.colour;
-  pickerLive = !!s?.live;
+  // In Preview the item's own Any colour pick is a saved hidden "Custom" preset (not in the colour list):
+  // its White, Amber and UV are the user's too.
+  pickerLive = preview.on
+    ? !!s?.entry && s.entry.name === 'Custom' && !row.group.presets.some((p) => p.id === s.entry.preset)
+    : !!s?.live;
   const now = performance.now();
   for (const r of extraRows) if (!r.dragging && now >= r.holdUntil) showLevel(r, running[r.key]);
   renderAddColour();
@@ -1252,12 +1422,24 @@ function attachStrip(strip, handle, whiteOnly, onColour, onStart) {
 // The White, Amber and UV sliders' levels go with it when they are the user's: the group
 // already runs an Any colour pick, or a slider was moved since the picker opened. Otherwise
 // (a preset or Basic light with its own white) the pick is the plain colour.
+// In Preview nothing is sent while the finger moves: the item gets one colour when it lifts.
 (() => {
-  let keep = false;
+  let keep = false, inPreview = false, item = null;
   const out = dragSender((hex, first) => sendColour(hex, first, keep ? extraLevels() : NO_EXTRAS));
   attachStrip($('pAny'), $('pAnyH'), () => pickerRow()?.group.whiteOnly ?? null,
-    (hex, last) => (last ? out.end(hex) : out.push(hex)),
-    () => { out.start(); keep = pickerLive || extrasMoved; });
+    (hex, last) => {
+      if (!inPreview) {
+        if (last) out.end(hex); else out.push(hex);
+      } else if (last && preview.on && item && preview.item === item && picker.group) {
+        sendItemGroup(picker.group, { colour: hex, ...(keep ? extraLevels() : {}) });
+      }
+    },
+    () => {
+      out.start();
+      keep = pickerLive || extrasMoved;
+      inPreview = preview.on;
+      item = preview.item;
+    });
 })();
 
 // ---- Edit colours: tap a swatch to rename it, change its colour or delete it ----
@@ -1422,7 +1604,11 @@ function buildQuick() {
       strip.append(block);
     }
     b.append(strip);
-    b.addEventListener('click', () => send({ type: 'quickLook', id: q.id }));
+    // In Preview the quick look's groups go into the selected item, not on stage.
+    b.addEventListener('click', () => {
+      if (!preview.on) send({ type: 'quickLook', id: q.id });
+      else if (preview.item) send({ type: 'itemQuickLook', item: preview.item, look: q.id });
+    });
     grid.append(b);
   }
   if (!mine.length) grid.append(el('span', 'qnone', 'None yet.'));
@@ -1485,7 +1671,7 @@ function renderSheet() {
   }
   for (const b of $('qsGroups').children) {
     const group = layout.groups.find((g) => g.id === b.dataset.group);
-    const s = state?.groups?.[b.dataset.group];
+    const s = group ? groupStatus(group) : state?.groups?.[b.dataset.group];
     const info = presetInfo(group, s);
     const left = qs.left.has(b.dataset.group);
     b.classList.toggle('off', left);
@@ -1615,6 +1801,7 @@ window.addEventListener('blur', flashAllOff);
 
 const canvas = $('stage');
 const ctx = canvas.getContext('2d');
+const NO_VISUAL = new Uint8Array(0);
 
 function drawStage() {
   if (!layout) return;
@@ -1626,10 +1813,12 @@ function drawStage() {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
+  // In Preview the picture is the selected item settled, never the stage: dark until it has come.
+  const shownVisual = preview.on ? previewVisual ?? NO_VISUAL : visual;
   const pad = 14, r = Math.max(5, Math.min(9, h / 16));
   layout.fixtures.forEach((f, k) => {
     const x = pad + f.x * (w - 2 * pad), y = pad + f.y * (h - 2 * pad);
-    const [R, G, B] = shownRgb(visual[k * 3] ?? 0, visual[k * 3 + 1] ?? 0, visual[k * 3 + 2] ?? 0);
+    const [R, G, B] = shownRgb(shownVisual[k * 3] ?? 0, shownVisual[k * 3 + 1] ?? 0, shownVisual[k * 3 + 2] ?? 0);
     const lit = Math.max(R, G, B) / 255;
     if (f.w || f.h) {
       // A bar or strip: a lit rounded rectangle at its real size.
@@ -1664,6 +1853,13 @@ function drawStage() {
     ctx.strokeStyle = '#3a3f48';
     ctx.stroke();
   });
+  if (preview.on && previewLabel) {
+    // So the picture can't be mistaken for the real stage.
+    ctx.font = previewLabel.font;
+    ctx.fillStyle = previewLabel.colour;
+    ctx.textBaseline = 'top';
+    ctx.fillText('Preview', 10, 8);
+  }
 }
 
 window.addEventListener('resize', drawStage);
@@ -1746,6 +1942,8 @@ function applyPhone() {
     // Editing belongs to the iPad: the running order's, and the colour list's (its buttons are hidden here,
     // and in Edit a swatch tap opens the editor instead of setting the colour).
     if (editing) setEditing(false);
+    // No Preview on the phone: it stays a remote for the live stage.
+    setPreview(false);
     if (picker.edit) setEditMode(false);
     closeSheet();
   } else if (flash.parentElement !== $('masterFader').parentElement) {

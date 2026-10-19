@@ -856,3 +856,42 @@ test('the rig: the layout says which groups have white, amber and UV, and Any co
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('Preview edits change a song and never the stage, even the song on stage', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  await waitFor(() => t.state()?.look === song, 2000, 'the song on stage');
+  const was = t.state().groups.audience.preset;
+  const saved = savedLook(dir, song)!.groups.find((e) => e.group === 'audience');
+  assert.notEqual(saved?.preset, 'aud-blue');
+
+  assert.equal(await t.send({ type: 'itemGroup', item: song, group: 'audience', preset: 'aud-blue', level: 0.4 }), null);
+  const entry = savedLook(dir, song)!.groups.find((e) => e.group === 'audience');
+  assert.equal(entry?.preset, 'aud-blue');
+  assert.equal(entry?.level, 0.4);
+  await sleep(60);
+  assert.equal(t.state().groups.audience.preset, was, 'the stage stays as it is');
+  assert.equal(t.state().lookChanged, true);
+  assert.equal(t.state().canUndo, true);
+
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.deepEqual(savedLook(dir, song)!.groups.find((e) => e.group === 'audience'), saved);
+}));
+
+test('the layout gives each item its entries, and the preview picture is served', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const layout = t.layout();
+  const item = layout.runningOrder[1];
+  assert.equal(item.entries.length, layout.groups.length);
+  assert.ok(item.entries.some((e: any) => e && e.preset && e.name && e.swatch));
+  assert.deepEqual(item.entries.map((e: any) => e?.swatch ?? null), item.colours);
+
+  const ok = await api(app, 'GET', `/api/looks/${item.id}/visual`);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.visual.length, layout.fixtures.length * 3);
+  const missing = await api(app, 'GET', '/api/looks/no-such-look/visual');
+  assert.equal(missing.status, 404);
+}));

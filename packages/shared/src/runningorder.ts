@@ -2,7 +2,7 @@
 // show and returns a new one; the input is never changed. Bad input throws an
 // Error with a plain message the page can show as it is.
 
-import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, parseLivePreset } from './protocol.ts';
+import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, livePresetId, parseLivePreset } from './protocol.ts';
 import type { Layer, Look, LookEntry, Preset, QuickTab, Show } from './schema.ts';
 
 /** Where the stage is going: preset ids (possibly live ones) and level targets, as in RuntimeState. */
@@ -248,4 +248,83 @@ export function saveQuickLook(
   lookIn(out, id).groups = entriesFor(out, stage, input.groups);
   out.operator.quickLooks.push({ look: id, tab: input.tab });
   return { show: out, id };
+}
+
+/** One group's change in a running-order item: a preset or an Any colour (with extras), and/or a level. */
+export interface ItemGroupEdit {
+  group: string;
+  preset?: string;
+  colour?: string;
+  white?: number;
+  amber?: number;
+  uv?: number;
+  level?: number;
+}
+
+/** The item's look, if it is in the running order. Only those can be changed from the operator page. */
+function itemLook(show: Show, itemId: string): Look {
+  if (!show.operator.runningOrder.includes(itemId)) throw new Error('only running-order items can be changed here');
+  return lookIn(show, itemId);
+}
+
+/** Puts the entry in the look: replaces the group's one, or adds it last. Basic lights stays at full. */
+function putEntry(show: Show, target: Look, entry: LookEntry): void {
+  if (target.id === show.operator.safeLook) entry.level = 1;
+  const at = target.groups.findIndex((e) => e.group === entry.group);
+  if (at < 0) target.groups.push(entry);
+  else target.groups[at] = entry;
+}
+
+/**
+ * Changes one group in a running-order item: a preset of the group, an Any colour
+ * (kept as a new hidden "Custom" preset, as Save does) and/or its level. The
+ * other groups and the item's name stay. A level alone needs the group to be set already.
+ */
+export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): Show {
+  const out = structuredClone(show);
+  const target = itemLook(out, itemId);
+  const group = out.groups.find((g) => g.id === edit.group);
+  if (!group) throw new Error(`the show has no group "${edit.group}"`);
+  if (group.kind === 'smoke') throw new Error("smoke machines aren't part of a song");
+  if (edit.preset !== undefined && edit.colour !== undefined) throw new Error('pick a colour or a preset, not both');
+  if (edit.preset === undefined && edit.colour === undefined && edit.level === undefined) throw new Error('nothing to change');
+
+  const existing = target.groups.find((e) => e.group === edit.group);
+  if (edit.preset === undefined && edit.colour === undefined) {
+    // Level only: keep the preset (and its own fade).
+    if (!existing) throw new Error('Give the group a colour first.');
+    putEntry(out, target, { ...existing, level: edit.level! });
+    return out;
+  }
+
+  let stagePreset: string;
+  if (edit.colour !== undefined) {
+    stagePreset = livePresetId(edit.group, edit.colour, { white: edit.white, amber: edit.amber, uv: edit.uv });
+  } else {
+    const preset = out.presets.find((p) => p.id === edit.preset && p.group === edit.group);
+    if (!preset) throw new Error(`unknown preset "${edit.preset}" for group "${edit.group}"`);
+    stagePreset = preset.id;
+  }
+  // Without a level the group keeps the one the item has (full if it has none).
+  const level = edit.level ?? existing?.level ?? 1;
+  const [entry] = entriesFor(out, { groups: { [edit.group]: stagePreset }, levels: { [edit.group]: level } }, [edit.group]);
+  putEntry(out, target, entry!);
+  return out;
+}
+
+/**
+ * Copies a quick look into a running-order item: each group the quick look lists
+ * takes its preset (referenced, not copied) and level. Other groups keep their entries.
+ * Smoke machines are skipped: looks never set smoke, so an older quick look that lists one
+ * doesn't put it into a song.
+ */
+export function applyQuickLookToItem(show: Show, itemId: string, quickLookId: string): Show {
+  const out = structuredClone(show);
+  const target = itemLook(out, itemId);
+  if (!out.operator.quickLooks.some((q) => q.look === quickLookId)) throw new Error('that is not a quick look');
+  for (const entry of lookIn(out, quickLookId).groups) {
+    if (out.groups.find((g) => g.id === entry.group)?.kind === 'smoke') continue;
+    putEntry(out, target, { group: entry.group, preset: entry.preset, level: entry.level ?? 1 });
+  }
+  return out;
 }

@@ -58,7 +58,7 @@ The first suggested palette was measured at about 4× the old screen's average b
 | `ds-label` | Muted small label above a value | "Key lights" over "Vēsi balts" |
 | `ds-btn`, `ds-btn--text`, `ds-btn--pill` | Button, quiet text button, pill | Pressed = lighter tint; disabled = 40 % opacity |
 | `ds-hold` + `ds-hold-fill` | Button that fills while held | Save (blue), Blackout (red) |
-| `ds-fill` + `-slab`, `-val` | Fill slider | A smooth filled bar on a faint track, no thumb; the fill carries a little of the group's colour (`--c`); the value is shown beside it |
+| `ds-fill` + `-slab`, `-val` | Fill slider | A smooth filled bar on a faint track, no thumb; the fill carries a little of the group's colour (`--c`); the value is shown beside it; `ds-disabled` = 40 % opacity and it doesn't react to a finger (a group a song doesn't set, or Basic lights in Preview) |
 | `ds-seg` | Segmented control and tabs | Faint track; selected = blue tint and edge |
 | `ds-field` | Text field | Flat; focus = accent edge |
 | `ds-sheet` | Glass sheet over one panel | The only place blur is used |

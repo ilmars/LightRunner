@@ -12,6 +12,18 @@ export interface OperatorLook {
   colours: (string | null)[];
   /** Level this look gives each operator group (same order as `groups`); null = no level of its own (always for smoke groups). */
   levels: (number | null)[];
+  /** What this look gives each operator group (same order as `groups`); null = not set (always for smoke groups). */
+  entries: (OperatorEntry | null)[];
+}
+
+/** One group's colour in a look, with what the editor needs to show it. */
+export interface OperatorEntry {
+  preset: string;
+  /** The preset's name ("Custom" for an Any colour pick). */
+  name: string;
+  /** The same colour as the look's `colours` entry for this group. */
+  swatch: string;
+  light: LiveLight | null;
 }
 
 export interface OperatorGroup {
@@ -77,20 +89,26 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
   const presetById = new Map(show.presets.map((p) => [p.id, p]));
 
   const smoke = new Set(show.groups.filter((g) => g.kind === 'smoke').map((g) => g.id));
+  const palettes = new Map<string, Palette>(show.palettes.map((p) => [p.id, p]));
 
   const describe = (id: string): OperatorLook[] => {
     const l = show.looks.find((x) => x.id === id);
     if (!l) return [];
     // A look never sets a smoke group, even one an import listed.
-    const entries = groupIds.map((gid) => (smoke.has(gid) ? undefined : l.groups.find((e) => e.group === gid)));
-    const colours = entries.map((entry) => {
+    const picked = groupIds.map((gid) => (smoke.has(gid) ? undefined : l.groups.find((e) => e.group === gid)));
+    const colours = picked.map((entry) => {
       const preset = entry ? presetById.get(entry.preset) : undefined;
       if (!preset) return null;
       const lit = preset.layers.some((layer) => layer.intensity > 0);
       return lit ? preset.swatch ?? '#888888' : '#000000';
     });
-    const levels = entries.map((entry) => entry?.level ?? null);
-    return [{ id: l.id, name: l.name, swatch: l.swatch ?? null, section: l.section ?? null, colours, levels }];
+    const levels = picked.map((entry) => entry?.level ?? null);
+    const entries = picked.map((entry, k): OperatorEntry | null => {
+      const preset = entry ? presetById.get(entry.preset) : undefined;
+      if (!entry || !preset) return null;
+      return { preset: preset.id, name: preset.name, swatch: colours[k]!, light: presetLight(preset, palettes) };
+    });
+    return [{ id: l.id, name: l.name, swatch: l.swatch ?? null, section: l.section ?? null, colours, levels, entries }];
   };
 
   const hasRole = (fixtureId: string, roles: ChannelRole[]): boolean => {
@@ -98,7 +116,6 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     const profile = f ? findProfile(show, f.profile) : undefined;
     return !!profile?.channels.some((c) => roles.includes(c.role));
   };
-  const palettes = new Map<string, Palette>(show.palettes.map((p) => [p.id, p]));
 
   return {
     show: show.name,

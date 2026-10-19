@@ -47,7 +47,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   display: flex; align-items: center; gap: 18px; padding: 0 2px 0 8px;
 }
 /* A state that matters gets a quiet tinted strip behind the bar, not a bright frame. */
-.topbar.problem, .topbar.off, .topbar.flash { border-radius: var(--ds-r-tile); }
+.topbar.problem, .topbar.off, .topbar.flash, .topbar.preview { border-radius: var(--ds-r-tile); }
+/* Preview is on: a neutral strip (no colour of its own). Written first so the states below win over it. */
+.topbar.preview { background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10); }
 .topbar.problem { background: rgba(201, 138, 42, 0.10); box-shadow: inset 0 0 0 1px rgba(201, 138, 42, 0.30); }
 .topbar.off { background: rgba(201, 138, 42, 0.07); box-shadow: inset 0 0 0 1px rgba(201, 138, 42, 0.22); }
 .topbar.flash { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
@@ -76,6 +78,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .clock { color: var(--dim); font-size: 14px; font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; }
 .gear { color: var(--dim); display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 8px; }
 .gear:hover { color: var(--text); background: var(--raised); }
+.preview-btn { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--dim); font: inherit; font-size: 14px; }
+.preview-btn:hover { color: var(--text); background: var(--raised); }
+.preview-btn[aria-pressed="true"] { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
 
 .fadepick { position: relative; }
 .fade-btn {
@@ -144,6 +149,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 .item.on .name { font-weight: 500; }
+/* The item Preview is showing: a quiet outline, no fill, so it can't be taken for the one on stage. */
+.item.selected { box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+/* Selected and on stage at once: the same edge, a little thicker, so the two can be told apart. */
+.item.on.selected { box-shadow: inset 0 0 0 2px var(--ds-edge-on); }
 /* The item Next will start: a quiet hint, not a second selection. */
 .item.is-next:not(.on)::after { content: "next"; color: var(--ds-muted); font-size: 12px; }
 .sep { flex: none; height: 1px; margin: 3px 12px; background: rgba(255, 255, 255, 0.05); }
@@ -261,6 +270,18 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 /* Held: tinted, like a held Flash button. */
 .puff.down { background: var(--ds-selected); color: var(--ds-text); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+
+/* Preview: a group the selected item doesn't set says "not set" quietly. */
+.chip.unset span { color: var(--ds-muted); }
+
+/* ---- Preview: the details work on the selected item ----
+   Smoke isn't part of a song, and these work on other things than the item:
+   Save stage as quick look, the colour list's Edit and Add to colours. */
+body.preview .row.smoke,
+body.preview .ql.newq,
+body.preview #pEditBtn,
+body.preview #pAddOpen,
+body.preview #pAdd { display: none; }
 
 /* ---- Colour picker: covers the details panel only ---- */
 .picker {
@@ -458,7 +479,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   /* Top line: what's on stage, "changed", and a status dot (tap it for the explanation). */
   .topbar { grid-column: 1; min-height: 44px; gap: 10px; padding: 0 2px 0 6px; }
   .now-name { font-size: 22px; }
-  #quiet, .clock, .gear { display: none !important; }
+  #quiet, .clock, .gear, #previewBtn { display: none !important; }
   .output-note { width: 44px; min-height: 44px; padding: 0; justify-content: center; max-width: none; }
   .output-note #outputText, .output-note .info { display: none; }
   .output-note .dot { margin: 0; }
