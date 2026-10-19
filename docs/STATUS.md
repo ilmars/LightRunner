@@ -25,7 +25,7 @@ Tests: 247 (`npm test`): 246 pass, 1 is skipped (the Lightkey project test, need
 1. **Run as a service on the church Mac** (launchd, start at boot, restart on crash, sleep off). Today it only runs while someone starts it.
 2. **Test on the real iPad**: add to home screen, Auto-Lock Never (Wake Lock needs HTTPS), check sizes in the dark room, short volunteer trial.
 3. **Edit colours**: edit a preset's colour, level and fade; edit the palette. Today presets come only from the Lightkey import, the show file or Save on the operator page.
-4. **Effects (spec Phase 2)**: colour fade, breathe, wave, chase, sparkle; speed dial; blind preview. The engine's layer model is ready for them.
+4. **Effects (spec Phase 2)**: colour fade, breathe, wave, chase, sparkle; speed dial; Blind mode (presets, manual changes and a Go step; Preview, which is built, covers only running-order items). The engine's layer model is ready for them.
 5. **Companion feedback, OSC and MIDI (APC mini)**: the HTTP API exists; OSC and MIDI do not.
 6. **Spec Phase 2b**: layered effect library and editor.
 7. **Programmer niceties from the spec**: channel test view, manual tab with raw values, stage photo background, operator layout editor.

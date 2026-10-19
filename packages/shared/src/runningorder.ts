@@ -315,12 +315,15 @@ export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): S
 /**
  * Copies a quick look into a running-order item: each group the quick look lists
  * takes its preset (referenced, not copied) and level. Other groups keep their entries.
+ * Smoke machines are skipped: looks never set smoke, so an older quick look that lists one
+ * doesn't put it into a song.
  */
 export function applyQuickLookToItem(show: Show, itemId: string, quickLookId: string): Show {
   const out = structuredClone(show);
   const target = itemLook(out, itemId);
   if (!out.operator.quickLooks.some((q) => q.look === quickLookId)) throw new Error('that is not a quick look');
   for (const entry of lookIn(out, quickLookId).groups) {
+    if (out.groups.find((g) => g.id === entry.group)?.kind === 'smoke') continue;
     putEntry(out, target, { group: entry.group, preset: entry.preset, level: entry.level ?? 1 });
   }
   return out;

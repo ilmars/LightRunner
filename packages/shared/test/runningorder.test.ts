@@ -478,3 +478,18 @@ test('applyQuickLookToItem copies only the groups the quick look lists', () => {
   assert.throws(() => applyQuickLookToItem(show, song, song), { message: 'that is not a quick look' });
   assert.throws(() => applyQuickLookToItem(show, 'walk-in', quickId), { message: 'only running-order items can be changed here' });
 });
+
+test('applyQuickLookToItem skips a smoke group an older quick look lists', () => {
+  const { show, song } = withSong();
+  const quickId = show.operator.quickLooks[0]!.look;
+  const quick = structuredClone(show);
+  quick.groups.find((g) => g.id === 'pulpit')!.kind = 'smoke';
+  quick.looks.find((l) => l.id === quickId)!.groups = [
+    { group: 'front-wash', preset: 'front-dim', level: 0.6 },
+    { group: 'pulpit', preset: firstPreset(quick, 'pulpit') },
+  ];
+  const songBefore = entryOf(quick, song, 'pulpit');
+  const out = applyQuickLookToItem(quick, song, quickId);
+  assert.deepEqual(entryOf(out, song, 'front-wash'), { group: 'front-wash', preset: 'front-dim', level: 0.6 });
+  assert.deepEqual(entryOf(out, song, 'pulpit'), songBefore, 'the smoke group is left as it was');
+});

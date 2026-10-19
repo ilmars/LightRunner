@@ -1,6 +1,6 @@
 # Preview mode: design
 
-Date: 19 Oct 2026. Status: agreed with Ilmārs, not built yet.
+Date: 19 Oct 2026. Status: agreed with Ilmārs and built (the Preview switch, selection and details edits in web/operator/app.js; the saving in packages/shared/src/runningorder.ts; the picture in packages/engine/src/preview.ts).
 
 ## Why
 

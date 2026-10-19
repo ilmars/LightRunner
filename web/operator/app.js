@@ -122,6 +122,8 @@ function setConnected(on) {
     addWanted = false;
     renames.clear();
     moves.clear();
+    // After a reconnect Preview is off, as after a reload.
+    setPreview(false);
   }
   if (!on && pendingEdit !== null) {
     pendingEdit = null;

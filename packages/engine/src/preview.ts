@@ -4,7 +4,7 @@
 import type { Show } from '../../shared/src/index.ts';
 import { Engine } from './engine.ts';
 
-/** Frames after the look starts: far past any fade or ramp, so everything has settled. */
+/** Seconds after the look starts (the engine runs on seconds): far past any fade or ramp, so everything has settled. */
 const SETTLED = 60;
 
 /**
