@@ -796,3 +796,63 @@ test('Compare with a file that removes Basic lights leaves a Basic lights first,
   assert.equal((await api(app, 'PUT', '/api/settings', { safeLook: song })).status, 200);
   assert.equal((await api(app, 'GET', '/api/layout')).body.basicLights, layout.basicLights);
 }));
+
+test('a slider drag after a Save is one Undo step, so two Undos put the show back', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  const before = savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')?.preset;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupColour', group: 'back-wall', colour: '#12ab34', fade: 0 }), null);
+  assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+  const custom = savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')!.preset;
+  await waitFor(() => t.state()?.groups['back-wall'].preset === custom, 2000, 'the stage to run the saved preset');
+  // The drag: a first send, then 30 that continue it.
+  assert.equal(await t.send({ type: 'groupColour', group: 'back-wall', colour: '#12ab34', white: 0.01, fade: 0.2 }), null);
+  for (let k = 2; k <= 31; k++) {
+    assert.equal(await t.send({ type: 'groupColour', group: 'back-wall', colour: '#12ab34', white: k / 100, fade: 0.2, continues: true }), null);
+  }
+  await waitFor(() => t.state()?.groups['back-wall'].preset === 'live:back-wall:#12ab34:w31', 2000, 'the last send of the drag');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  await waitFor(() => t.state()?.groups['back-wall'].preset === custom, 2000, 'Undo to bring back the saved preset');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')?.preset, before, 'the second Undo takes back the Save');
+}));
+
+test('the rig: the layout says which groups have white, amber and UV, and Any colour with amber reaches the key lights', async () => {
+  const dir = tempDir();
+  const app = new App({
+    port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'shows/stage-l1.json'), webDir: join(root, 'web'),
+    output: { kind: 'none' }, log: () => {},
+  });
+  try {
+    await app.start();
+    const t = await tablet(app);
+    const layout = await waitFor(t.layout);
+    const extras = (id: string) => layout.groups.find((g: any) => g.id === id).extras;
+    assert.deepEqual(extras('key-lights'), { white: true, amber: true, uv: true });
+    assert.deepEqual(extras('front-lights'), { white: false, amber: false, uv: false });
+    assert.deepEqual(extras('background'), { white: true, amber: false, uv: false });
+    assert.deepEqual(extras('drum-cage'), { white: false, amber: false, uv: false });
+    const preset = layout.groups.find((g: any) => g.id === 'key-lights').presets[0];
+    assert.match(preset.light.hex, /^#[0-9a-f]{6}$/);
+    // The engine's Basic light (#ffd2a0, half white, at 80 %) as an Any colour pick would make it.
+    assert.deepEqual(layout.basicLight, { hex: '#cca880', white: 0.4, amber: 0, uv: 0 });
+
+    // Visualiser frames: one RGB triple per fixture, in layout order.
+    let frame: Uint8Array | null = null;
+    t.ws.on('message', (data, isBinary) => { if (isBinary) frame = new Uint8Array(data as Buffer); });
+    const b1 = layout.fixtures.findIndex((f: any) => f.id === 'b1') * 3;
+    assert.equal(await t.send({ type: 'groupColour', group: 'key-lights', colour: '#000000', amber: 1, fade: 0 }), null);
+    await waitFor(() => t.state()?.groups['key-lights'].preset === 'live:key-lights:#000000:a100', 2000, 'the live colour');
+    frame = null;
+    const vis = await waitFor(() => frame && Array.from(frame.subarray(b1, b1 + 3)), 2000, 'a visualiser frame');
+    assert.deepEqual(vis, [255, 0xbf, 0]);
+    // Levels are 0..1.
+    assert.match(await t.send({ type: 'groupColour', group: 'key-lights', colour: '#000000', amber: 2 }) ?? '', /^invalid command/);
+    t.ws.close();
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

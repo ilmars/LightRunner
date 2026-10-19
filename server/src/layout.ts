@@ -1,7 +1,7 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { canRecolour, groupIsWhiteOnly, presetUsers } from '../../packages/shared/src/index.ts';
-import type { QuickTab, Show } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, canRecolour, findProfile, groupIsWhiteOnly, presetUsers, resolveColour } from '../../packages/shared/src/index.ts';
+import type { ChannelRole, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
 
 export interface OperatorLook {
   id: string;
@@ -19,8 +19,32 @@ export interface OperatorGroup {
   name: string;
   /** True when no fixture in the group can make colour, so the colour picker has nothing to do. */
   whiteOnly: boolean;
-  /** `usedBy` names the running-order items and quick looks that use the colour, for the editor. */
-  presets: { id: string; name: string; swatch: string | null; usedBy: string[]; canRecolour: boolean }[];
+  /** Which extra channels some fixture in the group has, for the White, Amber and UV sliders. */
+  extras: { white: boolean; amber: boolean; uv: boolean };
+  presets: OperatorPreset[];
+}
+
+export interface OperatorPreset {
+  id: string;
+  name: string;
+  swatch: string | null;
+  /** The running-order items and quick looks that use the colour, for the editor. */
+  usedBy: string[];
+  /** False for Off and multi-layer presets, which the editor can rename but not recolour. */
+  canRecolour: boolean;
+  /**
+   * The preset as an Any colour pick would make it: its top layer's colour,
+   * white, amber and UV, scaled by the layer's intensity (null if it has no layers).
+   */
+  light: LiveLight | null;
+}
+
+/** A light as an Any colour pick would make it: #rrggbb and white, amber and UV 0..1, intensity included. */
+export interface LiveLight {
+  hex: string;
+  white: number;
+  amber: number;
+  uv: number;
 }
 
 export interface OperatorLayout {
@@ -33,6 +57,8 @@ export interface OperatorLayout {
   /** Id of the safe look (Basic lights), or null when the show has none. */
   basicLights: string | null;
   groups: OperatorGroup[];
+  /** The engine's own Basic light (a group Basic lights doesn't list), as an Any colour pick would make it. */
+  basicLight: LiveLight;
   /** In the same order as the bytes of each visualiser frame. */
   fixtures: { id: string; name: string; x: number; y: number; w: number | null; h: number | null }[];
   /** Fixture ids of each group, for tapping a group on the mini visualiser. */
@@ -60,19 +86,35 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     return [{ id: l.id, name: l.name, swatch: l.swatch ?? null, section: l.section ?? null, colours, levels }];
   };
 
+  const hasRole = (fixtureId: string, roles: ChannelRole[]): boolean => {
+    const f = byId.get(fixtureId);
+    const profile = f ? findProfile(show, f.profile) : undefined;
+    return !!profile?.channels.some((c) => roles.includes(c.role));
+  };
+  const palettes = new Map<string, Palette>(show.palettes.map((p) => [p.id, p]));
+
   return {
     show: show.name,
     looks: lookIds.flatMap(describe),
     runningOrder: show.operator.runningOrder.flatMap(describe),
     quickLooks: show.operator.quickLooks.flatMap((q) => describe(q.look).map((l) => ({ ...l, tab: q.tab }))),
     basicLights: show.operator.safeLook ?? null,
+    basicLight: liveLight(SAFE_LIGHT, SAFE_LIGHT.intensity),
     groups: groupIds.flatMap((id) => {
       const g = show.groups.find((x) => x.id === id);
       if (!g) return [];
       const presets = show.presets
         .filter((p) => p.group === id && !p.custom)
-        .map((p) => ({ id: p.id, name: p.name, swatch: p.swatch ?? null, usedBy: presetUsers(show, p.id), canRecolour: canRecolour(p) }));
-      return [{ id: g.id, name: g.name, whiteOnly: groupIsWhiteOnly(show, g.id), presets }];
+        .map((p) => ({
+          id: p.id, name: p.name, swatch: p.swatch ?? null,
+          usedBy: presetUsers(show, p.id), canRecolour: canRecolour(p), light: presetLight(p, palettes),
+        }));
+      const any = (roles: ChannelRole[]) => g.fixtures.some((f) => hasRole(f, roles));
+      return [{
+        id: g.id, name: g.name, whiteOnly: groupIsWhiteOnly(show, g.id),
+        extras: { white: any(['white']), amber: any(['amber']), uv: any(['uv']) },
+        presets,
+      }];
     }),
     fixtures: fixtureOrder.flatMap((id) => {
       const f = byId.get(id);
@@ -81,4 +123,17 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     members: Object.fromEntries(show.groups.map((g) => [g.id, g.fixtures])),
     manualForOperators: show.operator.manualForOperators,
   };
+}
+
+function presetLight(preset: Preset, palettes: ReadonlyMap<string, Palette>): OperatorPreset['light'] {
+  const top = preset.layers[preset.layers.length - 1];
+  if (!top) return null;
+  return liveLight(resolveColour(top.colour, palettes), top.intensity);
+}
+
+function liveLight(c: PaletteColour, k: number): LiveLight {
+  const n = parseInt(c.hex.slice(1), 16);
+  const hex = `#${[16, 8, 0].map((s) => Math.round(((n >> s) & 255) * k).toString(16).padStart(2, '0')).join('')}`;
+  const level = (v: number | undefined) => Math.round((v ?? 0) * k * 1000) / 1000;
+  return { hex, white: level(c.white), amber: level(c.amber), uv: level(c.uv) };
 }

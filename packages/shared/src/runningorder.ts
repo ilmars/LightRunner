@@ -2,7 +2,7 @@
 // show and returns a new one; the input is never changed. Bad input throws an
 // Error with a plain message the page can show as it is.
 
-import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, parseLivePreset } from './protocol.ts';
+import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, parseLivePreset } from './protocol.ts';
 import type { Layer, Look, LookEntry, Preset, QuickTab, Show } from './schema.ts';
 
 /** Where the stage is going: preset ids (possibly live ones) and level targets, as in RuntimeState. */
@@ -51,7 +51,10 @@ const BUILT_IN = new Map<string, { name: string; swatch: string; layer: Layer }>
   [BLACKOUT_PRESET, { name: 'Off', swatch: '#000000', layer: { kind: 'static', colour: { hex: '#000000' }, intensity: 0 } }],
 ]);
 
-const layerKey = (l: Layer) => JSON.stringify(['palette' in l.colour ? l.colour : [l.colour.hex.toLowerCase(), l.colour.white ?? 0], l.intensity]);
+const layerKey = (l: Layer) => JSON.stringify([
+  'palette' in l.colour ? l.colour : [l.colour.hex.toLowerCase(), l.colour.white ?? 0, l.colour.amber ?? 0, l.colour.uv ?? 0],
+  l.intensity,
+]);
 
 /** The group's custom preset for a built-in light, made the first time and reused after. */
 function builtInPreset(show: Show, group: string, made: { name: string; swatch: string; layer: Layer }): string {
@@ -80,14 +83,16 @@ function entriesFor(show: Show, stage: Stage, only?: string[]): LookEntry[] {
     if (builtIn) {
       entries.push({ group, preset: builtInPreset(show, group, builtIn), level });
     } else if (live) {
+      // White, amber and UV go with it (each only when the pick had it).
+      const { group: _group, colour: hex, ...extras } = live;
       const made: Preset = {
         id: uniqueId('Custom', show.presets.map((p) => p.id)),
         name: 'Custom',
         group,
         custom: true,
-        layers: [{ kind: 'static', colour: { hex: live.colour }, intensity: 1 }],
+        layers: [{ kind: 'static', colour: { hex, ...extras }, intensity: 1 }],
         fade: 3,
-        swatch: live.colour,
+        swatch: displayColour(hex, extras),
       };
       show.presets.push(made);
       entries.push({ group, preset: made.id, level });

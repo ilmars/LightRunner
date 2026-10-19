@@ -1,10 +1,12 @@
 // Runs the engine headless through hours of random look, preset, manual,
 // Safe, Blackout and Any colour changes (Flash is left out: it snaps by design), tapping mid-fade on purpose, and reports the
-// largest intensity jump of any fixture between two frames.
+// largest jump in how bright any fixture looks (its brightest written colour
+// channel times its intensity) between two frames.
 //
 // The spec's rule: no fixture jumps more than 5% during any fade, including
-// interruptions and manual release. Manual takeover and master moves follow
-// the finger on purpose (0.2 s), so frames right after those are not judged.
+// interruptions and manual release. Manual takeover, master moves and Any
+// colour drags follow the finger on purpose (0.2 s), so frames right after
+// those are not judged.
 // Fades are at least 1 s, the spec's shortest (Safe and Blackout): a full
 // 0–100% fade shorter than 0.75 s cannot stay under 5% per frame at 40 fps.
 //
@@ -57,7 +59,15 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
     const p = pick(show.presets);
     return { cmd: { type: 'groupPreset', group: p.group, preset: p.id }, fast: false };
   }
-  if (r < 0.6) return { cmd: { type: 'groupColour', group: pick(show.groups).id, colour: hex() }, fast: false };
+  if (r < 0.6) {
+    // Half of the Any colour picks carry white, amber or UV (each one sometimes).
+    const extra = () => (rand() < 0.5 ? rand() : undefined);
+    const extras = rand() < 0.5 ? { white: extra(), amber: extra(), uv: extra() } : {};
+    const cmd = { type: 'groupColour' as const, group: pick(show.groups).id, colour: hex(), ...extras };
+    // A third are later sends of a drag on the operator page: they follow the finger in 0.2 s, like manual.
+    if (rand() < 0.33) return { cmd: { ...cmd, fade: 0.2, continues: true }, fast: true };
+    return { cmd, fast: false };
+  }
   if (r < 0.68) {
     const target = rand() < 0.5 ? { group: pick(show.groups).id } : { fixture: pick(show.fixtures).id };
     return { cmd: { type: 'manual', target, colour: hex(), intensity: rand() }, fast: true };
@@ -76,7 +86,7 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
 
 const engine = new Engine(show, 0);
 const ids = engine.fixtureIds();
-let prev = engine.lights().map((l) => l.i);
+let prev = engine.visibleLevels();
 let worst = 0;
 let worstAt = '';
 let judged = 0;
@@ -99,7 +109,7 @@ for (let n = 0; n * FRAME <= end; n++) {
     next = t + (rand() < 0.8 ? 0.2 + rand() * 4 : 5 + rand() * 30);
   }
   engine.frame(t);
-  const now = engine.lights().map((l) => l.i);
+  const now = engine.visibleLevels();
   if (t > skipUntil) {
     judged++;
     for (let k = 0; k < now.length; k++) {
@@ -115,7 +125,7 @@ for (let n = 0; n * FRAME <= end; n++) {
 
 const pass = worst <= limit;
 console.log(`Simulated ${values.hours} h: ${commands} commands, ${judged} frames judged, in ${((performance.now() - started) / 1000).toFixed(1)} s`);
-console.log(`Largest intensity step between frames: ${(worst * 100).toFixed(2)}% (limit ${(limit * 100).toFixed(0)}%)`);
+console.log(`Largest brightness step between frames: ${(worst * 100).toFixed(2)}% (limit ${(limit * 100).toFixed(0)}%)`);
 if (!pass) console.log(`Worst case: ${worstAt}`);
 console.log(pass ? 'PASS' : 'FAIL');
 process.exit(pass ? 0 : 1);
