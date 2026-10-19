@@ -249,10 +249,14 @@ $('frameRate').addEventListener('change', (e) => { draft.frameRate = Number(e.ta
 $('gamma').addEventListener('input', (e) => { draft.gamma = Number(e.target.value); markDirty(); });
 $('showName').addEventListener('input', (e) => { draft.showName = e.target.value; markDirty(); });
 
-$('discard').addEventListener('click', () => { draft = structuredClone(saved); render(); });
+$('discard').addEventListener('click', () => { draft = structuredClone(saved); sacnUnicast.clear(); render(); });
 $('save').addEventListener('click', async () => {
+  // "One receiver" with no address would save as multicast without a word.
+  const noReceiver = draft.routes.find((r) => r.output.kind === 'sacn' && !r.output.host && sacnUnicast.has(r.universe));
+  if (noReceiver) return toast(`Type the receiver's IP address for universe ${noReceiver.universe}.`, true);
   try {
     saved = await call('PUT', '/api/settings', changedFields());
+    sacnUnicast.clear();
     draft = structuredClone(saved);
     render();
     toast('Saved');
