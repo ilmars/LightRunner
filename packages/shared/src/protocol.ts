@@ -2,7 +2,7 @@
 // state every device receives back. The server is the single source of truth.
 
 import { z } from 'zod';
-import { QuickTab } from './schema.ts';
+import { EffectLayer, PaletteColour, QuickTab } from './schema.ts';
 
 const id = z.string().min(1).max(64);
 /** A #rrggbb colour. */
@@ -10,6 +10,12 @@ export const HEX_COLOUR = /^#[0-9a-fA-F]{6}$/;
 const hex = z.string().regex(HEX_COLOUR);
 const unit = z.number().min(0).max(1);
 const fade = z.number().min(0).max(600).optional();
+
+/** An effect as the operator page sends it: every colour a plain colour (never a palette reference). */
+export const LiveEffectLayer = EffectLayer.extend({ colours: z.array(PaletteColour).min(1).max(6) });
+export type LiveEffectLayer = z.infer<typeof LiveEffectLayer>;
+
+const bpm = z.number().min(40).max(240);
 
 export const ManualTarget = z.union([
   z.object({ group: id }),
@@ -31,6 +37,11 @@ export const Command = z.discriminatedUnion('type', [
     white: unit.optional(), amber: unit.optional(), uv: unit.optional(), fade,
     continues: z.boolean().optional(),
   }),
+  /**
+   * Run this exact effect on a group, as a live preset (`fx:<group>:<n>`).
+   * `continues`: a later send of the same drag, which adds no Undo step of its own and carries on from where the pattern is.
+   */
+  z.object({ type: z.literal('groupEffect'), group: id, effect: LiveEffectLayer, fade, continues: z.boolean().optional() }),
   /** Hold the groups at full white while `on`; snaps, and is not saved or undone. */
   z.object({ type: z.literal('flash'), groups: z.array(id).max(64), on: z.boolean() }),
   z.object({ type: z.literal('manual'), target: ManualTarget, colour: hex.optional(), intensity: unit.optional() }),
@@ -41,6 +52,8 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('blackout') }),
   z.object({ type: z.literal('master'), value: unit }),
   z.object({ type: z.literal('speed'), value: z.number().min(0.5).max(2) }),
+  /** The stage tempo in beats per minute. Effects count their speed in beats. */
+  z.object({ type: z.literal('tempo'), bpm }),
   z.object({ type: z.literal('groupLevel'), group: id, value: unit }),
   z.object({ type: z.literal('undo') }),
   /** Fade time for every look and preset change; null = each look's own fade. */
@@ -56,23 +69,32 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('moveItem'), id, to: z.number().int() }),
   /** A new quick look from the chosen groups of the stage. */
   z.object({ type: z.literal('saveQuickLook'), name: z.string(), tab: QuickTab, groups: z.array(id).min(1).max(64) }),
-  /** Change one group of a running-order item (a preset or an Any colour, and/or a level) without touching the stage. */
+  /** Change one group of a running-order item (a preset, an Any colour or an effect, and/or a level) without touching the stage. */
   z.object({
     type: z.literal('itemGroup'), item: id, group: id, preset: id.optional(), colour: hex.optional(),
-    white: unit.optional(), amber: unit.optional(), uv: unit.optional(), level: unit.optional(),
+    white: unit.optional(), amber: unit.optional(), uv: unit.optional(), effect: LiveEffectLayer.optional(), level: unit.optional(),
   }),
+  /** Set a running-order item's tempo without touching the stage. */
+  z.object({ type: z.literal('itemTempo'), item: id, bpm }),
   /** Copy a quick look's groups into a running-order item without touching the stage. */
   z.object({ type: z.literal('itemQuickLook'), item: id, look: id }),
   /** Keep an Any colour pick: add it to a group's colour list, or to every group of its kind. */
   z.object({ type: z.literal('addColour'), group: id, colour: hex, name: z.string(), allGroups: z.boolean() }),
   /** Change the name and/or colour of a colour in a group's list; `sameName` also changes the same-named ones of other groups. */
   z.object({ type: z.literal('editColour'), preset: id, name: z.string().optional(), colour: hex.optional(), sameName: z.boolean() }),
-  /** Remove a colour from a group's list (refused while a look uses it). */
+  /** Remove a colour (or an effect) from a group's list (refused while a look uses it). */
   z.object({ type: z.literal('deleteColour'), preset: id }),
+  /** A new effect in a group's effects list; an empty name becomes "Effect N". */
+  z.object({ type: z.literal('addEffect'), group: id, name: z.string(), effect: LiveEffectLayer }),
+  /** New settings for an effect in a group's list (its name is changed with editColour). */
+  z.object({ type: z.literal('editEffect'), preset: id, effect: LiveEffectLayer }),
 ]);
 export type Command = z.infer<typeof Command>;
 
-const SHOW_EDITS = ['saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'itemGroup', 'itemQuickLook', 'addColour', 'editColour', 'deleteColour'] as const;
+const SHOW_EDITS = [
+  'saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'itemGroup', 'itemTempo', 'itemQuickLook',
+  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect',
+] as const;
 /** Commands that change the show rather than the stage. */
 export type ShowEdit = Extract<Command, { type: (typeof SHOW_EDITS)[number] }>;
 /** Commands the engine runs. */
@@ -99,6 +121,8 @@ export interface GroupStatus {
   level: number;
   /** When the preset is an Any colour pick: its colour, white, amber and UV (0 when absent), and the colour to draw. */
   live: { colour: string; white: number; amber: number; uv: number; display: string } | null;
+  /** When the group runs a live effect (groupEffect): the effect. */
+  effect: EffectLayer | null;
 }
 
 export type OutputStatus = 'ok' | 'lost' | 'off';
@@ -124,6 +148,8 @@ export interface LiveState {
   flashing: string[];
   master: number;
   speed: number;
+  /** Stage tempo in beats per minute. */
+  tempo: number;
   output: OutputStatus;
   /** Why output is lost, in plain words (node not answering, another desk sending). */
   outputProblem: string | null;
@@ -140,11 +166,15 @@ export interface RuntimeState {
   groups: Record<string, string | null>;
   master: number;
   speed: number;
+  /** Stage tempo in beats per minute; 120 when missing (older saves). */
+  tempo?: number;
   levels: Record<string, number>;
   lastLook?: string | null;
   fadeTime?: number | null;
   /** Each group's preset before Blackout, so the next look restores the whole stage. */
   beforeBlackout?: Record<string, string | null>;
+  /** The live effects (`fx:` ids) that `groups` or `beforeBlackout` name, so a restart runs the same effect. */
+  effects?: Record<string, EffectLayer>;
 }
 
 export const SAFE = 'safe';
@@ -205,6 +235,16 @@ export function displayColour(colour: string, extras: ColourExtras = {}): string
   ];
   const scale = 1 / Math.max(1, ...rgb);
   return `#${rgb.map((c) => Math.round(c * scale * 255).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** A preset id that stands for "this group running this exact effect" (a live effect); `n` counts up. */
+export function liveEffectId(group: string, n: number): string {
+  return `fx:${group}:${n}`;
+}
+
+export function parseLiveEffect(id: string): { group: string; n: number } | null {
+  const m = /^fx:([^:]+):(\d{1,15})$/.exec(id);
+  return m ? { group: m[1]!, n: Number(m[2]) } : null;
 }
 
 export function parseLivePreset(id: string): LiveColour | null {

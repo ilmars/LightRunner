@@ -127,7 +127,10 @@ function setConnected(on) {
   }
   if (!on && pendingEdit !== null) {
     pendingEdit = null;
+    pendingEditNext = [];
     $('peSave').disabled = false;
+    $('feSave').disabled = false;
+    $('feCopy').disabled = false;
   }
   if (!on && pendingColour !== null) {
     pendingColour = null;
@@ -665,6 +668,133 @@ document.addEventListener('pointerdown', (ev) => {
   if (!fadeMenu.hidden && !fadeMenu.parentElement.contains(ev.target)) showFadeMenu(false);
 }, true);
 
+// ---- Tempo: beats per minute for the stage (in Preview, for the selected song) ----
+// Live it sends `tempo`; in Preview, `itemTempo`. The readout shows the stage's tempo, or the
+// selected song's saved one (120 when it has none). The menu steps by 1 (hold to repeat), ×2, ÷2.
+
+const TEMPO_MIN = 40;
+const TEMPO_MAX = 240;
+const clampTempo = (bpm) => Math.min(TEMPO_MAX, Math.max(TEMPO_MIN, Math.round(bpm)));
+
+const tempoMenu = $('tempoMenu');
+const showTempoMenu = (open) => {
+  tempoMenu.hidden = !open;
+  $('tempoButton').setAttribute('aria-expanded', String(open));
+  if (open) showFadeMenu(false);
+};
+$('tempoButton').addEventListener('click', () => showTempoMenu(tempoMenu.hidden));
+$('fadeButton').addEventListener('click', () => showTempoMenu(false));
+document.addEventListener('pointerdown', (ev) => {
+  if (!tempoMenu.hidden && !tempoMenu.parentElement.contains(ev.target)) showTempoMenu(false);
+}, true);
+$('tempoCtl').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape' || tempoMenu.hidden) return;
+  showTempoMenu(false);
+  $('tempoButton').focus();
+});
+
+/** What the stage runs, or in Preview what the selected song is saved with. */
+const shownTempo = () => Math.round(preview.on ? previewItem()?.tempo ?? 120 : state?.tempo ?? 120);
+
+// A step shows at once; the server's answer takes over after a moment (so a held button doesn't jump back).
+let tempoLocal = null;
+let tempoLocalAt = 0;
+function currentTempo() {
+  if (tempoLocal !== null && performance.now() - tempoLocalAt < 700) return tempoLocal;
+  tempoLocal = null;
+  return shownTempo();
+}
+
+function sendTempo(bpm) {
+  if (!preview.on) send({ type: 'tempo', bpm });
+  else if (preview.item) send({ type: 'itemTempo', item: preview.item, bpm });
+}
+
+// A held button sends at most 4 a second (every change is an Undo step), and the last one when let go.
+let tempoSentAt = 0;
+let tempoUnsent = null;
+function setTempo(bpm, throttle = false) {
+  const v = clampTempo(bpm);
+  tempoLocal = v;
+  tempoLocalAt = performance.now();
+  $('tempoValue').textContent = String(v);
+  if (throttle && tempoLocalAt - tempoSentAt < 250) {
+    tempoUnsent = v;
+    return;
+  }
+  tempoSentAt = tempoLocalAt;
+  tempoUnsent = null;
+  sendTempo(v);
+}
+function flushTempo() {
+  if (tempoUnsent === null) return;
+  const v = tempoUnsent;
+  tempoUnsent = null;
+  tempoSentAt = performance.now();
+  sendTempo(v);
+}
+
+for (const b of tempoMenu.querySelectorAll('button')) {
+  const step = b.dataset.step;
+  if (step === 'double' || step === 'half') {
+    b.addEventListener('click', () => setTempo(currentTempo() * (step === 'double' ? 2 : 0.5)));
+    continue;
+  }
+  const by = Number(step);
+  let delay = null;
+  let repeat = null;
+  const stop = () => {
+    clearTimeout(delay);
+    clearInterval(repeat);
+    delay = repeat = null;
+    flushTempo();
+  };
+  b.addEventListener('pointerdown', (ev) => {
+    if (ev.button || b.disabled) return;
+    b.setPointerCapture?.(ev.pointerId);
+    setTempo(currentTempo() + by);
+    delay = setTimeout(() => {
+      repeat = setInterval(() => setTempo(currentTempo() + by, true), 80);
+    }, 400);
+  });
+  b.addEventListener('pointerup', stop);
+  b.addEventListener('pointercancel', stop);
+  b.addEventListener('lostpointercapture', stop);
+  // A key press arrives as a click with no pointer; a pointer's click was already handled on pointerdown.
+  b.addEventListener('click', (ev) => {
+    if (ev.detail === 0) setTempo(currentTempo() + by);
+  });
+}
+
+// Tap: the average of the last 4 gaps; a gap over 2 s starts over. Sets the tempo from the second tap.
+const tapTimes = [];
+function tapTempo() {
+  const t = performance.now();
+  if (tapTimes.length && t - tapTimes[tapTimes.length - 1] > 2000) tapTimes.length = 0;
+  tapTimes.push(t);
+  if (tapTimes.length > 5) tapTimes.shift();
+  const btn = $('tapBtn');
+  btn.classList.add('hit');
+  setTimeout(() => btn.classList.remove('hit'), 120);
+  if (tapTimes.length < 2) return;
+  setTempo((60000 * (tapTimes.length - 1)) / (t - tapTimes[0]));
+}
+$('tapBtn').addEventListener('pointerdown', (ev) => {
+  if (!ev.button) tapTempo();
+});
+$('tapBtn').addEventListener('click', (ev) => {
+  if (ev.detail === 0) tapTempo();
+});
+
+function renderTempo() {
+  $('tempoValue').textContent = String(currentTempo());
+  // In Preview with no song selected there is nothing to change.
+  const none = preview.on && !previewItem();
+  for (const b of $('tempoCtl').querySelectorAll('button')) {
+    if (b !== $('tempoButton')) b.disabled = none;
+  }
+}
+
 // ---- Rendering live state ----
 
 /** What to call a look id in the top bar. */
@@ -730,6 +860,7 @@ function render() {
   // Blackout is the most important state on the page: the whole bar says so.
   top.classList.toggle('blackout', blackedOut);
 
+  renderTempo();
   const fade = state.fadeTime ?? null;
   $('fadeValue').textContent = fade === null ? 'Auto' : fade === 0 ? 'Instant' : `${fade} s`;
   $('fadeButton').classList.toggle('fixed', fade !== null);
@@ -872,9 +1003,55 @@ function sendItemGroup(group, change) {
   return send({ type: 'itemGroup', item: preview.item, group, ...change });
 }
 
+/**
+ * The effect a group runs now, as groupEffect takes it, or null when it runs a colour.
+ * `s` is groupStatus(group). Live: a live change (`s.effect`, an `fx:` id), a listed effect,
+ * or an effect a Save kept in a song (a hidden "Custom effect" the group goes on running:
+ * its settings come with the look's entry). In Preview: the selected item's entry.
+ */
+function runningEffect(group, s) {
+  if (!s || !group) return null;
+  if ('entry' in s) return s.entry?.effect ?? null;
+  if (s.live) return null;
+  if (s.effect) return s.effect;
+  const id = s.preset;
+  if (!id) return null;
+  const listed = group.presets.find((p) => p.id === id);
+  if (listed) return listed.effect ?? null;
+  return savedEntry(group, id)?.effect ?? null;
+}
+
+/** A look's entry that gives the group this preset (a hidden one Save made): the look on stage first, then any. */
+function savedEntry(group, presetId) {
+  const k = layout.groups.findIndex((g) => g.id === group.id);
+  const looks = [...layout.runningOrder, ...layout.looks, ...layout.quickLooks];
+  const onStage = looks.find((l) => l.id === state?.look);
+  for (const look of onStage ? [onStage, ...looks] : looks) {
+    const entry = look.entries?.[k];
+    if (entry?.preset === presetId) return entry;
+  }
+  return null;
+}
+
+/** The group's line: more than one segment (several fixtures, or a bar), so effects have somewhere to move. */
+const hasLine = (group) => (group?.segments ?? 1) > 1 || (layout?.members?.[group?.id]?.length ?? 0) > 1;
+
+/** An effect's colours side by side, whites drawn as whites; `loop` ends on the first colour again, for a swatch that moves. */
+function effectGradient(effect, loop = false) {
+  const colours = effect.colours.map((c) => shown(c.hex));
+  if (colours.length === 1) return colours[0];
+  return `linear-gradient(90deg, ${(loop ? [...colours, colours[0]] : colours).join(', ')})`;
+}
+
+/** The background of a small swatch for what a group runs: the colour, or an effect's colours. */
+const swatchFill = (info) => (info.effect ? effectGradient(info.effect) : shown(info.colour) ?? '#0d0e11');
+
 /** What a group runs, as an Any colour pick would make it: { colour, white, amber, uv }. */
 function runningLight(group, s) {
   if (s?.live) return s.live;
+  // An effect: its first colour, with White, Amber and UV from 0. A strip pick or a slider replaces the effect with a colour.
+  const effect = runningEffect(group, s);
+  if (effect) return { colour: effect.colours[0]?.hex ?? '#000000', white: 0, amber: 0, uv: 0 };
   if (s?.entry) {
     const light = s.entry.light;
     return light ? { colour: light.hex, white: light.white, amber: light.amber, uv: light.uv } : { colour: '#000000', white: 0, amber: 0, uv: 0 };
@@ -885,17 +1062,23 @@ function runningLight(group, s) {
   return { colour: '#000000', white: 0, amber: 0, uv: 0 };
 }
 
-/** Name and colour to show for what a group runs (never throws on an id the layout doesn't list). */
+/**
+ * Name and colour to show for what a group runs (never throws on an id the layout doesn't list).
+ * `effect` is the effect it runs (see runningEffect), or null.
+ */
 function presetInfo(group, s) {
-  if (s?.entry) return { name: s.entry.name, colour: s.entry.swatch };
-  if (notSet(s)) return { name: 'not set', colour: null };
+  const effect = runningEffect(group, s);
+  if (s?.entry) return { name: s.entry.name, colour: s.entry.swatch, effect };
+  if (notSet(s)) return { name: 'not set', colour: null, effect: null };
   const id = s?.preset;
-  if (id === null || id === undefined || id === '__blackout') return { name: 'Off', colour: null };
-  if (id === '__safe') return { name: 'Basic light', colour: layout.basicSwatch };
-  if (s.live) return { name: 'Custom', colour: s.live.display };
+  if (id === null || id === undefined || id === '__blackout') return { name: 'Off', colour: null, effect: null };
+  if (id === '__safe') return { name: 'Basic light', colour: layout.basicSwatch, effect: null };
+  if (s.live) return { name: 'Custom', colour: s.live.display, effect: null };
   const p = group?.presets.find((x) => x.id === id);
-  if (p) return { name: p.name, colour: p.swatch ?? NEUTRAL };
-  return { name: 'Custom', colour: NEUTRAL };
+  if (p) return { name: p.name, colour: p.swatch ?? NEUTRAL, effect };
+  // A live change to an effect, or the "Custom effect" a Save kept in the song.
+  if (effect) return { name: savedEntry(group, id)?.name ?? 'Custom effect', colour: effect.colours[0]?.hex ?? NEUTRAL, effect };
+  return { name: 'Custom', colour: NEUTRAL, effect: null };
 }
 
 /** At most one send every 40 ms while a finger moves; `end` always sends the last value. */
@@ -1043,7 +1226,7 @@ function renderDetails() {
     }
     const s = groupStatus(row.group);
     const info = presetInfo(row.group, s);
-    row.sw.style.background = shown(info.colour) ?? '#0d0e11';
+    row.sw.style.background = swatchFill(info);
     row.chipName.textContent = info.name;
     row.chip.classList.toggle('unset', notSet(s));
     const locked = dimmerLocked(row.group);
@@ -1093,7 +1276,7 @@ saveBtn.addEventListener('click', (ev) => ev.preventDefault());
 
 // ---- Colour picker (covers the details panel only) ----
 
-const picker = { group: null, edit: false };
+const picker = { group: null, edit: false, tab: 'col' };
 
 const HUE_STOPS = ['#ff0000', '#ffc800', '#00ff00', '#00ffc8', '#0000ff', '#8c00ff', '#ff008c', '#ff0000'];
 const WHITE_STOPS = ['#ffb46b', '#f4f8ff'];
@@ -1115,7 +1298,8 @@ function buildPickerGrid() {
   if (!row) return;
   const grid = $('pGrid');
   grid.replaceChildren();
-  for (const p of row.group.presets) {
+  // The Colours tab lists colours only; effects have their own tab.
+  for (const p of row.group.presets.filter((x) => !x.effect)) {
     const b = el('button', 'pc');
     b.dataset.preset = p.id;
     const sw = el('i');
@@ -1136,6 +1320,52 @@ function buildPickerGrid() {
   $('pAny').className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'}`;
   $('pAny').setAttribute('aria-label', $('pAnyLab').textContent);
   buildExtras(row.group);
+  buildEffectGrid(row.group);
+  // A group that is a single light has nowhere for an effect to move: no Effects tab.
+  $('pTabs').hidden = !hasLine(row.group);
+  if ($('pTabs').hidden && picker.tab === 'fx') showPickerTab('col');
+}
+
+/** The Effects tab: one tile per effect in the group's list, with a small moving swatch of its colours. */
+function buildEffectGrid(group) {
+  const grid = $('fxGrid');
+  grid.replaceChildren();
+  const effects = group.presets.filter((p) => p.effect);
+  for (const p of effects) {
+    const b = el('button', 'pc fx');
+    b.dataset.preset = p.id;
+    const sw = el('i', 'fxsw');
+    sw.style.setProperty('--g', effectGradient(p.effect, true));
+    b.append(sw, el('span', null, p.name));
+    b.classList.toggle('editable', picker.edit);
+    b.classList.toggle('editing', effectEdit?.id === p.id);
+    // While editing, a tap opens the effect's editor and leaves the stage alone.
+    // In Preview it goes into the selected item; live it goes on stage.
+    b.addEventListener('click', () => {
+      if (picker.edit) openEffectEditor(group.presets.find((x) => x.id === p.id) ?? p);
+      else if (preview.on) sendItemGroup(group.id, { preset: p.id });
+      else send({ type: 'groupPreset', group: group.id, preset: p.id });
+    });
+    grid.append(b);
+  }
+  if (picker.edit) {
+    const add = el('button', 'pc newfx', '＋ New effect');
+    add.classList.toggle('editing', effectEdit?.id === null);
+    add.addEventListener('click', () => openEffectEditor(null));
+    grid.append(add);
+  }
+  showStill();
+}
+
+/** In Preview, Basic lights is always still: the Effects tab shows a note instead of effects it would refuse. */
+const previewStill = () => preview.on && !!previewItem() && isBasic(previewItem());
+
+function showStill() {
+  const still = previewStill();
+  const row = pickerRow();
+  $('fxStill').hidden = !still;
+  $('fxGrid').hidden = still;
+  $('fxNone').hidden = still || picker.edit || !!row?.group.presets.some((p) => p.effect);
 }
 
 // White, Amber and UV under the Any colour strip, for groups whose fixtures have them.
@@ -1254,9 +1484,14 @@ function renderPicker() {
   if (!row) return;
   const s = groupStatus(row.group);
   const info = presetInfo(row.group, s);
-  $('pCurSw').style.background = shown(info.colour) ?? '#0d0e11';
+  $('pCurSw').style.background = swatchFill(info);
   $('pCurText').textContent = notSet(s) ? info.name : `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
+  for (const b of $('fxGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
+  // The settings of the effect the group runs (in Preview: the item's), under the list.
+  $('fxSet').hidden = !info.effect || previewStill();
+  showStill();
+  effectSettings.show(info.effect, preview.on ? previewItem()?.tempo ?? 120 : state?.tempo ?? 120);
   const running = runningLight(row.group, s);
   pickerColour = running.colour;
   // In Preview the item's own Any colour pick is a saved hidden "Custom" preset (not in the colour list):
@@ -1268,6 +1503,7 @@ function renderPicker() {
   for (const r of extraRows) if (!r.dragging && now >= r.holdUntil) showLevel(r, running[r.key]);
   renderAddColour();
   renderEditor();
+  renderEffectEditor();
 }
 
 // ---- Keep a strip colour: "＋ Add to colours" ----
@@ -1348,10 +1584,13 @@ function openPicker(groupId) {
   $('pEditBtn').classList.remove('on');
   $('pEditBtn').setAttribute('aria-pressed', 'false');
   $('pCol').classList.remove('editing');
+  $('pFx').classList.remove('editing');
   closeEditor();
   extrasMoved = false;
   buildPickerGrid();
-  showPickerTab('col');
+  // A group that runs an effect opens on its Effects tab.
+  const group = pickerRow()?.group;
+  showPickerTab(group && hasLine(group) && runningEffect(group, groupStatus(group)) ? 'fx' : 'col');
   $('picker').hidden = false;
   renderPicker();
 }
@@ -1367,6 +1606,8 @@ function closePicker() {
 }
 
 function showPickerTab(name) {
+  const changed = picker.tab !== name;
+  picker.tab = name;
   for (const t of document.querySelectorAll('[data-pt]')) {
     const on = t.dataset.pt === name;
     t.classList.toggle('on', on);
@@ -1374,10 +1615,235 @@ function showPickerTab(name) {
   }
   $('pCol').hidden = name !== 'col';
   $('pFx').hidden = name !== 'fx';
+  // Edit works on the tab it was turned on in.
+  if (changed && picker.edit) setEditMode(false);
 }
 
 $('pDone').addEventListener('click', closePicker);
 for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('click', () => showPickerTab(t.dataset.pt));
+
+// ---- Effect settings: speed, direction, waves, size and edges ----
+
+const SPEED_BEATS = [1, 2, 4, 8, 16, 32];
+const SPEED_SECONDS = [2, 5, 10, 30, 60];
+const DIRECTIONS = [['ltr', 'Left to right'], ['rtl', 'Right to left'], ['centreOut', 'Centre out'], ['outsideIn', 'Outside in']];
+/**
+ * The settings that change what each kind of effect does (the others are left out), and what
+ * its size is called. A wave uses its size only with one colour and hard edges.
+ */
+const EFFECT_USES = {
+  colourFade: {},
+  wave: { direction: true, waves: true },
+  chase: { direction: true, waves: true, size: 'Size' },
+  sparkle: { size: 'Amount' },
+  breathe: { size: 'Depth' },
+  meteor: { direction: true, size: 'Tail' },
+  fill: { direction: true },
+  yoyo: { direction: true, size: 'Size' },
+};
+function effectUses(effect) {
+  const uses = EFFECT_USES[effect.effect] ?? { direction: true, waves: true, size: 'Size' };
+  if (effect.effect === 'wave' && effect.colours.length === 1 && effect.edge === 'hard') return { ...uses, size: 'Size' };
+  return uses;
+}
+
+/** The choice nearest to v. */
+const nearest = (choices, v) => choices.reduce((best, c) => (Math.abs(c - v) < Math.abs(best - v) ? c : best));
+
+/** An effect as groupEffect takes it: plain colours, every setting, nothing else. */
+function liveLayer(fx) {
+  return {
+    kind: 'effect', effect: fx.effect,
+    colours: fx.colours.map((c) => {
+      const out = { hex: c.hex };
+      for (const k of ['white', 'amber', 'uv']) if (typeof c[k] === 'number') out[k] = c[k];
+      return out;
+    }),
+    speed: 'beats' in fx.speed ? { beats: fx.speed.beats } : { seconds: fx.speed.seconds },
+    direction: fx.direction, waves: fx.waves, size: fx.size, edge: fx.edge, intensity: fx.intensity,
+  };
+}
+
+/**
+ * The settings of one effect, built into `root`. `show(effect, tempo)` puts an effect in (the
+ * caller hides the box when there is none). Every change calls `onChange(effect, how)` with the
+ * whole effect: `how` is 'tap' for a choice, and 'start', 'move' and 'end' for a Size drag.
+ */
+function effectControls(root, onChange) {
+  let fx = null, tempo = 120;
+  const seg = (label) => {
+    const box = el('div', 'ds-seg');
+    box.setAttribute('role', 'radiogroup');
+    box.setAttribute('aria-label', label);
+    return box;
+  };
+  const choice = (box, text, label, pick) => {
+    const b = el('button', null, text);
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    if (label) b.setAttribute('aria-label', label);
+    b.addEventListener('click', () => { if (fx) pick(); });
+    box.append(b);
+    return b;
+  };
+  const item = (label, ...parts) => {
+    const box = el('span', 'fxitem');
+    const lab = el('span', 'lab2', label);
+    box.append(lab, ...parts);
+    return { box, lab };
+  };
+  /** A tap: the whole effect with `patch`, unless nothing changes. */
+  const change = (patch) => {
+    const next = { ...fx, ...patch };
+    if (JSON.stringify(liveLayer(next)) !== JSON.stringify(liveLayer(fx))) onChange(liveLayer(next), 'tap');
+  };
+
+  // Speed: one round every 1 … 32 beats of the tempo, or Free: every 2 … 60 seconds.
+  const beatsBox = seg('Beats for one round');
+  const beatButtons = SPEED_BEATS.map((n) => [n, choice(beatsBox, String(n), `One round every ${n} beat${n === 1 ? '' : 's'}`, () => change({ speed: { beats: n } }))]);
+  const freeButton = choice(beatsBox, 'Free', 'Free: in seconds, not with the tempo', () => {
+    if ('seconds' in fx.speed) return;
+    change({ speed: { seconds: nearest(SPEED_SECONDS, (fx.speed.beats * 60) / tempo) } });
+  });
+  const secondsBox = seg('Seconds for one round');
+  const secondButtons = SPEED_SECONDS.map((n) => [n, choice(secondsBox, `${n} s`, `One round every ${n} seconds`, () => change({ speed: { seconds: n } }))]);
+  const speedUnit = el('span', 'lab-note');
+  const speed = item('Speed', beatsBox, secondsBox);
+  speed.lab.append(' ', speedUnit);
+
+  const dirBox = seg('Direction');
+  const dirButtons = DIRECTIONS.map(([d, text]) => [d, choice(dirBox, text, null, () => change({ direction: d }))]);
+  const direction = item('Direction', dirBox);
+
+  const edgeBox = seg('Edges');
+  const edgeButtons = [['soft', 'Soft'], ['hard', 'Hard']].map(([e, text]) => [e, choice(edgeBox, text, `${text} edges`, () => change({ edge: e }))]);
+  const edges = item('Edges', edgeBox);
+
+  const fewer = el('button', 'ds-btn fxstep', '−');
+  const more = el('button', 'ds-btn fxstep', '+');
+  const count = el('b', 'fxcount');
+  fewer.setAttribute('aria-label', 'Fewer waves');
+  more.setAttribute('aria-label', 'More waves');
+  fewer.addEventListener('click', () => { if (fx && fx.waves > 1) change({ waves: fx.waves - 1 }); });
+  more.addEventListener('click', () => { if (fx && fx.waves < 16) change({ waves: fx.waves + 1 }); });
+  const waves = item('Waves', fewer, count, more);
+
+  // Size: a fill slider, moved relative to where the finger starts (as the dimmers are).
+  const slab = el('span', 'ds-fill-slab');
+  const dim = el('div', 'ds-fill');
+  dim.setAttribute('role', 'slider');
+  dim.setAttribute('aria-valuemin', '0');
+  dim.setAttribute('aria-valuemax', '100');
+  dim.append(slab);
+  const pct = el('span', 'pct');
+  const size = item('Size', dim, pct);
+  size.box.classList.add('fxsize');
+  const slider = { dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
+  let startX = 0, startV = 0, base = null;
+  const sized = () => ({ ...base, size: Math.round(slider.value * 100) / 100 });
+  dim.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    if (!fx) return;
+    slider.dragging = true;
+    base = liveLayer(fx);
+    try { dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    dim.classList.add('ds-dragging');
+    startX = ev.clientX;
+    startV = slider.value;
+    onChange(base, 'start');
+  });
+  dim.addEventListener('pointermove', (ev) => {
+    if (!slider.dragging) return;
+    showLevel(slider, startV + (ev.clientX - startX) / dim.clientWidth);
+    if (slider.value !== startV) onChange(sized(), 'move');
+  });
+  const end = () => {
+    if (!slider.dragging) return;
+    slider.dragging = false;
+    dim.classList.remove('ds-dragging');
+    // Keep what the finger set until the server has caught up with it.
+    slider.holdUntil = performance.now() + 600;
+    if (slider.value !== startV) onChange(sized(), 'end');
+  };
+  dim.addEventListener('pointerup', end);
+  dim.addEventListener('pointercancel', end);
+
+  const line = (...items) => {
+    const row = el('div', 'fxrow');
+    row.append(...items.map((i) => i.box));
+    return row;
+  };
+  root.replaceChildren(line(speed), line(direction, edges), line(waves, size));
+
+  const mark = (pairs, value) => {
+    for (const [v, b] of pairs) {
+      b.classList.toggle('on', v === value);
+      b.setAttribute('aria-checked', String(v === value));
+    }
+  };
+  return {
+    show(effect, bpm) {
+      fx = effect;
+      tempo = bpm;
+      if (!fx) return;
+      const free = 'seconds' in fx.speed;
+      mark(beatButtons, free ? null : fx.speed.beats);
+      freeButton.classList.toggle('on', free);
+      freeButton.setAttribute('aria-checked', String(free));
+      secondsBox.hidden = !free;
+      mark(secondButtons, free ? fx.speed.seconds : null);
+      speedUnit.textContent = free ? '· seconds a round' : '· beats a round';
+      mark(dirButtons, fx.direction);
+      mark(edgeButtons, fx.edge);
+      count.textContent = String(fx.waves);
+      fewer.disabled = fx.waves <= 1;
+      more.disabled = fx.waves >= 16;
+      const uses = effectUses(fx);
+      direction.box.hidden = !uses.direction;
+      waves.box.hidden = !uses.waves;
+      size.box.hidden = !uses.size;
+      size.lab.textContent = uses.size ?? 'Size';
+      dim.setAttribute('aria-label', uses.size ?? 'Size');
+      if (!slider.dragging && performance.now() >= slider.holdUntil) showLevel(slider, fx.size);
+    },
+  };
+}
+
+/**
+ * The picker's effect settings. Live, a change goes on stage (a Size drag is one Undo step:
+ * its later sends continue it, in 0.2 s each, like Any colour). In Preview it goes into the
+ * selected item: once per tap, and once when a drag ends. The group and item are the ones the
+ * finger started on.
+ */
+const effectSettings = (() => {
+  let target = null;
+  const sendEffect = (group, effect, first) =>
+    send({ type: 'groupEffect', group, effect, ...(first ? {} : { continues: true, fade: DRAG_FADE }) });
+  const out = dragSender((effect, first) => target && sendEffect(target.group, effect, first));
+  const capture = () => ({ group: picker.group, inPreview: preview.on, item: preview.item });
+  const toItem = (t, effect) => {
+    if (preview.on && t.item && preview.item === t.item) sendItemGroup(t.group, { effect });
+  };
+  return effectControls($('fxSet'), (effect, how) => {
+    if (how === 'tap') {
+      const t = capture();
+      if (!t.group) return;
+      if (t.inPreview) toItem(t, effect);
+      else sendEffect(t.group, effect, true);
+      return;
+    }
+    if (how === 'start') {
+      target = capture();
+      out.start();
+      return;
+    }
+    if (!target?.group) return;
+    if (target.inPreview) {
+      if (how === 'end') toItem(target, effect);
+    } else if (how === 'move') out.push(effect);
+    else out.end(effect);
+  });
+})();
 
 /**
  * Makes a strip pick colours: `onStart()` when a finger touches, then `onColour(hex, last)`
@@ -1449,7 +1915,11 @@ let colourEdit = null;
 let deleteArmed = 0;
 // The ref of an edit or delete the server hasn't answered yet.
 let pendingEdit = null;
-let pendingEditDelete = false;
+// What to say when the answer is yes, and the commands still to send after it (an effect's name, then its settings).
+let pendingEditToast = 'Colour saved';
+let pendingEditNext = [];
+/** The effect the editor is open on: { id (null for a new one), name, effect, original, choices }. */
+let effectEdit = null;
 
 const editedPreset = () => (colourEdit ? pickerRow()?.group.presets.find((p) => p.id === colourEdit.id) : undefined);
 
@@ -1459,6 +1929,7 @@ function setEditMode(on) {
   $('pEditBtn').classList.toggle('on', on);
   $('pEditBtn').setAttribute('aria-pressed', String(on));
   $('pCol').classList.toggle('editing', on);
+  $('pFx').classList.toggle('editing', on);
   if (on) $('pAdd').hidden = true;
   buildPickerGrid();
   renderPicker();
@@ -1491,6 +1962,13 @@ function closeEditor(keepPending = false) {
   $('peName').blur();
   $('pEdit').hidden = true;
   for (const b of $('pGrid').children) b.classList.remove('editing');
+  closeEffectEditor();
+}
+
+/** "Used in …" for the songs and quick looks that use any of these presets. */
+function usedText(presets) {
+  const used = [...new Set(presets.flatMap((x) => x.usedBy ?? []))];
+  return used.length ? `Used in ${used.slice(0, 4).join(', ')}${used.length > 4 ? ` and ${used.length - 4} more` : ''}` : 'Not used in any song or quick look';
 }
 
 /** Who uses it, and whether other groups have a colour of the same name. */
@@ -1505,8 +1983,7 @@ function renderEditor() {
   if (!others.length) $('peSame').checked = false;
   // With the switch on, the change reaches every same-named colour, so list where any of them is used.
   const affected = $('peSame').checked ? [p, ...others] : [p];
-  const used = [...new Set(affected.flatMap((x) => x.usedBy ?? []))];
-  $('peUsed').textContent = used.length ? `Used in ${used.slice(0, 4).join(', ')}${used.length > 4 ? ` and ${used.length - 4} more` : ''}` : 'Not used in any song or quick look';
+  $('peUsed').textContent = usedText(affected);
   // An Off colour can be renamed but has no colour to change.
   $('peStrip').hidden = p.canRecolour === false;
 }
@@ -1514,8 +1991,10 @@ function renderEditor() {
 function disarmDelete() {
   clearTimeout(deleteArmed);
   deleteArmed = 0;
-  $('peDelete').classList.remove('armed');
-  $('peDelete').textContent = 'Delete';
+  for (const id of ['peDelete', 'feDelete']) {
+    $(id).classList.remove('armed');
+    $(id).textContent = 'Delete';
+  }
 }
 
 $('pEditBtn').addEventListener('click', () => setEditMode(!picker.edit));
@@ -1544,8 +2023,9 @@ $('peSave').addEventListener('click', () => {
     closeEditor();
     return;
   }
+  pendingEditToast = 'Colour saved';
+  pendingEditNext = [];
   pendingEdit = send(cmd);
-  pendingEditDelete = false;
   $('peSave').disabled = pendingEdit !== null;
 });
 
@@ -1558,20 +2038,236 @@ $('peDelete').addEventListener('click', () => {
     $('peDelete').textContent = 'Delete?';
     return;
   }
+  pendingEditToast = 'Colour deleted';
+  pendingEditNext = [];
   pendingEdit = send({ type: 'deleteColour', preset: colourEdit.id });
-  pendingEditDelete = true;
   disarmDelete();
 });
 
+/** The server's answer to a Save or Delete in either editor: the next command if one is waiting, else done. */
 function finishEdit(error) {
-  const deleted = pendingEditDelete;
   pendingEdit = null;
+  let failed = !!error;
+  if (!failed && pendingEditNext.length) {
+    pendingEdit = send(pendingEditNext.shift());
+    if (pendingEdit !== null) return;
+    failed = true;
+  }
+  pendingEditNext = [];
   $('peSave').disabled = false;
-  if (!error) {
+  $('feSave').disabled = false;
+  $('feCopy').disabled = false;
+  if (!failed) {
     closeEditor();
-    toast(deleted ? 'Colour deleted' : 'Colour saved', true);
+    toast(pendingEditToast, true);
   }
 }
+
+// ---- Edit effects: the Effects tab's Edit, the same way as the colour list's ----
+
+const EFFECT_NAMES = [
+  ['colourFade', 'Colour fade'], ['wave', 'Wave'], ['chase', 'Chase'], ['sparkle', 'Sparkle'],
+  ['breathe', 'Breathe'], ['meteor', 'Meteor'], ['fill', 'Fill'], ['yoyo', 'Yo-yo'],
+];
+
+/** A colour as one string: its hex and White, Amber and UV levels, so the same colour always matches. */
+const colourKey = (c) => [c.hex.toLowerCase(), ...['white', 'amber', 'uv'].map((k) => Math.round((c[k] ?? 0) * 1000) / 1000)].join('|');
+
+/** An effect as one string, the colours by their keys, for telling whether the editor changed it. */
+const effectSig = (layer) => JSON.stringify({ ...layer, colours: layer.colours.map(colourKey) });
+
+/**
+ * The colours the editor offers: the group's own colour list, then any colour the effect already
+ * has that is not in the list (a colour picked on the strip, say), so it can be taken out and put back.
+ */
+function effectChoices(group, effect) {
+  const choices = [];
+  const seen = new Set();
+  const add = (name, swatch, colour) => {
+    const key = colourKey(colour);
+    if (seen.has(key)) return;
+    seen.add(key);
+    choices.push({ key, name, swatch, colour });
+  };
+  for (const p of group.presets) {
+    if (p.effect || !p.light) continue;
+    add(p.name, p.swatch ?? NEUTRAL, { hex: p.light.hex, white: p.light.white, amber: p.light.amber, uv: p.light.uv });
+  }
+  for (const c of effect.colours) add('Custom', c.hex, { ...c });
+  return choices;
+}
+
+/** A new effect starts as a wave of the group's first two colours (not Off), one round every 4 beats. */
+function newEffectLayer(choices) {
+  const colours = choices.filter((c) => colourKey(c.colour) !== '#000000|0|0|0').slice(0, 2).map((c) => ({ ...c.colour }));
+  if (!colours.length) colours.push({ hex: '#ffffff' });
+  return liveLayer({ effect: 'wave', colours, speed: { beats: 4 }, direction: 'ltr', waves: 1, size: 0.5, edge: 'soft', intensity: 1 });
+}
+
+/** Opens the editor on a listed effect, or empty (preset null) for a new one. */
+function openEffectEditor(preset) {
+  const row = pickerRow();
+  if (!row) return;
+  const choices = effectChoices(row.group, preset ? preset.effect : { colours: [] });
+  const effect = preset ? liveLayer(preset.effect) : newEffectLayer(choices);
+  effectEdit = { id: preset?.id ?? null, name: preset?.name ?? '', effect, original: effectSig(effect), choices };
+  pendingEdit = null;
+  pendingEditNext = [];
+  disarmDelete();
+  $('feName').value = effectEdit.name;
+  $('feSave').disabled = false;
+  $('feCopy').disabled = false;
+  $('feSave').textContent = preset ? 'Save' : 'Add';
+  $('feDelete').hidden = $('feCopy').hidden = $('feUsed').hidden = !preset;
+  $('fxEdit').hidden = false;
+  drawEffectEditor();
+  renderEffectEditor();
+  for (const b of $('fxGrid').children) b.classList.toggle('editing', preset ? b.dataset.preset === preset.id : b.classList.contains('newfx'));
+  $('fxEdit').scrollIntoView({ block: 'nearest' });
+}
+
+function closeEffectEditor() {
+  effectEdit = null;
+  $('feName').blur();
+  $('fxEdit').hidden = true;
+  for (const b of $('fxGrid').children) b.classList.remove('editing');
+}
+
+/** Keeps "Used in …" true as the show changes; closes the editor if the effect is gone. */
+function renderEffectEditor() {
+  if (!effectEdit || effectEdit.id === null) return;
+  const p = pickerRow()?.group.presets.find((x) => x.id === effectEdit.id);
+  if (!p?.effect) {
+    closeEffectEditor();
+    return;
+  }
+  $('feUsed').textContent = usedText([p]);
+}
+
+/** Draws what the editor holds: the swatch, the kind, the colours in order and the settings. */
+function drawEffectEditor() {
+  const { effect, choices } = effectEdit;
+  $('feSw').style.background = effectGradient(effect);
+  for (const b of $('feKind').children) {
+    const on = b.dataset.kind === effect.effect;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  }
+  const order = effect.colours.map(colourKey);
+  const box = $('feColours');
+  box.replaceChildren();
+  for (const c of choices) {
+    const at = order.indexOf(c.key);
+    const b = el('button', 'fecol');
+    b.type = 'button';
+    b.setAttribute('role', 'checkbox');
+    b.setAttribute('aria-checked', String(at >= 0));
+    const sw = el('i');
+    sw.style.background = shown(c.swatch) ?? NEUTRAL;
+    b.append(sw, el('span', null, c.name));
+    if (at >= 0) b.append(el('b', 'fenum', String(at + 1)));
+    b.classList.toggle('on', at >= 0);
+    b.addEventListener('click', () => toggleEffectColour(c));
+    box.append(b);
+  }
+  effectEditSettings.show(effect, state?.tempo ?? 120);
+}
+
+function setEffectEdit(next) {
+  if (!effectEdit) return;
+  effectEdit.effect = next;
+  disarmDelete();
+  drawEffectEditor();
+}
+
+/** A tap on a colour adds it at the end of the order, or takes it out. An effect has one to six. */
+function toggleEffectColour(choice) {
+  const { effect } = effectEdit;
+  const at = effect.colours.map(colourKey).indexOf(choice.key);
+  if (at >= 0) {
+    if (effect.colours.length === 1) return toast('An effect needs at least one colour', true);
+    setEffectEdit({ ...effect, colours: effect.colours.filter((_, i) => i !== at) });
+  } else {
+    if (effect.colours.length >= 6) return toast('An effect has at most six colours', true);
+    setEffectEdit({ ...effect, colours: [...effect.colours, { ...choice.colour }] });
+  }
+}
+
+for (const [kind, text] of EFFECT_NAMES) {
+  const b = el('button', null, text);
+  b.type = 'button';
+  b.dataset.kind = kind;
+  b.setAttribute('role', 'radio');
+  b.addEventListener('click', () => {
+    if (effectEdit && effectEdit.effect.effect !== kind) setEffectEdit({ ...effectEdit.effect, effect: kind });
+  });
+  $('feKind').append(b);
+}
+
+// The same settings as the Effects tab shows for a running effect; here they only change what is being edited.
+const effectEditSettings = effectControls($('feSet'), (effect, how) => {
+  if (!effectEdit || how === 'start') return;
+  effectEdit.effect = effect;
+  disarmDelete();
+  if (how !== 'move') drawEffectEditor();
+});
+
+$('feCancel').addEventListener('click', () => closeEditor());
+$('feName').addEventListener('keydown', (ev) => {
+  ev.stopPropagation();
+  if (ev.key === 'Enter') $('feName').blur();
+});
+$('feName').addEventListener('input', disarmDelete);
+
+/** Sends the commands one after the other: the next goes when the server has said yes to the one before. */
+function sendEffectEdit(cmds, doneText) {
+  pendingEditToast = doneText;
+  pendingEditNext = cmds.slice(1);
+  pendingEdit = send(cmds[0]);
+  $('feSave').disabled = $('feCopy').disabled = pendingEdit !== null;
+}
+
+// A plain tap. Only what changed is sent (the name, then the settings); the editor closes when the server says yes.
+$('feSave').addEventListener('click', () => {
+  if (!effectEdit || pendingEdit !== null) return;
+  const name = $('feName').value;
+  const effect = liveLayer(effectEdit.effect);
+  if (effectEdit.id === null) {
+    sendEffectEdit([{ type: 'addEffect', group: picker.group, name, effect }], 'Effect added');
+    return;
+  }
+  const cmds = [];
+  if (name.trim() !== effectEdit.name) cmds.push({ type: 'editColour', preset: effectEdit.id, name, sameName: false });
+  if (effectSig(effect) !== effectEdit.original) cmds.push({ type: 'editEffect', preset: effectEdit.id, effect });
+  if (!cmds.length) {
+    closeEditor();
+    return;
+  }
+  sendEffectEdit(cmds, 'Effect saved');
+});
+
+// Save as a copy: a new effect with these settings; the original stays as it was. Under the same name it becomes "… copy".
+$('feCopy').addEventListener('click', () => {
+  if (!effectEdit || effectEdit.id === null || pendingEdit !== null) return;
+  let name = $('feName').value.trim();
+  if (name === effectEdit.name) name = `${name} copy`;
+  sendEffectEdit([{ type: 'addEffect', group: picker.group, name, effect: liveLayer(effectEdit.effect) }], 'Saved as a copy');
+});
+
+// First tap arms it ("Delete?"), the second one deletes. A song or quick look that uses it refuses, and the toast names them.
+$('feDelete').addEventListener('click', () => {
+  if (!effectEdit || effectEdit.id === null || pendingEdit !== null) return;
+  if (!deleteArmed) {
+    deleteArmed = setTimeout(disarmDelete, 4000);
+    $('feDelete').classList.add('armed');
+    $('feDelete').textContent = 'Delete?';
+    return;
+  }
+  pendingEditToast = 'Effect deleted';
+  pendingEditNext = [];
+  pendingEdit = send({ type: 'deleteColour', preset: effectEdit.id });
+  disarmDelete();
+});
 
 // ---- Quick looks: tabs and grid ----
 
@@ -1676,7 +2372,7 @@ function renderSheet() {
     const left = qs.left.has(b.dataset.group);
     b.classList.toggle('off', left);
     b.setAttribute('aria-pressed', String(!left));
-    b.querySelector('i').style.background = shown(info.colour) ?? '#0d0e11';
+    b.querySelector('i').style.background = swatchFill(info);
     b.querySelector('.gs span').textContent = left ? 'left out' : info.name;
     b.querySelector('.gl').textContent = left ? '' : `${Math.round((s?.level ?? 0) * 100)}%`;
   }
@@ -1816,28 +2512,52 @@ function drawStage() {
   // In Preview the picture is the selected item settled, never the stage: dark until it has come.
   const shownVisual = preview.on ? previewVisual ?? NO_VISUAL : visual;
   const pad = 14, r = Math.max(5, Math.min(9, h / 16));
-  layout.fixtures.forEach((f, k) => {
+  let at = 0; // where this fixture's segments start in the visual, counted in segments
+  for (const f of layout.fixtures) {
+    const first = at;
+    const segs = Math.max(1, f.segments ?? 1);
+    at += segs;
     const x = pad + f.x * (w - 2 * pad), y = pad + f.y * (h - 2 * pad);
-    const [R, G, B] = shownRgb(shownVisual[k * 3] ?? 0, shownVisual[k * 3 + 1] ?? 0, shownVisual[k * 3 + 2] ?? 0);
-    const lit = Math.max(R, G, B) / 255;
+    const colourAt = (s) => shownRgb(shownVisual[(first + s) * 3] ?? 0, shownVisual[(first + s) * 3 + 1] ?? 0, shownVisual[(first + s) * 3 + 2] ?? 0);
     if (f.w || f.h) {
-      // A bar or strip: a lit rounded rectangle at its real size.
+      // A bar or strip: a rounded rectangle at its real size, one cell per segment along its longer side.
       const bw = Math.max(8, (f.w ?? 0) * (w - 2 * pad)), bh = Math.max(8, (f.h ?? 0) * (h - 2 * pad));
+      const across = bw >= bh;
+      const cellW = bw / segs, cellH = bh / segs;
+      const cells = Array.from({ length: segs }, (_, s) => colourAt(s));
+      const glow = cells.reduce((best, c) => (Math.max(...c) > Math.max(...best) ? c : best), cells[0]);
+      const lit = Math.max(...glow) / 255;
       ctx.save();
       if (lit > 0.02) {
-        ctx.shadowColor = `rgba(${R},${G},${B},${0.8 * lit})`;
+        ctx.shadowColor = `rgba(${glow[0]},${glow[1]},${glow[2]},${0.8 * lit})`;
         ctx.shadowBlur = 10;
       }
       ctx.beginPath();
       ctx.roundRect(x - bw / 2, y - bh / 2, bw, bh, 4);
-      ctx.fillStyle = `rgb(${R},${G},${B})`;
+      ctx.fillStyle = `rgb(${glow[0]},${glow[1]},${glow[2]})`;
       ctx.fill();
       ctx.restore();
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(x - bw / 2, y - bh / 2, bw, bh, 4);
+      ctx.clip();
+      cells.forEach(([R, G, B], s) => {
+        // Segment 0 is at the left or top; at the right or bottom when the fixture hangs reversed.
+        const slot = f.reversed ? segs - 1 - s : s;
+        ctx.fillStyle = `rgb(${R},${G},${B})`;
+        if (across) ctx.fillRect(x - bw / 2 + slot * cellW, y - bh / 2, cellW + 0.5, bh);
+        else ctx.fillRect(x - bw / 2, y - bh / 2 + slot * cellH, bw, cellH + 0.5);
+      });
+      ctx.restore();
+      ctx.beginPath();
+      ctx.roundRect(x - bw / 2, y - bh / 2, bw, bh, 4);
       ctx.lineWidth = 1;
       ctx.strokeStyle = '#3a3f48';
       ctx.stroke();
-      return;
+      continue;
     }
+    const [R, G, B] = colourAt(0);
+    const lit = Math.max(R, G, B) / 255;
     if (lit > 0.02) {
       const glow = ctx.createRadialGradient(x, y, 0, x, y, r * 3.2);
       glow.addColorStop(0, `rgba(${R},${G},${B},${0.55 * lit})`);
@@ -1852,7 +2572,7 @@ function drawStage() {
     ctx.lineWidth = 1;
     ctx.strokeStyle = '#3a3f48';
     ctx.stroke();
-  });
+  }
   if (preview.on && previewLabel) {
     // So the picture can't be mistaken for the real stage.
     ctx.font = previewLabel.font;
@@ -1937,7 +2657,10 @@ function applyPhone() {
   const phone = phoneQuery.matches;
   document.body.classList.toggle('phone', phone);
   const flash = $('flashArea');
+  // The tempo row goes first in Groups (the top bar's quiet items are hidden here).
+  const tempo = $('tempoCtl');
   if (phone) {
+    $('details').insertBefore(tempo, $('groupRows'));
     $('details').insertBefore(flash, $('groupRows'));
     // Editing belongs to the iPad: the running order's, and the colour list's (its buttons are hidden here,
     // and in Edit a swatch tap opens the editor instead of setting the colour).
@@ -1946,9 +2669,11 @@ function applyPhone() {
     setPreview(false);
     if (picker.edit) setEditMode(false);
     closeSheet();
-  } else if (flash.parentElement !== $('masterFader').parentElement) {
-    $('masterFader').after(flash);
+  } else {
+    if (flash.parentElement !== $('masterFader').parentElement) $('masterFader').after(flash);
+    if (tempo.parentElement !== $('quiet')) $('fadeButton').parentElement.after(tempo);
   }
+  showTempoMenu(false);
   if (!document.body.dataset.tab) setPhoneTab('order');
 }
 

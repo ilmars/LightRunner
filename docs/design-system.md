@@ -82,6 +82,7 @@ The first suggested palette was measured at about 4× the old screen's average b
 - **Details adapt to the rig:** with few groups each zone grows into the spare room (up to 124 px, the slider up to 64 px tall); with many groups they shrink back to their content (slider 44 px) and the list scrolls, so capacity isn't lost.
 - **White, Amber and UV** (colour picker, groups that have them): fill sliders side by side under Any colour, name and level on the header line, the fill carrying a little white, amber or violet.
 - **Smoke groups** (smoke or haze machines) in Details: a muted "Smoke" label where the colour chip would be, a neutral grey fill (no colour tint), and a **Puff** pill at the right of the header line, tinted while held like Flash. The top bar's "Smoke: N %" is plain muted text, not a warning.
+- **Tempo** (top bar, next to Fade): a quiet "Tempo 120" readout that opens a small glass menu in the same style as Fade's (×2, ÷2, − and +, 44 px high, a row instead of a column), and a 44 px **Tap** button with no fill that lights with the tinted edge for a moment on each tap. On the phone the same two controls become tiles sharing a row at the top of Groups.
 - **Quick looks** keep a fixed two rows (12 looks before scrolling), so the layout doesn't jump when switching tabs.
 - **Running order:**
   - on stage: blue-tinted glass with a blue edge

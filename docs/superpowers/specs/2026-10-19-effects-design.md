@@ -1,6 +1,6 @@
 # Effects: design
 
-Date: 19 Oct 2026. Status: agreed with Ilmārs, not built yet. This is the product spec's Phase 2 (docs/SPEC.md, "Effects in version 1" and "Effects engine and transitions"), shaped by what the owner asked for.
+Date: 19 Oct 2026. Status: built (19 Oct 2026; see docs/STATUS.md). This is the product spec's Phase 2 (docs/SPEC.md, "Effects in version 1" and "Effects engine and transitions"), shaped by what the owner asked for.
 
 ## Why
 
@@ -74,7 +74,7 @@ It must never be "my app is too simple and it can't do that" (owner's words, par
 
 - **What counts as a flash, and what the engine does about it.** The rule works per segment: no segment's brightness may rise and fall by more than 20 % more than 3 times a second. If an effect's settings and the tempo would break that, the engine runs that effect at half speed (again, if needed) until it doesn't. Colour changes at the same brightness (a colour fade, a colour wave) don't count. The check sits in the effect itself, before crossfades, Master and Flash. Flash (the held button) is not an effect and keeps working as today.
 - **Bars hung the other way round.** Each fixture gets a "Reversed" switch in Patch, which flips the order of its segments. Group order plus each fixture's direction makes the line. The owner checks at the church whether any bar needs it.
-- **Tempo and other controls.** In Preview, the tempo control edits the selected song's saved tempo, like every other Preview edit. Quick looks, Basic lights, Blackout and Undo leave the tempo alone; only starting a song (or the tempo control) sets it. Undo does take back a tempo change made with the tempo control.
+- **Tempo and other controls.** In Preview, the tempo control edits the selected song's saved tempo, like every other Preview edit. Quick looks, Basic lights and Blackout leave the tempo alone; only starting a song (or the tempo control) sets it. Undo puts back the tempo the stage had before the undone step (so undoing a song start brings back the earlier song's tempo, and undoing a tempo change takes it back); see DECISIONS, 19 Oct.
 - **The old speed dial.** The page's speed control goes. The `speed` command (and `POST /api/speed`) stays as an overall multiplier on the tempo (50–200 %, default 100 %), so existing clients keep working. Basic lights resets it to 100 %, as today.
 - **Ready-made effects**, added to each light group that has more than one segment, or more than one fixture:
   - Background: Colour fade, Wave, Three waves, Chase, Sparkle, Meteor, Fill, Yo-yo and Breathe.

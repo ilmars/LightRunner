@@ -56,6 +56,8 @@ export const Fixture = z.object({
   w: unit.optional(),
   h: unit.optional(),
   gamma: z.number().min(1).max(4).optional(),
+  /** Hung the other way round: its segments run backwards along a group's line. */
+  reversed: z.boolean().optional(),
 });
 export type Fixture = z.infer<typeof Fixture>;
 
@@ -111,8 +113,29 @@ export const StaticLayer = z.object({
 });
 export type StaticLayer = z.infer<typeof StaticLayer>;
 
-// Phase 2 adds the effect layers to this union.
-export const Layer = z.discriminatedUnion('kind', [StaticLayer]);
+/** The patterns an effect layer can run. */
+export const EffectKind = z.enum(['colourFade', 'wave', 'chase', 'sparkle', 'breathe', 'meteor', 'fill', 'yoyo']);
+export type EffectKind = z.infer<typeof EffectKind>;
+
+/** How long one cycle takes: in beats of the stage tempo, or free-running in seconds. */
+export const EffectSpeed = z.union([z.object({ beats: z.number().min(0.25).max(64) }), z.object({ seconds: z.number().min(0.25).max(600) })]);
+export type EffectSpeed = z.infer<typeof EffectSpeed>;
+
+/** A moving pattern along the group's line of segments, made from a list of colours. */
+export const EffectLayer = z.object({
+  kind: z.literal('effect'),
+  effect: EffectKind,
+  colours: z.array(ColourSpec).min(1).max(6),
+  speed: EffectSpeed,
+  direction: z.enum(['ltr', 'rtl', 'centreOut', 'outsideIn']).default('ltr'),
+  waves: z.number().int().min(1).max(16).default(1),
+  size: unit.default(0.5),
+  edge: z.enum(['soft', 'hard']).default('soft'),
+  intensity: unit.default(1),
+});
+export type EffectLayer = z.infer<typeof EffectLayer>;
+
+export const Layer = z.discriminatedUnion('kind', [StaticLayer, EffectLayer]);
 export type Layer = z.infer<typeof Layer>;
 
 export const Preset = z.object({
@@ -126,6 +149,22 @@ export const Preset = z.object({
   custom: z.boolean().optional(),
 });
 export type Preset = z.infer<typeof Preset>;
+
+/**
+ * A key that is the same for two effect layers exactly when they run the same: every setting,
+ * the colours in order (a hex in any case; a palette colour by reference).
+ */
+export function effectKey(l: EffectLayer): string {
+  return JSON.stringify([
+    l.effect,
+    l.colours.map((c) => ('palette' in c ? [c.palette, c.index] : [c.hex.toLowerCase(), c.white ?? 0, c.amber ?? 0, c.uv ?? 0])),
+    'beats' in l.speed ? ['beats', l.speed.beats] : ['seconds', l.speed.seconds],
+    l.direction, l.waves, l.size, l.edge, l.intensity,
+  ]);
+}
+
+/** True when a preset runs an effect (it moves), not a plain colour. */
+export const isEffectPreset = (p: Preset): boolean => p.layers.some((l) => l.kind === 'effect');
 
 export const LookEntry = z.object({
   group: id,
@@ -141,6 +180,8 @@ export const Look = z.object({
   name: z.string(),
   swatch: hex.optional(),
   section: z.string().optional(),
+  /** Beats per minute the stage runs at when this look starts; 120 when not set. */
+  tempo: z.number().min(40).max(240).optional(),
   groups: z.array(LookEntry),
 });
 export type Look = z.infer<typeof Look>;
@@ -162,6 +203,8 @@ export const OperatorLayout = z.object({
   runningOrder: z.array(id).default([]),
   /** Looks offered under "Quick looks", each on a tab. */
   quickLooks: z.array(QuickLook).default([]),
+  /** The ready-made effects have been added once (see ensureEffects); they are never added again. */
+  effectsAdded: z.boolean().optional(),
 });
 export type OperatorLayout = z.infer<typeof OperatorLayout>;
 
@@ -254,8 +297,8 @@ export function checkReferences(show: Show): string[] {
   for (const p of show.presets) {
     if (!groups.has(p.group)) problems.push(`preset "${p.id}" belongs to unknown group "${p.group}"`);
     for (const layer of p.layers) {
-      const c = layer.colour;
-      if ('palette' in c) {
+      for (const c of layer.kind === 'effect' ? layer.colours : [layer.colour]) {
+        if (!('palette' in c)) continue;
         const pal = palettes.get(c.palette);
         if (!pal) problems.push(`preset "${p.id}" uses unknown palette "${c.palette}"`);
         else if (c.index >= pal.colours.length) problems.push(`preset "${p.id}" uses colour ${c.index} of palette "${c.palette}", which has ${pal.colours.length}`);

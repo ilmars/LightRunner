@@ -90,6 +90,16 @@ async function loadOflBrowse() {
 // ---- Helpers ----
 
 const footprint = (f) => profileById.get(f.profile)?.channels ?? 1;
+
+/** Segments in a fixture type: the most times any colour repeats (a bar of 8 pixels has 8). Same rule as the engine. */
+function segmentsOf(f) {
+  const channels = (show.profiles.find((p) => p.id === f.profile) ?? profileById.get(f.profile))?.channels;
+  if (!Array.isArray(channels)) return 1; // a built-in type: one segment
+  const seen = new Map();
+  for (const c of channels) if (!c.fine && COLOUR_ROLES.includes(c.role)) seen.set(c.role, (seen.get(c.role) ?? 0) + 1);
+  return Math.max(1, ...seen.values());
+}
+const COLOUR_ROLES = ['red', 'green', 'blue', 'white', 'amber', 'uv'];
 const groupsOf = (fid) => show.groups.filter((g) => g.fixtures.includes(fid));
 
 function slug(text) {
@@ -190,7 +200,24 @@ function renderFixtures() {
     addr.addEventListener('change', () => { f.address = clampInt(addr.value, 1, 512, f.address); changed(); });
 
     const n = footprint(f);
-    const range = el('span', 'range', problems.get(f.id) ?? `${f.address}–${f.address + n - 1} (${n} ch)`);
+    const range = el('div', 'range', problems.get(f.id) ?? `${f.address}–${f.address + n - 1} (${n} ch)`);
+    const segs = segmentsOf(f);
+    range.append(el('div', 'segments', segs === 1 ? '1 segment' : `${segs} segments`));
+
+    // Hung the other way round: its first segment is at the other end of the bar.
+    const rev = el('label', 'switch');
+    const revInput = el('input');
+    revInput.type = 'checkbox';
+    revInput.checked = !!f.reversed;
+    revInput.setAttribute('aria-label', `${f.name} reversed`);
+    revInput.addEventListener('change', () => {
+      if (revInput.checked) f.reversed = true;
+      else delete f.reversed;
+      changed();
+    });
+    const track = el('span', 'track');
+    track.append(el('span', 'knob'));
+    rev.append(revInput, track);
 
     const chips = el('div', 'chips');
     for (const g of groupsOf(f.id)) chips.append(el('span', 'chip', g.name));
@@ -220,7 +247,7 @@ function renderFixtures() {
     });
     actions.append(identify, del);
 
-    for (const c of [name, type, uni, addr, range, chips, actions]) {
+    for (const c of [name, type, uni, addr, range, rev, chips, actions]) {
       const td = el('td');
       if (c === uni || c === addr) td.className = 'num';
       td.append(c);

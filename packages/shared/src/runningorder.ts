@@ -2,17 +2,27 @@
 // show and returns a new one; the input is never changed. Bad input throws an
 // Error with a plain message the page can show as it is.
 
-import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, livePresetId, parseLivePreset } from './protocol.ts';
-import type { Layer, Look, LookEntry, Preset, QuickTab, Show } from './schema.ts';
+import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, liveEffectId, livePresetId, parseLiveEffect, parseLivePreset } from './protocol.ts';
+import { effectKey, isEffectPreset, resolveColour } from './schema.ts';
+import type { EffectLayer, Layer, Look, LookEntry, Preset, QuickTab, Show } from './schema.ts';
 
 /** Where the stage is going: preset ids (possibly live ones) and level targets, as in RuntimeState. */
 export interface Stage {
   groups: Record<string, string | null>;
   levels: Record<string, number>;
+  /** The live effects (`fx:` ids) the groups name. */
+  effects?: Record<string, EffectLayer>;
+  /** The stage tempo in beats per minute. */
+  tempo?: number;
 }
+
+const MIN_TEMPO = 40;
+const MAX_TEMPO = 240;
 
 const MAX_NAME = 40;
 const BASIC = 'Basic lights';
+/** Basic lights is always still, so it never takes an effect. */
+const STILL = 'Basic lights is always still.';
 
 /** Trims and cuts a name to 40 characters. Empty names are refused. */
 export function cleanName(name: string): string {
@@ -51,7 +61,8 @@ const BUILT_IN = new Map<string, { name: string; swatch: string; layer: Layer }>
   [BLACKOUT_PRESET, { name: 'Off', swatch: '#000000', layer: { kind: 'static', colour: { hex: '#000000' }, intensity: 0 } }],
 ]);
 
-const layerKey = (l: Layer) => JSON.stringify([
+/** A plain layer's light (palette colours by reference); an effect layer is only ever the same as itself. */
+const layerKey = (l: Layer) => l.kind === 'effect' ? effectKey(l) : JSON.stringify([
   'palette' in l.colour ? l.colour : [l.colour.hex.toLowerCase(), l.colour.white ?? 0, l.colour.amber ?? 0, l.colour.uv ?? 0],
   l.intensity,
 ]);
@@ -66,9 +77,15 @@ function builtInPreset(show: Show, group: string, made: { name: string; swatch: 
   return id;
 }
 
+/** The #rrggbb of an effect's first colour (palette colours looked up), for its swatch. */
+export function effectSwatch(show: Show, effect: EffectLayer): string {
+  const first = effect.colours[0];
+  return first ? resolveColour(first, new Map(show.palettes.map((p) => [p.id, p]))).hex.toLowerCase() : '#ffffff';
+}
+
 /**
  * The look entries for these groups: one per group with a preset. A live preset
- * (an "Any colour" pick) becomes a new custom preset in `show`; an existing one
+ * (an "Any colour" pick, or a live effect) becomes a new custom preset in `show`; an existing one
  * is only referenced. The engine's Safe light and Blackout become the group's
  * "Basic light" and "Off" custom presets, shared by every save. Smoke groups
  * are left out: starting a look never turns a smoke machine on or off.
@@ -83,7 +100,23 @@ function entriesFor(show: Show, stage: Stage, only?: string[]): LookEntry[] {
     const level = stage.levels[group] ?? 1;
     const live = parseLivePreset(preset);
     const builtIn = BUILT_IN.get(preset);
-    if (builtIn) {
+    const fx = parseLiveEffect(preset);
+    if (fx) {
+      const effect = stage.effects?.[preset];
+      if (!effect) throw new Error(`the show has no preset "${preset}"`);
+      if (fx.group !== group) throw new Error(`preset "${preset}" belongs to another group`);
+      const made: Preset = {
+        id: uniqueId('Custom effect', show.presets.map((p) => p.id)),
+        name: 'Custom effect',
+        group,
+        custom: true,
+        layers: [structuredClone(effect)],
+        swatch: effectSwatch(show, effect),
+        fade: 3,
+      };
+      show.presets.push(made);
+      entries.push({ group, preset: made.id, level });
+    } else if (builtIn) {
       entries.push({ group, preset: builtInPreset(show, group, builtIn), level });
     } else if (live) {
       // White, amber and UV go with it (each only when the pick had it).
@@ -171,15 +204,33 @@ export function ensureBasicLights(show: Show): Show {
   return out;
 }
 
+/** True when the stage preset is an effect: a live one (`fx:`) or a preset of the show with an effect in it. */
+function isEffect(show: Show, preset: string): boolean {
+  if (parseLiveEffect(preset)) return true;
+  const found = show.presets.find((p) => p.id === preset);
+  return !!found && isEffectPreset(found);
+}
+
 /**
  * Replaces what a look holds with the stage as it is going; the look keeps its id, name and place.
  * Basic lights keeps no dimmer levels: it stores every group at full, as it always resets them.
+ * Basic lights is always still too: a group running an effect keeps what Basic lights had for it.
  */
 export function saveItem(show: Show, lookId: string, stage: Stage): Show {
   const out = structuredClone(show);
   const target = lookIn(out, lookId);
-  target.groups = entriesFor(out, stage);
-  if (lookId === out.operator.safeLook) for (const entry of target.groups) entry.level = 1;
+  if (lookId === out.operator.safeLook) {
+    const moving = new Set(Object.entries(stage.groups).filter(([, p]) => p && isEffect(out, p)).map(([g]) => g));
+    const fresh = entriesFor(out, stage, Object.keys(stage.groups).filter((g) => !moving.has(g)));
+    const kept = target.groups.filter((e) => moving.has(e.group));
+    // In the stage's group order, as a plain Save stores them.
+    const order = Object.keys(stage.groups);
+    target.groups = [...fresh, ...kept].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
+    for (const entry of target.groups) entry.level = 1;
+  } else {
+    target.groups = entriesFor(out, stage);
+  }
+  if (stage.tempo !== undefined) target.tempo = stage.tempo;
   return out;
 }
 
@@ -194,6 +245,7 @@ export function addSong(show: Show, afterId: string, stage: Stage): { show: Show
   }
   const id = addLook(out, `Song ${highest + 1}`, []);
   lookIn(out, id).groups = entriesFor(out, stage);
+  if (stage.tempo !== undefined) lookIn(out, id).tempo = stage.tempo;
   const at = out.operator.runningOrder.indexOf(afterId);
   if (at < 0) out.operator.runningOrder.push(id);
   else out.operator.runningOrder.splice(at + 1, 0, id);
@@ -250,7 +302,7 @@ export function saveQuickLook(
   return { show: out, id };
 }
 
-/** One group's change in a running-order item: a preset or an Any colour (with extras), and/or a level. */
+/** One group's change in a running-order item: a preset, an Any colour (with extras) or an effect, and/or a level. */
 export interface ItemGroupEdit {
   group: string;
   preset?: string;
@@ -258,6 +310,7 @@ export interface ItemGroupEdit {
   white?: number;
   amber?: number;
   uv?: number;
+  effect?: EffectLayer;
   level?: number;
 }
 
@@ -277,8 +330,9 @@ function putEntry(show: Show, target: Look, entry: LookEntry): void {
 
 /**
  * Changes one group in a running-order item: a preset of the group, an Any colour
- * (kept as a new hidden "Custom" preset, as Save does) and/or its level. The
- * other groups and the item's name stay. A level alone needs the group to be set already.
+ * (kept as a new hidden "Custom" preset, as Save does), an effect (a new hidden
+ * "Custom effect") and/or its level. The other groups and the item's name stay.
+ * A level alone needs the group to be set already. Basic lights is always still: it takes no effect.
  */
 export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): Show {
   const out = structuredClone(show);
@@ -286,11 +340,12 @@ export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): S
   const group = out.groups.find((g) => g.id === edit.group);
   if (!group) throw new Error(`the show has no group "${edit.group}"`);
   if (group.kind === 'smoke') throw new Error("smoke machines aren't part of a song");
-  if (edit.preset !== undefined && edit.colour !== undefined) throw new Error('pick a colour or a preset, not both');
-  if (edit.preset === undefined && edit.colour === undefined && edit.level === undefined) throw new Error('nothing to change');
+  const picks = [edit.preset, edit.colour, edit.effect].filter((x) => x !== undefined).length;
+  if (picks > 1) throw new Error('pick a colour, a preset or an effect, not more than one');
+  if (!picks && edit.level === undefined) throw new Error('nothing to change');
 
   const existing = target.groups.find((e) => e.group === edit.group);
-  if (edit.preset === undefined && edit.colour === undefined) {
+  if (!picks) {
     // Level only: keep the preset (and its own fade).
     if (!existing) throw new Error('Give the group a colour first.');
     putEntry(out, target, { ...existing, level: edit.level! });
@@ -298,17 +353,32 @@ export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): S
   }
 
   let stagePreset: string;
-  if (edit.colour !== undefined) {
+  const effects: Record<string, EffectLayer> = {};
+  const safe = target.id === out.operator.safeLook;
+  if (edit.effect !== undefined) {
+    if (safe) throw new Error(STILL);
+    stagePreset = liveEffectId(edit.group, 0);
+    effects[stagePreset] = edit.effect;
+  } else if (edit.colour !== undefined) {
     stagePreset = livePresetId(edit.group, edit.colour, { white: edit.white, amber: edit.amber, uv: edit.uv });
   } else {
     const preset = out.presets.find((p) => p.id === edit.preset && p.group === edit.group);
     if (!preset) throw new Error(`unknown preset "${edit.preset}" for group "${edit.group}"`);
+    if (safe && isEffectPreset(preset)) throw new Error(STILL);
     stagePreset = preset.id;
   }
   // Without a level the group keeps the one the item has (full if it has none).
   const level = edit.level ?? existing?.level ?? 1;
-  const [entry] = entriesFor(out, { groups: { [edit.group]: stagePreset }, levels: { [edit.group]: level } }, [edit.group]);
+  const [entry] = entriesFor(out, { groups: { [edit.group]: stagePreset }, levels: { [edit.group]: level }, effects }, [edit.group]);
   putEntry(out, target, entry!);
+  return out;
+}
+
+/** Sets a running-order item's tempo (beats per minute), without touching the stage. */
+export function setItemTempo(show: Show, itemId: string, bpm: number): Show {
+  if (!(bpm >= MIN_TEMPO && bpm <= MAX_TEMPO)) throw new Error(`the tempo is ${MIN_TEMPO} to ${MAX_TEMPO} beats per minute`);
+  const out = structuredClone(show);
+  itemLook(out, itemId).tempo = bpm;
   return out;
 }
 
@@ -316,13 +386,15 @@ export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): S
  * Copies a quick look into a running-order item: each group the quick look lists
  * takes its preset (referenced, not copied) and level. Other groups keep their entries.
  * Smoke machines are skipped: looks never set smoke, so an older quick look that lists one
- * doesn't put it into a song.
+ * doesn't put it into a song. Basic lights is always still: a quick look with an effect is refused there.
  */
 export function applyQuickLookToItem(show: Show, itemId: string, quickLookId: string): Show {
   const out = structuredClone(show);
   const target = itemLook(out, itemId);
   if (!out.operator.quickLooks.some((q) => q.look === quickLookId)) throw new Error('that is not a quick look');
-  for (const entry of lookIn(out, quickLookId).groups) {
+  const entries = lookIn(out, quickLookId).groups;
+  if (itemId === out.operator.safeLook && entries.some((e) => isEffect(out, e.preset))) throw new Error(STILL);
+  for (const entry of entries) {
     if (out.groups.find((g) => g.id === entry.group)?.kind === 'smoke') continue;
     putEntry(out, target, { group: entry.group, preset: entry.preset, level: entry.level ?? 1 });
   }

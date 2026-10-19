@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   addSong, applyPicks, applyQuickLookToItem, setItemGroup, checkReferences, cleanName, deleteItem, ensureBasicLights, ensureRunningOrder, livePresetId, moveItem,
-  parseLivePreset, parseShow, renameItem, saveItem, saveQuickLook, BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET,
-  type Show, type Stage,
+  parseLivePreset, parseShow, renameItem, saveItem, saveQuickLook, setItemTempo, BLACKOUT_PRESET, EffectLayer, SAFE_LIGHT, SAFE_PRESET,
+  liveEffectId, parseLiveEffect, type Show, type Stage, type StaticLayer,
 } from '../src/index.ts';
 
 const load = (path: string): Show => parseShow(JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')));
@@ -413,7 +413,7 @@ test('setItemGroup keeps an Any colour as a new hidden Custom preset, with its a
   assert.equal(made.custom, true);
   assert.equal(made.name, 'Custom');
   assert.equal(made.group, 'back-wall');
-  assert.deepEqual(made.layers[0]!.colour, { hex: '#ff0000', amber: 0.5 });
+  assert.deepEqual((made.layers[0] as StaticLayer).colour, { hex: '#ff0000', amber: 0.5 });
   assert.deepEqual(checkReferences(out), []);
 });
 
@@ -439,7 +439,10 @@ test('setItemGroup refuses a level for a group the song does not set, smoke, qui
   const smoky = structuredClone(show);
   smoky.groups.find((g) => g.id === 'pulpit')!.kind = 'smoke';
   assert.throws(() => setItemGroup(smoky, song, { group: 'pulpit', level: 0.5 }), { message: "smoke machines aren't part of a song" });
-  assert.throws(() => setItemGroup(show, song, { group: 'audience', preset: 'aud-blue', colour: '#ff0000' }), { message: 'pick a colour or a preset, not both' });
+  assert.throws(() => setItemGroup(show, song, { group: 'audience', preset: 'aud-blue', colour: '#ff0000' }), { message: 'pick a colour, a preset or an effect, not more than one' });
+  const wave = EffectLayer.parse({ kind: 'effect', effect: 'wave', colours: [{ hex: '#ff0000' }], speed: { beats: 4 } });
+  assert.throws(() => setItemGroup(show, song, { group: 'audience', preset: 'aud-blue', effect: wave }), { message: 'pick a colour, a preset or an effect, not more than one' });
+  assert.throws(() => setItemGroup(show, song, { group: 'audience', colour: '#ff0000', effect: wave }), { message: 'pick a colour, a preset or an effect, not more than one' });
   assert.throws(() => setItemGroup(show, song, { group: 'audience' }), { message: 'nothing to change' });
   assert.throws(() => setItemGroup(show, song, { group: 'audience', preset: 'pulpit-on' }), { message: 'unknown preset "pulpit-on" for group "audience"' });
   assert.throws(() => setItemGroup(show, song, { group: 'audience', preset: 'nope' }), { message: 'unknown preset "nope" for group "audience"' });
@@ -492,4 +495,138 @@ test('applyQuickLookToItem skips a smoke group an older quick look lists', () =>
   const out = applyQuickLookToItem(quick, song, quickId);
   assert.deepEqual(entryOf(out, song, 'front-wash'), { group: 'front-wash', preset: 'front-dim', level: 0.6 });
   assert.deepEqual(entryOf(out, song, 'pulpit'), songBefore, 'the smoke group is left as it was');
+});
+
+// ---- Effects and tempo in songs ----
+
+const wave = () => EffectLayer.parse({
+  kind: 'effect', effect: 'wave', colours: [{ hex: '#1F3BFF' }, { hex: '#7a2bff', white: 0.2 }], speed: { beats: 4 }, waves: 3,
+});
+
+test('live effect ids name their group and count up', () => {
+  assert.equal(liveEffectId('back-wall', 7), 'fx:back-wall:7');
+  assert.deepEqual(parseLiveEffect('fx:back-wall:7'), { group: 'back-wall', n: 7 });
+  assert.equal(parseLiveEffect('fx:back-wall'), null);
+  assert.equal(parseLiveEffect('fx:back-wall:x'), null);
+  assert.equal(parseLiveEffect('live:back-wall:#123456'), null);
+});
+
+test('Save turns a live effect into a hidden "Custom effect" preset, and keeps the stage tempo', () => {
+  const { show, song } = withSong();
+  const id = liveEffectId('back-wall', 3);
+  const stage: Stage = { groups: { 'back-wall': id }, levels: { 'back-wall': 0.5 }, effects: { [id]: wave() }, tempo: 97 };
+  const saved = saveItem(show, song, stage);
+  const entry = entryOf(saved, song, 'back-wall')!;
+  assert.equal(entry.level, 0.5);
+  assert.ok(!entry.preset.startsWith('fx:'));
+  const made = saved.presets.find((p) => p.id === entry.preset)!;
+  assert.deepEqual(made, { id: made.id, name: 'Custom effect', group: 'back-wall', custom: true, layers: [wave()], swatch: '#1f3bff', fade: 3 });
+  assert.equal(saved.looks.find((l) => l.id === song)!.tempo, 97);
+  assert.deepEqual(checkReferences(saved), []);
+  assert.deepEqual(parseShow(JSON.parse(JSON.stringify(saved))).presets.find((p) => p.id === made.id), made);
+  // A Save without a tempo leaves the song's own.
+  assert.equal(saveItem(saved, song, { groups: {}, levels: {} }).looks.find((l) => l.id === song)!.tempo, 97);
+  // A live effect the stage doesn't describe can't be saved.
+  assert.throws(() => saveItem(show, song, { groups: { 'back-wall': id }, levels: {} }), { message: `the show has no preset "${id}"` });
+  // Nor one of another group.
+  const other = liveEffectId('audience', 4);
+  assert.throws(() => saveItem(show, song, { groups: { 'back-wall': other }, levels: {}, effects: { [other]: wave() } }), { message: `preset "${other}" belongs to another group` });
+});
+
+test('Add song takes the stage tempo too', () => {
+  const { show, song } = withSong();
+  const { show: out, id } = addSong(show, song, { groups: {}, levels: {}, tempo: 150 });
+  assert.equal(out.looks.find((l) => l.id === id)!.tempo, 150);
+});
+
+test('setItemGroup keeps an effect as a new hidden "Custom effect" preset', () => {
+  const { show, song } = withSong();
+  const out = setItemGroup(show, song, { group: 'back-wall', effect: wave(), level: 0.7 });
+  assert.equal(out.presets.length, show.presets.length + 1);
+  const entry = entryOf(out, song, 'back-wall')!;
+  assert.equal(entry.level, 0.7);
+  const made = out.presets.find((p) => p.id === entry.preset)!;
+  assert.equal(made.custom, true);
+  assert.equal(made.name, 'Custom effect');
+  assert.deepEqual(made.layers, [wave()]);
+  assert.deepEqual(checkReferences(out), []);
+});
+
+/** The demo show with a running order and a saved wave effect for the back wall, "bw-wave". */
+const withEffectPreset = () => {
+  const { show, song } = withSong();
+  show.presets.push({ id: 'bw-wave', name: 'Wave', group: 'back-wall', layers: [wave()], fade: 3 });
+  return { show, song, basic: show.operator.safeLook! };
+};
+
+test('Basic lights is always still: setItemGroup refuses an effect for it, live or saved', () => {
+  const { show, basic } = withEffectPreset();
+  const before = structuredClone(show);
+  assert.throws(() => setItemGroup(show, basic, { group: 'back-wall', effect: wave() }), { message: 'Basic lights is always still.' });
+  assert.throws(() => setItemGroup(show, basic, { group: 'back-wall', preset: 'bw-wave' }), { message: 'Basic lights is always still.' });
+  assert.deepEqual(show, before, 'nothing changed');
+  // A colour is fine there, and an effect is fine in a song.
+  assert.ok(setItemGroup(show, basic, { group: 'back-wall', colour: '#00ff00' }));
+  assert.ok(setItemGroup(show, show.operator.runningOrder[1]!, { group: 'back-wall', preset: 'bw-wave' }));
+});
+
+test('Basic lights is always still: applyQuickLookToItem refuses a quick look with an effect for it', () => {
+  const { show, song, basic } = withEffectPreset();
+  const quickId = show.operator.quickLooks[0]!.look;
+  show.looks.find((l) => l.id === quickId)!.groups = [
+    { group: 'audience', preset: 'aud-blue' },
+    { group: 'back-wall', preset: 'bw-wave' },
+  ];
+  assert.throws(() => applyQuickLookToItem(show, basic, quickId), { message: 'Basic lights is always still.' });
+  // A song takes it.
+  assert.equal(entryOf(applyQuickLookToItem(show, song, quickId), song, 'back-wall')!.preset, 'bw-wave');
+});
+
+test('Save on Basic lights keeps what it had for a group running an effect, and saves the rest', () => {
+  const { show, basic } = withEffectPreset();
+  const basicLook = show.looks.find((l) => l.id === basic)!;
+  basicLook.groups = [
+    { group: 'back-wall', preset: firstPreset(show, 'back-wall'), level: 1 },
+    { group: 'front-wash', preset: 'front-dim', level: 1 },
+  ];
+  const fx = liveEffectId('back-wall', 2);
+  // A live effect on the back wall, another colour on the front, and the audience Basic lights didn't list.
+  const stage: Stage = {
+    groups: { 'back-wall': fx, 'front-wash': firstPreset(show, 'front-wash'), audience: 'aud-blue' },
+    levels: { 'front-wash': 0.5 },
+    effects: { [fx]: wave() },
+  };
+  const saved = saveItem(show, basic, stage);
+  assert.deepEqual(saved.looks.find((l) => l.id === basic)!.groups, [
+    { group: 'back-wall', preset: firstPreset(show, 'back-wall'), level: 1 },
+    { group: 'front-wash', preset: firstPreset(show, 'front-wash'), level: 1 },
+    { group: 'audience', preset: 'aud-blue', level: 1 },
+  ]);
+  assert.equal(saved.presets.length, show.presets.length, 'no Custom effect made');
+  // A saved effect preset is kept out the same way; a group Basic lights didn't list stays unlisted.
+  const out = saveItem(show, basic, { groups: { 'back-wall': 'bw-wave' }, levels: {} });
+  assert.deepEqual(out.looks.find((l) => l.id === basic)!.groups, [{ group: 'back-wall', preset: firstPreset(show, 'back-wall'), level: 1 }]);
+  basicLook.groups = [];
+  assert.deepEqual(saveItem(show, basic, { groups: { 'back-wall': 'bw-wave' }, levels: {} }).looks.find((l) => l.id === basic)!.groups, []);
+});
+
+test('Save as quick look and Add song still keep an effect', () => {
+  const { show, song } = withEffectPreset();
+  const stage: Stage = { groups: { 'back-wall': 'bw-wave' }, levels: {} };
+  const quick = saveQuickLook(show, { name: 'Waves', tab: 'effects', groups: ['back-wall'] }, stage);
+  assert.equal(quick.show.looks.find((l) => l.id === quick.id)!.groups[0]!.preset, 'bw-wave');
+  const added = addSong(show, song, stage);
+  assert.equal(added.show.looks.find((l) => l.id === added.id)!.groups[0]!.preset, 'bw-wave');
+});
+
+test('setItemTempo changes the tempo of a song and nothing else', () => {
+  const { show, song } = withSong();
+  const before = structuredClone(show);
+  const out = setItemTempo(show, song, 132);
+  assert.equal(out.looks.find((l) => l.id === song)!.tempo, 132);
+  assert.deepEqual({ ...out.looks.find((l) => l.id === song)!, tempo: undefined }, { ...before.looks.find((l) => l.id === song)!, tempo: undefined });
+  assert.deepEqual(show, before, 'the input show is not changed');
+  assert.throws(() => setItemTempo(show, 'walk-in', 100), { message: 'only running-order items can be changed here' });
+  assert.throws(() => setItemTempo(show, song, 39), { message: 'the tempo is 40 to 240 beats per minute' });
+  assert.throws(() => setItemTempo(show, song, 241), { message: 'the tempo is 40 to 240 beats per minute' });
 });

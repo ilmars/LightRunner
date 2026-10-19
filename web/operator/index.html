@@ -37,6 +37,22 @@
           <button role="menuitemradio" data-fade="10">10 s</button>
         </div>
       </div>
+      <!-- Tempo: a quiet readout that opens a few steps, and a Tap button. On the phone this moves to the top of Groups. -->
+      <div id="tempoCtl" class="tempo">
+        <div class="fadepick">
+          <button id="tempoButton" class="fade-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="tempoMenu" title="Beats per minute">
+            Tempo <b id="tempoValue">120</b>
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div id="tempoMenu" class="fade-menu tempo-menu" role="menu" hidden>
+            <button role="menuitem" data-step="double" aria-label="Double the tempo">×2</button>
+            <button role="menuitem" data-step="half" aria-label="Half the tempo">÷2</button>
+            <button role="menuitem" data-step="-1" aria-label="One beat per minute slower">−</button>
+            <button role="menuitem" data-step="1" aria-label="One beat per minute faster">+</button>
+          </div>
+        </div>
+        <button id="tapBtn" class="tap-btn" type="button" title="Tap along with the band">Tap</button>
+      </div>
       <span class="q link" id="link"><span class="dot"></span><span id="linkText">Connecting</span></span>
     </span>
     <!-- Outside the quiet items: the DMX box holds its last frame, so smoke can still be running during a problem. -->
@@ -100,7 +116,8 @@
           <button id="pEditBtn" class="ghost" aria-pressed="false">Edit</button>
           <button id="pDone" class="done">Done</button>
         </div>
-        <div class="ptabs" role="tablist">
+        <!-- Only for groups that make a line (more than one segment or fixture); otherwise just the colours. -->
+        <div id="pTabs" class="ptabs" role="tablist">
           <button class="tab on" data-pt="col" role="tab" aria-selected="true">Colours</button>
           <button class="tab" data-pt="fx" role="tab" aria-selected="false">Effects</button>
         </div>
@@ -148,7 +165,32 @@
             </div>
           </div>
         </div>
-        <p id="pFx" class="soon" hidden>Effects come later.</p>
+        <div id="pFx" class="pfx" hidden>
+          <div id="fxGrid" class="pgrid"></div>
+          <p id="fxNone" class="soon" hidden>No effects for this group yet.</p>
+          <!-- In Preview of Basic lights: it never takes an effect. -->
+          <p id="fxStill" class="soon" hidden>Basic lights is always still</p>
+          <!-- While the group runs an effect: its settings. Built by app.js; hidden on the phone. -->
+          <div id="fxSet" class="fxset" aria-label="Effect settings" hidden></div>
+          <!-- Edit mode: tapping an effect (or ＋ New effect) opens this. Built by app.js; hidden on the phone and in Preview. -->
+          <div id="fxEdit" class="padd pedit fxedit" hidden>
+            <div class="padd-top">
+              <i id="feSw" class="padd-sw"></i>
+              <input id="feName" class="qs-name" type="text" maxlength="40" placeholder="Name" aria-label="Name" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
+            </div>
+            <div id="feKind" class="ds-seg fe-kind" role="radiogroup" aria-label="Kind of effect"></div>
+            <p class="lab2">Colours <span class="lab-note">· tap to add or remove, 1 to 6, in the order they play</span></p>
+            <div id="feColours" class="fe-colours"></div>
+            <div id="feSet" class="fxset" aria-label="Effect settings"></div>
+            <p id="feUsed" class="pe-used"></p>
+            <div class="padd-btns">
+              <button id="feDelete" class="ghost danger">Delete</button>
+              <button id="feCopy" class="ghost">Save as a copy</button>
+              <button id="feCancel" class="ghost">Cancel</button>
+              <button id="feSave" class="done">Save</button>
+            </div>
+          </div>
+        </div>
       </div>
       <div id="qSheet" class="picker qsheet" hidden>
         <div class="phead">
