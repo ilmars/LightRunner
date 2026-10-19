@@ -35,7 +35,7 @@ Pages: `/operator/` (volunteers, no login), `/patch/` and `/settings/` (programm
 - The engine stays pure. Anything with timers, sockets or files lives in `server/`.
 - Every input (tablet, HTTP, OSC/MIDI later) becomes the same `Command` (`packages/shared/src/protocol.ts`) and goes through `App.command()`; the server is the single source of truth and pages only display state.
 - New engine behaviour gets a test in `packages/engine/test`, and anything touching fades must keep `npm run jump-check` passing.
-- Web pages: dark theme, nothing bright enough to light the operator's face, thumb-sized targets on the iPad (1080 × 810 landscape). Match the existing quiet style; the user dislikes controls that stand out.
+- Web pages: dark theme, nothing bright enough to light the operator's face, thumb-sized targets on the iPad (1080 × 810 landscape). Use the shared design system (`web/shared/theme.css`, described in [docs/design-system.md](docs/design-system.md)): its tokens and `ds-` components, and its brightness rules. Keep controls quiet; the user dislikes controls that stand out.
 - Writing (UI text, docs, commits): plain words, sentence case, no jargon a volunteer wouldn't know.
 - Commits: small, descriptive messages; push to `main` only when tests pass. For changes by collaborators, use a branch and a pull request.
 

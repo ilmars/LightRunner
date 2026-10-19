@@ -691,16 +691,18 @@ function stageItem() {
   return k >= 0 ? layout.runningOrder[k] : null;
 }
 
-// One entry per group: { group, chip, sw, chipName, dim, lvl, tint, handle, pct, dragging, holdUntil }.
+// One entry per group: { group, chip, sw, chipName, dim, slab, tint, grip, pct, dragging, holdUntil }.
 let detailRows = [];
 
 function showLevel(row, v) {
   const p = clamp01(v);
   row.value = p;
-  row.lvl.style.width = `${p * 100}%`;
+  row.slab.style.width = `${p * 100}%`;
   row.tint.style.width = `${p * 100}%`;
-  row.handle.style.left = `calc(${p * 100}% - ${p * 4}px)`;
-  row.pct.textContent = `${Math.round(p * 100)}%`;
+  // The grip sits just inside the end of the slab; hidden while the slab is too short to hold it.
+  row.grip.style.left = `${p * 100}%`;
+  row.grip.hidden = p < 0.12;
+  row.pct.textContent = `${Math.round(p * 100)} %`;
   row.dim.setAttribute('aria-valuenow', String(Math.round(p * 100)));
 }
 
@@ -715,17 +717,17 @@ function buildDetails() {
     const chip = el('button', 'chip');
     chip.append(sw, chipName);
     chip.setAttribute('aria-label', `${group.name}: choose colour`);
-    const lvl = el('span', 'lvl'), tint = el('span', 'tint'), handle = el('span', 'handle');
-    const dim = el('div', 'dim');
+    const tint = el('span', 'ds-fill-tint'), slab = el('span', 'ds-fill-slab'), grip = el('span', 'ds-fill-grip');
+    const pct = el('span', 'ds-fill-val');
+    const dim = el('div', 'ds-fill');
     dim.setAttribute('role', 'slider');
     dim.setAttribute('aria-label', `${group.name} dimmer`);
     dim.setAttribute('aria-valuemin', '0');
     dim.setAttribute('aria-valuemax', '100');
-    dim.append(lvl, tint, handle);
-    const pct = el('span', 'pct');
-    box.append(el('span', 'g', group.name), chip, dim, pct);
+    dim.append(slab, tint, grip, pct);
+    box.append(el('span', 'g', group.name), chip, dim);
     root.append(box);
-    const row = { group, chip, sw, chipName, dim, lvl, tint, handle, pct, value: 0, dragging: false, holdUntil: 0 };
+    const row = { group, chip, sw, chipName, dim, slab, tint, grip, pct, value: 0, dragging: false, holdUntil: 0 };
     detailRows.push(row);
     showLevel(row, 0);
     chip.addEventListener('click', () => openPicker(group.id));
@@ -747,7 +749,7 @@ function wireDimmer(row) {
     ev.preventDefault();
     row.dragging = true;
     try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
-    row.dim.classList.add('dragging');
+    row.dim.classList.add('ds-dragging');
     startX = ev.clientX;
     startV = row.value;
   });
@@ -759,7 +761,7 @@ function wireDimmer(row) {
   const end = () => {
     if (!row.dragging) return;
     row.dragging = false;
-    row.dim.classList.remove('dragging');
+    row.dim.classList.remove('ds-dragging');
     // Keep what the finger set until the server has caught up with it.
     row.holdUntil = performance.now() + 600;
     if (row.value !== startV) out.end(row.value);
