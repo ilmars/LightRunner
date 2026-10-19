@@ -1816,28 +1816,52 @@ function drawStage() {
   // In Preview the picture is the selected item settled, never the stage: dark until it has come.
   const shownVisual = preview.on ? previewVisual ?? NO_VISUAL : visual;
   const pad = 14, r = Math.max(5, Math.min(9, h / 16));
-  layout.fixtures.forEach((f, k) => {
+  let at = 0; // where this fixture's segments start in the visual, counted in segments
+  for (const f of layout.fixtures) {
+    const first = at;
+    const segs = Math.max(1, f.segments ?? 1);
+    at += segs;
     const x = pad + f.x * (w - 2 * pad), y = pad + f.y * (h - 2 * pad);
-    const [R, G, B] = shownRgb(shownVisual[k * 3] ?? 0, shownVisual[k * 3 + 1] ?? 0, shownVisual[k * 3 + 2] ?? 0);
-    const lit = Math.max(R, G, B) / 255;
+    const colourAt = (s) => shownRgb(shownVisual[(first + s) * 3] ?? 0, shownVisual[(first + s) * 3 + 1] ?? 0, shownVisual[(first + s) * 3 + 2] ?? 0);
     if (f.w || f.h) {
-      // A bar or strip: a lit rounded rectangle at its real size.
+      // A bar or strip: a rounded rectangle at its real size, one cell per segment along its longer side.
       const bw = Math.max(8, (f.w ?? 0) * (w - 2 * pad)), bh = Math.max(8, (f.h ?? 0) * (h - 2 * pad));
+      const across = bw >= bh;
+      const cellW = bw / segs, cellH = bh / segs;
+      const cells = Array.from({ length: segs }, (_, s) => colourAt(s));
+      const glow = cells.reduce((best, c) => (Math.max(...c) > Math.max(...best) ? c : best), cells[0]);
+      const lit = Math.max(...glow) / 255;
       ctx.save();
       if (lit > 0.02) {
-        ctx.shadowColor = `rgba(${R},${G},${B},${0.8 * lit})`;
+        ctx.shadowColor = `rgba(${glow[0]},${glow[1]},${glow[2]},${0.8 * lit})`;
         ctx.shadowBlur = 10;
       }
       ctx.beginPath();
       ctx.roundRect(x - bw / 2, y - bh / 2, bw, bh, 4);
-      ctx.fillStyle = `rgb(${R},${G},${B})`;
+      ctx.fillStyle = `rgb(${glow[0]},${glow[1]},${glow[2]})`;
       ctx.fill();
       ctx.restore();
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(x - bw / 2, y - bh / 2, bw, bh, 4);
+      ctx.clip();
+      cells.forEach(([R, G, B], s) => {
+        // Segment 0 is at the left or top; at the right or bottom when the fixture hangs reversed.
+        const slot = f.reversed ? segs - 1 - s : s;
+        ctx.fillStyle = `rgb(${R},${G},${B})`;
+        if (across) ctx.fillRect(x - bw / 2 + slot * cellW, y - bh / 2, cellW + 0.5, bh);
+        else ctx.fillRect(x - bw / 2, y - bh / 2 + slot * cellH, bw, cellH + 0.5);
+      });
+      ctx.restore();
+      ctx.beginPath();
+      ctx.roundRect(x - bw / 2, y - bh / 2, bw, bh, 4);
       ctx.lineWidth = 1;
       ctx.strokeStyle = '#3a3f48';
       ctx.stroke();
-      return;
+      continue;
     }
+    const [R, G, B] = colourAt(0);
+    const lit = Math.max(R, G, B) / 255;
     if (lit > 0.02) {
       const glow = ctx.createRadialGradient(x, y, 0, x, y, r * 3.2);
       glow.addColorStop(0, `rgba(${R},${G},${B},${0.55 * lit})`);
@@ -1852,7 +1876,7 @@ function drawStage() {
     ctx.lineWidth = 1;
     ctx.strokeStyle = '#3a3f48';
     ctx.stroke();
-  });
+  }
   if (preview.on && previewLabel) {
     // So the picture can't be mistaken for the real stage.
     ctx.font = previewLabel.font;

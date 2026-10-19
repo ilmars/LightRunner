@@ -62,6 +62,7 @@ function describe(kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show):
       if (fa.universe !== fb.universe || fa.address !== fb.address) out.push(`address ${fa.universe}/${fa.address} → ${fb.universe}/${fb.address}`);
       if (fa.x !== fb.x || fa.y !== fb.y || fa.w !== fb.w || fa.h !== fb.h) out.push('moved on the stage plan');
       if (fa.gamma !== fb.gamma) out.push('dimming curve changed');
+      if (!!fa.reversed !== !!fb.reversed) out.push(fb.reversed ? 'reversed on' : 'reversed off');
       break;
     }
     case 'group': {

@@ -34,6 +34,14 @@ test('new, changed and removed items are found and described', () => {
   assert.ok(diffShows(current, incoming, 'patch').every((i) => i.kind === 'profile' || i.kind === 'fixture'));
 });
 
+test('hanging a fixture the other way round is described', () => {
+  const incoming = rig();
+  incoming.fixtures.find((f) => f.id === 'b4')!.reversed = true;
+  const item = diffShows(rig(), incoming).find((i) => i.kind === 'fixture' && i.id === 'b4');
+  assert.deepEqual(item?.details, ['reversed on']);
+  assert.deepEqual(diffShows(incoming, rig()).find((i) => i.id === 'b4')?.details, ['reversed off']);
+});
+
 test('only picked changes are applied, and removals take their dependants', () => {
   const current = rig();
   const incoming = rig();
