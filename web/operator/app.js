@@ -44,6 +44,7 @@ function connect() {
     if (msg.type === 'layout') {
       layout = msg.layout;
       buildOrder();
+      buildDetails();
       render();
     } else if (msg.type === 'state') {
       if (state && msg.state.look !== seenLook) previousLook = seenLook;
@@ -221,6 +222,8 @@ function render() {
   $('undo').disabled = !state.canUndo;
   $('blackout').classList.toggle('on', blackedOut);
   if (!master.dragging) master.set(state.master);
+
+  renderDetails();
 }
 
 // ---- Master: a horizontal fader ----
@@ -279,6 +282,295 @@ const master = (() => {
   box.addEventListener('pointerup', end);
   box.addEventListener('pointercancel', end);
   return m;
+})();
+
+// ---- Details: one row per group, Save / Back, and the colour picker ----
+
+const NEUTRAL = '#5a5f69';
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+
+/** `live:<group>:<#rrggbb>` is a colour picked with Any colour. */
+function liveColour(id) {
+  const m = /^live:([^:]+):(#[0-9a-f]{6})$/i.exec(id ?? '');
+  return m ? m[2].toLowerCase() : null;
+}
+
+/** Name and colour to show for a preset id of a group (never throws on an id the layout doesn't list). */
+function presetInfo(group, id) {
+  if (id === null || id === undefined || id === '__blackout') return { name: 'Off', colour: null };
+  if (id === '__safe') return { name: 'Basic light', colour: '#ffd2a0' };
+  const hex = liveColour(id);
+  if (hex) return { name: 'Custom', colour: hex };
+  const p = group?.presets.find((x) => x.id === id);
+  if (p) return { name: p.name, colour: p.swatch ?? NEUTRAL };
+  return { name: 'Custom', colour: NEUTRAL };
+}
+
+/** At most one send every 40 ms while a finger moves; `end` always sends the last value. */
+function throttle(sendValue) {
+  let timer = 0, last;
+  return {
+    push(v) {
+      last = v;
+      if (!timer) timer = setTimeout(() => { timer = 0; sendValue(last); }, 40);
+    },
+    end(v) {
+      clearTimeout(timer);
+      timer = 0;
+      sendValue(v);
+    },
+  };
+}
+
+/** The running-order item on stage, or null (Blackout, nothing yet, or a look that isn't in the order). */
+function stageItem() {
+  const k = stageIndex();
+  return k >= 0 ? layout.runningOrder[k] : null;
+}
+
+// One entry per group: { group, chip, sw, chipName, dim, lvl, tint, handle, pct, dragging, holdUntil }.
+let detailRows = [];
+
+function showLevel(row, v) {
+  const p = clamp01(v);
+  row.value = p;
+  row.lvl.style.width = `${p * 100}%`;
+  row.tint.style.width = `${p * 100}%`;
+  row.handle.style.left = `calc(${p * 100}% - ${p * 4}px)`;
+  row.pct.textContent = `${Math.round(p * 100)}%`;
+  row.dim.setAttribute('aria-valuenow', String(Math.round(p * 100)));
+}
+
+function buildDetails() {
+  const root = $('groupRows');
+  root.replaceChildren();
+  detailRows = [];
+  for (const group of layout.groups) {
+    const box = el('div', 'row');
+    const sw = el('i');
+    const chipName = el('span');
+    const chip = el('button', 'chip');
+    chip.append(sw, chipName);
+    chip.setAttribute('aria-label', `${group.name}: choose colour`);
+    const lvl = el('span', 'lvl'), tint = el('span', 'tint'), handle = el('span', 'handle');
+    const dim = el('div', 'dim');
+    dim.setAttribute('role', 'slider');
+    dim.setAttribute('aria-label', `${group.name} dimmer`);
+    dim.setAttribute('aria-valuemin', '0');
+    dim.setAttribute('aria-valuemax', '100');
+    dim.append(lvl, tint, handle);
+    const pct = el('span', 'pct');
+    box.append(el('span', 'g', group.name), chip, dim, pct);
+    root.append(box);
+    const row = { group, chip, sw, chipName, dim, lvl, tint, handle, pct, value: 0, dragging: false, holdUntil: 0 };
+    detailRows.push(row);
+    showLevel(row, 0);
+    chip.addEventListener('click', () => openPicker(group.id));
+    wireDimmer(row);
+  }
+  // A new layout can drop the group the picker was showing.
+  if (picker.group && !layout.groups.some((g) => g.id === picker.group)) closePicker();
+  else if (picker.group) buildPickerGrid();
+}
+
+/**
+ * Dragging moves the level relative to where the finger started, so touching a
+ * dimmer never makes the lights jump (same as Master).
+ */
+function wireDimmer(row) {
+  const out = throttle((v) => send({ type: 'groupLevel', group: row.group.id, value: v }));
+  let startX = 0, startV = 0;
+  row.dim.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    row.dragging = true;
+    try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    row.dim.classList.add('dragging');
+    startX = ev.clientX;
+    startV = row.value;
+  });
+  row.dim.addEventListener('pointermove', (ev) => {
+    if (!row.dragging) return;
+    showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
+    out.push(row.value);
+  });
+  const end = () => {
+    if (!row.dragging) return;
+    row.dragging = false;
+    row.dim.classList.remove('dragging');
+    // Keep what the finger set until the server has caught up with it.
+    row.holdUntil = performance.now() + 600;
+    if (row.value !== startV) out.end(row.value);
+  };
+  row.dim.addEventListener('pointerup', end);
+  row.dim.addEventListener('pointercancel', end);
+}
+
+function renderDetails() {
+  const item = stageItem();
+  $('dTitle').textContent = item ? item.name : state.look === 'blackout' ? 'Blackout' : 'Details';
+  // Without an item on stage there is nothing to save into or go back to.
+  $('backBtn').hidden = !item || !state.lookChanged;
+  $('saveBtn').hidden = !item;
+  if (item) {
+    $('backBtn').textContent = `Back to ${item.name}`;
+    $('saveBtn').querySelector('.label').replaceChildren(`Save to ${item.name} `, el('small', null, 'hold'));
+  }
+  const now = performance.now();
+  for (const row of detailRows) {
+    const s = state.groups?.[row.group.id];
+    const info = presetInfo(row.group, s?.preset);
+    row.sw.style.background = info.colour ?? '#0d0e11';
+    row.chipName.textContent = info.name;
+    row.tint.style.background = info.colour ?? 'transparent';
+    if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
+  }
+  if (picker.group) renderPicker();
+}
+
+// Back and Save.
+$('backBtn').addEventListener('click', () => send({ type: 'backToLook' }));
+
+// Save needs a 1 s hold; letting go early does nothing.
+const saveBtn = $('saveBtn');
+let saveTimer = 0;
+let saveFor = null;
+saveBtn.addEventListener('pointerdown', (ev) => {
+  ev.preventDefault();
+  const item = stageItem();
+  if (!item) return;
+  saveFor = item.id;
+  saveBtn.classList.add('holding');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveBtn.classList.remove('holding');
+    // Only if the same item is still on stage; for Basic lights the id is the safe look's.
+    const now = stageItem();
+    if (now && now.id === saveFor) send({ type: 'saveItem', id: now.id });
+  }, 1000);
+});
+const stopSave = () => {
+  clearTimeout(saveTimer);
+  saveBtn.classList.remove('holding');
+};
+for (const e of ['pointerup', 'pointerleave', 'pointercancel']) saveBtn.addEventListener(e, stopSave);
+saveBtn.addEventListener('click', (ev) => ev.preventDefault());
+
+// ---- Colour picker (covers the details panel only) ----
+
+const picker = { group: null };
+
+const HUE_STOPS = ['#ff0000', '#ffc800', '#00ff00', '#00ffc8', '#0000ff', '#8c00ff', '#ff008c', '#ff0000'];
+const WHITE_STOPS = ['#ffb46b', '#f4f8ff'];
+
+/** The colour a strip shows at position p (0..1), blended like the CSS gradient does. */
+function stripColour(stops, p) {
+  const x = clamp01(p) * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(x));
+  const t = x - i;
+  const rgb = (h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16));
+  const a = rgb(stops[i]), b = rgb(stops[i + 1]);
+  return `#${a.map((v, k) => Math.round(v + (b[k] - v) * t).toString(16).padStart(2, '0')).join('')}`;
+}
+
+const pickerRow = () => detailRows.find((r) => r.group.id === picker.group);
+
+function buildPickerGrid() {
+  const row = pickerRow();
+  if (!row) return;
+  const grid = $('pGrid');
+  grid.replaceChildren();
+  for (const p of row.group.presets) {
+    const b = el('button', 'pc');
+    b.dataset.preset = p.id;
+    const sw = el('i');
+    sw.style.background = p.swatch ?? NEUTRAL;
+    b.append(sw, el('span', null, p.name));
+    b.addEventListener('click', () => send({ type: 'groupPreset', group: row.group.id, preset: p.id }));
+    grid.append(b);
+  }
+  $('pTitle').textContent = row.group.name;
+  $('pAnyLab').textContent = row.group.whiteOnly ? 'Any white, warm to cool' : 'Any colour';
+  $('pAny').className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'}`;
+  $('pAny').setAttribute('aria-label', $('pAnyLab').textContent);
+}
+
+/** Keeps "current", the highlighted swatch and the dimmer in step with the live state. */
+function renderPicker() {
+  const row = pickerRow();
+  if (!row) return;
+  const s = state.groups?.[row.group.id];
+  const info = presetInfo(row.group, s?.preset);
+  $('pCurSw').style.background = info.colour ?? '#0d0e11';
+  $('pCurText').textContent = `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
+  for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
+}
+
+function openPicker(groupId) {
+  if (picker.group !== groupId) {
+    $('pAnyH').hidden = true;
+  }
+  picker.group = groupId;
+  buildPickerGrid();
+  showPickerTab('col');
+  $('picker').hidden = false;
+  renderPicker();
+}
+
+function closePicker() {
+  picker.group = null;
+  $('picker').hidden = true;
+}
+
+function showPickerTab(name) {
+  for (const t of document.querySelectorAll('[data-pt]')) {
+    const on = t.dataset.pt === name;
+    t.classList.toggle('on', on);
+    t.setAttribute('aria-selected', String(on));
+  }
+  $('pCol').hidden = name !== 'col';
+  $('pFx').hidden = name !== 'fx';
+}
+
+$('pDone').addEventListener('click', closePicker);
+for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('click', () => showPickerTab(t.dataset.pt));
+
+// Any colour: picking sends right away; moves are throttled and the last one always goes.
+(() => {
+  const strip = $('pAny');
+  const out = throttle((hex) => {
+    if (picker.group) send({ type: 'groupColour', group: picker.group, colour: hex });
+  });
+  let dragging = false;
+  const pick = (ev) => {
+    const r = strip.getBoundingClientRect();
+    const p = clamp01((ev.clientX - r.left) / r.width);
+    const row = pickerRow();
+    if (!row) return null;
+    $('pAnyH').hidden = false;
+    $('pAnyH').style.left = `calc(${p * 100}% - ${p * 4}px)`;
+    return stripColour(row.group.whiteOnly ? WHITE_STOPS : HUE_STOPS, p);
+  };
+  let hex = null;
+  strip.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    dragging = true;
+    try { strip.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    hex = pick(ev);
+    if (hex) out.push(hex);
+  });
+  strip.addEventListener('pointermove', (ev) => {
+    if (!dragging) return;
+    hex = pick(ev) ?? hex;
+    if (hex) out.push(hex);
+  });
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    if (hex) out.end(hex);
+    hex = null;
+  };
+  strip.addEventListener('pointerup', end);
+  strip.addEventListener('pointercancel', end);
 })();
 
 // ---- Mini visualiser (for looking only) ----

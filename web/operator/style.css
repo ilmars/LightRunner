@@ -120,6 +120,79 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .right { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1.5fr); gap: 8px; min-height: 0; min-width: 0; }
 .block { min-height: 0; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; overflow: hidden; }
 
+/* ---- Details: group rows ---- */
+.details { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; }
+.dhead { display: flex; align-items: center; gap: 8px; flex: none; min-height: 44px; }
+.dhead h2 { flex: 1; min-width: 0; margin: 0 0 0 4px; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ghost {
+  min-height: 44px; padding: 0 14px; border: 1px solid transparent; border-radius: 10px; background: transparent;
+  color: var(--dim); font-size: 15px; white-space: nowrap;
+}
+.ghost:active { background: var(--raised); }
+.save {
+  position: relative; overflow: hidden; min-height: 44px; padding: 0 16px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--raised); font-size: 15px; white-space: nowrap;
+}
+.save .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: #23406b; }
+.save.holding .fill { width: 100%; transition: width 1s linear; }
+.save .label { position: relative; }
+.save small { color: var(--dim); font-size: 12px; margin-left: 4px; }
+
+.rows { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.row {
+  flex: 1; min-height: 48px; max-height: 70px; display: grid; grid-template-columns: 150px 190px minmax(0, 1fr) 56px;
+  align-items: center; gap: 12px; padding: 0 12px; background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
+}
+.row .g { font-weight: 600; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip {
+  display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; min-width: 0; text-align: left;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px; font-size: 15px;
+}
+.chip:active { background: var(--bg); }
+.chip i, .cur i { flex: none; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--line); }
+.chip span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Calm dimmers: grey fill on a dark track, the group's colour only as a faint tint, a small dim handle. */
+.dim { position: relative; height: 40px; border-radius: 8px; overflow: hidden; touch-action: none; cursor: ew-resize; background: #111317; border: 1px solid #23262c; }
+.dim .lvl, .dim .tint { position: absolute; left: 0; top: 0; bottom: 0; width: 0; }
+.dim .lvl { background: #262a31; }
+.dim .tint { opacity: 0.14; }
+.dim .handle { position: absolute; top: 6px; bottom: 6px; left: 0; width: 4px; background: #8e959f; border-radius: 2px; }
+.dim.dragging { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pct { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ---- Colour picker: covers the details panel only ---- */
+.picker {
+  position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; gap: 8px; padding: 8px 12px;
+  background: var(--panel); border-radius: var(--radius); overflow-y: auto;
+}
+.phead { display: flex; align-items: center; gap: 10px; flex: none; }
+.phead h2 { margin: 0 0 0 2px; font-size: 18px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cur { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 15px; white-space: nowrap; }
+.cur i { width: 18px; height: 18px; border-radius: 5px; }
+.done { min-width: 96px; min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--raised); font-size: 16px; font-weight: 600; }
+.done:active { background: #262a31; }
+.ptabs { display: flex; gap: 4px; flex: none; }
+.tab { min-height: 44px; padding: 0 14px; border: 0; border-radius: 8px; background: transparent; color: var(--dim); font-size: 15px; }
+.tab.on { color: #e3e6ea; background: var(--raised); }
+.pcol { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.pgrid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.pc {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 6px; min-height: 76px; padding: 10px;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 10px; font-size: 14px; text-align: left;
+}
+.pc i { flex: none; width: 100%; height: 26px; border-radius: 6px; border: 1px solid var(--line); opacity: 0.8; }
+.pc span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc.on { border-color: #8e959f; }
+.lab2 { margin: 4px 2px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); font-weight: 600; }
+.strip2 { position: relative; height: 44px; border-radius: 8px; border: 1px solid var(--line); cursor: crosshair; touch-action: none; flex: none; }
+/* The colour is dimmed on the strip (the handle and border are not); the colour sent is the true one. */
+.strip2::before { content: ""; position: absolute; inset: 0; border-radius: 7px; background: var(--grad); opacity: 0.55; }
+.strip2.hue { --grad: linear-gradient(90deg, #ff0000, #ffc800, #00ff00, #00ffc8, #0000ff, #8c00ff, #ff008c, #ff0000); }
+.strip2.cct { --grad: linear-gradient(90deg, #ffb46b, #f4f8ff); }
+.strip2.cct::before { opacity: 0.7; }
+.strip-handle { position: absolute; top: 4px; bottom: 4px; left: 0; width: 4px; background: #c9ccd2; border-radius: 2px; box-shadow: 0 0 0 1px #000; }
+.soon { margin: 0; padding: 24px 4px; color: var(--dim); font-size: 15px; }
+
 /* ---- Bottom bar ---- */
 .bottom { grid-column: 1 / -1; display: flex; align-items: stretch; gap: 8px; min-width: 0; }
 .master {
