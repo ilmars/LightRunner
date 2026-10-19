@@ -150,6 +150,19 @@ export const Preset = z.object({
 });
 export type Preset = z.infer<typeof Preset>;
 
+/**
+ * A key that is the same for two effect layers exactly when they run the same: every setting,
+ * the colours in order (a hex in any case; a palette colour by reference).
+ */
+export function effectKey(l: EffectLayer): string {
+  return JSON.stringify([
+    l.effect,
+    l.colours.map((c) => ('palette' in c ? [c.palette, c.index] : [c.hex.toLowerCase(), c.white ?? 0, c.amber ?? 0, c.uv ?? 0])),
+    'beats' in l.speed ? ['beats', l.speed.beats] : ['seconds', l.speed.seconds],
+    l.direction, l.waves, l.size, l.edge, l.intensity,
+  ]);
+}
+
 /** True when a preset runs an effect (it moves), not a plain colour. */
 export const isEffectPreset = (p: Preset): boolean => p.layers.some((l) => l.kind === 'effect');
 
@@ -190,6 +203,8 @@ export const OperatorLayout = z.object({
   runningOrder: z.array(id).default([]),
   /** Looks offered under "Quick looks", each on a tab. */
   quickLooks: z.array(QuickLook).default([]),
+  /** The ready-made effects have been added once (see ensureEffects); they are never added again. */
+  effectsAdded: z.boolean().optional(),
 });
 export type OperatorLayout = z.infer<typeof OperatorLayout>;
 

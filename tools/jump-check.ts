@@ -99,6 +99,15 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
     const p = pick(show.presets);
     return { cmd: { type: 'groupPreset', group: p.group, preset: p.id }, fast: false };
   }
+  if (r < 0.6 && rand() < 0.4) {
+    // A live effect from the Effects tab; a third are later sends of a slider drag, which carry the pattern on.
+    const base = pick(show.presets.filter((p) => p.layers[0]!.kind === 'effect'));
+    const layer = base.layers[0] as EffectLayer;
+    const effect = { ...layer, colours: layer.colours.map((c) => ('hex' in c ? c : { hex: hex() })), size: rand() };
+    const cmd = { type: 'groupEffect' as const, group: base.group, effect };
+    if (rand() < 0.33) return { cmd: { ...cmd, fade: 0.2, continues: true }, fast: true };
+    return { cmd, fast: false };
+  }
   if (r < 0.6) {
     // Half of the Any colour picks carry white, amber or UV (each one sometimes).
     const extra = () => (rand() < 0.5 ? rand() : undefined);

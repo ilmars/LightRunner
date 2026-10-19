@@ -1,7 +1,7 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { SAFE_LIGHT, canRecolour, findProfile, groupIsWhiteOnly, presetUsers, resolveColour } from '../../packages/shared/src/index.ts';
-import type { ChannelRole, GroupKind, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, canRecolour, findProfile, groupIsWhiteOnly, groupSegments, presetUsers, resolveColour } from '../../packages/shared/src/index.ts';
+import type { ChannelRole, GroupKind, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 
 export interface OperatorLook {
@@ -9,6 +9,8 @@ export interface OperatorLook {
   name: string;
   swatch: string | null;
   section: string | null;
+  /** Beats per minute the look sets when it starts; null = the default (120). */
+  tempo: number | null;
   /** Colour this look gives each operator group (same order as `groups`); null = left alone (always for smoke groups). */
   colours: (string | null)[];
   /** Level this look gives each operator group (same order as `groups`); null = no level of its own (always for smoke groups). */
@@ -25,6 +27,8 @@ export interface OperatorEntry {
   /** The same colour as the look's `colours` entry for this group. */
   swatch: string;
   light: LiveLight | null;
+  /** When the preset is an effect: its settings, colours as plain colours. */
+  effect: LiveEffectLayer | null;
 }
 
 export interface OperatorGroup {
@@ -36,6 +40,8 @@ export interface OperatorGroup {
   whiteOnly: boolean;
   /** Which extra channels some fixture in the group has, for the White, Amber and UV sliders. */
   extras: { white: boolean; amber: boolean; uv: boolean };
+  /** The length of the group's line: the segments of all its fixtures. */
+  segments: number;
   presets: OperatorPreset[];
 }
 
@@ -49,9 +55,11 @@ export interface OperatorPreset {
   canRecolour: boolean;
   /**
    * The preset as an Any colour pick would make it: its top layer's colour,
-   * white, amber and UV, scaled by the layer's intensity (null if it has no layers).
+   * white, amber and UV, scaled by the layer's intensity (null if it has no layers, or is an effect).
    */
   light: LiveLight | null;
+  /** When the preset is an effect: its settings, colours as plain colours (as groupEffect takes them). */
+  effect: LiveEffectLayer | null;
 }
 
 /** A light as an Any colour pick would make it: #rrggbb and white, amber and UV 0..1, intensity included. */
@@ -110,9 +118,9 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     const entries = picked.map((entry, k): OperatorEntry | null => {
       const preset = entry ? presetById.get(entry.preset) : undefined;
       if (!entry || !preset) return null;
-      return { preset: preset.id, name: preset.name, swatch: colours[k]!, light: presetLight(preset, palettes) };
+      return { preset: preset.id, name: preset.name, swatch: colours[k]!, light: presetLight(preset, palettes), effect: presetEffect(preset, palettes) };
     });
-    return [{ id: l.id, name: l.name, swatch: l.swatch ?? null, section: l.section ?? null, colours, levels, entries }];
+    return [{ id: l.id, name: l.name, swatch: l.swatch ?? null, section: l.section ?? null, tempo: l.tempo ?? null, colours, levels, entries }];
   };
 
   const hasRole = (fixtureId: string, roles: ChannelRole[]): boolean => {
@@ -137,11 +145,13 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
         .map((p) => ({
           id: p.id, name: p.name, swatch: p.swatch ?? null,
           usedBy: presetUsers(show, p.id), canRecolour: canRecolour(p), light: presetLight(p, palettes),
+          effect: presetEffect(p, palettes),
         }));
       const any = (roles: ChannelRole[]) => g.fixtures.some((f) => hasRole(f, roles));
       return [{
         id: g.id, name: g.name, kind: g.kind, whiteOnly: groupIsWhiteOnly(show, g.id),
         extras: { white: any(['white']), amber: any(['amber']), uv: any(['uv']) },
+        segments: groupSegments(show, g.id),
         presets,
       }];
     }),
@@ -162,6 +172,13 @@ function presetLight(preset: Preset, palettes: ReadonlyMap<string, Palette>): Op
   const top = preset.layers[preset.layers.length - 1];
   if (!top || top.kind !== 'static') return null;
   return liveLight(resolveColour(top.colour, palettes), top.intensity);
+}
+
+/** A preset's effect (its top layer), with its colours looked up; null for a plain colour. */
+function presetEffect(preset: Preset, palettes: ReadonlyMap<string, Palette>): LiveEffectLayer | null {
+  const top = preset.layers[preset.layers.length - 1];
+  if (!top || top.kind !== 'effect') return null;
+  return { ...structuredClone(top), colours: top.colours.map((c) => ({ ...resolveColour(c, palettes) })) };
 }
 
 function liveLight(c: PaletteColour, k: number): LiveLight {

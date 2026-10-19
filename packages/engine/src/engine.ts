@@ -3,8 +3,9 @@
 // same code drives output, tests, blind preview and the soak test.
 
 import {
-  BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, displayColour, findProfile, livePresetId, parseLivePreset,
-  type StageCommand, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
+  BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, LiveEffectLayer, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, displayColour, effectKey, findProfile,
+  liveEffectId, livePresetId, parseLiveEffect, parseLivePreset,
+  type StageCommand, type EffectLayer, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
   type GroupStatus, type Palette, type Preset, type RuntimeState, type Show,
 } from '../../shared/src/index.ts';
 import { Crossfade, Ramp } from './fade.ts';
@@ -255,8 +256,16 @@ export class Engine {
   private history: Snapshot[] = [];
   /** True when the last apply() added an Undo step. */
   recorded = false;
-  /** The group and live preset of the last Any colour send that added an Undo step, for the drag it starts. */
+  /** The group and live preset of the last Any colour (or live effect) send that added an Undo step, for the drag it starts. */
   private lastColourStep: { group: string; key: string } | null = null;
+  /**
+   * Live effects (groupEffect) by their `fx:<group>:<n>` id, and their compiled presets. Kept while
+   * the stage, Blackout or an Undo step still names them (see pruneLiveEffects).
+   */
+  private liveEffects = new Map<string, EffectLayer>();
+  private liveCompiled = new Map<string, CompiledPreset>();
+  /** The `n` of the next live effect id. */
+  private nextEffect = 1;
   private lastLook: string | null = null;
   /** Operator's fade time for look and preset changes; null = each look's own. */
   private fadeTime: number | null = null;
@@ -387,12 +396,17 @@ export class Engine {
       const group = this.groups.get(entry.group);
       const key = group?.presets.currentKey;
       if (!group || group.smoke || !key || key === entry.preset) continue;
-      if (!(key === SAFE_ID || key === BLACKOUT_ID || parseLivePreset(key))) continue;
+      const effect = this.liveEffects.get(key);
+      if (!(key === SAFE_ID || key === BLACKOUT_ID || parseLivePreset(key) || effect)) continue;
       const saved = this.show.presets.find((p) => p.id === entry.preset);
       const target = this.presets.get(entry.preset);
       const running = group.presets.current?.preset;
       if (!saved?.custom || !target || !running || target.group !== group.id) continue;
-      if (!sameLight(target, running)) continue;
+      // A live effect is the same as a saved one when its one layer is that effect; the run (and its phase) carries on.
+      const same = effect
+        ? saved.layers.length === 1 && saved.layers[0]!.kind === 'effect' && effectKey(saved.layers[0]!) === effectKey(effect)
+        : sameLight(target, running);
+      if (!same) continue;
       group.presets.rekey(key, target.id, { ...group.presets.current!, preset: target });
     }
   }
@@ -483,20 +497,22 @@ export class Engine {
       this.lastColourStep = null;
       return this.undo(now);
     }
-    // A later send of the same Any colour drag joins the drag's one Undo step,
+    // A later send of the same Any colour (or effect) drag joins the drag's one Undo step,
     // as long as nothing else has changed the group since.
-    if (cmd.type === 'groupColour' && cmd.continues) {
+    const drag = cmd.type === 'groupColour' || cmd.type === 'groupEffect';
+    if (drag && cmd.continues) {
       const step = this.lastColourStep;
       const group = this.groups.get(cmd.group);
       if (step && group && step.group === cmd.group && group.presets.currentKey === step.key) {
         const error = this.run(cmd, now);
         step.key = group.presets.currentKey ?? step.key;
+        if (cmd.type === 'groupEffect') this.pruneLiveEffects();
         return error;
       }
     }
     // A send that doesn't continue starts a new drag, so it never joins the last one's step.
-    if (cmd.type === 'groupColour' && !cmd.continues) this.lastColourStep = null;
-    if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || cmd.type === 'groupColour' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook' || cmd.type === 'tempo') {
+    if (drag && !cmd.continues) this.lastColourStep = null;
+    if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || drag || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook' || cmd.type === 'tempo') {
       const before = this.snapshot();
       const error = this.run(cmd, now);
       const after = this.snapshot();
@@ -504,9 +520,11 @@ export class Engine {
         this.history.push(before);
         if (this.history.length > UNDO_STEPS) this.history.shift();
         this.recorded = true;
-        const key = cmd.type === 'groupColour' ? this.groups.get(cmd.group)?.presets.currentKey : null;
-        this.lastColourStep = key ? { group: (cmd as { group: string }).group, key } : null;
+        const key = drag ? this.groups.get(cmd.group)?.presets.currentKey : null;
+        this.lastColourStep = key && drag ? { group: cmd.group, key } : null;
       }
+      // Only once the Undo step is kept: it may be all that still names the effect the group ran before.
+      if (cmd.type === 'groupEffect') this.pruneLiveEffects();
       return error;
     }
     return this.run(cmd, now);
@@ -550,7 +568,49 @@ export class Engine {
     if (pid === BLACKOUT_ID) return fixedPreset(BLACKOUT_ID, group, dark(), BLACKOUT_FADE);
     const live = pid ? parseLivePreset(pid) : null;
     if (live) return live.group === group ? fixedPreset(pid!, group, fromHex(live.colour, live), DEFAULT_FADE) : undefined;
+    const fx = pid ? parseLiveEffect(pid) : null;
+    if (fx) return fx.group === group ? this.liveCompiled.get(pid!) : undefined;
     return pid ? this.presets.get(pid) : undefined;
+  }
+
+  /**
+   * The live effect id for this effect on this group: the one it already has (so sending the
+   * same effect again changes nothing), or a new `fx:<group>:<n>`.
+   */
+  private liveEffectFor(group: string, effect: EffectLayer): string {
+    const key = effectKey(effect);
+    for (const [id, layer] of this.liveEffects) {
+      if (parseLiveEffect(id)?.group === group && effectKey(layer) === key) return id;
+    }
+    const id = liveEffectId(group, this.nextEffect++);
+    this.addLiveEffect(id, effect);
+    return id;
+  }
+
+  private addLiveEffect(id: string, effect: EffectLayer): void {
+    const layer = structuredClone(effect);
+    const group = parseLiveEffect(id)!.group;
+    this.liveEffects.set(id, layer);
+    this.liveCompiled.set(id, compilePreset({ id, name: 'Custom effect', group, layers: [layer], fade: DEFAULT_FADE }, new Map()));
+  }
+
+  /** Forget the live effects nothing names any more: not a group's mix, Blackout's memory or an Undo step. */
+  private pruneLiveEffects(): void {
+    const named = new Set<string>();
+    for (const g of this.groups.values()) for (const run of g.presets.items()) named.add(run.preset.id);
+    const add = (groups: Record<string, string | null> | null) => {
+      for (const id of Object.values(groups ?? {})) if (id) named.add(id);
+    };
+    add(this.beforeBlackout);
+    for (const step of this.history) {
+      add(step.groups);
+      add(step.beforeBlackout);
+    }
+    for (const id of this.liveEffects.keys()) {
+      if (named.has(id)) continue;
+      this.liveEffects.delete(id);
+      this.liveCompiled.delete(id);
+    }
   }
 
   private run(cmd: StageCommand, now: number): string | null {
@@ -575,6 +635,23 @@ export class Engine {
         const extras = { white: cmd.white, amber: cmd.amber, uv: cmd.uv };
         const preset = this.presetFor(livePresetId(cmd.group, cmd.colour, extras), cmd.group)!;
         this.setPreset(group, preset, cmd.fade ?? this.fadeTime ?? preset.fade, now);
+        return null;
+      }
+      case 'groupEffect': {
+        const group = this.groups.get(cmd.group);
+        if (!group) return `unknown group "${cmd.group}"`;
+        if (group.smoke) return smokeRefusal(cmd.group);
+        const id = this.liveEffectFor(cmd.group, cmd.effect);
+        const preset = this.presetFor(id, cmd.group)!;
+        const was = group.presets.current;
+        const fresh = !group.presets.items().some((r) => r.preset.id === id);
+        const started = this.setPreset(group, preset, cmd.fade ?? this.fadeTime ?? preset.fade, now);
+        // A later send of a drag carries on from where the pattern is, so moving a slider never restarts it.
+        if (cmd.continues && fresh && started && was && moves(was.preset)) {
+          started.time = was.time;
+          started.beats = was.beats;
+          started.cycles = [was.cycles[was.preset.layers.length - 1] ?? 0];
+        }
         return null;
       }
       case 'flash': {
@@ -1032,6 +1109,13 @@ export class Engine {
     return this.groups.get(group)?.presets.current?.beats;
   }
 
+  /** The phase (in cycles) of the effect a group is running (or fading into); undefined when it runs none. */
+  effectPhase(group: string): number | undefined {
+    const run = this.groups.get(group)?.presets.current;
+    if (!run || !moves(run.preset)) return undefined;
+    return run.cycles[run.preset.layers.length - 1];
+  }
+
   liveState(now: number, output: OutputStatus): LiveState {
     const look = this.look ? this.looks.get(this.look) : undefined;
     const groups: LiveState['groups'] = {};
@@ -1046,6 +1130,7 @@ export class Engine {
         progress: g.presets.progress(now),
         level: g.level.target,
         live: liveView(preset),
+        effect: (preset ? this.liveEffects.get(preset) : undefined) ?? null,
       };
     }
     return {
@@ -1112,11 +1197,32 @@ export class Engine {
       lastLook: this.lastLook,
       fadeTime: this.fadeTime,
       ...(this.beforeBlackout ? { beforeBlackout: { ...this.beforeBlackout } } : {}),
+      ...this.namedEffects(groups),
     };
+  }
+
+  /** The live effects the stage (or Blackout's memory) names, for the runtime state. */
+  private namedEffects(groups: Record<string, string | null>): { effects?: Record<string, EffectLayer> } {
+    const effects: Record<string, EffectLayer> = {};
+    for (const id of [...Object.values(groups), ...Object.values(this.beforeBlackout ?? {})]) {
+      const layer = id ? this.liveEffects.get(id) : undefined;
+      if (layer) effects[id!] = structuredClone(layer);
+    }
+    return Object.keys(effects).length ? { effects } : {};
   }
 
   /** Put the stage back as it was saved, with no fade, so a restart matches what the node is holding. */
   restore(rt: RuntimeState, now: number): void {
+    // The live effects it names come back first, so the groups can run them. A broken one is left out.
+    this.liveEffects.clear();
+    this.liveCompiled.clear();
+    for (const [id, layer] of Object.entries(rt.effects ?? {})) {
+      const fx = parseLiveEffect(id);
+      const parsed = LiveEffectLayer.safeParse(layer);
+      if (!fx || !parsed.success) continue;
+      this.addLiveEffect(id, parsed.data);
+      this.nextEffect = Math.max(this.nextEffect, fx.n + 1);
+    }
     for (const group of this.groups.values()) {
       if (group.smoke) {
         // Smoke never starts by itself: after a restart it is off, whatever it was.

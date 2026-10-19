@@ -13,8 +13,8 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OutputRoute, OutputSettings, addColour, addSong, deleteColour, editColour, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureRunningOrder, isManualCommand,
-  applyQuickLookToItem, isShowEdit, moveItem, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook, setItemGroup,
+  BUILT_IN_PROFILES, Command, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
+  applyQuickLookToItem, isEffectPreset, isShowEdit, moveItem, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,
   type OflFixture, type Pick, type Scope,
   BLACKOUT, type LiveState, type RuntimeState, type Show, type ShowEdit,
 } from '../../packages/shared/src/index.ts';
@@ -140,10 +140,10 @@ export class App {
     const loaded = this.store.loadShow();
     if (loaded.problem) this.log(`WARNING: ${loaded.problem}`);
     this.log(`Loaded show "${loaded.show.name}" from ${loaded.source}`);
-    const migrated = ensureBasicLights(ensureRunningOrder(loaded.show));
+    const migrated = ensureShow(loaded.show);
     if (JSON.stringify(migrated) !== JSON.stringify(loaded.show)) {
       this.store.saveShow(migrated);
-      this.log('Gave the show a running order');
+      this.log('Gave the show a running order and ready-made effects');
     }
     this.show = migrated;
     this.latestRuntime = this.store.loadRuntime();
@@ -364,15 +364,21 @@ export class App {
       case 'saveQuickLook': next = saveQuickLook(before, { name: cmd.name, tab: cmd.tab, groups: cmd.groups }, stage!).show; break;
       // Preview edits never look at the stage, so they are fine during Blackout.
       case 'itemGroup': next = setItemGroup(before, cmd.item, cmd); break;
+      case 'itemTempo': next = setItemTempo(before, cmd.item, cmd.bpm); break;
       case 'itemQuickLook': next = applyQuickLookToItem(before, cmd.item, cmd.look); break;
       // A colour doesn't depend on the stage, so it is fine during Blackout.
       case 'addColour': next = addColour(before, cmd).show; break;
       case 'editColour': next = editColour(before, cmd).show; break;
+      // Effects are edited like colours: never from the stage, fine during Blackout.
+      case 'addEffect': next = addEffect(before, cmd).show; break;
+      case 'editEffect': next = editEffect(before, cmd); break;
       case 'deleteColour': {
         // A colour that is lit (or was, before Blackout) stays: the group would name a preset that is gone.
         next = deleteColour(before, cmd.preset); // refuses while a look uses it
-        const group = before.presets.find((p) => p.id === cmd.preset)!.group;
+        const found = before.presets.find((p) => p.id === cmd.preset)!;
+        const group = found.group;
         if (stage!.groups[group] === cmd.preset || stage!.beforeBlackout?.[group] === cmd.preset) {
+          if (isEffectPreset(found)) throw new Error('That effect is on stage now. Pick something else for the group first.');
           throw new Error('That colour is on stage now. Pick another colour for the group first.');
         }
         break;
@@ -384,7 +390,10 @@ export class App {
     this.publishState();
   }
 
-  /** The engine's stage and look as they are right now, straight from the worker. */
+  /**
+   * The engine's stage and look as they are right now, straight from the worker, with the live
+   * effects the groups run and the stage tempo, so Save keeps both.
+   */
   private async stage(): Promise<RuntimeState> {
     const reply = await this.request<{ runtime?: RuntimeState; error?: string }>((id) => ({ type: 'snapshot', id }));
     if (!reply.runtime) throw new Error(reply.error ?? 'engine did not answer');
@@ -418,7 +427,7 @@ export class App {
   private async putShow(show: Show, backup = true): Promise<void> {
     // A show that arrives without a running order (import, restore, merge) gets one, as at start,
     // and Basic lights always exists and comes first, whatever Compare with a file took away.
-    show = ensureBasicLights(ensureRunningOrder(show));
+    show = ensureShow(show);
     this.store.saveShow(show, { backup });
     this.show = show;
     this.post({ type: 'show', show: this.engineShow() });
@@ -955,8 +964,16 @@ export class App {
 }
 
 /**
+ * What every show gets on its way in (at start, import, restore, merge): a running order with
+ * Basic lights first, and the ready-made effects the first time.
+ */
+function ensureShow(show: Show): Show {
+  return ensureEffects(ensureBasicLights(ensureRunningOrder(show)));
+}
+
+/**
  * The show an Undo goes back to, plus the hidden custom presets (Any colour, Basic light,
- * Off) that the current show has and it lacks: the stage may be running one of them.
+ * Off, Custom effect) that the current show has and it lacks: the stage may be running one of them.
  */
 function keepCustomPresets(restored: Show, current: Show): Show {
   const have = new Set(restored.presets.map((p) => p.id));

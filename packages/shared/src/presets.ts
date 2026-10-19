@@ -3,9 +3,9 @@
 // with a plain message the page can show as it is.
 
 import { HEX_COLOUR, displayColour } from './protocol.ts';
-import { cleanName, uniqueId } from './runningorder.ts';
-import { findProfile } from './schema.ts';
-import type { Preset, Show, StaticLayer } from './schema.ts';
+import { cleanName, effectSwatch, uniqueId } from './runningorder.ts';
+import { findProfile, isEffectPreset, resolveColour } from './schema.ts';
+import type { ChannelRole, ColourSpec, EffectLayer, Palette, Preset, Profile, Show, StaticLayer } from './schema.ts';
 
 /** True when no fixture in the group has a red, green or blue channel: the picker offers it warm-to-cool white only. */
 export function groupIsWhiteOnly(show: Show, groupId: string): boolean {
@@ -37,14 +37,14 @@ function plainLight(show: Show, preset: Preset): string | null {
   return c ? JSON.stringify([c.hex.toLowerCase(), c.white ?? 0, c.amber ?? 0, c.uv ?? 0, layer.intensity]) : null;
 }
 
-/** "Colour 4" after "Colour 3": one more than the highest number in use among these presets. */
-function nextColourName(presets: Preset[]): string {
+/** "Colour 4" after "Colour 3" (or "Effect 4" after "Effect 3"): one more than the highest number in use among these presets. */
+function nextName(presets: Preset[], word: 'Colour' | 'Effect' = 'Colour'): string {
   let highest = 0;
   for (const p of presets) {
-    const m = /^Colour (\d+)$/.exec(p.name);
-    if (m) highest = Math.max(highest, Number(m[1]));
+    const m = /^(\w+) (\d+)$/.exec(p.name);
+    if (m && m[1] === word) highest = Math.max(highest, Number(m[2]));
   }
-  return `Colour ${highest + 1}`;
+  return `${word} ${highest + 1}`;
 }
 
 /**
@@ -67,7 +67,7 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
   const layer: StaticLayer = { kind: 'static', colour: { hex: colour }, intensity: 1 };
   const wanted = JSON.stringify([colour, 0, 0, 0, 1]);
   // One name for the whole set, numbered after the highest "Colour N" in any of the groups.
-  const name = input.name.trim() ? cleanName(input.name) : nextColourName(out.presets.filter((p) => targets.includes(p.group)));
+  const name = input.name.trim() ? cleanName(input.name) : nextName(out.presets.filter((p) => targets.includes(p.group)));
   const ids: string[] = [];
   for (const group of targets) {
     const own = out.presets.filter((p) => p.group === group);
@@ -187,5 +187,152 @@ export function deleteColour(show: Show, presetId: string): Show {
   if (users.length) throw new Error(`Used in ${listNames(users)}. Change those first.`);
   const out = structuredClone(show);
   out.presets = out.presets.filter((p) => p.id !== presetId);
+  return out;
+}
+
+// ---- The effects list ----
+
+export interface AddEffect {
+  group: string;
+  /** Empty = "Effect N", numbered after the group's own effects. */
+  name: string;
+  effect: EffectLayer;
+}
+
+/** Adds an effect to a group's effects list as a normal preset. Returns the new show and the preset's id. */
+export function addEffect(show: Show, input: AddEffect): { show: Show; id: string } {
+  const group = show.groups.find((g) => g.id === input.group);
+  if (!group) throw new Error(`the show has no group "${input.group}"`);
+  if (group.kind === 'smoke') throw new Error("smoke machines can't run effects");
+  const out = structuredClone(show);
+  const name = input.name.trim() ? cleanName(input.name) : nextName(out.presets.filter((p) => p.group === group.id), 'Effect');
+  const id = uniqueId(`${group.id} ${name}`, out.presets.map((p) => p.id));
+  out.presets.push({ id, name, group: group.id, layers: [structuredClone(input.effect)], fade: 3, swatch: effectSwatch(out, input.effect) });
+  return { show: out, id };
+}
+
+export interface EditEffect {
+  preset: string;
+  effect: EffectLayer;
+}
+
+/** New settings for an effect in a group's list. Its name is changed with editColour, like a colour's. */
+export function editEffect(show: Show, input: EditEffect): Show {
+  const out = structuredClone(show);
+  const target = out.presets.find((p) => p.id === input.preset);
+  if (!target) throw new Error('that effect is not in the list');
+  if (!isEffectPreset(target)) throw new Error('that is not an effect');
+  if (target.custom) throw new Error("that effect can't be edited");
+  const before = JSON.stringify([target.layers, target.swatch]);
+  target.layers = [structuredClone(input.effect)];
+  target.swatch = effectSwatch(out, input.effect);
+  if (JSON.stringify([target.layers, target.swatch]) === before) throw new Error('nothing changed');
+  return out;
+}
+
+/** The roles that repeat once per segment (as the engine's channel plan counts them). */
+const SEGMENT_ROLES: readonly ChannelRole[] = ['red', 'green', 'blue', 'white', 'amber', 'uv'];
+
+/** How many segments a fixture type has: the most times any colour role repeats, at least 1. */
+export function profileSegments(profile: Profile): number {
+  const seen = new Map<ChannelRole, number>();
+  for (const c of profile.channels) {
+    if (c.fine || !SEGMENT_ROLES.includes(c.role)) continue;
+    seen.set(c.role, (seen.get(c.role) ?? 0) + 1);
+  }
+  return Math.max(1, ...seen.values());
+}
+
+/** The length of a group's line: the segments of all its fixtures (0 for a group the show doesn't have). */
+export function groupSegments(show: Show, groupId: string): number {
+  const group = show.groups.find((g) => g.id === groupId);
+  let n = 0;
+  for (const id of group?.fixtures ?? []) {
+    const fixture = show.fixtures.find((f) => f.id === id);
+    const profile = fixture ? findProfile(show, fixture.profile) : undefined;
+    if (profile) n += profileSegments(profile);
+  }
+  return n;
+}
+
+/** A group with this many segments or more counts as the background and gets every ready-made effect. */
+const BACKGROUND_SEGMENTS = 8;
+
+interface ReadyMade {
+  name: string;
+  effect: EffectLayer['effect'];
+  waves?: number;
+  beats?: number;
+}
+
+const BACKGROUND_EFFECTS: ReadyMade[] = [
+  { name: 'Colour fade', effect: 'colourFade', beats: 16 },
+  { name: 'Wave', effect: 'wave' },
+  { name: 'Three waves', effect: 'wave', waves: 3 },
+  { name: 'Chase', effect: 'chase' },
+  { name: 'Sparkle', effect: 'sparkle' },
+  { name: 'Meteor', effect: 'meteor' },
+  { name: 'Fill', effect: 'fill' },
+  { name: 'Yo-yo', effect: 'yoyo' },
+  { name: 'Breathe', effect: 'breathe' },
+];
+
+const OTHER_EFFECTS: ReadyMade[] = [
+  { name: 'Colour fade', effect: 'colourFade', beats: 16 },
+  { name: 'Breathe', effect: 'breathe' },
+  { name: 'Wave', effect: 'wave' },
+];
+
+/**
+ * True when a colour reads as a white rather than a colour: warm, neutral and cool whites and
+ * pale tints (red, green and blue fairly close together), and black (only white light, or Off).
+ */
+function isWhitish(c: { hex: string }): boolean {
+  const n = parseInt(c.hex.slice(1), 16);
+  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const top = Math.max(...rgb);
+  if (top === 0) return true;
+  return (top - Math.min(...rgb)) / top < 0.7;
+}
+
+/** The first three coloured swatches of a group's list (not the whites, not Off), as the list gives them. */
+function readyColours(show: Show, groupId: string, palettes: ReadonlyMap<string, Palette>): ColourSpec[] {
+  const colours: ColourSpec[] = [];
+  for (const p of show.presets) {
+    if (colours.length === 3) break;
+    if (p.group !== groupId || p.custom || !canRecolour(p)) continue;
+    const layer = p.layers[0] as StaticLayer;
+    if (layer.intensity <= 0 || isWhitish(resolveColour(layer.colour, palettes))) continue;
+    colours.push(structuredClone(layer.colour));
+  }
+  return colours;
+}
+
+/**
+ * The first time a show runs with effects: adds the ready-made effects to every light group
+ * whose line has more than one segment and that has at least two coloured swatches. Groups of
+ * 8 segments or more (the background) get the whole set; the others a colour fade, breathe and
+ * wave. Then `operator.effectsAdded` is set, so they are never added again (even once deleted).
+ */
+export function ensureEffects(show: Show): Show {
+  const out = structuredClone(show);
+  if (out.operator.effectsAdded) return out;
+  const palettes = new Map(out.palettes.map((p) => [p.id, p]));
+  for (const group of out.groups) {
+    if (group.kind === 'smoke' || groupIsWhiteOnly(out, group.id)) continue;
+    const segments = groupSegments(out, group.id);
+    if (segments <= 1) continue;
+    const colours = readyColours(out, group.id, palettes);
+    if (colours.length < 2) continue;
+    for (const made of segments >= BACKGROUND_SEGMENTS ? BACKGROUND_EFFECTS : OTHER_EFFECTS) {
+      const effect: EffectLayer = {
+        kind: 'effect', effect: made.effect, colours: structuredClone(colours), speed: { beats: made.beats ?? 4 },
+        direction: 'ltr', waves: made.waves ?? 1, size: 0.5, edge: 'soft', intensity: 1,
+      };
+      const id = uniqueId(`${group.id} ${made.name}`, out.presets.map((p) => p.id));
+      out.presets.push({ id, name: made.name, group: group.id, layers: [effect], fade: 3, swatch: effectSwatch(out, effect) });
+    }
+  }
+  out.operator.effectsAdded = true;
   return out;
 }

@@ -843,6 +843,14 @@ test('the rig: the layout says which groups have white, amber and UV, and Any co
     const segments = (id: string) => layout.fixtures.find((f: any) => f.id === id).segments;
     assert.deepEqual(['p1', 'b1', 'b3', 'l1', 'b8'].map(segments), [1, 3, 8, 1, 4]);
     assert.ok(layout.fixtures.every((f: any) => f.reversed === false));
+    // Each group's line, and the ready-made effects on the coloured groups with more than one segment.
+    const group = (id: string) => layout.groups.find((g: any) => g.id === id);
+    assert.deepEqual(['front-lights', 'key-lights', 'background', 'drum-cage', 'b8-side-bar'].map((id) => group(id).segments), [4, 6, 32, 1, 4]);
+    const effectNames = (id: string) => group(id).presets.filter((p: any) => p.effect).map((p: any) => p.name);
+    assert.equal(effectNames('background').length, 9);
+    assert.deepEqual(effectNames('key-lights'), ['Colour fade', 'Breathe', 'Wave']);
+    assert.deepEqual(effectNames('front-lights'), []);
+    assert.deepEqual(group('background').presets.find((p: any) => p.name === 'Wave').effect.colours, [{ hex: '#ff0000' }, { hex: '#ff5a00' }, { hex: '#ffc800' }]);
     let frame: Uint8Array | null = null;
     t.ws.on('message', (data, isBinary) => { if (isBinary) frame = new Uint8Array(data as Buffer); });
     const b1At = layout.fixtures.findIndex((f: any) => f.id === 'b1');
@@ -898,4 +906,180 @@ test('the layout gives each item its entries, and the preview picture is served'
   assert.equal(ok.body.visual.length, layout.fixtures.reduce((n: number, f: any) => n + f.segments, 0) * 3);
   const missing = await api(app, 'GET', '/api/looks/no-such-look/visual');
   assert.equal(missing.status, 404);
+}));
+
+// ---- Live effects, the song's tempo and the effects list ----
+
+/** A wave as the Effects tab sends it: every setting, colours as plain hex. */
+const liveWave = (over: Record<string, unknown> = {}) => ({
+  kind: 'effect', effect: 'wave', colours: [{ hex: '#12ab34' }, { hex: '#3456cd', white: 0.2 }], speed: { beats: 4 },
+  direction: 'ltr', waves: 3, size: 0.5, edge: 'soft', intensity: 1, ...over,
+});
+
+test('a live effect runs, Undo takes it back, and Save keeps it as a hidden effect the stage then runs', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  await waitFor(() => t.state()?.look === song, 2000, 'the song on stage');
+  const was = t.state().groups['back-wall'].preset;
+
+  assert.equal(await t.send({ type: 'groupEffect', group: 'back-wall', effect: liveWave(), fade: 0 }), null);
+  const running = await waitFor(() => /^fx:back-wall:\d+$/.test(t.state()?.groups['back-wall'].preset ?? '') && t.state().groups['back-wall'], 2000, 'the live effect');
+  assert.deepEqual(running.effect, liveWave());
+  assert.equal(running.live, null);
+  assert.equal(t.state().lookChanged, true);
+  assert.equal(t.state().groups.audience.effect, null);
+
+  assert.equal(await t.send({ type: 'undo' }), null);
+  await waitFor(() => t.state()?.groups['back-wall'].preset === was, 2000, 'Undo to bring back the song\'s preset');
+  assert.equal(t.state().groups['back-wall'].effect, null);
+
+  assert.equal(await t.send({ type: 'groupEffect', group: 'back-wall', effect: liveWave({ edge: 'hard' }), fade: 0 }), null);
+  await waitFor(() => t.state()?.groups['back-wall'].effect?.edge === 'hard', 2000, 'the second live effect');
+  assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+  await waitFor(() => t.state()?.lookChanged === false, 2000, 'the look to no longer show as changed');
+  const entry = savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')!;
+  const saved = parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).presets.find((p) => p.id === entry.preset)!;
+  assert.equal(saved.custom, true);
+  assert.equal(saved.name, 'Custom effect');
+  assert.deepEqual(saved.layers, [liveWave({ edge: 'hard' })]);
+  assert.equal(saved.swatch, '#12ab34');
+  // The stage runs the saved preset now (the same effect, carrying on).
+  assert.equal(t.state().groups['back-wall'].preset, entry.preset);
+  assert.equal(t.state().groups['back-wall'].effect, null);
+  // Starting the song again runs the saved effect.
+  assert.equal(await t.send({ type: 'safe' }), null);
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  await waitFor(() => t.state()?.look === song && t.state().groups['back-wall'].preset === entry.preset, 2000, 'the song with its effect');
+}));
+
+test('an effect slider drag is one Undo step', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  await waitFor(() => t.state()?.look === song, 2000, 'the song on stage');
+  const was = t.state().groups['back-wall'].preset;
+  assert.equal(await t.send({ type: 'groupEffect', group: 'back-wall', effect: liveWave({ size: 0.1 }), fade: 0.2 }), null);
+  for (let k = 2; k <= 20; k++) {
+    assert.equal(await t.send({ type: 'groupEffect', group: 'back-wall', effect: liveWave({ size: k / 20 }), fade: 0.2, continues: true }), null);
+  }
+  await waitFor(() => t.state()?.groups['back-wall'].effect?.size === 1, 2000, 'the last send of the drag');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  await waitFor(() => t.state()?.groups['back-wall'].preset === was, 2000, 'one Undo to take the whole drag back');
+}));
+
+test('a restart with a live effect running brings the same effect back', async () => {
+  const dir = tempDir();
+  const a = makeApp(dir);
+  const b = makeApp(dir);
+  try {
+    await a.start();
+    const t = await tablet(a);
+    await waitFor(t.layout);
+    assert.equal(await t.send({ type: 'groupEffect', group: 'back-wall', effect: liveWave({ effect: 'chase' }), fade: 0 }), null);
+    const id = (await waitFor(() => t.state()?.groups['back-wall'].effect && t.state().groups['back-wall'], 2000, 'the live effect')).preset;
+    await sleep(100);
+    t.ws.close();
+    await a.stop();
+    const runtime = JSON.parse(readFileSync(join(dir, 'runtime.json'), 'utf8'));
+    assert.deepEqual(runtime.effects, { [id]: liveWave({ effect: 'chase' }) });
+
+    await b.start();
+    await sleep(80);
+    const state = (await api(b, 'GET', '/api/state')).body;
+    assert.equal(state.groups['back-wall'].preset, id);
+    assert.deepEqual(state.groups['back-wall'].effect, liveWave({ effect: 'chase' }));
+    // It can still be saved after the restart.
+    const song = (await api(b, 'GET', '/api/layout')).body.runningOrder[1].id;
+    const u = await tablet(b);
+    assert.equal(await u.send({ type: 'saveItem', id: song }), null);
+    const entry = savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')!;
+    assert.deepEqual(parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).presets.find((p) => p.id === entry.preset)!.layers, [liveWave({ effect: 'chase' })]);
+    u.ws.close();
+  } finally {
+    await a.stop();
+    await b.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Save stores the stage tempo in the song, and itemTempo changes the song and not the stage', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const [, song, other] = t.order();
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'tempo', bpm: 133 }), null);
+  assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+  assert.equal(savedLook(dir, song!)!.tempo, 133);
+  await waitFor(() => t.layout().runningOrder.find((l: any) => l.id === song).tempo === 133, 2000, 'the layout to show the tempo');
+  assert.equal(t.layout().runningOrder.find((l: any) => l.id === other).tempo, null);
+
+  assert.equal(await t.send({ type: 'itemTempo', item: other, bpm: 72 }), null);
+  assert.equal(savedLook(dir, other!)!.tempo, 72);
+  await sleep(60);
+  assert.equal(t.state().tempo, 133, 'the stage keeps its tempo');
+  assert.equal(t.state().canUndo, true);
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(savedLook(dir, other!)!.tempo, undefined);
+  assert.match(await t.send({ type: 'itemTempo', item: other, bpm: 300 }) ?? '', /^invalid command/);
+  assert.equal(await t.send({ type: 'itemTempo', item: 'walk-in', bpm: 100 }), 'only running-order items can be changed here');
+  // Starting the song sets its tempo.
+  assert.equal(await t.send({ type: 'itemTempo', item: other, bpm: 88 }), null);
+  assert.equal(await t.send({ type: 'look', id: other, fade: 0 }), null);
+  await waitFor(() => t.state()?.tempo === 88, 2000, 'the song\'s tempo');
+}));
+
+test('the effects list: add, edit, rename and delete over the wire, and the layout shows effects', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  const layout = await waitFor(t.layout);
+  const backWall = layout.groups.find((g: any) => g.id === 'back-wall');
+  assert.equal(backWall.segments, 6);
+  assert.equal(layout.groups.find((g: any) => g.id === 'pulpit').segments, 1);
+  // The ready-made effects, with their colours as plain hex.
+  const ready = backWall.presets.filter((p: any) => p.effect);
+  assert.deepEqual(ready.map((p: any) => p.name), ['Colour fade', 'Breathe', 'Wave']);
+  assert.deepEqual(ready[0].effect.colours.map((c: any) => c.hex), ['#1f3bff', '#7a2bff', '#ff8a1f']);
+  assert.ok(backWall.presets.filter((p: any) => !p.effect).every((p: any) => p.effect === null && p.light));
+  assert.equal(ready[0].canRecolour, false);
+
+  assert.equal(await t.send({ type: 'addEffect', group: 'back-wall', name: 'Rolling', effect: liveWave() }), null);
+  const added = await waitFor(() => t.layout().groups.find((g: any) => g.id === 'back-wall').presets.find((p: any) => p.name === 'Rolling'), 2000, 'the new effect');
+  assert.deepEqual(added.effect, liveWave());
+  assert.equal(await t.send({ type: 'editEffect', preset: added.id, effect: liveWave({ waves: 1 }) }), null);
+  await waitFor(() => t.layout().groups.find((g: any) => g.id === 'back-wall').presets.find((p: any) => p.id === added.id).effect.waves === 1, 2000, 'the edit');
+  assert.equal(await t.send({ type: 'editEffect', preset: 'back-amber', effect: liveWave() }), 'that is not an effect');
+  assert.equal(await t.send({ type: 'editColour', preset: added.id, name: 'Slow roll', sameName: false }), null);
+  // On stage it stays.
+  assert.equal(await t.send({ type: 'groupPreset', group: 'back-wall', preset: added.id, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'deleteColour', preset: added.id }), 'That effect is on stage now. Pick something else for the group first.');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(await t.send({ type: 'deleteColour', preset: added.id }), null);
+  await waitFor(() => !t.layout().groups.find((g: any) => g.id === 'back-wall').presets.some((p: any) => p.id === added.id), 2000, 'the delete');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.ok(parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).presets.some((p) => p.id === added.id && p.name === 'Slow roll'));
+
+  // Preview: an effect for a song's group, kept as a hidden preset; the stage stays.
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'itemGroup', item: song, group: 'back-wall', effect: liveWave({ effect: 'meteor' }) }), null);
+  const entry = savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')!;
+  const hidden = parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).presets.find((p) => p.id === entry.preset)!;
+  assert.equal(hidden.custom, true);
+  assert.deepEqual(hidden.layers, [liveWave({ effect: 'meteor' })]);
+  const item = await waitFor(() => t.layout().runningOrder.find((l: any) => l.id === song && l.entries[1]?.effect), 2000, 'the item entry');
+  assert.equal(item.entries[1].effect.effect, 'meteor');
+  assert.equal(await t.send({ type: 'itemGroup', item: song, group: 'back-wall', effect: liveWave(), preset: 'back-amber' }), 'pick a colour, a preset or an effect, not more than one');
+}));
+
+test('smoke machines refuse effects', () => withApp(async (app) => {
+  const show = (await api(app, 'GET', '/api/show')).body;
+  show.groups.find((g: any) => g.id === 'pulpit').kind = 'smoke';
+  assert.equal((await api(app, 'PUT', '/api/show', show)).status, 200);
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  assert.equal(await t.send({ type: 'groupEffect', group: 'pulpit', effect: liveWave(), fade: 0 }), '"pulpit" is a smoke machine: use its slider or Puff');
+  assert.equal(await t.send({ type: 'addEffect', group: 'pulpit', name: 'x', effect: liveWave() }), "smoke machines can't run effects");
+  // Effect colours are plain hex over the wire.
+  assert.match(await t.send({ type: 'groupEffect', group: 'back-wall', effect: liveWave({ colours: [{ palette: 'x', index: 0 }] }) }) ?? '', /^invalid command/);
 }));

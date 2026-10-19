@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  addColour, canRecolour, checkReferences, deleteColour, editColour, EffectLayer, ensureRunningOrder, groupIsWhiteOnly, isEffectPreset, isOff, listNames, parseShow, presetUsers,
+  addColour, addEffect, canRecolour, checkReferences, deleteColour, editColour, editEffect, EffectLayer, ensureEffects, ensureRunningOrder, groupIsWhiteOnly,
+  groupSegments, isEffectPreset, isOff, listNames, parseShow, presetUsers, resolveColour,
   type Show, type StaticLayer,
 } from '../src/index.ts';
 
@@ -274,4 +275,118 @@ test('an effect preset is in the show like a colour, but is never recoloured or 
   // A missing palette inside an effect is a broken reference.
   s.presets.at(-1)!.layers = [{ ...wave, colours: [{ palette: 'nope', index: 0 }] }];
   assert.throws(() => parseShow(s), /unknown palette "nope"/);
+});
+
+// ---- The effects list ----
+
+const fx = (over: Partial<EffectLayer> = {}) => EffectLayer.parse({
+  kind: 'effect', effect: 'wave', colours: [{ hex: '#FF0000' }, { hex: '#0000ff' }], speed: { beats: 4 }, ...over,
+});
+
+test('an effect is added to a group\'s list, named, or "Effect N" when the name is empty', () => {
+  const s = ready();
+  const first = addEffect(s, { group: 'background', name: '  Slow wave  ', effect: fx() });
+  const made = preset(first.show, first.id);
+  assert.deepEqual(made, { id: first.id, name: 'Slow wave', group: 'background', layers: [fx()], fade: 3, swatch: '#ff0000' });
+  assert.equal(first.id, 'background-slow-wave');
+  assert.equal(s.presets.some((p) => p.id === first.id), false, 'the input show is not changed');
+  assert.deepEqual(checkReferences(first.show), []);
+
+  const a = addEffect(first.show, { group: 'background', name: '', effect: fx() });
+  assert.equal(preset(a.show, a.id).name, 'Effect 1');
+  const b = addEffect(a.show, { group: 'background', name: ' ', effect: fx({ effect: 'chase' }) });
+  assert.equal(preset(b.show, b.id).name, 'Effect 2');
+  // Another group counts its own.
+  const c = addEffect(b.show, { group: 'key-lights', name: '', effect: fx() });
+  assert.equal(preset(c.show, c.id).name, 'Effect 1');
+  assert.equal(new Set(c.show.presets.map((p) => p.id)).size, c.show.presets.length);
+  // A long name is cut to 40 characters.
+  assert.equal(preset(addEffect(s, { group: 'background', name: 'w'.repeat(60), effect: fx() }).show, 'background-' + 'w'.repeat(40)).name, 'w'.repeat(40));
+});
+
+test('adding an effect refuses a missing group and a smoke machine', () => {
+  const s = ready();
+  assert.throws(() => addEffect(s, { group: 'nope', name: 'x', effect: fx() }), { message: 'the show has no group "nope"' });
+  const smoky = structuredClone(s);
+  smoky.groups.find((g) => g.id === 'drum-cage')!.kind = 'smoke';
+  assert.throws(() => addEffect(smoky, { group: 'drum-cage', name: 'x', effect: fx() }), { message: "smoke machines can't run effects" });
+});
+
+test('an effect\'s settings are edited in place; a colour is not an effect', () => {
+  const s = ready();
+  const { show, id } = addEffect(s, { group: 'background', name: 'Wave', effect: fx() });
+  const hard = fx({ edge: 'hard', colours: [{ hex: '#00FF00' }] });
+  const out = editEffect(show, { preset: id, effect: hard });
+  assert.deepEqual(preset(out, id).layers, [hard]);
+  assert.equal(preset(out, id).swatch, '#00ff00');
+  assert.equal(preset(out, id).name, 'Wave');
+  assert.deepEqual(preset(show, id).layers, [fx()], 'the input show is not changed');
+  assert.throws(() => editEffect(show, { preset: 'background-zils', effect: hard }), { message: 'that is not an effect' });
+  assert.throws(() => editEffect(show, { preset: 'nope', effect: hard }), { message: 'that effect is not in the list' });
+  assert.throws(() => editEffect(show, { preset: id, effect: fx() }), { message: 'nothing changed' });
+  const hidden = structuredClone(show);
+  preset(hidden, id).custom = true;
+  assert.throws(() => editEffect(hidden, { preset: id, effect: hard }), { message: "that effect can't be edited" });
+});
+
+test('an effect is renamed and deleted like a colour, but never given a colour there', () => {
+  const s = ready();
+  const { show, id } = addEffect(s, { group: 'background', name: 'Wave', effect: fx() });
+  const renamed = editColour(show, { preset: id, name: 'Rolling', sameName: false }).show;
+  assert.equal(preset(renamed, id).name, 'Rolling');
+  assert.deepEqual(preset(renamed, id).layers, [fx()]);
+  assert.throws(() => editColour(show, { preset: id, colour: '#00ff00', sameName: false }), { message: "that colour can't be changed here" });
+  const gone = deleteColour(show, id);
+  assert.equal(gone.presets.some((p) => p.id === id), false);
+  // Used in a song: refused with the names.
+  const used = structuredClone(show);
+  used.looks.find((l) => l.name === 'Song 2')!.groups.find((e) => e.group === 'background')!.preset = id;
+  assert.throws(() => deleteColour(used, id), /^Error: Used in Song 2\. Change those first\.$/);
+});
+
+test('a group\'s line is its fixtures\' segments', () => {
+  const s = rig();
+  assert.equal(groupSegments(s, 'background'), 32);
+  assert.equal(groupSegments(s, 'key-lights'), 6);
+  assert.equal(groupSegments(s, 'front-lights'), 4);
+  assert.equal(groupSegments(s, 'drum-cage'), 1);
+  assert.equal(groupSegments(s, 'b8-side-bar'), 4);
+  assert.equal(groupSegments(s, 'nope'), 0);
+});
+
+test('ready-made effects are added once to every coloured group with more than one segment', () => {
+  const s = ready();
+  const out = ensureEffects(s);
+  assert.equal(out.operator.effectsAdded, true);
+  assert.equal(s.operator.effectsAdded, undefined, 'the input show is not changed');
+  const effects = (show: Show, group: string) => show.presets.filter((p) => p.group === group && isEffectPreset(p));
+  const named = (show: Show, group: string) => effects(show, group).map((p) => p.name);
+  assert.deepEqual(named(out, 'background'), ['Colour fade', 'Wave', 'Three waves', 'Chase', 'Sparkle', 'Meteor', 'Fill', 'Yo-yo', 'Breathe']);
+  assert.deepEqual(named(out, 'key-lights'), ['Colour fade', 'Breathe', 'Wave']);
+  assert.deepEqual(named(out, 'b8-side-bar'), ['Colour fade', 'Breathe', 'Wave']);
+  // White-only front lights and the one-segment drum cage get none.
+  assert.deepEqual(named(out, 'front-lights'), []);
+  assert.deepEqual(named(out, 'drum-cage'), []);
+  // The colours are the group's first three coloured swatches (not the whites, not Off), by reference.
+  const palettes = new Map(out.palettes.map((p) => [p.id, p]));
+  for (const p of effects(out, 'background')) {
+    const layer = p.layers[0]!;
+    assert.equal(layer.kind, 'effect');
+    if (layer.kind !== 'effect') continue;
+    assert.deepEqual(layer.colours.map((c) => resolveColour(c, palettes).hex), ['#ff0000', '#ff5a00', '#ffc800']);
+    assert.deepEqual(layer.speed, p.name === 'Colour fade' ? { beats: 16 } : { beats: 4 });
+    assert.equal(layer.waves, p.name === 'Three waves' ? 3 : 1);
+    assert.equal(p.swatch, '#ff0000');
+    assert.equal(p.custom, undefined);
+  }
+  const kinds = effects(out, 'background').map((p) => (p.layers[0] as EffectLayer).effect);
+  assert.deepEqual(kinds, ['colourFade', 'wave', 'wave', 'chase', 'sparkle', 'meteor', 'fill', 'yoyo', 'breathe']);
+  assert.deepEqual(checkReferences(out), []);
+  parseShow(JSON.parse(JSON.stringify(out)));
+
+  // Never again: not on a second run, and not after the owner deleted them.
+  assert.deepEqual(ensureEffects(out), out);
+  const cleared = structuredClone(out);
+  cleared.presets = cleared.presets.filter((p) => !isEffectPreset(p));
+  assert.deepEqual(ensureEffects(cleared), cleared);
 });
