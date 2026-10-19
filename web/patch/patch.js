@@ -677,6 +677,22 @@ function renderGroups() {
     });
     head.append(name, el('span', 'note', `${presets} presets`), del);
 
+    // A smoke or haze machine: only its own slider and Puff on the operator page turn it on.
+    const kind = el('div', 'group-kind');
+    const sw = el('label', 'switch');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = g.kind === 'smoke';
+    box.addEventListener('change', () => { g.kind = box.checked ? 'smoke' : 'light'; changed(); });
+    const track = el('span', 'track');
+    track.append(el('span', 'knob'));
+    sw.append(box, track, el('span', 'switch-label', 'Smoke or haze machine'));
+    kind.append(sw);
+    if (g.kind === 'smoke') {
+      kind.append(el('span', 'note', 'Looks, Basic lights and Flash leave it alone. It runs only from its own slider and Puff, and is off after a restart. Turning this off lets Basic lights and looks drive the machine.'));
+    }
+    for (const text of smokeWarnings(g)) kind.append(el('p', 'warn', text));
+
     const members = el('div', 'members');
     g.fixtures.forEach((fid, k) => {
       const f = show.fixtures.find((x) => x.id === fid);
@@ -702,9 +718,35 @@ function renderGroups() {
     add.addEventListener('change', () => { if (add.value) { g.fixtures.push(add.value); changed(); } });
     if (add.options.length > 1) members.append(add);
     if (!g.fixtures.length) members.prepend(el('span', 'note', 'No fixtures yet.'));
-    card.append(head, members);
+    card.append(head, kind, members);
     root.append(card);
   }
+}
+
+const SMOKE_NAME = /\b(fog|fogger|haze|hazer|smoke)\b/i;
+
+/**
+ * Problems with smoke machines in a group. A smoke group drives a fixture's dimmer channel
+ * (or its only channel), so a multi-channel type without one is never driven. A light group
+ * holding something that looks like a smoke machine would let Basic lights and looks run it.
+ */
+function smokeWarnings(g) {
+  const out = [];
+  for (const fid of g.fixtures) {
+    const f = show.fixtures.find((x) => x.id === fid);
+    const type = f && profileById.get(f.profile);
+    if (!f || !type) continue;
+    if (g.kind === 'smoke') {
+      if (type.channels > 1 && !type.roles?.includes('dimmer')) {
+        out.push(`${f.name}: This fixture has no dimmer channel, so Light Runner can't drive it. Set its level channel to dimmer in the fixture type.`);
+      }
+    } else {
+      const own = show.profiles.find((p) => p.id === f.profile);
+      const looksLikeSmoke = SMOKE_NAME.test(f.name) || SMOKE_NAME.test(type.name) || !!own?.channels.some((c) => c.role === 'dimmer' && SMOKE_NAME.test(c.name ?? ''));
+      if (looksLikeSmoke) out.push(`${f.name} looks like a smoke or haze machine. Mark this group as one, or Basic lights and looks will turn it on.`);
+    }
+  }
+  return out;
 }
 
 $('newGroupForm').addEventListener('submit', (ev) => {
@@ -712,7 +754,7 @@ $('newGroupForm').addEventListener('submit', (ev) => {
   const name = $('newGroupName').value.trim();
   if (!name) return;
   const id = uniqueId(name, new Set(show.groups.map((g) => g.id)));
-  show.groups.push({ id, name, fixtures: [] });
+  show.groups.push({ id, name, kind: 'light', fixtures: [] });
   // Show it on the operator page too.
   if (show.operator.groups.length) show.operator.groups.push(id);
   $('newGroupName').value = '';

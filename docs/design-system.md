@@ -80,6 +80,7 @@ The first suggested palette was measured at about 4× the old screen's average b
 - **Whites are drawn as whites everywhere** (running order, colour chips, picker swatches, quick-look strips, the stage preview, the warm-to-cool strip): a light colour with little colour in it (chroma under 65 %, e.g. warm white `#ffb46b`, cool white `#dcebff`) is mixed 60 % towards cream `#f1ece4`, keeping its brightness. Saturated colours are unchanged, and nothing changes in what is sent to the lights.
 - **Details adapt to the rig:** with few groups each zone grows into the spare room (up to 124 px, the slider up to 64 px tall); with many groups they shrink back to their content (slider 44 px) and the list scrolls, so capacity isn't lost.
 - **White, Amber and UV** (colour picker, groups that have them): fill sliders side by side under Any colour, name and level on the header line, the fill carrying a little white, amber or violet.
+- **Smoke groups** (smoke or haze machines) in Details: a muted "Smoke" label where the colour chip would be, a neutral grey fill (no colour tint), and a **Puff** pill at the right of the header line, tinted while held like Flash. The top bar's "Smoke: N %" is plain muted text, not a warning.
 - **Quick looks** keep a fixed two rows (12 looks before scrolling), so the layout doesn't jump when switching tabs.
 - **Running order:**
   - on stage: blue-tinted glass with a blue edge

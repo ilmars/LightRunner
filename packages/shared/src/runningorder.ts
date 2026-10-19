@@ -70,13 +70,16 @@ function builtInPreset(show: Show, group: string, made: { name: string; swatch: 
  * The look entries for these groups: one per group with a preset. A live preset
  * (an "Any colour" pick) becomes a new custom preset in `show`; an existing one
  * is only referenced. The engine's Safe light and Blackout become the group's
- * "Basic light" and "Off" custom presets, shared by every save.
+ * "Basic light" and "Off" custom presets, shared by every save. Smoke groups
+ * are left out: starting a look never turns a smoke machine on or off.
  */
 function entriesFor(show: Show, stage: Stage, only?: string[]): LookEntry[] {
   const entries: LookEntry[] = [];
   for (const [group, preset] of Object.entries(stage.groups)) {
     if (!preset || (only && !only.includes(group))) continue;
-    if (!show.groups.some((g) => g.id === group)) throw new Error(`the show has no group "${group}"`);
+    const found = show.groups.find((g) => g.id === group);
+    if (!found) throw new Error(`the show has no group "${group}"`);
+    if (found.kind === 'smoke') continue;
     const level = stage.levels[group] ?? 1;
     const live = parseLivePreset(preset);
     const builtIn = BUILT_IN.get(preset);
@@ -237,7 +240,9 @@ export function saveQuickLook(
   stage: Stage,
 ): { show: Show; id: string } {
   const name = cleanName(input.name);
-  if (!input.groups.length) throw new Error('pick at least one group');
+  // Smoke groups never go into a look, so they don't count.
+  const lights = input.groups.filter((id) => show.groups.find((g) => g.id === id)?.kind !== 'smoke');
+  if (!lights.length) throw new Error('pick at least one group');
   const out = structuredClone(show);
   const id = addLook(out, name, []);
   lookIn(out, id).groups = entriesFor(out, stage, input.groups);

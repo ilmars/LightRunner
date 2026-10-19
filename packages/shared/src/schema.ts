@@ -59,9 +59,17 @@ export const Fixture = z.object({
 });
 export type Fixture = z.infer<typeof Fixture>;
 
+/**
+ * What a group drives. A smoke group is a smoke or haze machine: only its own
+ * level and Puff turn it on, never looks, Basic lights or Flash All.
+ */
+export const GroupKind = z.enum(['light', 'smoke']);
+export type GroupKind = z.infer<typeof GroupKind>;
+
 export const Group = z.object({
   id,
   name: z.string(),
+  kind: GroupKind.default('light'),
   // Order matters: waves and chases travel along it.
   fixtures: z.array(id),
 });

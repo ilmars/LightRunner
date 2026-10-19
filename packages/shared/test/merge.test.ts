@@ -52,10 +52,51 @@ test('only picked changes are applied, and removals take their dependants', () =
   assert.equal(merged.settings.output.kind, current.settings.output.kind);
 });
 
+/** The rig with a hazer in a smoke group, as this installation has it. */
+function withHaze(kind: 'light' | 'smoke'): Show {
+  const show = rig();
+  show.fixtures.push({ id: 'hazer', name: 'Hazer', profile: 'generic-dimmer', universe: 1, address: 300, x: 0.5, y: 0.1 });
+  show.groups.push({ id: 'haze', name: 'Haze', kind, fixtures: ['hazer'] });
+  return parseShow(show);
+}
+
+test("an import can't turn a smoke group back into a light group", () => {
+  const current = withHaze('smoke');
+  // A show file or Lightkey-made show knows nothing of smoke: its groups read as lights.
+  const incoming = withHaze('light');
+  assert.deepEqual(diffShows(current, incoming), [], 'kind alone is no difference');
+
+  // A real change to the group is still offered, and taking it keeps the group a smoke machine.
+  incoming.groups.find((g) => g.id === 'haze')!.name = 'Haze machine';
+  const items = diffShows(current, incoming);
+  assert.deepEqual(items.map((i) => [i.kind, i.id, i.details]), [['group', 'haze', ['name "Haze" → "Haze machine"']]]);
+  const merged = applyPicks(current, incoming, [{ kind: 'group', id: 'haze', change: 'changed' }]);
+  const haze = merged.groups.find((g) => g.id === 'haze')!;
+  assert.equal(haze.name, 'Haze machine');
+  assert.equal(haze.kind, 'smoke');
+
+  // Nor can it turn a light group into a smoke group.
+  const smokeFile = withHaze('smoke');
+  smokeFile.groups.find((g) => g.id === 'key-lights')!.kind = 'smoke';
+  smokeFile.groups.find((g) => g.id === 'key-lights')!.name = 'Keys';
+  const kept = applyPicks(current, smokeFile, [{ kind: 'group', id: 'key-lights', change: 'changed' }]);
+  assert.equal(kept.groups.find((g) => g.id === 'key-lights')!.kind, 'light');
+});
+
+test('a new group from a file keeps the kind the file gives it', () => {
+  const current = rig();
+  const incoming = withHaze('smoke');
+  const merged = applyPicks(current, incoming, [
+    { kind: 'fixture', id: 'hazer', change: 'added' },
+    { kind: 'group', id: 'haze', change: 'added' },
+  ]);
+  assert.equal(merged.groups.find((g) => g.id === 'haze')!.kind, 'smoke');
+});
+
 test('a pick that leaves the show broken is refused with a readable reason', () => {
   const current = rig();
   const incoming = rig();
-  incoming.groups.push({ id: 'balcony', name: 'Balcony', fixtures: ['b9'] });
+  incoming.groups.push({ id: 'balcony', name: 'Balcony', kind: 'light', fixtures: ['b9'] });
   incoming.fixtures.push({ id: 'b9', name: 'B9', profile: 'generic-rgb', universe: 1, address: 400, x: 0.5, y: 0.5 });
   assert.throws(
     () => applyPicks(current, incoming, [{ kind: 'group', id: 'balcony', change: 'added' }]),

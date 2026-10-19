@@ -64,6 +64,9 @@ table.patch { width: 100%; min-width: 960px; border-collapse: collapse; font-siz
 .member .pos { color: var(--dim); font-size: 11px; margin-right: 4px; }
 .group-card select { width: auto; min-height: 36px; padding: 4px 32px 4px 12px; border-radius: var(--ds-r-pill); font-size: 13px; }
 .group-card .note { font-size: 12px; color: var(--dim); }
+.group-card .group-kind { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.group-card .group-kind .switch-label { font-size: 14px; }
+.group-card .group-kind .warn { flex-basis: 100%; }
 
 /* ---- Stage plan: glass frame, quiet grid, fixture marks as before ---- */
 .stage-plan {

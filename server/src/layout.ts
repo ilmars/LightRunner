@@ -1,22 +1,24 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
 import { SAFE_LIGHT, canRecolour, findProfile, groupIsWhiteOnly, presetUsers, resolveColour } from '../../packages/shared/src/index.ts';
-import type { ChannelRole, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
+import type { ChannelRole, GroupKind, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
 
 export interface OperatorLook {
   id: string;
   name: string;
   swatch: string | null;
   section: string | null;
-  /** Colour this look gives each operator group (same order as `groups`); null = left alone. */
+  /** Colour this look gives each operator group (same order as `groups`); null = left alone (always for smoke groups). */
   colours: (string | null)[];
-  /** Level this look gives each operator group (same order as `groups`); null = no level of its own. */
+  /** Level this look gives each operator group (same order as `groups`); null = no level of its own (always for smoke groups). */
   levels: (number | null)[];
 }
 
 export interface OperatorGroup {
   id: string;
   name: string;
+  /** A smoke group is a smoke or haze machine: a level and Puff, no colour and no Flash. */
+  kind: GroupKind;
   /** True when no fixture in the group can make colour, so the colour picker has nothing to do. */
   whiteOnly: boolean;
   /** Which extra channels some fixture in the group has, for the White, Amber and UV sliders. */
@@ -72,10 +74,13 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
   const byId = new Map(show.fixtures.map((f) => [f.id, f]));
   const presetById = new Map(show.presets.map((p) => [p.id, p]));
 
+  const smoke = new Set(show.groups.filter((g) => g.kind === 'smoke').map((g) => g.id));
+
   const describe = (id: string): OperatorLook[] => {
     const l = show.looks.find((x) => x.id === id);
     if (!l) return [];
-    const entries = groupIds.map((gid) => l.groups.find((e) => e.group === gid));
+    // A look never sets a smoke group, even one an import listed.
+    const entries = groupIds.map((gid) => (smoke.has(gid) ? undefined : l.groups.find((e) => e.group === gid)));
     const colours = entries.map((entry) => {
       const preset = entry ? presetById.get(entry.preset) : undefined;
       if (!preset) return null;
@@ -111,7 +116,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
         }));
       const any = (roles: ChannelRole[]) => g.fixtures.some((f) => hasRole(f, roles));
       return [{
-        id: g.id, name: g.name, whiteOnly: groupIsWhiteOnly(show, g.id),
+        id: g.id, name: g.name, kind: g.kind, whiteOnly: groupIsWhiteOnly(show, g.id),
         extras: { white: any(['white']), amber: any(['amber']), uv: any(['uv']) },
         presets,
       }];

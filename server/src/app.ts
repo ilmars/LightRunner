@@ -458,7 +458,11 @@ export class App {
             // The tablet went away while its Flash was on its way.
             if (cmd.data.on) release(cmd.data.groups);
           } else {
+            // The engine leaves smoke groups out of a flash of several groups (only a Puff runs them),
+            // so this tablet doesn't hold them; counting them would keep another tablet's Puff on.
+            const several = cmd.data.groups.length > 1;
             for (const g of cmd.data.groups) {
+              if (cmd.data.on && several && this.isSmokeGroup(g)) continue;
               if (cmd.data.on) held.add(g);
               else held.delete(g);
             }
@@ -467,6 +471,10 @@ export class App {
         if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'result', ref: msg.ref ?? null, error }));
       }
     });
+  }
+
+  private isSmokeGroup(id: string): boolean {
+    return this.show.groups.some((g) => g.id === id && g.kind === 'smoke');
   }
 
   /** Pings every tablet; one that missed the last two pings is dropped, which ends its Flash. */

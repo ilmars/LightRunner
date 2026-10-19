@@ -249,6 +249,18 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .row .pct.zero { color: var(--ds-muted); }
 /* Group dimmer: the design system's fill slider, across the zone. */
 .row .ds-fill { grid-column: 1 / -1; height: auto; align-self: stretch; min-height: 44px; max-height: 64px; }
+/* A smoke or haze machine: a plain "Smoke" label instead of the colour chip, Puff on the right,
+   and a neutral grey fill (no colour to carry). */
+.row.smoke { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-rows: var(--ds-target) minmax(44px, 1fr); }
+.row .smoke-tag { justify-self: start; padding: 0 10px; color: var(--ds-muted); font-size: 15px; }
+.row.smoke .ds-fill > .ds-fill-slab { background: var(--ds-fill-sheen), linear-gradient(90deg, rgba(143, 154, 176, 0.20), rgba(160, 170, 190, 0.28)); }
+.puff {
+  min-height: var(--ds-target); min-width: 76px; padding: 0 16px; border: 0; border-radius: var(--ds-r-pill);
+  background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low); color: var(--ds-muted-on); font-size: 14px; font-weight: 500;
+  touch-action: none; -webkit-touch-callout: none;
+}
+/* Held: tinted, like a held Flash button. */
+.puff.down { background: var(--ds-selected); color: var(--ds-text); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
 
 /* ---- Colour picker: covers the details panel only ---- */
 .picker {
