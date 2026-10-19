@@ -1072,13 +1072,28 @@ function finishSaveQuick() {
 
 // ---- Flash: hold a button and the group goes to full white ----
 
-/** Short label for each group: its first word, or the name cut to 6 characters when two groups share it. */
+/**
+ * Short label for each group, as the spec's "Front, Key, Back, Drum, B8": the first
+ * word of its name, cut to 4 letters when it is longer than 6. Groups that would share
+ * a label (or take "All") get their name cut to 8 instead, then 2, 3, … if still the same.
+ */
 function flashLabels(groups) {
-  const first = groups.map((g) => g.name.trim().split(/\s+/)[0] ?? '');
-  return groups.map((g, i) => {
-    const shared = first.filter((w) => w.toLowerCase() === first[i].toLowerCase()).length > 1;
-    return (shared ? g.name.trim() : first[i]).slice(0, 6);
-  });
+  const names = groups.map((g) => g.name.trim());
+  const firstWord = (name) => {
+    const w = name.split(/\s+/)[0] ?? '';
+    return w.length > 6 ? w.slice(0, 4) : w;
+  };
+  // "All" is the first button, so it counts as taken.
+  const clashes = (list, i) => list.filter((w) => w.toLowerCase() === list[i].toLowerCase()).length > 1;
+  const short = ['All', ...names.map(firstWord)];
+  const longer = short.map((w, i) => (i > 0 && clashes(short, i) ? names[i - 1].slice(0, 8) : w));
+  const seen = new Map();
+  return longer.map((w) => {
+    const key = w.toLowerCase();
+    const n = (seen.get(key) ?? 0) + 1;
+    seen.set(key, n);
+    return n === 1 ? w : `${w} ${n}`;
+  }).slice(1);
 }
 
 // Buttons now held: pointer id -> { button, groups }.
