@@ -98,6 +98,23 @@ export function writeFixture(buf: Uint8Array, plan: ChannelPlan, light: Light): 
   }
 }
 
+/**
+ * Write a smoke or haze machine: only its output level, linear (no gamma), on
+ * its dimmer channel, or on its one channel when the profile has a single
+ * channel of another role. Every other channel keeps its fixed value (fan,
+ * mode, ...), and colour channels stay at 0.
+ */
+export function writeSmoke(buf: Uint8Array, plan: ChannelPlan, level: number): void {
+  const single = plan.channels.length === 1;
+  for (const ch of plan.channels) {
+    if (ch.role === 'dimmer' || single) put(buf, ch, level);
+    else {
+      buf[ch.at] = ch.fixed;
+      if (ch.fineAt >= 0 && ch.fineAt < 512) buf[ch.fineAt] = 0;
+    }
+  }
+}
+
 /** Blue-to-red ratio of typical white sources at a given colour temperature. */
 const KELVIN_BY_RATIO: [number, number][] = [
   [0.2, 2000], [0.34, 2700], [0.45, 3200], [0.64, 4000], [0.87, 5600], [1.0, 6500], [1.27, 10000],
