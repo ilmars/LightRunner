@@ -49,6 +49,7 @@ function connect() {
       buildDetails();
       buildQuick();
       buildSheetGroups();
+      buildFlash();
       render();
     } else if (msg.type === 'state') {
       if (state && msg.state.look !== seenLook) previousLook = seenLook;
@@ -74,6 +75,9 @@ function setConnected(on) {
   $('link').classList.toggle('down', !on);
   $('linkText').textContent = on ? 'Connected' : 'Offline';
   if (!on) {
+    // The server puts a flash out when it loses us; show the same here.
+    for (const h of flashHeld.values()) h.button.classList.remove('down');
+    flashHeld.clear();
     // Answers that can no longer come: let a tap on ＋ Add song go through again.
     pendingAdd = null;
     addWanted = false;
@@ -1065,6 +1069,63 @@ function finishSaveQuick() {
   closeSheet();
   showQuickTab(tab);
 }
+
+// ---- Flash: hold a button and the group goes to full white ----
+
+/** Short label for each group: its first word, or the name cut to 6 characters when two groups share it. */
+function flashLabels(groups) {
+  const first = groups.map((g) => g.name.trim().split(/\s+/)[0] ?? '');
+  return groups.map((g, i) => {
+    const shared = first.filter((w) => w.toLowerCase() === first[i].toLowerCase()).length > 1;
+    return (shared ? g.name.trim() : first[i]).slice(0, 6);
+  });
+}
+
+// Buttons now held: pointer id -> { button, groups }.
+const flashHeld = new Map();
+
+/** Puts out one flash. Groups another held button still covers stay on. */
+function flashOff(pointerId) {
+  const h = flashHeld.get(pointerId);
+  if (!h) return;
+  flashHeld.delete(pointerId);
+  h.button.classList.remove('down');
+  const still = new Set([...flashHeld.values()].flatMap((o) => o.groups));
+  const groups = h.groups.filter((id) => !still.has(id));
+  if (groups.length) send({ type: 'flash', groups, on: false });
+}
+
+const flashAllOff = () => { for (const id of [...flashHeld.keys()]) flashOff(id); };
+
+function buildFlash() {
+  flashAllOff();
+  const root = $('flashArea');
+  root.replaceChildren(el('span', 'flash-label', 'Flash'));
+  const labels = flashLabels(layout.groups);
+  const buttons = [['All', layout.groups.map((g) => g.id), 'All lights']];
+  layout.groups.forEach((g, i) => buttons.push([labels[i], [g.id], g.name]));
+  for (const [text, groups, full] of buttons) {
+    const b = el('button', null, text);
+    b.setAttribute('aria-label', `Flash ${full} (hold)`);
+    root.append(b);
+    b.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      if (flashHeld.has(ev.pointerId)) return;
+      // Keep getting the release when the finger slides off the button.
+      try { b.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+      if (send({ type: 'flash', groups, on: true }) === null) return;
+      flashHeld.set(ev.pointerId, { button: b, groups });
+      b.classList.add('down');
+    });
+    const end = (ev) => flashOff(ev.pointerId);
+    for (const name of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) b.addEventListener(name, end);
+    b.addEventListener('contextmenu', (ev) => ev.preventDefault());
+  }
+}
+
+// A page that goes to the background or loses its connection can't send the release; end every flash here.
+document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') flashAllOff(); });
+window.addEventListener('blur', flashAllOff);
 
 // ---- Mini visualiser (for looking only) ----
 

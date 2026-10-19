@@ -290,18 +290,29 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .master-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: #3a3e46; }
 .master-handle { position: absolute; top: 5px; bottom: 5px; left: 100%; width: 4px; margin-left: -4px; background: #8e959f; border-radius: 2px; }
 .master.dragging .master-track { outline: 2px solid var(--accent); outline-offset: 1px; }
-.flash-area { flex: 1; min-width: 0; display: flex; align-items: stretch; gap: 6px; }
+.flash-area {
+  flex: 1; min-width: 0; display: flex; align-items: stretch; justify-content: center; gap: 6px; padding: 6px 8px;
+  background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.flash-area .flash-label { align-self: center; color: var(--dim); font-size: 13px; padding: 0 2px; }
+.flash-area button {
+  flex: none; width: 58px; padding: 0; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  touch-action: none; -webkit-touch-callout: none;
+}
+/* Held: the one place a control is allowed to be lighter, so the volunteer sees it is on. */
+.flash-area button.down { background: #3a4352; border-color: #8e959f; color: #fff; }
 
 .action {
-  flex: none; min-width: 96px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--raised);
+  flex: none; min-width: 84px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--raised);
   font-size: 17px; font-weight: 600; padding: 0 14px;
 }
 .action:active { background: #262a31; }
 .undo { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .undo:disabled { opacity: 0.4; }
-.next { min-width: 190px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+.next { min-width: 160px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
 .next small { color: var(--dim); font-size: 12px; font-weight: 500; }
-.next .next-name { max-width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.next .next-name { max-width: 136px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .next:disabled { opacity: 0.45; }
 .blackout {
   position: relative; overflow: hidden; min-width: 120px; background: #1a1012; border-color: #3a1f22; color: #d9a3a3;
