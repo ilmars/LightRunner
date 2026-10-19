@@ -123,6 +123,12 @@ export interface RuntimeState {
 export const SAFE = 'safe';
 export const BLACKOUT = 'blackout';
 
+/** Preset ids the engine gives its own Safe light and Blackout. They are never in a show. */
+export const SAFE_PRESET = '__safe';
+export const BLACKOUT_PRESET = '__blackout';
+/** Safe's fixed warm white stage wash, as Basic lights shows it. The engine builds its light from this. */
+export const SAFE_LIGHT = { hex: '#ffd2a0', white: 0.5, intensity: 0.8 } as const;
+
 /**
  * A preset id that stands for "this group in this exact colour" (the Any colour
  * pick). It is not a preset in the show; Save turns it into a custom one.

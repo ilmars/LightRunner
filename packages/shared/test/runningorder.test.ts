@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   addSong, applyPicks, checkReferences, cleanName, deleteItem, ensureRunningOrder, livePresetId, moveItem,
-  parseLivePreset, parseShow, renameItem, saveItem, saveQuickLook, type Show, type Stage,
+  parseLivePreset, parseShow, renameItem, saveItem, saveQuickLook, BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET,
+  type Show, type Stage,
 } from '../src/index.ts';
 
 const load = (path: string): Show => parseShow(JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')));
@@ -266,4 +267,39 @@ test('removing a look in merge drops it from the running order and quick looks',
   incoming2.operator.quickLooks = incoming2.operator.quickLooks.filter((q) => q.look !== quick);
   const merged2 = applyPicks(s, incoming2, [{ kind: 'look', id: quick, change: 'removed' }]);
   assert.ok(!merged2.operator.quickLooks.some((q) => q.look === quick));
+});
+
+test("Save after Basic lights stores the built-in safe light as one reusable Basic light preset", () => {
+  let s = ready();
+  const stage: Stage = { groups: { 'key-lights': SAFE_PRESET, background: SAFE_PRESET }, levels: { background: 0.5 } };
+  s = saveItem(s, look(s, 'Song 1').id, stage);
+  const made = s.presets.filter((p) => p.custom);
+  assert.equal(made.length, 2, 'one per group');
+  for (const p of made) {
+    assert.equal(p.name, 'Basic light');
+    assert.deepEqual(p.layers, [{ kind: 'static', colour: { hex: SAFE_LIGHT.hex, white: SAFE_LIGHT.white }, intensity: SAFE_LIGHT.intensity }]);
+  }
+  assert.equal(look(s, 'Song 1').groups.find((e) => e.group === 'background')!.level, 0.5);
+  // A second Save, an added song and a quick look use the same presets.
+  s = saveItem(s, look(s, 'Song 2').id, stage);
+  s = addSong(s, look(s, 'Song 2').id, stage).show;
+  s = saveQuickLook(s, { name: 'Calm', tab: 'plain', groups: ['background'] }, stage).show;
+  assert.equal(s.presets.filter((p) => p.custom).length, 2);
+  const bg = (name: string) => look(s, name).groups.find((e) => e.group === 'background')!.preset;
+  assert.equal(bg('Song 2'), bg('Song 1'));
+  assert.equal(bg('Calm'), bg('Song 1'));
+  assert.deepEqual(checkReferences(s), []);
+});
+
+test('a stray Blackout on a group is saved as a dark "Off" preset, reused per group', () => {
+  let s = ready();
+  const stage: Stage = { groups: { background: BLACKOUT_PRESET }, levels: {} };
+  s = saveItem(s, look(s, 'Song 1').id, stage);
+  s = saveItem(s, look(s, 'Song 2').id, stage);
+  const off = s.presets.filter((p) => p.custom);
+  assert.equal(off.length, 1);
+  assert.equal(off[0]!.name, 'Off');
+  assert.equal(off[0]!.group, 'background');
+  assert.ok(off[0]!.layers.every((l) => l.intensity === 0));
+  assert.equal(look(s, 'Song 2').groups[0]!.preset, off[0]!.id);
 });

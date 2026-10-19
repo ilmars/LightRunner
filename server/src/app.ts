@@ -15,7 +15,7 @@ import {
   BUILT_IN_PROFILES, Command, OutputSettings, addSong, applyPicks, deleteItem, describeMode, diffShows, ensureRunningOrder, isManualCommand,
   isShowEdit, moveItem, oflToProfile, parseShow, renameItem, saveItem, saveQuickLook,
   type OflFixture, type Pick, type Scope,
-  type LiveState, type RuntimeState, type Show, type ShowEdit,
+  BLACKOUT, type LiveState, type RuntimeState, type Show, type ShowEdit,
 } from '../../packages/shared/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
 import { discoverArtNet } from './discovery.ts';
@@ -85,6 +85,12 @@ export class App {
    * before an operator edit, or 'stage' for a step the engine keeps itself.
    */
   private undoLog: (Show | 'stage')[] = [];
+  /**
+   * The first operator edit after start or after a programmer save keeps a
+   * backup; the rest of a rehearsal's edits don't, so they can't push the
+   * programmer's backups out.
+   */
+  private operatorBackedUp = false;
   /** Groups each tablet is holding a Flash on, so they go out if it disconnects. */
   private readonly flashes = new Map<WebSocket, Set<string>>();
   private latestRuntime: RuntimeState | null = null;
@@ -292,7 +298,7 @@ export class App {
         // Undo of a show edit puts the show back and leaves the stage as it is.
         this.undoLog.pop();
         try {
-          await this.putShow(last);
+          await this.operatorSave(last);
         } catch (err) {
           this.undoLog.push(last); // still there to try again
           return { error: (err as Error).message, recorded: false };
@@ -317,6 +323,7 @@ export class App {
   private async editShow(cmd: ShowEdit): Promise<void> {
     const usesStage = cmd.type === 'saveItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook';
     const stage = usesStage ? await this.stage() : null;
+    if (stage?.look === BLACKOUT) throw new Error('Blackout is on. Bring the lights back, then save.');
     // Nothing below waits until the show is replaced, so no other edit can slip in between.
     const before = this.show;
     let next: Show;
@@ -332,7 +339,7 @@ export class App {
       case 'moveItem': next = moveItem(before, cmd.id, cmd.to); break;
       case 'saveQuickLook': next = saveQuickLook(before, { name: cmd.name, tab: cmd.tab, groups: cmd.groups }, stage!).show; break;
     }
-    await this.putShow(next);
+    await this.operatorSave(next);
     this.remember(before);
     // Undo lights up at once, without waiting for the engine's next state.
     this.publishState();
@@ -358,14 +365,21 @@ export class App {
     const hadShowSteps = this.undoLog.some((step) => step !== 'stage');
     this.undoLog = this.undoLog.filter((step) => step === 'stage');
     await this.putShow(show);
+    this.operatorBackedUp = false;
     if (hadShowSteps) this.publishState();
   }
 
+  /** An operator edit or its Undo: saved like any change, but only the first one keeps a backup. */
+  private async operatorSave(show: Show): Promise<void> {
+    await this.putShow(show, !this.operatorBackedUp);
+    this.operatorBackedUp = true;
+  }
+
   /** Save the show, hand it to the engine and send every device the new layout. */
-  private async putShow(show: Show): Promise<void> {
+  private async putShow(show: Show, backup = true): Promise<void> {
     // A show that arrives without a running order (import, restore, merge) gets one, as at start.
     if (!show.operator.runningOrder.length) show = ensureRunningOrder(show);
-    this.store.saveShow(show);
+    this.store.saveShow(show, { backup });
     this.show = show;
     this.post({ type: 'show', show: this.engineShow() });
     this.watchNode();

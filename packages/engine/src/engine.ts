@@ -3,7 +3,7 @@
 // same code drives output, tests, blind preview and the soak test.
 
 import {
-  BLACKOUT, HEX_COLOUR, SAFE, findProfile, livePresetId, parseLivePreset,
+  BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, findProfile, livePresetId, parseLivePreset,
   type StageCommand, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
   type Palette, type RuntimeState, type Show,
 } from '../../shared/src/index.ts';
@@ -13,7 +13,7 @@ import { copy, dark, fromHex, mix, mix2, type Light } from './light.ts';
 import { planChannels, writeFixture, type ChannelPlan } from './output.ts';
 
 /** Safe's fixed warm white stage wash. */
-const SAFE_LIGHT = fromHex('#ffd2a0', 0.5, 0.8);
+const SAFE_LIGHT = fromHex(SAFE_COLOUR.hex, SAFE_COLOUR.white, SAFE_COLOUR.intensity);
 /** Flash: full white, snapping on and off. */
 const FLASH_LIGHT = fromHex('#ffffff');
 const SAFE_FADE = 1;
@@ -38,8 +38,8 @@ const DEFAULT_FADE = 3;
 const UNDO_FADE = 2;
 const UNDO_STEPS = 20;
 
-const SAFE_ID = '__safe';
-const BLACKOUT_ID = '__blackout';
+const SAFE_ID = SAFE_PRESET;
+const BLACKOUT_ID = BLACKOUT_PRESET;
 
 interface Snapshot {
   look: string | null;

@@ -2,8 +2,8 @@
 // show and returns a new one; the input is never changed. Bad input throws an
 // Error with a plain message the page can show as it is.
 
-import { parseLivePreset } from './protocol.ts';
-import type { Look, LookEntry, Preset, QuickTab, Show } from './schema.ts';
+import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, parseLivePreset } from './protocol.ts';
+import type { Layer, Look, LookEntry, Preset, QuickTab, Show } from './schema.ts';
 
 /** Where the stage is going: preset ids (possibly live ones) and level targets, as in RuntimeState. */
 export interface Stage {
@@ -40,10 +40,34 @@ function addLook(show: Show, name: string, groups: LookEntry[]): string {
   return id;
 }
 
+/** The engine's own Safe light and Blackout, as the presets a Save stores them as. */
+const BUILT_IN = new Map<string, { name: string; swatch: string; layer: Layer }>([
+  [SAFE_PRESET, {
+    name: 'Basic light',
+    swatch: SAFE_LIGHT.hex,
+    layer: { kind: 'static', colour: { hex: SAFE_LIGHT.hex, white: SAFE_LIGHT.white }, intensity: SAFE_LIGHT.intensity },
+  }],
+  // Only a group Blackout left dark (Save itself is refused during Blackout).
+  [BLACKOUT_PRESET, { name: 'Off', swatch: '#000000', layer: { kind: 'static', colour: { hex: '#000000' }, intensity: 0 } }],
+]);
+
+const layerKey = (l: Layer) => JSON.stringify(['palette' in l.colour ? l.colour : [l.colour.hex.toLowerCase(), l.colour.white ?? 0], l.intensity]);
+
+/** The group's custom preset for a built-in light, made the first time and reused after. */
+function builtInPreset(show: Show, group: string, made: { name: string; swatch: string; layer: Layer }): string {
+  const key = layerKey(made.layer);
+  const same = show.presets.find((p) => p.custom && p.group === group && p.layers.length === 1 && layerKey(p.layers[0]!) === key);
+  if (same) return same.id;
+  const id = uniqueId(made.name, show.presets.map((p) => p.id));
+  show.presets.push({ id, name: made.name, group, custom: true, layers: [structuredClone(made.layer)], fade: 3, swatch: made.swatch });
+  return id;
+}
+
 /**
  * The look entries for these groups: one per group with a preset. A live preset
  * (an "Any colour" pick) becomes a new custom preset in `show`; an existing one
- * is only referenced.
+ * is only referenced. The engine's Safe light and Blackout become the group's
+ * "Basic light" and "Off" custom presets, shared by every save.
  */
 function entriesFor(show: Show, stage: Stage, only?: string[]): LookEntry[] {
   const entries: LookEntry[] = [];
@@ -52,7 +76,10 @@ function entriesFor(show: Show, stage: Stage, only?: string[]): LookEntry[] {
     if (!show.groups.some((g) => g.id === group)) throw new Error(`the show has no group "${group}"`);
     const level = stage.levels[group] ?? 1;
     const live = parseLivePreset(preset);
-    if (live) {
+    const builtIn = BUILT_IN.get(preset);
+    if (builtIn) {
+      entries.push({ group, preset: builtInPreset(show, group, builtIn), level });
+    } else if (live) {
       const made: Preset = {
         id: uniqueId('Custom', show.presets.map((p) => p.id)),
         name: 'Custom',

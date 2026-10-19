@@ -414,6 +414,54 @@ test("Undo doesn't take back an operator edit from before a programmer change", 
   assert.equal((await api(app, 'GET', '/api/settings')).body.showName, 'Sunday');
 }));
 
+test('Save, add and Save as quick look work after Basic lights', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const [, one, two] = t.order();
+  assert.equal(await t.send({ type: 'safe' }), null);
+  await waitFor(() => t.state()?.look === 'safe');
+  assert.equal(await t.send({ type: 'saveItem', id: one }), null);
+  assert.equal(await t.send({ type: 'saveItem', id: two }), null);
+  assert.equal(await t.send({ type: 'addSong', after: two }), null);
+  assert.equal(await t.send({ type: 'saveQuickLook', name: 'Calm', tab: 'plain', groups: ['back-wall'] }), null);
+  const show = parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8')));
+  const basic = show.presets.filter((p) => p.name === 'Basic light');
+  assert.equal(basic.length, show.groups.length, 'one Basic light preset per group, reused by every save');
+  assert.ok(basic.every((p) => p.custom));
+  const presetsOf = (id: string) => show.looks.find((l) => l.id === id)!.groups.map((e) => e.preset).sort();
+  assert.deepEqual(presetsOf(one!), basic.map((p) => p.id).sort());
+  assert.deepEqual(presetsOf(two!), presetsOf(one!));
+}));
+
+test('Save is refused while Blackout is on', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'blackout' }), null);
+  const refused = 'Blackout is on. Bring the lights back, then save.';
+  assert.equal(await t.send({ type: 'saveItem', id: song }), refused);
+  assert.equal(await t.send({ type: 'addSong', after: song }), refused);
+  assert.equal(await t.send({ type: 'saveQuickLook', name: 'Dark', tab: 'plain', groups: ['back-wall'] }), refused);
+  assert.equal(await t.send({ type: 'renameItem', id: song, name: 'Opening' }), null, 'other edits still work');
+}));
+
+test('operator edits make one backup, and a programmer save allows one more', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  const start = app.store.backups().length;
+  assert.equal(await t.send({ type: 'renameItem', id: song, name: 'Opening' }), null);
+  assert.equal(await t.send({ type: 'renameItem', id: song, name: 'Welcome' }), null);
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(app.store.backups().length, start + 1);
+  assert.equal((await api(app, 'PUT', '/api/settings', { showName: 'Sunday' })).status, 200);
+  assert.equal(app.store.backups().length, start + 2);
+  assert.equal(await t.send({ type: 'renameItem', id: song, name: 'Opening' }), null);
+  assert.equal(await t.send({ type: 'moveItem', id: song, to: 3 }), null);
+  assert.equal(app.store.backups().length, start + 3);
+}));
+
 test('deleting the item on stage leaves the stage alone and nothing breaks', () => withApp(async (app) => {
   const t = await tablet(app);
   await waitFor(t.layout);

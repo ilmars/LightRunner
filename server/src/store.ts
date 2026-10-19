@@ -58,9 +58,10 @@ export class Store {
     return { show, source: 'seed', problem };
   }
 
-  saveShow(show: Show): void {
+  /** Saves the show, first keeping the old one as a backup unless `backup` is false. */
+  saveShow(show: Show, { backup = true }: { backup?: boolean } = {}): void {
     parseShow(show);
-    if (existsSync(this.showPath)) {
+    if (backup && existsSync(this.showPath)) {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const seq = String(this.saves++ % 10000).padStart(4, '0');
       copyFileSync(this.showPath, join(this.dir, 'backups', `show-${stamp}-${seq}.json`));
