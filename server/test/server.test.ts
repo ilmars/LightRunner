@@ -526,3 +526,51 @@ test('show edits are open to operators without the PIN', () => withApp(async (ap
   // The PIN is still set after all those saves.
   assert.equal((await api(app, 'GET', '/api/settings')).status, 401);
 }));
+
+/** Starts a song, picks Any colour on the back wall, saves it, then takes the Save back with Undo. */
+async function saveThenUndo(t: Awaited<ReturnType<typeof tablet>>, dir: string) {
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupColour', group: 'back-wall', colour: '#12ab34', fade: 0 }), null);
+  assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+  const custom = savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')!.preset;
+  await waitFor(() => t.state()?.groups['back-wall'].preset === custom, 2000, 'the stage to run the saved preset');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.notEqual(savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')?.preset, custom);
+  return { song, custom };
+}
+
+test('Undo of a Save keeps the hidden preset the stage is running, so Save works again', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  const { song, custom } = await saveThenUndo(t, dir);
+  assert.equal(t.state().groups['back-wall'].preset, custom);
+  assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+  assert.equal(savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')?.preset, custom);
+}));
+
+test('after Undo of a Save, a restart still lights the group in the same colour', async () => {
+  const dir = tempDir();
+  const a = makeApp(dir);
+  const b = makeApp(dir);
+  try {
+    await a.start();
+    const t = await tablet(a);
+    const { custom } = await saveThenUndo(t, dir);
+    await sleep(100);
+    t.ws.close();
+    await a.stop();
+
+    await b.start();
+    await sleep(80);
+    const state = (await api(b, 'GET', '/api/state')).body;
+    assert.equal(state.groups['back-wall'].preset, custom);
+    const preset = parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).presets.find((p) => p.id === custom);
+    assert.equal(preset?.swatch, '#12ab34');
+    assert.deepEqual(preset?.layers[0], { kind: 'static', colour: { hex: '#12ab34' }, intensity: 1 });
+  } finally {
+    await a.stop();
+    await b.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -298,7 +298,9 @@ export class App {
         // Undo of a show edit puts the show back and leaves the stage as it is.
         this.undoLog.pop();
         try {
-          await this.operatorSave(last);
+          // The stage may be running a hidden preset that Save made; keep it, or the
+          // next Save or a restart would find it gone.
+          await this.operatorSave(keepCustomPresets(last, this.show));
         } catch (err) {
           this.undoLog.push(last); // still there to try again
           return { error: (err as Error).message, recorded: false };
@@ -856,6 +858,17 @@ export class App {
     if (error) throw new HttpError(error.startsWith('unknown') ? 404 : 400, error);
     json(res, 200, { ok: true });
   }
+}
+
+/**
+ * The show an Undo goes back to, plus the hidden custom presets (Any colour, Basic light,
+ * Off) that the current show has and it lacks: the stage may be running one of them.
+ */
+function keepCustomPresets(restored: Show, current: Show): Show {
+  const have = new Set(restored.presets.map((p) => p.id));
+  const groups = new Set(restored.groups.map((g) => g.id));
+  const kept = current.presets.filter((p) => p.custom && !have.has(p.id) && groups.has(p.group));
+  return kept.length ? { ...restored, presets: [...restored.presets, ...structuredClone(kept)] } : restored;
 }
 
 function slugKey(text: string): string {
