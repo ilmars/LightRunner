@@ -20,6 +20,8 @@ let orderRows = [];
 // The look before the one now on stage, for "Song 3 → Song 4" while a fade runs.
 let seenLook = null;
 let previousLook = null;
+// The ref of a Save from the new-quick-look sheet that the server hasn't answered yet.
+let pendingSave = null;
 
 // ---- Connection: reconnect every 2 s and resync on reconnect ----
 
@@ -45,14 +47,22 @@ function connect() {
       layout = msg.layout;
       buildOrder();
       buildDetails();
+      buildQuick();
+      buildSheetGroups();
       render();
     } else if (msg.type === 'state') {
       if (state && msg.state.look !== seenLook) previousLook = seenLook;
       seenLook = msg.state.look;
       state = msg.state;
       render();
-    } else if (msg.type === 'result' && msg.error) {
-      toast(msg.error);
+    } else if (msg.type === 'result') {
+      if (msg.ref !== null && msg.ref === pendingSave) {
+        // The answer to the sheet's Save: on an error the sheet stays open to fix it.
+        pendingSave = null;
+        if (!msg.error) finishSaveQuick();
+        else renderSheet();
+      }
+      if (msg.error) toast(msg.error);
     }
   };
 }
@@ -62,14 +72,21 @@ function setConnected(on) {
   $('banner').hidden = on;
   $('link').classList.toggle('down', !on);
   $('linkText').textContent = on ? 'Connected' : 'Offline';
+  if (!on && pendingSave !== null) {
+    // The answer may never come; let the user try Save again.
+    pendingSave = null;
+    renderSheet();
+  }
 }
 
+/** Sends a command; returns its ref (to match the server's answer), or null when not connected. */
 function send(cmd) {
   if (!connected) {
     toast('Not connected. Lights keep running; try again in a moment.');
-    return;
+    return null;
   }
   socket.send(JSON.stringify({ type: 'command', ref: ++ref, cmd }));
+  return ref;
 }
 
 // ---- Running order ----
@@ -425,6 +442,7 @@ function renderDetails() {
     if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
   }
   if (picker.group) renderPicker();
+  if (qs.open) renderSheet();
 }
 
 // Back and Save.
@@ -506,6 +524,7 @@ function renderPicker() {
 }
 
 function openPicker(groupId) {
+  closeSheet();
   if (picker.group !== groupId) {
     $('pAnyH').hidden = true;
   }
@@ -572,6 +591,143 @@ for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('clic
   strip.addEventListener('pointerup', end);
   strip.addEventListener('pointercancel', end);
 })();
+
+// ---- Quick looks: tabs and grid ----
+
+let quickTab = 'plain';
+
+function showQuickTab(name) {
+  quickTab = name;
+  for (const t of document.querySelectorAll('[data-qt]')) {
+    const on = t.dataset.qt === name;
+    t.classList.toggle('on', on);
+    t.setAttribute('aria-selected', String(on));
+  }
+  buildQuick();
+}
+for (const t of document.querySelectorAll('[data-qt]')) t.addEventListener('click', () => showQuickTab(t.dataset.qt));
+
+function buildQuick() {
+  const grid = $('qGrid');
+  grid.replaceChildren();
+  const mine = (layout?.quickLooks ?? []).filter((q) => q.tab === quickTab);
+  for (const q of mine) {
+    const b = el('button', 'ql');
+    b.append(el('span', 'qname', q.name));
+    // A thin strip along the bottom: one block per group, the colour this quick look gives it.
+    const strip = el('span', 'qstrip');
+    (q.colours ?? []).forEach((c, i) => {
+      const block = el('i');
+      if (c) block.style.background = c;
+      block.title = layout.groups[i]?.name ?? '';
+      strip.append(block);
+    });
+    b.append(strip);
+    b.addEventListener('click', () => send({ type: 'quickLook', id: q.id }));
+    grid.append(b);
+  }
+  if (!mine.length) grid.append(el('span', 'qnone', 'None yet.'));
+  const add = el('button', 'ql newq', '＋ Save stage as quick look');
+  add.addEventListener('click', openSheet);
+  grid.append(add);
+}
+
+// ---- New quick look sheet (covers the details panel, like the colour picker) ----
+
+const qs = { open: false, tab: 'plain', left: new Set(), saved: 'plain' };
+
+function openSheet() {
+  closePicker();
+  qs.open = true;
+  qs.tab = quickTab;
+  qs.left = new Set();
+  pendingSave = null;
+  $('qsName').value = '';
+  buildSheetGroups();
+  $('qSheet').hidden = false;
+  renderSheet();
+}
+
+function closeSheet() {
+  qs.open = false;
+  pendingSave = null;
+  $('qSheet').hidden = true;
+  $('qsName').blur();
+}
+
+/** One tile per group; tapping one toggles "left out". */
+function buildSheetGroups() {
+  const root = $('qsGroups');
+  root.replaceChildren();
+  if (!layout) return;
+  const ids = new Set(layout.groups.map((g) => g.id));
+  for (const id of [...qs.left]) if (!ids.has(id)) qs.left.delete(id);
+  for (const group of layout.groups) {
+    const b = el('button');
+    b.dataset.group = group.id;
+    const line = el('span', 'gs');
+    line.append(el('i'), el('span'));
+    b.append(el('span', 'gn', group.name), line, el('span', 'gl'));
+    b.addEventListener('click', () => {
+      if (qs.left.has(group.id)) qs.left.delete(group.id); else qs.left.add(group.id);
+      renderSheet();
+    });
+    root.append(b);
+  }
+}
+
+function renderSheet() {
+  if (!qs.open || !layout) return;
+  for (const b of $('qsTab').children) {
+    const on = b.dataset.t === qs.tab;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  }
+  for (const b of $('qsGroups').children) {
+    const group = layout.groups.find((g) => g.id === b.dataset.group);
+    const s = state?.groups?.[b.dataset.group];
+    const info = presetInfo(group, s?.preset);
+    const left = qs.left.has(b.dataset.group);
+    b.classList.toggle('off', left);
+    b.setAttribute('aria-pressed', String(!left));
+    b.querySelector('i').style.background = info.colour ?? '#0d0e11';
+    b.querySelector('.gs span').textContent = left ? 'left out' : info.name;
+    b.querySelector('.gl').textContent = left ? '' : `${Math.round((s?.level ?? 0) * 100)}%`;
+  }
+  $('qsSave').disabled = pendingSave !== null;
+}
+
+for (const b of $('qsTab').children) {
+  b.addEventListener('click', () => {
+    qs.tab = b.dataset.t;
+    renderSheet();
+  });
+}
+$('qsCancel').addEventListener('click', closeSheet);
+// The keyboard's Done closes the keyboard; nothing else on the page reacts to typing.
+$('qsName').addEventListener('keydown', (ev) => {
+  ev.stopPropagation();
+  if (ev.key === 'Enter') $('qsName').blur();
+});
+// A plain tap: a new quick look overwrites nothing. The sheet closes when the server says yes.
+$('qsSave').addEventListener('click', () => {
+  if (pendingSave !== null || !layout) return;
+  const groups = layout.groups.map((g) => g.id).filter((id) => !qs.left.has(id));
+  // The server would say this too, but in less friendly words.
+  if (!groups.length) {
+    toast('pick at least one group');
+    return;
+  }
+  qs.saved = qs.tab;
+  pendingSave = send({ type: 'saveQuickLook', name: $('qsName').value, tab: qs.tab, groups });
+  renderSheet();
+});
+
+function finishSaveQuick() {
+  const tab = qs.saved;
+  closeSheet();
+  showQuickTab(tab);
+}
 
 // ---- Mini visualiser (for looking only) ----
 

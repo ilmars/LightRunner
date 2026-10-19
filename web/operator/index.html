@@ -58,8 +58,15 @@
 
   <!-- Right column. -->
   <main class="right">
-    <!-- Task 8: Quick looks tabs and grid. -->
-    <section id="quickLooks" class="block quick-looks" aria-label="Quick looks"></section>
+    <!-- Quick looks: three tabs and a grid; the last tile opens the "new quick look" sheet over the details. -->
+    <section id="quickLooks" class="block quick-looks" aria-label="Quick looks">
+      <div class="qtabs" role="tablist" aria-label="Quick look tabs">
+        <button class="tab on" data-qt="plain" role="tab" aria-selected="true">Plain</button>
+        <button class="tab" data-qt="colours" role="tab" aria-selected="false">Colours</button>
+        <button class="tab" data-qt="effects" role="tab" aria-selected="false">Effects</button>
+      </div>
+      <div id="qGrid" class="qgrid"></div>
+    </section>
     <!-- Details: the item on stage with Back / Save, one row per group, and the colour picker over the top. -->
     <section id="details" class="block details" aria-label="Details">
       <div class="dhead">
@@ -84,6 +91,23 @@
           <div id="pAny" class="strip2 hue" aria-label="Any colour"><span id="pAnyH" class="strip-handle" hidden></span></div>
         </div>
         <p id="pFx" class="soon" hidden>Effects come later.</p>
+      </div>
+      <div id="qSheet" class="picker qsheet" hidden>
+        <div class="phead">
+          <h2>New quick look from the stage</h2>
+          <button id="qsCancel" class="ghost">Cancel</button>
+          <button id="qsSave" class="done">Save</button>
+        </div>
+        <label class="lab2" for="qsName">Name</label>
+        <input id="qsName" class="qs-name" type="text" maxlength="40" placeholder="e.g. Blue and warm" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
+        <p class="lab2" id="qsTabLab">Tab</p>
+        <div id="qsTab" class="seg" role="radiogroup" aria-labelledby="qsTabLab">
+          <button data-t="plain" role="radio">Plain</button>
+          <button data-t="colours" role="radio">Colours</button>
+          <button data-t="effects" role="radio">Effects</button>
+        </div>
+        <p class="lab2">Groups it sets <span class="lab-note">· tap a group to leave it out; left-out groups keep what they have</span></p>
+        <div id="qsGroups" class="gpick"></div>
       </div>
     </section>
   </main>

@@ -117,8 +117,31 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .sep { flex: none; height: 1px; margin: 4px 6px; background: var(--line); }
 
 /* ---- Right column ---- */
-.right { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1.5fr); gap: 8px; min-height: 0; min-width: 0; }
+.right { display: grid; grid-template-rows: 180px minmax(0, 1fr); gap: 8px; min-height: 0; min-width: 0; }
 .block { min-height: 0; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; overflow: hidden; }
+
+/* ---- Quick looks: tabs, then 6 columns by 2 rows (scrolls when a tab holds more) ---- */
+.quick-looks { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; }
+.qtabs { display: flex; gap: 4px; flex: none; }
+.qgrid {
+  flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-auto-rows: 53px; gap: 6px; align-content: start; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: #3a3f48 transparent;
+}
+.ql {
+  position: relative; overflow: hidden; display: flex; align-items: center; padding: 0 10px 4px; min-width: 0;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 10px; font-size: 15px; text-align: left;
+}
+.ql:active { background: #262a31; }
+.ql .qname {
+  min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  line-height: 1.15; overflow-wrap: anywhere;
+}
+.ql .qstrip { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; display: flex; opacity: 0.75; }
+.ql .qstrip i { flex: 1; }
+.ql.newq { grid-column: span 2; justify-content: center; background: transparent; border-style: dashed; color: var(--dim); font-size: 15px; }
+.ql.newq:active { background: var(--raised); }
+.qnone { grid-column: span 4; align-self: center; padding: 0 6px; color: var(--dim); font-size: 15px; }
 
 /* ---- Details: group rows ---- */
 .details { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; }
@@ -191,6 +214,31 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .strip2.cct { --grad: linear-gradient(90deg, #ffb46b, #f4f8ff); }
 .strip2.cct::before { opacity: 0.7; }
 .strip-handle { position: absolute; top: 4px; bottom: 4px; left: 0; width: 4px; background: #c9ccd2; border-radius: 2px; box-shadow: 0 0 0 1px #000; }
+/* ---- New quick look sheet (same cover as the colour picker) ---- */
+.lab-note { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.qs-name {
+  flex: none; min-height: 44px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg);
+  color: var(--text); font: inherit; font-size: 17px; user-select: text; -webkit-user-select: text;
+}
+.qs-name:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.qs-name::placeholder { color: var(--dim); }
+.seg { display: flex; gap: 4px; flex: none; }
+.seg button { min-height: 44px; min-width: 96px; padding: 0 14px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--dim); font-size: 15px; }
+.seg button.on { color: #e3e6ea; background: var(--raised); border-color: #3a4352; }
+.gpick { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; flex: none; }
+.gpick button {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px; min-height: 84px; padding: 10px;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 10px; text-align: left; min-width: 0;
+}
+.gpick .gn { font-weight: 600; font-size: 15px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gpick .gs { display: flex; align-items: center; gap: 8px; max-width: 100%; color: var(--dim); font-size: 13px; }
+.gpick .gl { color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; min-height: 1em; }
+.gpick .gs i { flex: none; width: 16px; height: 16px; border-radius: 5px; border: 1px solid var(--line); }
+.gpick .gs span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gpick button.off { border-style: dashed; background: transparent; }
+.gpick button.off .gn { color: var(--dim); font-weight: 500; }
+.gpick button.off .gs i { display: none; }
+.done:disabled { opacity: 0.5; }
 .soon { margin: 0; padding: 24px 4px; color: var(--dim); font-size: 15px; }
 
 /* ---- Bottom bar ---- */
