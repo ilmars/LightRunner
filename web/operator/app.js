@@ -1093,6 +1093,8 @@ function openEditor(preset) {
   $('peStrip').setAttribute('aria-label', row.group.whiteOnly ? 'Change the colour: warm to cool' : 'Change the colour');
   $('peH').hidden = true;
   $('peSw').style.background = colourEdit.swatch;
+  // The switch never carries over from an earlier colour: a change reaches other groups only when asked for each time.
+  $('peSame').checked = false;
   $('peSave').disabled = false;
   $('pEdit').hidden = false;
   renderEditor();
@@ -1116,10 +1118,15 @@ function renderEditor() {
     if (colourEdit) closeEditor(true);
     return;
   }
-  $('peUsed').textContent = p.usedBy?.length ? `Used in ${p.usedBy.slice(0, 4).join(', ')}${p.usedBy.length > 4 ? ` and ${p.usedBy.length - 4} more` : ''}` : 'Not used in any song or quick look';
-  const same = layout.groups.some((g) => g.id !== picker.group && g.presets.some((x) => x.name === p.name));
-  $('peSameWrap').hidden = !same;
-  if (!same) $('peSame').checked = false;
+  const others = layout.groups.filter((g) => g.id !== picker.group).flatMap((g) => g.presets.filter((x) => x.name === p.name));
+  $('peSameWrap').hidden = !others.length;
+  if (!others.length) $('peSame').checked = false;
+  // With the switch on, the change reaches every same-named colour, so list where any of them is used.
+  const affected = $('peSame').checked ? [p, ...others] : [p];
+  const used = [...new Set(affected.flatMap((x) => x.usedBy ?? []))];
+  $('peUsed').textContent = used.length ? `Used in ${used.slice(0, 4).join(', ')}${used.length > 4 ? ` and ${used.length - 4} more` : ''}` : 'Not used in any song or quick look';
+  // An Off colour can be renamed but has no colour to change.
+  $('peStrip').hidden = p.canRecolour === false;
 }
 
 function disarmDelete() {
@@ -1136,6 +1143,7 @@ $('peName').addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter') $('peName').blur();
 });
 $('peName').addEventListener('input', disarmDelete);
+$('peSame').addEventListener('change', renderEditor);
 attachStrip($('peStrip'), $('peH'), () => (pickerRow() ? pickerRow().group.whiteOnly : null), (hex) => {
   if (!colourEdit) return;
   colourEdit.colour = hex;
@@ -1149,7 +1157,7 @@ $('peSave').addEventListener('click', () => {
   const name = $('peName').value;
   const cmd = { type: 'editColour', preset: colourEdit.id, sameName: $('peSame').checked && !$('peSameWrap').hidden };
   if (name.trim() !== colourEdit.name) cmd.name = name;
-  if (colourEdit.colour) cmd.colour = colourEdit.colour;
+  if (colourEdit.colour && !$('peStrip').hidden) cmd.colour = colourEdit.colour;
   if (cmd.name === undefined && cmd.colour === undefined) {
     closeEditor();
     return;

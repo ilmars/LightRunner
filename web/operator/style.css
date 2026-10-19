@@ -283,7 +283,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* Keep a strip colour: a quiet pill beside the strip's label, and a small form under the strip. */
 .labrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; }
 .labrow .lab2 { margin: 4px 2px 0; }
-.pill-add { flex: none; min-height: 36px; }
+.pill-add { flex: none; min-height: 40px; }
 #pEditBtn { min-height: 40px; padding: 0 18px; }
 .padd {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 14px; flex: none; padding: 6px 12px;
@@ -298,6 +298,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .pc.editing { box-shadow: inset 0 0 0 1px var(--ds-accent); }
 .ghost.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
 .pedit .pe-strip { grid-column: 1 / -1; height: 40px; }
+.pe-strip[hidden] { display: none; }
 .pe-used { grid-column: 1 / -1; margin: 0 2px; font-size: var(--ds-fs-label); color: var(--ds-muted); }
 .pedit .padd-btns { grid-column: 2; justify-self: end; }
 .ghost.danger.armed { color: var(--ds-danger-text); background: var(--ds-danger-fill); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
