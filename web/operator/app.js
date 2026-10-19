@@ -474,6 +474,8 @@ function nextItem() {
 }
 
 $('next').addEventListener('click', () => {
+  // Nothing goes on stage while the running order is being edited.
+  if (editing) return;
   const item = nextItem();
   if (item) start(item);
 });
@@ -570,7 +572,7 @@ function render() {
   // Bottom bar.
   const next = nextItem();
   $('nextName').textContent = next ? next.name : 'End of list';
-  $('next').disabled = !next;
+  $('next').disabled = !next || editing;
   $('undo').disabled = !state.canUndo;
   $('blackout').classList.toggle('on', blackedOut);
   if (!master.dragging) master.set(state.master);
