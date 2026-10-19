@@ -22,8 +22,11 @@ export const Command = z.discriminatedUnion('type', [
   /** Set only the groups a look lists, leaving the current look and the other groups alone. */
   z.object({ type: z.literal('quickLook'), id, fade }),
   z.object({ type: z.literal('groupPreset'), group: id, preset: id, fade }),
-  /** Any colour: run this exact colour on a group, as a live preset. */
-  z.object({ type: z.literal('groupColour'), group: id, colour: hex, fade }),
+  /** Any colour: run this exact colour (with optional white, amber and UV) on a group, as a live preset. */
+  z.object({
+    type: z.literal('groupColour'), group: id, colour: hex,
+    white: unit.optional(), amber: unit.optional(), uv: unit.optional(), fade,
+  }),
   /** Hold the groups at full white while `on`; snaps, and is not saved or undone. */
   z.object({ type: z.literal('flash'), groups: z.array(id).max(64), on: z.boolean() }),
   z.object({ type: z.literal('manual'), target: ManualTarget, colour: hex.optional(), intensity: unit.optional() }),
@@ -129,15 +132,67 @@ export const BLACKOUT_PRESET = '__blackout';
 /** Safe's fixed warm white stage wash, as Basic lights shows it. The engine builds its light from this. */
 export const SAFE_LIGHT = { hex: '#ffd2a0', white: 0.5, intensity: 0.8 } as const;
 
+/** White, amber and UV levels (0..1) that go with a colour. */
+export interface ColourExtras {
+  white?: number;
+  amber?: number;
+  uv?: number;
+}
+
+/** A live colour: the group, its #rrggbb colour and any white, amber and UV (only those above 0 are set). */
+export interface LiveColour extends ColourExtras {
+  group: string;
+  colour: string;
+}
+
+const EXTRA_PARTS = [['white', 'w'], ['amber', 'a'], ['uv', 'u']] as const;
+
+/** A level 0..1 as a whole percentage, the way live preset ids carry it. */
+const percent = (v: number | undefined) => Math.round(Math.min(1, Math.max(0, v ?? 0)) * 100);
+
 /**
  * A preset id that stands for "this group in this exact colour" (the Any colour
  * pick). It is not a preset in the show; Save turns it into a custom one.
+ * White, amber and UV follow as whole percentages, leaving out the ones at 0:
+ * `live:key-lights:#ff0000:w40:a20`. Without them it is `live:<group>:<#hex>`, as it always was.
  */
-export function livePresetId(group: string, colour: string): string {
-  return `live:${group}:${colour.toLowerCase()}`;
+export function livePresetId(group: string, colour: string, extras: ColourExtras = {}): string {
+  let id = `live:${group}:${colour.toLowerCase()}`;
+  for (const [name, letter] of EXTRA_PARTS) {
+    const p = percent(extras[name]);
+    if (p > 0) id += `:${letter}${p}`;
+  }
+  return id;
 }
 
-export function parseLivePreset(id: string): { group: string; colour: string } | null {
-  const m = /^live:([^:]+):(#[0-9a-f]{6})$/.exec(id);
-  return m ? { group: m[1]!, colour: m[2]! } : null;
+/**
+ * A #rrggbb colour to show for a colour with white, amber and UV, as the
+ * visualiser draws them: white adds to all three, amber (about #ffbf00) to red
+ * and green, UV a faint violet; scaled back if a channel goes over full.
+ */
+export function displayColour(colour: string, extras: ColourExtras = {}): string {
+  const w = extras.white ?? 0, a = extras.amber ?? 0, u = extras.uv ?? 0;
+  if (!w && !a && !u) return colour.toLowerCase();
+  const n = parseInt(colour.slice(1), 16);
+  const rgb = [
+    ((n >> 16) & 255) / 255 + w + a + 0.25 * u,
+    ((n >> 8) & 255) / 255 + w + (0xbf / 255) * a,
+    (n & 255) / 255 + w + 0.4 * u,
+  ];
+  const scale = 1 / Math.max(1, ...rgb);
+  return `#${rgb.map((c) => Math.round(c * scale * 255).toString(16).padStart(2, '0')).join('')}`;
+}
+
+export function parseLivePreset(id: string): LiveColour | null {
+  const m = /^live:([^:]+):(#[0-9a-f]{6})(?::w(\d{1,3}))?(?::a(\d{1,3}))?(?::u(\d{1,3}))?$/.exec(id);
+  if (!m) return null;
+  const out: LiveColour = { group: m[1]!, colour: m[2]! };
+  for (let k = 0; k < EXTRA_PARTS.length; k++) {
+    const part = m[3 + k];
+    if (part === undefined) continue;
+    const p = Number(part);
+    if (p > 100) return null;
+    if (p > 0) out[EXTRA_PARTS[k]![0]] = p / 100;
+  }
+  return out;
 }

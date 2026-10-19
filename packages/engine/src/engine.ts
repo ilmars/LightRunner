@@ -10,7 +10,7 @@ import {
 import { Crossfade, Ramp } from './fade.ts';
 import { compilePreset, fixedPreset, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
 import { copy, dark, fromHex, mix, mix2, type Light } from './light.ts';
-import { planChannels, writeFixture, type ChannelPlan } from './output.ts';
+import { planChannels, visualOf, writeFixture, type ChannelPlan } from './output.ts';
 
 /** Safe's fixed warm white stage wash. */
 const SAFE_LIGHT = fromHex(SAFE_COLOUR.hex, SAFE_COLOUR.white, SAFE_COLOUR.intensity);
@@ -76,6 +76,8 @@ class ManualRun {
     c.g += (t.g - c.g) * a;
     c.b += (t.b - c.b) * a;
     c.w += (t.w - c.w) * a;
+    c.a += (t.a - c.a) * a;
+    c.u += (t.u - c.u) * a;
     c.i += (t.i - c.i) * a;
   }
 }
@@ -124,7 +126,7 @@ function sameLight(a: CompiledPreset, b: CompiledPreset): boolean {
   if (a.layers.length !== 1 || b.layers.length !== 1) return false;
   const x = a.layers[0]!.light, y = b.layers[0]!.light;
   const near = (p: number, q: number) => Math.abs(p - q) < 1e-9;
-  return near(x.r, y.r) && near(x.g, y.g) && near(x.b, y.b) && near(x.w, y.w) && near(x.i, y.i);
+  return near(x.r, y.r) && near(x.g, y.g) && near(x.b, y.b) && near(x.w, y.w) && near(x.a, y.a) && near(x.u, y.u) && near(x.i, y.i);
 }
 
 export interface Frame {
@@ -310,7 +312,7 @@ export class Engine {
     if (pid === SAFE_ID) return fixedPreset(SAFE_ID, group, SAFE_LIGHT, SAFE_FADE);
     if (pid === BLACKOUT_ID) return fixedPreset(BLACKOUT_ID, group, dark(), BLACKOUT_FADE);
     const live = pid ? parseLivePreset(pid) : null;
-    if (live) return live.group === group ? fixedPreset(pid!, group, fromHex(live.colour), DEFAULT_FADE) : undefined;
+    if (live) return live.group === group ? fixedPreset(pid!, group, fromHex(live.colour, live), DEFAULT_FADE) : undefined;
     return pid ? this.presets.get(pid) : undefined;
   }
 
@@ -331,7 +333,8 @@ export class Engine {
         const group = this.groups.get(cmd.group);
         if (!group) return `unknown group "${cmd.group}"`;
         if (!HEX_COLOUR.test(cmd.colour)) return `bad colour "${cmd.colour}"`;
-        const preset = this.presetFor(livePresetId(cmd.group, cmd.colour), cmd.group)!;
+        const extras = { white: cmd.white, amber: cmd.amber, uv: cmd.uv };
+        const preset = this.presetFor(livePresetId(cmd.group, cmd.colour, extras), cmd.group)!;
         this.setPreset(group, preset, cmd.fade ?? this.fadeTime ?? preset.fade, now);
         return null;
       }
@@ -518,7 +521,7 @@ export class Engine {
     }
     if (colour) {
       const c = fromHex(colour);
-      m.target.r = c.r; m.target.g = c.g; m.target.b = c.b; m.target.w = c.w;
+      m.target.r = c.r; m.target.g = c.g; m.target.b = c.b; m.target.w = c.w; m.target.a = c.a; m.target.u = c.u;
       if (intensity === undefined && c.i < 1) m.target.i = c.i;
     }
     if (intensity !== undefined) m.target.i = intensity;
@@ -609,10 +612,7 @@ export class Engine {
 
       const buf = this.universes.get(run.plan.universe);
       if (buf) writeFixture(buf, run.plan, light);
-      const v = f * 3;
-      this.visual[v] = Math.round(Math.min(1, light.r + light.w) * light.i * 255);
-      this.visual[v + 1] = Math.round(Math.min(1, light.g + light.w) * light.i * 255);
-      this.visual[v + 2] = Math.round(Math.min(1, light.b + light.w) * light.i * 255);
+      visualOf(light, this.visual, f * 3);
     }
     return { universes: this.universes, visual: this.visual };
   }

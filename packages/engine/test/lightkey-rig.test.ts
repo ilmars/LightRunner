@@ -34,6 +34,30 @@ test('the imported rig drives every channel of a look', () => {
   assert.deepEqual(Array.from(u.slice(171, 175)), [0, 0, 255, 0]);
 });
 
+test('Any colour with white, amber and UV lights those LEDs of the SixBar 500, and the other fixtures make do', () => {
+  const e = new Engine(show());
+  e.apply({ type: 'look', id: 'sermon', fade: 0 }, 0);
+  const plain = e.frame(1);
+  const plainCct = plain.universes.get(1)![1]!;
+  e.apply({ type: 'groupColour', group: 'key-lights', colour: '#ff0000', white: 0.4, amber: 0.6, uv: 0.2, fade: 0 }, 1);
+  e.apply({ type: 'groupColour', group: 'background', colour: '#000000', amber: 0.5, fade: 0 }, 1);
+  e.apply({ type: 'groupColour', group: 'front-lights', colour: '#ffffff', amber: 1, fade: 0 }, 1);
+  const frame = e.frame(2);
+  const u = frame.universes.get(1)!;
+  // B1 at 10 and B2 at 30: red, green, blue, white, amber, UV in each of the three segments.
+  const seg = [255, 0, 0, dmx(0.4), dmx(0.6), dmx(0.2)];
+  for (const at of [9, 15, 21, 29, 35, 41]) assert.deepEqual(Array.from(u.slice(at, at + 6)), seg, `segment at ${at + 1}`);
+  // B6 SonicPulse (no amber channel) at 165: dimmer at half, amber made from red and green.
+  assert.equal(u[164], dmx(0.5));
+  assert.deepEqual(Array.from(u.slice(171, 175)), [255, dmx(0xbf / 255), 0, 0]);
+  // P1 AS600B: amber makes it warmer than the same white without.
+  assert.ok(u[1]! < plainCct, `cct ${u[1]} vs ${plainCct}`);
+  // The visualiser shows B1 with the amber and white added in.
+  const b1 = e.fixtureIds().indexOf('b1') * 3;
+  const vis = Array.from(frame.visual.slice(b1, b1 + 3));
+  assert.ok(vis[0] === 255 && vis[1]! > 100 && vis[2]! > 100, `b1 visual ${vis}`);
+});
+
 test('key lights are off in Walk-in while the front lights sit at half', () => {
   const e = new Engine(show());
   e.apply({ type: 'look', id: 'walk-in' }, 0);

@@ -28,6 +28,37 @@ test('live preset ids round-trip and lower-case the colour', () => {
   assert.equal(parseLivePreset('live:key-lights:red'), null);
 });
 
+test('live preset ids carry white, amber and UV as percentages, leaving out the ones at 0', () => {
+  const id = livePresetId('key-lights', '#FF0000', { white: 0.4, amber: 0.2, uv: 0 });
+  assert.equal(id, 'live:key-lights:#ff0000:w40:a20');
+  assert.deepEqual(parseLivePreset(id), { group: 'key-lights', colour: '#ff0000', white: 0.4, amber: 0.2 });
+  assert.equal(livePresetId('k', '#000000', { uv: 1 }), 'live:k:#000000:u100');
+  assert.deepEqual(parseLivePreset('live:k:#000000:u100'), { group: 'k', colour: '#000000', uv: 1 });
+  assert.equal(livePresetId('k', '#000000', { white: 0.333, amber: 0.004 }), 'live:k:#000000:w33');
+  assert.equal(livePresetId('k', '#123456', { white: 0, amber: 0, uv: 0 }), 'live:k:#123456');
+  // Old ids still read the same.
+  assert.deepEqual(parseLivePreset('live:k:#123456'), { group: 'k', colour: '#123456' });
+  assert.equal(parseLivePreset('live:k:#123456:a101'), null);
+  assert.equal(parseLivePreset('live:k:#123456:a20:w40'), null, 'white, amber, UV in that order');
+  assert.equal(parseLivePreset('live:k:#123456:x5'), null);
+});
+
+test('Save turns a live colour with white, amber and UV into a custom preset that keeps them', () => {
+  const s = ready();
+  const stage: Stage = { groups: { 'key-lights': livePresetId('key-lights', '#ff0000', { white: 0.4, amber: 0.25, uv: 0.1 }) }, levels: {} };
+  const saved = saveItem(s, look(s, 'Song 1').id, stage);
+  const entry = look(saved, 'Song 1').groups[0]!;
+  const preset = saved.presets.find((p) => p.id === entry.preset)!;
+  assert.equal(preset.custom, true);
+  assert.deepEqual(preset.layers, [{ kind: 'static', colour: { hex: '#ff0000', white: 0.4, amber: 0.25, uv: 0.1 }, intensity: 1 }]);
+  // The swatch shows the amber and white mixed in, not plain red.
+  assert.notEqual(preset.swatch, '#ff0000');
+  assert.match(preset.swatch!, /^#ff[0-9a-f]{4}$/);
+  assert.deepEqual(checkReferences(saved), []);
+  // The saved show still reads.
+  assert.deepEqual(parseShow(JSON.parse(JSON.stringify(saved))).presets.find((p) => p.id === preset.id)!.layers, preset.layers);
+});
+
 test('the stage L1 show gets a running order with Basic lights first', () => {
   const s = ensureRunningOrder(rig());
   assert.deepEqual(order(s), ['Basic lights', 'Song 1', 'Song 2', 'Song 3', 'Song 4', 'Song 5', 'Sermon', 'Midweek calm']);

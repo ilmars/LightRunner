@@ -2,7 +2,7 @@
 // function of effect time, the fixture's position in its group and its
 // parameters. Phase 1 has static layers only; Phase 2 adds effects here.
 
-import type { Layer, Palette, Preset } from '../../shared/src/index.ts';
+import { resolveColour, type Layer, type Palette, type Preset } from '../../shared/src/index.ts';
 import { copy, dark, fromHex, type Light } from './light.ts';
 
 export interface LayerContext {
@@ -34,20 +34,8 @@ export function compilePreset(preset: Preset, palettes: ReadonlyMap<string, Pale
 }
 
 function compileLayer(layer: Layer, palettes: ReadonlyMap<string, Palette>): CompiledLayer {
-  const c = layer.colour;
-  let hex = '#ffffff';
-  let white = 0;
-  if ('palette' in c) {
-    const colour = palettes.get(c.palette)?.colours[c.index];
-    if (colour) {
-      hex = colour.hex;
-      white = colour.white ?? 0;
-    }
-  } else {
-    hex = c.hex;
-    white = c.white ?? 0;
-  }
-  return { kind: 'static', light: fromHex(hex, white, layer.intensity) };
+  const c = resolveColour(layer.colour, palettes);
+  return { kind: 'static', light: fromHex(c.hex, c, layer.intensity) };
 }
 
 /** A preset that is not in the show: Safe's warm wash, or Blackout. */

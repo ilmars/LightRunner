@@ -69,6 +69,8 @@ export type Group = z.infer<typeof Group>;
 export const PaletteColour = z.object({
   hex,
   white: unit.optional(),
+  amber: unit.optional(),
+  uv: unit.optional(),
 });
 export type PaletteColour = z.infer<typeof PaletteColour>;
 
@@ -86,6 +88,12 @@ export const ColourSpec = z.union([
   z.object({ palette: id, index: z.number().int().min(0) }),
 ]);
 export type ColourSpec = z.infer<typeof ColourSpec>;
+
+/** The colour a spec stands for, looking palette colours up (white if the palette or colour is missing). */
+export function resolveColour(c: ColourSpec, palettes: ReadonlyMap<string, Palette>): PaletteColour {
+  if (!('palette' in c)) return c;
+  return palettes.get(c.palette)?.colours[c.index] ?? { hex: '#ffffff' };
+}
 
 export const StaticLayer = z.object({
   kind: z.literal('static'),
