@@ -178,6 +178,20 @@ test('routes are checked: one universe per USB interface, in plain words', async
   });
 });
 
+test('a Patch page left open does not put back old output settings', async () => {
+  await withApp(async (call) => {
+    const stale = (await call('GET', '/api/show')).body;
+    // Meanwhile, in Settings: a route, and the lights handed to another desk.
+    assert.equal((await call('PUT', '/api/settings', { routes: [{ universe: 2, output: { kind: 'artnet', host: '192.168.0.120' } }], outputEnabled: false })).status, 200);
+    stale.fixtures[0].name = 'Renamed in Patch';
+    assert.equal((await call('PUT', '/api/show?source=patch', stale)).status, 200);
+    const now = (await call('GET', '/api/show')).body;
+    assert.equal(now.fixtures[0].name, 'Renamed in Patch');
+    assert.equal(now.settings.outputEnabled, false);
+    assert.deepEqual(now.settings.routes, [{ universe: 2, output: { kind: 'artnet', host: '192.168.0.120' } }]);
+  });
+});
+
 test('moving a single-universe rig moves its route with it', async () => {
   await withApp(async (call) => {
     await call('PUT', '/api/settings', { routes: [{ universe: 0, output: { kind: 'none' } }] });

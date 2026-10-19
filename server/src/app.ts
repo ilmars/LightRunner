@@ -652,10 +652,15 @@ export class App {
         } catch (err) {
           throw new HttpError(400, `not a valid show: ${(err as Error).message}`);
         }
-        // Keep this installation's PIN: an imported file must not change who can log in.
-        show = { ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash } };
+        const fromPatch = url.searchParams.get('source') === 'patch';
+        // Patch never edits settings, and a Patch page left open holds an old copy of them: keep the live ones
+        // (Send DMX, output, routes), or saving the patch could start sending DMX again.
+        // An imported file keeps this installation's PIN: it must not change who can log in.
+        show = fromPatch
+          ? { ...show, settings: this.show.settings }
+          : { ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash } };
         await this.setShow(show);
-        this.log(url.searchParams.get('source') === 'patch' ? 'Patch saved' : `Imported show "${show.name}"`);
+        this.log(fromPatch ? 'Patch saved' : `Imported show "${show.name}"`);
         json(res, 200, this.settingsView());
         return true;
       }
