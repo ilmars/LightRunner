@@ -143,6 +143,8 @@ export const Look = z.object({
   name: z.string(),
   swatch: hex.optional(),
   section: z.string().optional(),
+  /** Beats per minute the stage runs at when this look starts; 120 when not set. */
+  tempo: z.number().min(40).max(240).optional(),
   groups: z.array(LookEntry),
 });
 export type Look = z.infer<typeof Look>;

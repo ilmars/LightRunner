@@ -41,6 +41,8 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('blackout') }),
   z.object({ type: z.literal('master'), value: unit }),
   z.object({ type: z.literal('speed'), value: z.number().min(0.5).max(2) }),
+  /** The stage tempo in beats per minute. Effects count their speed in beats. */
+  z.object({ type: z.literal('tempo'), bpm: z.number().min(40).max(240) }),
   z.object({ type: z.literal('groupLevel'), group: id, value: unit }),
   z.object({ type: z.literal('undo') }),
   /** Fade time for every look and preset change; null = each look's own fade. */
@@ -124,6 +126,8 @@ export interface LiveState {
   flashing: string[];
   master: number;
   speed: number;
+  /** Stage tempo in beats per minute. */
+  tempo: number;
   output: OutputStatus;
   /** Why output is lost, in plain words (node not answering, another desk sending). */
   outputProblem: string | null;
@@ -140,6 +144,8 @@ export interface RuntimeState {
   groups: Record<string, string | null>;
   master: number;
   speed: number;
+  /** Stage tempo in beats per minute; 120 when missing (older saves). */
+  tempo?: number;
   levels: Record<string, number>;
   lastLook?: string | null;
   fadeTime?: number | null;

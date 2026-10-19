@@ -34,6 +34,8 @@ const MANUAL_IN = 0.2;
 /** Release fades back to the running preset over this long. */
 const MANUAL_OUT = 1;
 const DEFAULT_FADE = 3;
+/** The stage tempo (beats per minute) until a look or the tempo command sets one. */
+const DEFAULT_TEMPO = 120;
 
 /** A held Puff runs a smoke machine at this level, whatever its slider says. */
 const PUFF_LEVEL = 1;
@@ -56,12 +58,16 @@ interface Snapshot {
   /** Each group's level target. */
   levels: Record<string, number>;
   beforeBlackout: Record<string, string | null> | null;
+  /** Stage tempo in beats per minute. */
+  bpm: number;
 }
 
 interface PresetRun {
   preset: CompiledPreset;
   /** Effect time in seconds, advanced by speed × elapsed time. */
   time: number;
+  /** Beat phase in beats, advanced by tempo ÷ 60 × speed × elapsed time. */
+  beats: number;
 }
 
 class ManualRun {
@@ -210,6 +216,8 @@ export class Engine {
 
   private master = new Ramp(1);
   private speed = new Ramp(1);
+  /** Stage tempo in beats per minute. */
+  private bpm = DEFAULT_TEMPO;
   private look: string | null = null;
   private lookStart = 0;
   private lookDur = 0;
@@ -349,7 +357,7 @@ export class Engine {
       const running = group.presets.current?.preset;
       if (!saved?.custom || !target || !running || target.group !== group.id) continue;
       if (!sameLight(target, running)) continue;
-      group.presets.rekey(key, target.id, { preset: target, time: group.presets.current!.time });
+      group.presets.rekey(key, target.id, { preset: target, time: group.presets.current!.time, beats: group.presets.current!.beats });
     }
   }
 
@@ -387,7 +395,7 @@ export class Engine {
       if (!key || !running || !parseLivePreset(key)) continue;
       const found = added.find((p) => p.group === group.id && sameLight(this.presets.get(p.id)!, running.preset));
       const target = found && this.presets.get(found.id);
-      if (target) group.presets.rekey(key, target.id, { preset: target, time: running.time });
+      if (target) group.presets.rekey(key, target.id, { preset: target, time: running.time, beats: running.beats });
     }
   }
 
@@ -412,7 +420,7 @@ export class Engine {
       const running = group.presets.current;
       const id = key ? liveOf(gone.get(key), group.id) : null;
       const live = id ? this.presetFor(id, group.id) : undefined;
-      if (key && running && live) group.presets.rekey(key, live.id, { preset: live, time: running.time });
+      if (key && running && live) group.presets.rekey(key, live.id, { preset: live, time: running.time, beats: running.beats });
     }
     // Blackout remembers what each group ran; the next look brings that back, so it must not name a removed preset.
     if (this.beforeBlackout) {
@@ -451,7 +459,7 @@ export class Engine {
     }
     // A send that doesn't continue starts a new drag, so it never joins the last one's step.
     if (cmd.type === 'groupColour' && !cmd.continues) this.lastColourStep = null;
-    if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || cmd.type === 'groupColour' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') {
+    if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || cmd.type === 'groupColour' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook' || cmd.type === 'tempo') {
       const before = this.snapshot();
       const error = this.run(cmd, now);
       const after = this.snapshot();
@@ -474,7 +482,7 @@ export class Engine {
       groups[g.id] = g.presets.currentKey;
       levels[g.id] = g.level.target;
     }
-    return { look: this.look, lastLook: this.lastLook, groups, levels, beforeBlackout: this.beforeBlackout ? { ...this.beforeBlackout } : null };
+    return { look: this.look, lastLook: this.lastLook, groups, levels, beforeBlackout: this.beforeBlackout ? { ...this.beforeBlackout } : null, bpm: this.bpm };
   }
 
   /** Fade back to how the stage was before the last look or preset change. */
@@ -493,6 +501,7 @@ export class Engine {
       if (group.level.target !== level) group.level.set(level, now, UNDO_FADE);
     }
     this.beforeBlackout = prev.beforeBlackout;
+    this.bpm = prev.bpm;
     this.lastLook = prev.lastLook;
     this.setLook(prev.look ?? '', now, UNDO_FADE);
     if (!prev.look) this.look = null;
@@ -554,6 +563,7 @@ export class Engine {
       case 'blackout': this.goBlackout(now); return null;
       case 'master': this.master.set(cmd.value, now, SMOOTH); return null;
       case 'speed': this.speed.set(cmd.value, now, SMOOTH); return null;
+      case 'tempo': this.bpm = cmd.bpm; return null;
       case 'fadeTime': this.fadeTime = cmd.value; return null;
       case 'groupLevel': {
         const group = this.groups.get(cmd.group);
@@ -584,6 +594,7 @@ export class Engine {
       }
       this.beforeBlackout = null;
     }
+    this.bpm = look.tempo ?? DEFAULT_TEMPO;
     this.setLook(id, now, longest);
     this.lastLook = id;
     return null;
@@ -696,7 +707,7 @@ export class Engine {
   private setPreset(group: GroupRun, preset: CompiledPreset, fade: number, now: number, own = true): void {
     // A smoke group runs no presets: nothing but its level drives it.
     if (group.smoke) return;
-    group.presets.push(preset.id, () => ({ preset, time: 0 }), now, fade);
+    group.presets.push(preset.id, () => ({ preset, time: 0, beats: 0 }), now, fade);
     if (own) this.takeOwnership(group, now, fade);
   }
 
@@ -768,7 +779,8 @@ export class Engine {
     const dt = this.last === null ? 0 : Math.min(0.5, Math.max(0, now - this.last));
     this.last = now;
     const speed = this.speed.value(now);
-    const ctx: LayerContext = { index: 0, count: 0, time: 0 };
+    const beatsPerSecond = this.bpm / 60 * speed;
+    const ctx: LayerContext = { index: 0, count: 0, time: 0, beats: 0 };
     const parts = this.scratch;
     const weights = this.scratchWeights;
 
@@ -787,7 +799,10 @@ export class Engine {
         continue;
       }
       const mix0 = group.presets.weights(now);
-      for (const w of mix0) w.item.time += dt * speed;
+      for (const w of mix0) {
+        w.item.time += dt * speed;
+        w.item.beats += dt * beatsPerSecond;
+      }
       const level = group.level.value(now);
       const manual = this.liveManual(group, now, dt);
       // One light per segment of the group's line.
@@ -803,6 +818,7 @@ export class Engine {
           weights.length = 0;
           for (let n = 0; n < mix0.length; n++) {
             ctx.time = mix0[n].item.time;
+            ctx.beats = mix0[n].item.beats;
             if (!this.scratchLights[n]) this.scratchLights[n] = dark();
             const part = renderPreset(this.scratchLights[n], mix0[n].item.preset, ctx);
             parts.push(noUv ? withoutUv(part) : part);
@@ -920,6 +936,11 @@ export class Engine {
     return this.fixtures.map((f) => f.id);
   }
 
+  /** The beat phase of the preset a group is running (or fading into), in beats; undefined when it runs none. */
+  beatPhase(group: string): number | undefined {
+    return this.groups.get(group)?.presets.current?.beats;
+  }
+
   liveState(now: number, output: OutputStatus): LiveState {
     const look = this.look ? this.looks.get(this.look) : undefined;
     const groups: LiveState['groups'] = {};
@@ -949,6 +970,7 @@ export class Engine {
       flashing: [...this.flash],
       master: this.master.target,
       speed: this.speed.target,
+      tempo: this.bpm,
       output,
       outputProblem: null,
       outputProblemKind: null,
@@ -991,6 +1013,7 @@ export class Engine {
       groups,
       master: this.master.target,
       speed: this.speed.target,
+      tempo: this.bpm,
       levels,
       lastLook: this.lastLook,
       fadeTime: this.fadeTime,
@@ -1012,6 +1035,7 @@ export class Engine {
     }
     this.master.set(rt.master, now, 0);
     this.speed.set(rt.speed, now, 0);
+    this.bpm = rt.tempo ?? DEFAULT_TEMPO;
     this.fadeTime = rt.fadeTime ?? null;
     this.beforeBlackout = rt.beforeBlackout ?? null;
     this.look = rt.look;

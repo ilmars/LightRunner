@@ -16,6 +16,8 @@ export interface LayerContext {
   count: number;
   /** Effect time in seconds, already scaled by the speed dial. */
   time: number;
+  /** This preset run's beat phase in beats: the stage tempo and the speed dial, counted from the run's start. */
+  beats: number;
 }
 
 /** A layer with its colours looked up once, so rendering does no lookups. */
