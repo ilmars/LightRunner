@@ -527,7 +527,95 @@ test('show edits are open to operators without the PIN', () => withApp(async (ap
   assert.equal((await api(app, 'GET', '/api/settings')).status, 401);
 }));
 
-test('a tablet that stops answering is dropped and its Flash goes out', () => withApp(async (app) => {
+const presetsOf = (layout: any, group: string) => layout.groups.find((g: any) => g.id === group).presets as { id: string; name: string; swatch: string }[];
+const savedPresets = (dir: string) => parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).presets;
+
+test('Add to colours lists a live colour, the group adopts it, and Undo takes it back', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupColour', group: 'back-wall', colour: '#12ab34', fade: 0 }), null);
+  await waitFor(() => t.state()?.groups['back-wall'].preset === 'live:back-wall:#12ab34', 2000, 'the live colour to run');
+  const listed = presetsOf(t.layout(), 'back-wall').length;
+
+  assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: '#12AB34', name: ' Meadow ', allGroups: false }), null);
+  const added = presetsOf(t.layout(), 'back-wall').find((p) => p.name === 'Meadow')!;
+  assert.ok(added, 'the layout lists the new colour');
+  assert.equal(added.swatch, '#12ab34');
+  assert.equal(presetsOf(t.layout(), 'back-wall').length, listed + 1);
+  await waitFor(() => t.state()?.groups['back-wall'].preset === added.id, 2000, 'the group to run the new preset');
+  assert.ok(savedPresets(dir).some((p) => p.id === added.id && !p.custom), 'the show on disk has it as a normal preset');
+  // Adding it is one Undo step: the group's change to the new preset adds none of its own.
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.ok(!presetsOf(t.layout(), 'back-wall').some((p) => p.id === added.id), 'Undo removes it from the list');
+  assert.ok(!savedPresets(dir).some((p) => p.id === added.id));
+  await waitFor(() => t.state()?.groups['back-wall'].preset === 'live:back-wall:#12ab34', 2000, 'the group to carry on as the live colour');
+  // Saving still works afterwards: no group names a preset that is gone.
+  assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+}));
+
+test('Add to colours: names, every group, duplicates, Blackout and the PIN', () => withApp(async (app, dir) => {
+  assert.equal((await api(app, 'POST', '/api/pin', { next: '1234' })).status, 200);
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const before = Object.fromEntries(t.layout().groups.map((g: any) => [g.id, g.presets.length]));
+
+  // No name: "Colour 1"; adding it to every colour group gives each its own.
+  assert.equal(await t.send({ type: 'addColour', group: 'audience', colour: '#aa5500', name: '', allGroups: true }), null);
+  for (const g of t.layout().groups) {
+    assert.equal(g.presets.length, before[g.id] + 1, g.id);
+    assert.ok(g.presets.some((p: any) => p.name === 'Colour 1' && p.swatch === '#aa5500'), g.id);
+  }
+  // The same colour again is refused and adds no Undo step.
+  assert.equal(await t.send({ type: 'addColour', group: 'audience', colour: '#AA5500', name: 'x', allGroups: true }), 'every group already has that colour');
+  assert.equal(await t.send({ type: 'addColour', group: 'audience', colour: '#aa5500', name: 'x', allGroups: false }), 'that colour is already in the list');
+  assert.equal(await t.send({ type: 'addColour', group: 'nope', colour: '#aa5501', name: 'x', allGroups: false }), 'the show has no group "nope"');
+  assert.match((await t.send({ type: 'addColour', group: 'audience', colour: 'red', name: 'x', allGroups: false }))!, /^invalid command/);
+  assert.match((await t.send({ type: 'addColour', group: 'audience', colour: '#aa5501', name: 'x' }))!, /^invalid command/);
+
+  // Allowed during Blackout: a colour doesn't depend on the stage.
+  assert.equal(await t.send({ type: 'blackout' }), null);
+  await waitFor(() => t.state()?.look === 'blackout', 2000, 'Blackout');
+  assert.equal(await t.send({ type: 'addColour', group: 'audience', colour: '#0a0b0c', name: 'Night', allGroups: false }), null);
+  assert.ok(presetsOf(t.layout(), 'audience').some((p) => p.name === 'Night'));
+
+  // The newest Undo step is Night; Blackout stays on.
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.ok(!presetsOf(t.layout(), 'audience').some((p) => p.name === 'Night'));
+  assert.equal(t.state().look, 'blackout');
+}));
+
+test('a colour added with Add to colours survives a restart, still adopted by the group', async () => {
+  const dir = tempDir();
+  try {
+    const first = makeApp(dir);
+    await first.start();
+    const t = await tablet(first);
+    await waitFor(t.layout);
+    assert.equal(await t.send({ type: 'groupColour', group: 'back-wall', colour: '#12ab34', fade: 0 }), null);
+    assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: '#12ab34', name: 'Meadow', allGroups: false }), null);
+    const id = presetsOf(t.layout(), 'back-wall').find((p) => p.name === 'Meadow')!.id;
+    await waitFor(() => t.state()?.groups['back-wall'].preset === id, 2000, 'the group to run the new preset');
+    await first.stop();
+
+    const second = makeApp(dir);
+    await second.start();
+    try {
+      const u = await tablet(second);
+      await waitFor(u.layout);
+      await waitFor(() => u.state(), 2000, 'the state');
+      assert.ok(presetsOf(u.layout(), 'back-wall').some((p) => p.id === id && p.name === 'Meadow'));
+      assert.equal(u.state().groups['back-wall'].preset, id);
+    } finally {
+      await second.stop();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a tablet that stops answering is dropped and its Flash goes out',() => withApp(async (app) => {
   const watch = await tablet(app);
   const silent = await tablet(app, { autoPong: false });
   assert.equal(await silent.send({ type: 'flash', groups: ['back-wall'], on: true }), null);

@@ -12,7 +12,7 @@ import { extname, join, normalize, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  BUILT_IN_PROFILES, Command, OutputSettings, addSong, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureRunningOrder, isManualCommand,
+  BUILT_IN_PROFILES, Command, OutputSettings, addColour, addSong, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureRunningOrder, isManualCommand,
   isShowEdit, moveItem, oflToProfile, parseShow, renameItem, saveItem, saveQuickLook,
   type OflFixture, type Pick, type Scope,
   BLACKOUT, type LiveState, type RuntimeState, type Show, type ShowEdit,
@@ -350,6 +350,8 @@ export class App {
       case 'deleteItem': next = deleteItem(before, cmd.id); break;
       case 'moveItem': next = moveItem(before, cmd.id, cmd.to); break;
       case 'saveQuickLook': next = saveQuickLook(before, { name: cmd.name, tab: cmd.tab, groups: cmd.groups }, stage!).show; break;
+      // A colour doesn't depend on the stage, so it is fine during Blackout.
+      case 'addColour': next = addColour(before, cmd).show; break;
     }
     await this.operatorSave(next);
     this.remember(before);

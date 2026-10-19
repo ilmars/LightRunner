@@ -1,6 +1,6 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { findProfile } from '../../packages/shared/src/index.ts';
+import { groupIsWhiteOnly } from '../../packages/shared/src/index.ts';
 import type { QuickTab, Show } from '../../packages/shared/src/index.ts';
 
 export interface OperatorLook {
@@ -59,12 +59,6 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     return [{ id: l.id, name: l.name, swatch: l.swatch ?? null, section: l.section ?? null, colours, levels }];
   };
 
-  const makesColour = (fixtureId: string): boolean => {
-    const f = byId.get(fixtureId);
-    const profile = f ? findProfile(show, f.profile) : undefined;
-    return !!profile?.channels.some((c) => c.role === 'red' || c.role === 'green' || c.role === 'blue');
-  };
-
   return {
     show: show.name,
     looks: lookIds.flatMap(describe),
@@ -77,7 +71,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
       const presets = show.presets
         .filter((p) => p.group === id && !p.custom)
         .map((p) => ({ id: p.id, name: p.name, swatch: p.swatch ?? null }));
-      return [{ id: g.id, name: g.name, whiteOnly: !g.fixtures.some(makesColour), presets }];
+      return [{ id: g.id, name: g.name, whiteOnly: groupIsWhiteOnly(show, g.id), presets }];
     }),
     fixtures: fixtureOrder.flatMap((id) => {
       const f = byId.get(id);
