@@ -9,6 +9,30 @@ const el = (tag, cls, text) => {
   return e;
 };
 
+/**
+ * How a light's colour is drawn on screen. Whites (light colours with little
+ * colour in them: warm white #ffb46b, cool white #dcebff, the safe light) are
+ * drawn as soft whites instead of their raw values, which look orange or blue
+ * on a screen. Saturated colours are left as they are. Only the drawing
+ * changes; what is sent to the lights doesn't.
+ */
+const CREAM = [241, 236, 228];
+function shownRgb(r, g, b) {
+  const max = Math.max(r, g, b);
+  if (max <= 0) return [r, g, b];
+  const chroma = (max - Math.min(r, g, b)) / max;
+  if (chroma >= 0.65) return [r, g, b];
+  // Mix the colour (at full brightness) 60 % towards cream, then put its brightness back.
+  const k = max / 255;
+  return [r, g, b].map((v, i) => Math.round(((v / k) * 0.4 + CREAM[i] * 0.6) * k));
+}
+function shown(hex) {
+  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return hex;
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = shownRgb((n >> 16) & 255, (n >> 8) & 255, n & 255);
+  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
+}
+
 let layout = null;
 let state = null;
 let visual = new Uint8Array(0);
@@ -180,13 +204,15 @@ function buildPlainRows(order) {
   order.forEach((item, k) => {
     const basic = isBasic(item);
     const b = el('button', basic ? 'item fixed' : 'item');
-    // A thin strip: one block per group, the colour this item gives it.
-    const strip = el('span', 'strip');
+    // One small dot per group, in group order: the colour this item gives it (whites drawn as whites).
+    const strip = el('span', 'dots');
     (item.colours ?? []).forEach((c, i) => {
-      const block = el('i', c ? null : 'unset');
-      if (c) block.style.background = c;
-      block.title = layout.groups[i]?.name ?? '';
-      strip.append(block);
+      // Basic lights' groups without a saved colour run the built-in warm light.
+      const colour = c ?? (basic ? '#ffd2a0' : null);
+      const dot = el('i', colour ? null : 'unset');
+      if (colour) dot.style.background = shown(colour);
+      dot.title = layout.groups[i]?.name ?? '';
+      strip.append(dot);
     });
     const mark = el('span', 'mark', 'changed');
     mark.hidden = true;
@@ -794,10 +820,10 @@ function renderDetails() {
   for (const row of detailRows) {
     const s = state.groups?.[row.group.id];
     const info = presetInfo(row.group, s?.preset);
-    row.sw.style.background = info.colour ?? '#0d0e11';
+    row.sw.style.background = shown(info.colour) ?? '#0d0e11';
     row.chipName.textContent = info.name;
     // The slider carries a little of the group's colour.
-    row.dim.style.setProperty('--c', info.colour && info.colour !== '#000000' ? info.colour : '#5a6478');
+    row.dim.style.setProperty('--c', info.colour && info.colour !== '#000000' ? shown(info.colour) : '#5a6478');
     if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
   }
   if (picker.group) renderPicker();
@@ -865,7 +891,7 @@ function buildPickerGrid() {
     const b = el('button', 'pc');
     b.dataset.preset = p.id;
     const sw = el('i');
-    sw.style.background = p.swatch ?? NEUTRAL;
+    sw.style.background = shown(p.swatch) ?? NEUTRAL;
     b.append(sw, el('span', null, p.name));
     b.addEventListener('click', () => send({ type: 'groupPreset', group: row.group.id, preset: p.id }));
     grid.append(b);
@@ -882,7 +908,7 @@ function renderPicker() {
   if (!row) return;
   const s = state.groups?.[row.group.id];
   const info = presetInfo(row.group, s?.preset);
-  $('pCurSw').style.background = info.colour ?? '#0d0e11';
+  $('pCurSw').style.background = shown(info.colour) ?? '#0d0e11';
   $('pCurText').textContent = `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
 }
@@ -982,7 +1008,7 @@ function buildQuick() {
     const strip = el('span', 'qstrip');
     (q.colours ?? []).forEach((c, i) => {
       const block = el('i');
-      if (c) block.style.background = c;
+      if (c) block.style.background = shown(c);
       block.title = layout.groups[i]?.name ?? '';
       strip.append(block);
     });
@@ -1054,7 +1080,7 @@ function renderSheet() {
     const left = qs.left.has(b.dataset.group);
     b.classList.toggle('off', left);
     b.setAttribute('aria-pressed', String(!left));
-    b.querySelector('i').style.background = info.colour ?? '#0d0e11';
+    b.querySelector('i').style.background = shown(info.colour) ?? '#0d0e11';
     b.querySelector('.gs span').textContent = left ? 'left out' : info.name;
     b.querySelector('.gl').textContent = left ? '' : `${Math.round((s?.level ?? 0) * 100)}%`;
   }
@@ -1183,7 +1209,7 @@ function drawStage() {
   const pad = 14, r = Math.max(5, Math.min(9, h / 16));
   layout.fixtures.forEach((f, k) => {
     const x = pad + f.x * (w - 2 * pad), y = pad + f.y * (h - 2 * pad);
-    const R = visual[k * 3] ?? 0, G = visual[k * 3 + 1] ?? 0, B = visual[k * 3 + 2] ?? 0;
+    const [R, G, B] = shownRgb(visual[k * 3] ?? 0, visual[k * 3 + 1] ?? 0, visual[k * 3 + 2] ?? 0);
     const lit = Math.max(R, G, B) / 255;
     if (f.w || f.h) {
       // A bar or strip: a lit rounded rectangle at its real size.

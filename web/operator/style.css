@@ -130,9 +130,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border: 0; border-radius: var(--ds-r-tile); background: transparent; text-align: left; color: var(--ds-muted-on);
 }
 .item:active { background: rgba(255, 255, 255, 0.04); }
-.item .strip { display: flex; flex-direction: column; width: 4px; height: 24px; border-radius: 2px; overflow: hidden; background: rgba(255, 255, 255, 0.06); opacity: 0.8; }
-.item .strip i { flex: 1; }
-.item .strip i.unset { background: transparent; }
+/* The item's colours: one small dot per group, like a tiny stage. */
+.item .dots { flex: none; display: flex; align-items: center; gap: 3px; }
+.item .dots i { width: 7px; height: 7px; border-radius: 50%; opacity: 0.85; }
+.item .dots i.unset { background: rgba(255, 255, 255, 0.08); opacity: 1; }
+.item.on .dots i { opacity: 1; }
 .item .name { flex: 1; min-width: 0; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item .mark { display: inline-flex; align-items: center; gap: 6px; color: var(--ds-warn-text); font-size: 12px; }
 .item .mark::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ds-warn); }
@@ -142,7 +144,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 .item.on .name { font-weight: 500; }
-.item.on .strip { opacity: 1; }
 /* The item Next will start: a quiet hint, not a second selection. */
 .item.is-next:not(.on)::after { content: "next"; color: var(--ds-muted); font-size: 12px; }
 .sep { flex: none; height: 1px; margin: 3px 12px; background: rgba(255, 255, 255, 0.05); }
@@ -278,7 +279,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* The colour is dimmed on the strip (the handle and border are not); the colour sent is the true one. */
 .strip2::before { content: ""; position: absolute; inset: 0; border-radius: 7px; background: var(--grad); opacity: 0.55; }
 .strip2.hue { --grad: linear-gradient(90deg, #ff0000, #ffc800, #00ff00, #00ffc8, #0000ff, #8c00ff, #ff008c, #ff0000); }
-.strip2.cct { --grad: linear-gradient(90deg, #ffb46b, #f4f8ff); }
+.strip2.cct { --grad: linear-gradient(90deg, #f7d6b4, #f4f8ff); }
 .strip2.cct::before { opacity: 0.7; }
 .strip-handle { position: absolute; top: 4px; bottom: 4px; left: 0; width: 4px; background: #c9ccd2; border-radius: 2px; box-shadow: 0 0 0 1px #000; }
 /* ---- New quick look sheet (same cover as the colour picker) ---- */

@@ -76,6 +76,8 @@ The first suggested palette was measured at about 4× the old screen's average b
 
 - **Surfaces:** glass panels on the background. Group zones in Details are flat and divided by a faint line, not cards inside a card. The bottom bar is one strip whose groups are divided by faint lines.
 - **Levels:** a clear number on the right of the group's header line, never drawn over the slider. 0 % is muted.
+- **Running order colours:** one small dot per group, in group order (Basic lights' unsaved groups show the built-in warm light).
+- **Whites are drawn as whites everywhere** (running order, colour chips, picker swatches, quick-look strips, the stage preview, the warm-to-cool strip): a light colour with little colour in it (chroma under 65 %, e.g. warm white `#ffb46b`, cool white `#dcebff`) is mixed 60 % towards cream `#f1ece4`, keeping its brightness. Saturated colours are unchanged, and nothing changes in what is sent to the lights.
 - **Details adapt to the rig:** with few groups each zone grows into the spare room (up to 124 px, the slider up to 64 px tall); with many groups they shrink back to their content (slider 44 px) and the list scrolls, so capacity isn't lost.
 - **Quick looks** keep a fixed two rows (12 looks before scrolling), so the layout doesn't jump when switching tabs.
 - **Running order:**
