@@ -16,7 +16,7 @@ Last updated: 19 Oct 2026. Update this file whenever a feature lands or a priori
 | HTTP API | Looks, presets, manual, release, back to look, Basic lights (`POST /api/safe` starts it), Blackout, master, speed, group level, undo, fade time, state, looks list; local network only | 4 (HTTP part) |
 | Tools | Lightkey importer, jump check (no fixture steps >5% per frame over hours of random changes), timing probe | — |
 
-Tests: 140 (`npm test`): 139 pass, 1 is skipped (the Lightkey project test, needs `LIGHTKEY_PROJECT`).
+Tests: 141 (`npm test`): 140 pass, 1 is skipped (the Lightkey project test, needs `LIGHTKEY_PROJECT`).
 
 ## Not built yet (in rough priority order)
 
@@ -35,7 +35,10 @@ Tests: 140 (`npm test`): 139 pass, 1 is skipped (the Lightkey project test, need
 - "Compare with a file" with the Lightkey project lists P5 as new and ticked; untick it (P5 is not used).
 - One server test (show saved with backups) has failed once on Windows and passed on re-run.
 - Each Save of an Any colour adds a hidden custom preset; old ones aren't cleaned up.
-- Not yet tried on the real iPad: finger drag in the running order, the on-screen keyboard over the quick-look sheet, two fingers on Flash, pointer capture on iOS Safari.
+- Not yet tried on the real iPad: finger drag in the running order, the on-screen keyboard over the quick-look sheet, two fingers on Flash, pointer capture on iOS Safari, the White, Amber and UV slider tints in the dark room.
+- The stage view doesn't know what each fixture can do: amber shows orange on the colour-temperature front lights, which only go warmer. (UV is already left out where there is no UV.)
+- Going back to a build from before white, amber and UV loses them: older builds can't read live colours like `live:key-lights:#ff0000:a100` when restoring the stage, and drop amber and UV from saved custom presets.
+- A layout change in the middle of a White, Amber or UV slider drag rebuilds the sliders and drops the drag (rare: only when the show is edited at that moment).
 
 ## Open questions
 
