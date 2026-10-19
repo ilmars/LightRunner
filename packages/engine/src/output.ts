@@ -209,6 +209,61 @@ export function visibleLevel(plan: ChannelPlan, light: Light): number {
   return Math.min(1, top) * light.i;
 }
 
+/** True when a fixture type with several segments has a colour channel shared by all of them (it follows the brightest segment). */
+export function hasWideColour(plan: ChannelPlan): boolean {
+  return plan.cells > 1 && plan.channels.some((c) => c.cell < 0 && COLOUR_ROLES.includes(c.role));
+}
+
+/**
+ * How bright each segment of a fixture looks, written to `out[at..]`: as
+ * visibleLevel(), but a fixture-wide colour channel shows the brightest
+ * segment's light, as writeCells writes it, and counts for every segment.
+ */
+export function visibleCells(plan: ChannelPlan, lights: readonly Light[], out: number[], at: number): void {
+  const cells = plan.hasUv ? lights : withoutUvAll(lights);
+  if (!plan.hasColour && !plan.hasUv) {
+    for (let k = 0; k < cells.length; k++) out[at + k] = Math.max(0, cells[k].i);
+    return;
+  }
+  let top = 0, brightest = 0;
+  for (let k = 0; k < cells.length; k++) {
+    if (cells[k].i > top) {
+      top = cells[k].i;
+      brightest = k;
+    }
+  }
+  // What the fixture-wide colour channels show, for every segment.
+  let wide = 0;
+  for (const ch of plan.channels) {
+    if (ch.cell < 0 || ch.cell >= cells.length) wide = Math.max(wide, channelLevel(plan, ch.role, cells[brightest]));
+  }
+  for (let k = 0; k < cells.length; k++) {
+    let level = wide;
+    for (const ch of plan.channels) {
+      if (ch.cell === k) level = Math.max(level, channelLevel(plan, ch.role, cells[k]));
+    }
+    out[at + k] = level;
+  }
+}
+
+/** How bright one colour channel looks for a light (0 for channels that make no colour). */
+function channelLevel(plan: ChannelPlan, role: ChannelRole, light: Light): number {
+  if (light.i <= 0) return 0;
+  const fold = plan.hasWhite ? 0 : light.w;
+  const amber = plan.hasAmber ? 0 : light.a;
+  let v: number;
+  switch (role) {
+    case 'red': v = light.r + fold + amber; break;
+    case 'green': v = light.g + fold + amber * AMBER_GREEN; break;
+    case 'blue': v = light.b + fold; break;
+    case 'white': v = light.w; break;
+    case 'amber': v = light.a; break;
+    case 'uv': v = light.u; break;
+    default: return 0;
+  }
+  return Math.min(1, v) * light.i;
+}
+
 /**
  * The colour the visualiser shows for a light, as RGB bytes at `out[at..at+2]`:
  * white adds to all three, amber to red and green, UV a faint violet.

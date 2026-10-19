@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   addSong, applyPicks, applyQuickLookToItem, setItemGroup, checkReferences, cleanName, deleteItem, ensureBasicLights, ensureRunningOrder, livePresetId, moveItem,
   parseLivePreset, parseShow, renameItem, saveItem, saveQuickLook, BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET,
-  type Show, type Stage,
+  type Show, type Stage, type StaticLayer,
 } from '../src/index.ts';
 
 const load = (path: string): Show => parseShow(JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')));
@@ -413,7 +413,7 @@ test('setItemGroup keeps an Any colour as a new hidden Custom preset, with its a
   assert.equal(made.custom, true);
   assert.equal(made.name, 'Custom');
   assert.equal(made.group, 'back-wall');
-  assert.deepEqual(made.layers[0]!.colour, { hex: '#ff0000', amber: 0.5 });
+  assert.deepEqual((made.layers[0] as StaticLayer).colour, { hex: '#ff0000', amber: 0.5 });
   assert.deepEqual(checkReferences(out), []);
 });
 

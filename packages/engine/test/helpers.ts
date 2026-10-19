@@ -29,6 +29,40 @@ export function lightOf(engine: Engine, fixture: string) {
   return { ...engine.lights()[i] };
 }
 
+/** How bright each segment of a fixture looks, in its segment order (see Engine.visibleLevels). */
+export function segmentsOf(engine: Engine, fixture: string): number[] {
+  const ids = engine.fixtureIds();
+  const f = ids.indexOf(fixture);
+  if (f < 0) throw new Error(`no fixture ${fixture}`);
+  const counts = engine.segmentCounts();
+  const start = counts.slice(0, f).reduce((a, b) => a + b, 0);
+  return engine.visibleLevels().slice(start, start + counts[f]);
+}
+
+/**
+ * Run frames from `from` to `to` and return how far any segment's step in visible
+ * level went past what its running presets move by themselves (Engine.ownMotion),
+ * and the largest own motion seen. The jump check's rule is `worst ≤ 5 %`.
+ */
+export function beyondOwnMotion(engine: Engine, from: number, to: number, onFrame?: (t: number) => void): { worst: number; motion: number; step: number } {
+  let prev = engine.visibleLevels();
+  let worst = -Infinity, motion = 0, step = 0;
+  for (let t = from; t <= to + 1e-9; t += FRAME) {
+    onFrame?.(t);
+    engine.frame(t);
+    const now = engine.visibleLevels();
+    const own = engine.ownMotion();
+    for (let k = 0; k < now.length; k++) {
+      const s = Math.abs(now[k] - prev[k]);
+      worst = Math.max(worst, s - own[k]);
+      motion = Math.max(motion, own[k]);
+      step = Math.max(step, s);
+    }
+    prev = now;
+  }
+  return { worst, motion, step };
+}
+
 export function close(a: number, b: number, eps = 1e-6): boolean {
   return Math.abs(a - b) <= eps;
 }

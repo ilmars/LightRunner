@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  addColour, checkReferences, deleteColour, editColour, ensureRunningOrder, groupIsWhiteOnly, listNames, parseShow, presetUsers,
-  type Show,
+  addColour, canRecolour, checkReferences, deleteColour, editColour, EffectLayer, ensureRunningOrder, groupIsWhiteOnly, isEffectPreset, isOff, listNames, parseShow, presetUsers,
+  type Show, type StaticLayer,
 } from '../src/index.ts';
 
 const rig = (): Show => parseShow(JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8')));
@@ -104,7 +104,7 @@ test('a listed colour with amber or UV is not the plain colour', () => {
   for (const colour of ['#ff0000', '#0000ff']) {
     const { show, ids } = addColour(s, { group: 'key-lights', colour, name: '', allGroups: false });
     assert.equal(ids.length, 1);
-    assert.deepEqual(show.presets.find((p) => p.id === ids[0])!.layers[0]!.colour, { hex: colour });
+    assert.deepEqual((show.presets.find((p) => p.id === ids[0])!.layers[0] as StaticLayer).colour, { hex: colour });
   }
 });
 
@@ -198,7 +198,7 @@ test('a colour change keeps the other channels of the colour, also from a palett
   assert.equal(mixed.swatch, '#aabbcc');
   s.presets.push({ id: 'amber-red', name: 'Amber red', group: 'key-lights', fade: 3, swatch: '#ff0000', layers: [{ kind: 'static', colour: { hex: '#ff0000', amber: 0.6 }, intensity: 1 }] });
   const amber = preset(editColour(s, { preset: 'amber-red', colour: '#ff0000', sameName: false }).show, 'amber-red');
-  assert.deepEqual(amber.layers[0]!.colour, { hex: '#ff0000', amber: 0.6 });
+  assert.deepEqual((amber.layers[0] as StaticLayer).colour, { hex: '#ff0000', amber: 0.6 });
   assert.equal(amber.swatch, '#ff4800');
   // A palette colour becomes a hex colour that carries the palette entry's white.
   const palette = s.palettes.find((p) => p.id === 'lightkey')!;
@@ -250,4 +250,28 @@ test('a colour no look uses can be deleted; a used one is refused with the names
   assert.throws(() => deleteColour(s, 'nope'), /not in the list/);
   const hidden = saveHidden(s);
   assert.throws(() => deleteColour(hidden.show, hidden.id), /can't be deleted/);
+});
+
+test('an effect preset is in the show like a colour, but is never recoloured or taken for a plain colour', () => {
+  const s = rig();
+  const wave = EffectLayer.parse({ kind: 'effect', effect: 'wave', colours: [{ hex: '#ff0000' }, { palette: 'lightkey', index: 1 }], speed: { beats: 4 } });
+  assert.deepEqual(wave, {
+    kind: 'effect', effect: 'wave', colours: [{ hex: '#ff0000' }, { palette: 'lightkey', index: 1 }], speed: { beats: 4 },
+    direction: 'ltr', waves: 1, size: 0.5, edge: 'soft', intensity: 1,
+  });
+  s.presets.push({ id: 'bg-wave', name: 'Wave', group: 'background', fade: 3, swatch: '#ff0000', layers: [wave] });
+  const show = parseShow(s);
+  const effect = preset(show, 'bg-wave');
+  assert.equal(isEffectPreset(effect), true);
+  assert.equal(isEffectPreset(preset(show, 'background-zils')), false);
+  assert.equal(canRecolour(effect), false);
+  assert.equal(isOff(effect), false);
+  assert.throws(() => editColour(show, { preset: 'bg-wave', colour: '#00ff00', sameName: false }), /that colour can't be changed here/);
+  // An effect of one colour doesn't count as that colour in the list.
+  const one = EffectLayer.parse({ kind: 'effect', effect: 'breathe', colours: [{ hex: '#123456' }], speed: { beats: 4 } });
+  show.presets.push({ id: 'bg-breathe', name: 'Breathe', group: 'background', fade: 3, swatch: '#123456', layers: [one] });
+  assert.equal(addColour(show, { group: 'background', colour: '#123456', name: '', allGroups: false }).ids.length, 1);
+  // A missing palette inside an effect is a broken reference.
+  s.presets.at(-1)!.layers = [{ ...wave, colours: [{ palette: 'nope', index: 0 }] }];
+  assert.throws(() => parseShow(s), /unknown palette "nope"/);
 });

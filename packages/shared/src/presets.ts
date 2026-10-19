@@ -5,7 +5,7 @@
 import { HEX_COLOUR, displayColour } from './protocol.ts';
 import { cleanName, uniqueId } from './runningorder.ts';
 import { findProfile } from './schema.ts';
-import type { Layer, Preset, Show } from './schema.ts';
+import type { Preset, Show, StaticLayer } from './schema.ts';
 
 /** True when no fixture in the group has a red, green or blue channel: the picker offers it warm-to-cool white only. */
 export function groupIsWhiteOnly(show: Show, groupId: string): boolean {
@@ -27,10 +27,11 @@ export interface AddColour {
   allGroups: boolean;
 }
 
-/** The light (hex, white, amber, UV, intensity) a preset's only layer makes, palette colours looked up; null for anything else. */
+/** The light (hex, white, amber, UV, intensity) a preset's only layer makes, palette colours looked up; null for anything else (an effect, say). */
 function plainLight(show: Show, preset: Preset): string | null {
   if (preset.layers.length !== 1) return null;
   const layer = preset.layers[0]!;
+  if (layer.kind !== 'static') return null;
   const spec = layer.colour;
   const c = 'palette' in spec ? show.palettes.find((p) => p.id === spec.palette)?.colours[spec.index] : spec;
   return c ? JSON.stringify([c.hex.toLowerCase(), c.white ?? 0, c.amber ?? 0, c.uv ?? 0, layer.intensity]) : null;
@@ -63,7 +64,7 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
     ? out.groups.filter((g) => g.id === input.group || (shown.includes(g.id) && groupIsWhiteOnly(out, g.id) === whiteOnly)).map((g) => g.id)
     : [input.group];
 
-  const layer: Layer = { kind: 'static', colour: { hex: colour }, intensity: 1 };
+  const layer: StaticLayer = { kind: 'static', colour: { hex: colour }, intensity: 1 };
   const wanted = JSON.stringify([colour, 0, 0, 0, 1]);
   // One name for the whole set, numbered after the highest "Colour N" in any of the groups.
   const name = input.name.trim() ? cleanName(input.name) : nextColourName(out.presets.filter((p) => targets.includes(p.group)));
@@ -140,7 +141,7 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
     if (name !== undefined) p.name = name;
     // An Off (or other kind of) colour of the same name only takes the new name.
     if (colour !== undefined && canRecolour(p)) {
-      const layer = recoloured(out, p.layers[0]!, colour);
+      const layer = recoloured(out, p.layers[0] as StaticLayer, colour);
       p.layers = [layer];
       // The swatch shows what the stage does, white, amber and UV included (as a saved Any colour pick does).
       p.swatch = 'hex' in layer.colour ? displayColour(colour, layer.colour) : colour;
@@ -151,15 +152,15 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
   return { show: out, ids };
 }
 
-/** One plain, lit layer: the only kind of colour the editor can recolour. */
-export const isOff = (p: Preset) => p.layers.length === 1 && p.layers[0]!.intensity === 0;
-export const canRecolour = (p: Preset) => p.layers.length === 1 && !isOff(p);
+/** One plain, lit layer: the only kind of colour the editor can recolour (never an effect). */
+export const isOff = (p: Preset) => p.layers.length === 1 && p.layers[0]!.kind === 'static' && p.layers[0]!.intensity === 0;
+export const canRecolour = (p: Preset) => p.layers.length === 1 && p.layers[0]!.kind === 'static' && !isOff(p);
 
 /**
  * The layer with a new hex. Everything else of its colour stays (white, and any other channel a
  * colour carries); a palette reference becomes a hex colour that keeps the palette entry's fields.
  */
-function recoloured(show: Show, layer: Layer, hex: string): Layer {
+function recoloured(show: Show, layer: StaticLayer, hex: string): StaticLayer {
   const spec = layer.colour;
   const base = 'palette' in spec ? show.palettes.find((p) => p.id === spec.palette)?.colours[spec.index] ?? {} : spec;
   return { ...layer, colour: { ...base, hex } };

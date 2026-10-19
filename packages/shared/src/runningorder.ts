@@ -51,7 +51,8 @@ const BUILT_IN = new Map<string, { name: string; swatch: string; layer: Layer }>
   [BLACKOUT_PRESET, { name: 'Off', swatch: '#000000', layer: { kind: 'static', colour: { hex: '#000000' }, intensity: 0 } }],
 ]);
 
-const layerKey = (l: Layer) => JSON.stringify([
+/** A plain layer's light (palette colours by reference); an effect layer is only ever the same as itself. */
+const layerKey = (l: Layer) => l.kind === 'effect' ? JSON.stringify(l) : JSON.stringify([
   'palette' in l.colour ? l.colour : [l.colour.hex.toLowerCase(), l.colour.white ?? 0, l.colour.amber ?? 0, l.colour.uv ?? 0],
   l.intensity,
 ]);

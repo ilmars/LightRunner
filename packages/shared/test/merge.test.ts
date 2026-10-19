@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { applyPicks, diffShows, parseShow, type Show } from '../src/index.ts';
+import { applyPicks, diffShows, EffectLayer, parseShow, type Show } from '../src/index.ts';
 
 const rig = (): Show => parseShow(JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8')));
 
@@ -115,4 +115,13 @@ test('a pick that leaves the show broken is refused with a readable reason', () 
     { kind: 'fixture', id: 'b9', change: 'added' },
   ]);
   assert.ok(ok.operator.groups.includes('balcony'));
+});
+
+test('a changed effect is described as an effect change', () => {
+  const layer = (waves: number) => EffectLayer.parse({ kind: 'effect', effect: 'wave', colours: [{ hex: '#ff0000' }], speed: { beats: 4 }, waves });
+  const current = rig(), incoming = rig();
+  current.presets.push({ id: 'bg-wave', name: 'Wave', group: 'background', fade: 3, layers: [layer(1)] });
+  incoming.presets.push({ id: 'bg-wave', name: 'Wave', group: 'background', fade: 3, layers: [layer(3)] });
+  const item = diffShows(current, incoming).find((i) => i.id === 'bg-wave');
+  assert.deepEqual(item?.details, ['effect changed']);
 });

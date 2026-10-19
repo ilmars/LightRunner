@@ -1,7 +1,7 @@
 // Comparing a show with an incoming one (a show file or a Lightkey project)
 // and merging only the changes someone picked. Items are matched by id.
 
-import { parseShow, type Fixture, type Group, type Look, type Preset, type Profile, type Show } from './schema.ts';
+import { isEffectPreset, parseShow, type Fixture, type Group, type Look, type Preset, type Profile, type Show } from './schema.ts';
 
 export type ItemKind = 'profile' | 'fixture' | 'group' | 'preset' | 'look';
 export type Change = 'added' | 'changed' | 'removed';
@@ -77,7 +77,7 @@ function describe(kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show):
     }
     case 'preset': {
       const pa = a as Preset, pb = b as Preset;
-      if (!same(pa.layers, pb.layers)) out.push('colour or level changed');
+      if (!same(pa.layers, pb.layers)) out.push(isEffectPreset(pa) || isEffectPreset(pb) ? 'effect changed' : 'colour or level changed');
       if (pa.fade !== pb.fade) out.push(`fade ${pa.fade} s → ${pb.fade} s`);
       if (pa.group !== pb.group) out.push(`group ${pa.group} → ${pb.group}`);
       break;

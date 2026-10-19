@@ -8,9 +8,9 @@ import {
   type GroupStatus, type Palette, type Preset, type RuntimeState, type Show,
 } from '../../shared/src/index.ts';
 import { Crossfade, Ramp } from './fade.ts';
-import { compilePreset, fixedPreset, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
+import { advancePhases, compilePreset, fixedPreset, moves, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
 import { copy, dark, fromHex, mix, mix2, withoutUv, type Light } from './light.ts';
-import { planChannels, visibleLevel, visualOf, writeCells, writeSmoke, type ChannelPlan } from './output.ts';
+import { hasWideColour, planChannels, visibleCells, visibleLevel, visualOf, writeCells, writeSmoke, type ChannelPlan } from './output.ts';
 
 /** Safe's fixed warm white stage wash. */
 const SAFE_LIGHT = fromHex(SAFE_COLOUR.hex, SAFE_COLOUR.white, SAFE_COLOUR.intensity);
@@ -68,6 +68,17 @@ interface PresetRun {
   time: number;
   /** Beat phase in beats, advanced by tempo ÷ 60 × speed × elapsed time. */
   beats: number;
+  /** Each layer's phase in cycles, advanced at its safe rate (see advancePhases). */
+  cycles: number[];
+  /**
+   * For a preset that moves: how bright it made each segment of the line look
+   * last frame (NaN before its first frame), for ownMotion.
+   */
+  levels: number[];
+}
+
+function newRun(preset: CompiledPreset): PresetRun {
+  return { preset, time: 0, beats: 0, cycles: [], levels: [] };
 }
 
 class ManualRun {
@@ -120,6 +131,8 @@ class GroupRun {
   smokeOut = 0;
   /** This group's light for each segment of its line. */
   out: Light[] = [];
+  /** For each segment of its line: the largest change any of its running presets made by itself this frame. */
+  motion: number[] = [];
 
   constructor(id: string) {
     this.id = id;
@@ -135,6 +148,7 @@ class GroupRun {
     }
     while (this.out.length < this.line.length) this.out.push(dark());
     this.out.length = this.line.length;
+    this.motion = new Array<number>(this.line.length).fill(0);
   }
 }
 
@@ -152,6 +166,10 @@ class FixtureRun {
   visualAt = 0;
   /** Final light of each segment after manual and master, before gamma. */
   cells: Light[] = [];
+  /** Each segment's own motion this frame: the most a preset running there changed it by itself. */
+  motion: number[] = [];
+  /** It has a colour channel shared by all its segments, so one segment's motion shows on all of them. */
+  wide = false;
 
   constructor(id: string, plan: ChannelPlan) {
     this.id = id;
@@ -168,6 +186,8 @@ class FixtureRun {
     this.plan = plan;
     while (this.cells.length < plan.cells) this.cells.push(dark());
     this.cells.length = plan.cells;
+    this.motion = new Array<number>(plan.cells).fill(0);
+    this.wide = hasWideColour(plan);
   }
 }
 
@@ -183,10 +203,12 @@ function smokeRefusal(name: string): string {
   return `"${name}" is a smoke machine: use its slider or Puff`;
 }
 
-/** True when two presets are one static layer of the same light. */
+/** True when two presets are one static layer of the same light (never an effect). */
 function sameLight(a: CompiledPreset, b: CompiledPreset): boolean {
   if (a.layers.length !== 1 || b.layers.length !== 1) return false;
-  const x = a.layers[0]!.light, y = b.layers[0]!.light;
+  const p = a.layers[0]!, q = b.layers[0]!;
+  if (p.kind !== 'static' || q.kind !== 'static') return false;
+  const x = p.light, y = q.light;
   const near = (p: number, q: number) => Math.abs(p - q) < 1e-9;
   return near(x.r, y.r) && near(x.g, y.g) && near(x.b, y.b) && near(x.w, y.w) && near(x.a, y.a) && near(x.u, y.u) && near(x.i, y.i);
 }
@@ -286,14 +308,22 @@ export class Engine {
       }
       run.smoke = smoke;
       run.setFixtures(g.fixtures.map((id) => this.fixtureIndex.get(id)).filter((i): i is number => i !== undefined), this.fixtures);
-      // A colour edited while it is lit fades to the new colour instead of snapping.
+      // A colour (or effect) edited while it is lit fades to the new one instead of snapping.
       const lit = this.editedColour(run, before, now);
       // Running presets pick up edits; deleted ones keep running until they fade out.
       run.presets.update((key, item) => {
         const fresh = this.presets.get(key);
         return fresh ? { ...item, preset: fresh } : item;
       });
-      if (lit) this.setPreset(run, lit, this.fadeTime ?? lit.fade, now, false);
+      if (lit) {
+        const started = this.setPreset(run, lit.preset, this.fadeTime ?? lit.preset.fade, now, false);
+        // An edited effect carries on from where it was, so only its settings change across the fade.
+        if (started && moves(lit.preset)) {
+          started.time = lit.was.time;
+          started.beats = lit.was.beats;
+          started.cycles = lit.was.cycles.slice();
+        }
+      }
       this.groups.set(g.id, run);
     }
 
@@ -357,16 +387,17 @@ export class Engine {
       const running = group.presets.current?.preset;
       if (!saved?.custom || !target || !running || target.group !== group.id) continue;
       if (!sameLight(target, running)) continue;
-      group.presets.rekey(key, target.id, { preset: target, time: group.presets.current!.time, beats: group.presets.current!.beats });
+      group.presets.rekey(key, target.id, { ...group.presets.current!, preset: target });
     }
   }
 
   /**
-   * The group runs a plain one-colour preset whose colour the new show changed: the running copy
-   * is set aside under a spare key to fade out, and the new one to fade in. Returns the new
-   * preset to start, or null (everything else just takes the edit in place).
+   * The group runs a one-layer preset (a plain colour or an effect) whose layer the new show
+   * changed: the running copy is set aside under a spare key to fade out, and the new one to
+   * fade in. Returns the new preset to start and the run set aside, or null (everything else
+   * just takes the edit in place).
    */
-  private editedColour(group: GroupRun, before: Show | undefined, now: number): CompiledPreset | null {
+  private editedColour(group: GroupRun, before: Show | undefined, now: number): { preset: CompiledPreset; was: PresetRun } | null {
     const key = group.presets.currentKey;
     const running = group.presets.current;
     if (!before || !key || !running) return null;
@@ -376,7 +407,7 @@ export class Engine {
     if (!was || !is || !fresh || was.layers.length !== 1 || is.layers.length !== 1) return null;
     if (JSON.stringify(was.layers) === JSON.stringify(is.layers)) return null;
     if (!group.presets.rekey(key, `${key}~${now}`, running)) return null;
-    return fresh;
+    return { preset: fresh, was: running };
   }
 
   /**
@@ -395,7 +426,7 @@ export class Engine {
       if (!key || !running || !parseLivePreset(key)) continue;
       const found = added.find((p) => p.group === group.id && sameLight(this.presets.get(p.id)!, running.preset));
       const target = found && this.presets.get(found.id);
-      if (target) group.presets.rekey(key, target.id, { preset: target, time: running.time, beats: running.beats });
+      if (target) group.presets.rekey(key, target.id, { ...running, preset: target });
     }
   }
 
@@ -411,7 +442,7 @@ export class Engine {
     const liveOf = (old: Preset | undefined, group: string): string | null => {
       if (!old || old.group !== group || old.layers.length !== 1) return null;
       const layer = old.layers[0]!;
-      if (!('hex' in layer.colour) || layer.intensity !== 1) return null;
+      if (layer.kind !== 'static' || !('hex' in layer.colour) || layer.intensity !== 1) return null;
       // White, amber and UV go with it, so the stage keeps the same light.
       return livePresetId(group, layer.colour.hex, layer.colour);
     };
@@ -420,7 +451,7 @@ export class Engine {
       const running = group.presets.current;
       const id = key ? liveOf(gone.get(key), group.id) : null;
       const live = id ? this.presetFor(id, group.id) : undefined;
-      if (key && running && live) group.presets.rekey(key, live.id, { preset: live, time: running.time, beats: running.beats });
+      if (key && running && live) group.presets.rekey(key, live.id, { ...running, preset: live });
     }
     // Blackout remembers what each group ran; the next look brings that back, so it must not name a removed preset.
     if (this.beforeBlackout) {
@@ -654,7 +685,8 @@ export class Engine {
     const safeLook = this.show.operator.safeLook ? this.looks.get(this.show.operator.safeLook) : undefined;
     const entry = safeLook?.groups.find((e) => e.group === group.id);
     const own = entry && this.presets.get(entry.preset);
-    if (entry && own) return { preset: own, level: 1, fade: entry.fade ?? own.fade };
+    // Basic lights is always still: an effect in its look gives way to the built-in wash.
+    if (entry && own && !moves(own)) return { preset: own, level: 1, fade: entry.fade ?? own.fade };
     return { preset: fixedPreset(SAFE_ID, group.id, SAFE_LIGHT, SAFE_FADE), level: 1, fade: SAFE_FADE };
   }
 
@@ -704,11 +736,12 @@ export class Engine {
    * it shares with other groups. Safe and Blackout set every group at once,
    * so handing fixtures over would only add a second fade on top.
    */
-  private setPreset(group: GroupRun, preset: CompiledPreset, fade: number, now: number, own = true): void {
+  private setPreset(group: GroupRun, preset: CompiledPreset, fade: number, now: number, own = true): PresetRun | null {
     // A smoke group runs no presets: nothing but its level drives it.
-    if (group.smoke) return;
-    group.presets.push(preset.id, () => ({ preset, time: 0, beats: 0 }), now, fade);
+    if (group.smoke) return null;
+    const run = group.presets.push(preset.id, () => newRun(preset), now, fade);
     if (own) this.takeOwnership(group, now, fade);
+    return run;
   }
 
   /** The most recent change to a group wins its fixtures, including ones shared with other groups. */
@@ -780,7 +813,7 @@ export class Engine {
     this.last = now;
     const speed = this.speed.value(now);
     const beatsPerSecond = this.bpm / 60 * speed;
-    const ctx: LayerContext = { index: 0, count: 0, time: 0, beats: 0 };
+    const ctx: LayerContext = { index: 0, count: 0, time: 0, beats: 0, cycles: [] };
     const parts = this.scratch;
     const weights = this.scratchWeights;
 
@@ -799,30 +832,47 @@ export class Engine {
         continue;
       }
       const mix0 = group.presets.weights(now);
+      const length = group.line.length;
       for (const w of mix0) {
-        w.item.time += dt * speed;
-        w.item.beats += dt * beatsPerSecond;
+        const item = w.item;
+        item.time += dt * speed;
+        item.beats += dt * beatsPerSecond;
+        advancePhases(item.cycles, item.preset, dt, beatsPerSecond, speed);
+        // A preset that moves remembers each segment's level, to tell its own motion from fades.
+        if (moves(item.preset) && item.levels.length !== length) item.levels = new Array<number>(length).fill(NaN);
       }
       const level = group.level.value(now);
       const manual = this.liveManual(group, now, dt);
+      const motion = group.motion;
       // One light per segment of the group's line.
-      ctx.count = group.line.length;
-      for (let k = 0; k < group.line.length; k++) {
+      ctx.count = length;
+      for (let k = 0; k < length; k++) {
         ctx.index = k;
         const out = group.out[k];
+        motion[k] = 0;
         // A fixture without UV mixes only the light it can make, so its intensity is what it shows.
-        const noUv = !this.fixtures[group.line[k]!]!.plan.hasUv;
+        const plan = this.fixtures[group.line[k]!]!.plan;
+        const noUv = !plan.hasUv;
         if (mix0.length === 0) copy(out, DARK);
         else {
           parts.length = 0;
           weights.length = 0;
           for (let n = 0; n < mix0.length; n++) {
-            ctx.time = mix0[n].item.time;
-            ctx.beats = mix0[n].item.beats;
+            const item = mix0[n].item;
+            ctx.time = item.time;
+            ctx.beats = item.beats;
+            ctx.cycles = item.cycles;
             if (!this.scratchLights[n]) this.scratchLights[n] = dark();
-            const part = renderPreset(this.scratchLights[n], mix0[n].item.preset, ctx);
+            const part = renderPreset(this.scratchLights[n], item.preset, ctx);
             parts.push(noUv ? withoutUv(part) : part);
             weights.push(mix0[n].weight);
+            if (moves(item.preset)) {
+              const seen = visibleLevel(plan, part);
+              // The change since last frame (NaN on its first frame, which never counts).
+              const change = Math.abs(seen - item.levels[k]!);
+              if (change > motion[k]) motion[k] = change;
+              item.levels[k] = seen;
+            }
           }
           mix(out, parts, weights);
         }
@@ -859,10 +909,15 @@ export class Engine {
       // Flash overrides everything above, but not Blackout.
       const flash = flashing && this.flashed.has(f);
       const cells = run.cells, n = cells.length;
+      let widest = 0;
       for (let c = 0; c < n; c++) {
         // Where this segment sits in each group's line.
         const slot = run.reversed ? n - 1 - c : c;
         const light = cells[c];
+        let own = 0;
+        for (let j = 0; j < from.length; j++) own = Math.max(own, from[j].motion[starts[j] + slot]);
+        run.motion[c] = own;
+        if (own > widest) widest = own;
         if (from.length === 0) copy(light, DARK);
         else if (from.length === 1) copy(light, from[0].out[starts[0] + slot]);
         else {
@@ -876,6 +931,8 @@ export class Engine {
         if (flash) copy(light, FLASH_LIGHT);
         visualOf(light, this.visual, (run.visualAt + c) * 3);
       }
+      // A colour channel shared by all segments follows the brightest, so any segment's motion can show on all.
+      if (run.wide) run.motion.fill(widest);
 
       const buf = this.universes.get(run.plan.universe);
       if (buf) writeCells(buf, run.plan, cells);
@@ -894,6 +951,7 @@ export class Engine {
       copy(light, DARK);
       light.i = level;
     }
+    run.motion.fill(0);
     const buf = this.universes.get(run.plan.universe);
     if (buf) writeSmoke(buf, run.plan, level);
     const grey = Math.round(level * 140);
@@ -928,7 +986,19 @@ export class Engine {
    */
   visibleLevels(): number[] {
     const out: number[] = [];
-    for (const f of this.fixtures) for (const light of f.cells) out.push(visibleLevel(f.plan, light));
+    for (const f of this.fixtures) visibleCells(f.plan, f.cells, out, out.length);
+    return out;
+  }
+
+  /**
+   * For each segment, in the order of visibleLevels(): the largest change in how bright
+   * it looks that any preset running there made by itself this frame (an effect's own
+   * motion: a chase stepping, a wave rolling). 0 for plain colours. The jump check
+   * judges each segment's step against this plus 5 %.
+   */
+  ownMotion(): number[] {
+    const out: number[] = [];
+    for (const f of this.fixtures) for (const m of f.motion) out.push(m);
     return out;
   }
 
@@ -990,7 +1060,10 @@ export class Engine {
     // Smoke groups are left out: looks never set them.
     for (const entry of look?.groups ?? []) {
       const group = this.groups.get(entry.group);
-      if (group && !group.smoke && differs(group, entry.preset, safe ? 1 : entry.level ?? 1)) return true;
+      if (!group || group.smoke) continue;
+      // Basic lights runs its built-in wash where the safe look lists an effect.
+      const preset = safe ? this.safeTarget(group).preset.id : entry.preset;
+      if (differs(group, preset, safe ? 1 : entry.level ?? 1)) return true;
     }
     // Basic lights puts every group the safe look doesn't list on the built-in safe light at full.
     if (safe) {

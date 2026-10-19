@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { BUILT_IN_PROFILES, parseShow, type ChannelRole, type Fixture, type Profile, type Show } from '../../shared/src/index.ts';
 import { Engine, fromHex, type Light } from '../src/index.ts';
-import { kelvinOf, planChannels, writeCells, writeFixture, type ChannelPlan } from '../src/output.ts';
+import { kelvinOf, planChannels, visibleCells, visibleLevel, writeCells, writeFixture, type ChannelPlan } from '../src/output.ts';
 import { copy, dark, withoutUv } from '../src/light.ts';
 
 const G = 2.2;
@@ -90,7 +90,18 @@ function referenceWrite(buf: Uint8Array, plan: ChannelPlan, light: Light): void 
 }
 
 test('a plain colour writes the same DMX as before segments', () => {
-  const profiles = [...BUILT_IN_PROFILES, ...stage().profiles];
+  const fine = (role: ChannelRole) => [{ role }, { role, fine: true }];
+  const profiles: Profile[] = [
+    ...BUILT_IN_PROFILES,
+    ...stage().profiles,
+    // Several segments with a colour shared by all of them, and with fine (16-bit) colour channels.
+    made('4rgb-w', ['red', 'green', 'blue', 'red', 'green', 'blue', 'red', 'green', 'blue', 'red', 'green', 'blue', 'white']),
+    {
+      id: 'fd-2frgb-cct', name: 'fd-2frgb-cct',
+      channels: [...fine('dimmer'), ...fine('red'), ...fine('green'), ...fine('blue'), ...fine('red'), ...fine('green'), ...fine('blue'), { role: 'cct' }],
+    },
+    made('d-2rgb-a-uv', ['dimmer', 'red', 'green', 'blue', 'red', 'green', 'blue', 'amber', 'uv']),
+  ];
   const lights = [
     dark(),
     fromHex('#ffffff'),
@@ -135,6 +146,21 @@ test('segments of one fixture can differ, and the dimmer gets the brightest', ()
   const out = new Uint8Array(512);
   writeCells(out, bare, [fromHex('#ff0000', 0.5, 0.4), fromHex('#00ff00', 1, 0.8)]);
   assert.deepEqual(Array.from(out.subarray(0, 7)), [dmx(0.4), 0, 0, 0, dmx(0.8), 0, dmx(0.8)]);
+
+  // How bright each segment looks agrees: the shared white shows the brightest segment's white, on both segments.
+  const seen: number[] = [];
+  visibleCells(bare, [fromHex('#ff0000', 0.5, 0.4), fromHex('#00ff00', 1, 0.8)], seen, 0);
+  assert.deepEqual(seen, [0.8, 0.8]);
+  visibleCells(bare, [fromHex('#ff0000', 0, 0.4), fromHex('#00ff00', 0, 0.8)], seen, 0);
+  assert.deepEqual(seen, [0.4, 0.8]);
+  // A plain colour on every segment looks as bright as visibleLevel says, for every profile.
+  for (const profile of [...BUILT_IN_PROFILES, ...stage().profiles]) {
+    const plan = planOf(profile);
+    for (const light of [fromHex('#ff8000', 0.3, 0.6), fromHex('#000000', { uv: 1 }, 0.5), dark()]) {
+      visibleCells(plan, Array.from({ length: plan.cells }, () => ({ ...light })), seen, 0);
+      assert.deepEqual(seen.slice(0, plan.cells), new Array(plan.cells).fill(visibleLevel(plan, { ...light })), profile.id);
+    }
+  }
 });
 
 /** Two 8-segment bars in one group, the second hung the other way round. */

@@ -157,9 +157,10 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
   };
 }
 
+/** The plain light a preset shows; null for an effect (it moves, so it has no one light). */
 function presetLight(preset: Preset, palettes: ReadonlyMap<string, Palette>): OperatorPreset['light'] {
   const top = preset.layers[preset.layers.length - 1];
-  if (!top) return null;
+  if (!top || top.kind !== 'static') return null;
   return liveLight(resolveColour(top.colour, palettes), top.intensity);
 }
 
