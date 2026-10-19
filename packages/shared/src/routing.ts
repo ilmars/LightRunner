@@ -81,6 +81,7 @@ export function routeProblems(output: OutputSettings, routes: OutputRoute[] | un
   for (const r of routes ?? []) {
     if (seen.has(r.universe)) problems.push(`Universe ${r.universe} has its own output twice. Keep one.`);
     seen.add(r.universe);
+    if (r.output.kind === 'artnet' && !r.output.host.trim()) problems.push(`Type the node's IP address for universe ${r.universe}.`);
     if (r.output.kind !== 'enttec') continue;
     const port = r.output.port.trim();
     if (!port) {

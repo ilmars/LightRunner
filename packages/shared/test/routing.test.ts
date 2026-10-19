@@ -23,6 +23,7 @@ test('routes parse, and bad ones are refused with a plain message', () => {
   assert.match(twice.error!.issues[0].message, /Universe 2 has its own output twice/);
 
   assert.equal(Settings.safeParse({ routes: [{ universe: -1, output: artnet('a') }] }).success, false);
+  assert.deepEqual(routeProblems(artnet('x'), [{ universe: 2, output: artnet(' ') }]), ["Type the node's IP address for universe 2."]);
 });
 
 test('two universes on the same ENTTEC port are refused', () => {

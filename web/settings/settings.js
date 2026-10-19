@@ -167,6 +167,7 @@ function render() {
     s.output.kind === 'artnet' ? 'Art-Net port-address the node listens on. "Find nodes" shows it.' :
     s.output.kind === 'sacn' ? 'sACN universes start at 1.' :
     'Used when you switch to Art-Net or sACN.';
+  renderRoutes();
 
   $('manualForOperators').checked = s.manualForOperators;
 
@@ -210,7 +211,7 @@ setInterval(async () => {
 
 function changedFields() {
   const out = {};
-  const keys = ['showName', 'output', 'frameRate', 'gamma', 'manualForOperators'];
+  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators'];
   for (const k of keys) if (JSON.stringify(draft[k]) !== JSON.stringify(saved[k])) out[k] = draft[k];
   if (draft.universe !== undefined && draft.universe !== saved.universes[0]) out.universe = draft.universe;
   return out;
@@ -278,9 +279,8 @@ $('outputEnabled').addEventListener('change', async (e) => {
 
 // ---- Art-Net node finder ----
 
-$('findNodes').addEventListener('click', async () => {
-  const box = $('nodes');
-  const btn = $('findNodes');
+/** Search the network and list the nodes in `box`; "Use" calls `onUse(node)`. */
+async function findNodes(btn, box, onUse) {
   btn.disabled = true;
   btn.textContent = 'Searching…';
   box.replaceChildren();
@@ -296,11 +296,7 @@ $('findNodes').addEventListener('click', async () => {
       use.type = 'button';
       use.addEventListener('click', () => {
         if (n.thisMachine && !confirm(`${n.longName || n.shortName} is software on this computer, not the node box. It only reaches the lights while that program runs. Use it anyway?`)) return;
-        useNode(n);
-      });
-      const useNode = (n) => edit((s) => {
-        s.output = { kind: 'artnet', host: n.ip };
-        if (n.universes.length) s.universe = n.universes[0];
+        onUse(n);
       });
       row.append(meta, use);
       box.append(row);
@@ -311,24 +307,183 @@ $('findNodes').addEventListener('click', async () => {
     btn.disabled = false;
     btn.textContent = 'Find nodes';
   }
-});
+}
+
+$('findNodes').addEventListener('click', () => findNodes($('findNodes'), $('nodes'), (n) => edit((s) => {
+  s.output = { kind: 'artnet', host: n.ip };
+  // Moving the whole rig to the node's universe only works with one universe.
+  if (n.universes.length && s.universes.length <= 1) s.universe = n.universes[0];
+  $('nodes').replaceChildren();
+})));
 
 // ---- ENTTEC ports ----
 
-async function loadPorts(current) {
-  const sel = $('enttecPort');
-  let ports = [];
-  try {
-    ports = await call('GET', '/api/serial-ports');
-  } catch {
-    // ignore
+let portList = null; // the last list of USB serial ports, shared by every port menu
+
+async function serialPorts(refresh) {
+  if (!portList || refresh) {
+    try {
+      portList = await call('GET', '/api/serial-ports');
+    } catch {
+      portList = [];
+    }
   }
+  return portList;
+}
+
+/** Fill a USB port menu, keeping a chosen port that is unplugged right now. */
+async function fillPorts(sel, current, refresh) {
+  const ports = await serialPorts(refresh);
   sel.replaceChildren(new Option(ports.length ? 'Choose a port' : 'No USB DMX interface found', ''));
   for (const p of ports) sel.append(new Option(`${p.path}${p.manufacturer ? ` (${p.manufacturer})` : ''}`, p.path));
   if (current && !ports.some((p) => p.path === current)) sel.append(new Option(`${current} (not connected)`, current));
   sel.value = current ?? '';
 }
-$('refreshPorts').addEventListener('click', () => loadPorts(draft.output.port));
+
+function loadPorts(current, refresh) {
+  return fillPorts($('enttecPort'), current, refresh);
+}
+$('refreshPorts').addEventListener('click', async () => {
+  await loadPorts(draft.output.port, true);
+  renderRoutes();
+});
+
+// ---- Universes with their own output ----
+
+const KINDS = [['artnet', 'Art-Net'], ['sacn', 'sACN (E1.31)'], ['enttec', 'ENTTEC USB']];
+
+/** Universes set to "One receiver" for sACN whose address isn't typed yet. */
+const sacnUnicast = new Set();
+
+function routeFor(u) {
+  return draft.routes.find((r) => r.universe === u);
+}
+
+/** A new route starts as the same kind of output as the default, with the address still to fill in. */
+function newRouteOutput() {
+  const kind = draft.output.kind;
+  if (kind === 'sacn') return { kind, host: '', priority: draft.output.priority ?? 100 };
+  if (kind === 'enttec') return { kind, port: '' };
+  return { kind: 'artnet', host: '' };
+}
+
+function renderRoutes() {
+  const s = draft;
+  const counts = s.fixturesPerUniverse ?? {};
+  const universes = [...new Set([...s.universes, ...s.routes.map((r) => r.universe)])].sort((a, b) => a - b);
+  // With one universe and no routes there is nothing to choose: the output above is it.
+  $('routes').hidden = universes.length < 2 && !s.routes.length;
+  $('unsent').textContent = (saved?.unsent ?? []).map((x) => `Universe ${x.universe} is not sent: ${x.reason}.`).join(' ');
+  const list = $('routeList');
+  list.replaceChildren(...universes.map((u) => routeRow(u, counts[u] ?? 0)));
+}
+
+function routeRow(u, fixtures) {
+  const route = routeFor(u);
+  const row = el('div', 'node route');
+  const head = el('div', 'route-head');
+  const meta = el('div', 'meta');
+  meta.append(el('b', null, `Universe ${u}`));
+  meta.append(el('span', null, `${fixtures ? `${fixtures} fixture${fixtures === 1 ? '' : 's'}` : 'No fixtures patched'} · ${route ? 'Own output' : 'Default output'}`));
+  const toggle = el('button', 'ghost small', route ? 'Use default' : 'Use its own output');
+  toggle.type = 'button';
+  toggle.addEventListener('click', () => edit((s) => {
+    if (route) s.routes = s.routes.filter((r) => r.universe !== u);
+    else s.routes = [...s.routes, { universe: u, output: newRouteOutput() }].sort((a, b) => a.universe - b.universe);
+  }));
+  head.append(meta, toggle);
+  row.append(head);
+  if (route) row.append(routeFields(u, route.output));
+  return row;
+}
+
+function routeFields(u, out) {
+  const box = el('div', 'route-fields');
+  const seg = el('div', 'segmented small');
+  seg.setAttribute('role', 'radiogroup');
+  seg.setAttribute('aria-label', `Output type for universe ${u}`);
+  for (const [kind, label] of KINDS) {
+    const l = el('label');
+    const r = el('input');
+    r.type = 'radio';
+    r.name = `kind-${u}`;
+    r.value = kind;
+    r.checked = out.kind === kind;
+    r.addEventListener('change', () => edit(() => {
+      const host = out.host ?? '';
+      routeFor(u).output = kind === 'artnet' ? { kind, host }
+        : kind === 'sacn' ? { kind, host: '', priority: draft.output.priority ?? 100 }
+        : { kind, port: '' };
+    }));
+    l.append(r, el('span', null, label));
+    seg.append(l);
+  }
+  box.append(seg);
+
+  const textField = (label, value, placeholder, onInput) => {
+    const f = el('div', 'field');
+    const id = `route-${u}-${label.replace(/\W+/g, '-').toLowerCase()}`;
+    const lab = el('label', null, label);
+    lab.htmlFor = id;
+    const input = el('input');
+    input.id = id;
+    input.type = 'text';
+    input.inputMode = 'decimal';
+    input.placeholder = placeholder;
+    input.value = value ?? '';
+    input.addEventListener('input', (e) => { onInput(e.target.value.trim()); markDirty(); });
+    f.append(lab);
+    return { f, input };
+  };
+
+  if (out.kind === 'artnet') {
+    const { f, input } = textField('Node IP address', out.host, '192.168.0.120', (v) => { routeFor(u).output.host = v; });
+    const line = el('div', 'row');
+    const find = el('button', 'ghost', 'Find nodes');
+    find.type = 'button';
+    const nodes = el('div', 'nodes');
+    find.addEventListener('click', () => findNodes(find, nodes, (n) => edit(() => { routeFor(u).output = { kind: 'artnet', host: n.ip }; })));
+    line.append(input, find);
+    f.append(line);
+    box.append(f, nodes);
+  } else if (out.kind === 'sacn') {
+    const unicast = Boolean(out.host) || sacnUnicast.has(u);
+    const mode = el('div', 'segmented small');
+    for (const [value, label] of [['multicast', 'Multicast'], ['unicast', 'One receiver']]) {
+      const l = el('label');
+      const r = el('input');
+      r.type = 'radio';
+      r.name = `sacn-${u}`;
+      r.value = value;
+      r.checked = (value === 'unicast') === unicast;
+      r.addEventListener('change', () => edit(() => {
+        routeFor(u).output.host = '';
+        // An empty address is multicast to the server, so the page remembers "One receiver" until one is typed.
+        if (value === 'unicast') sacnUnicast.add(u);
+        else sacnUnicast.delete(u);
+      }));
+      l.append(r, el('span', null, label));
+      mode.append(l);
+    }
+    box.append(mode);
+    if (unicast) {
+      const { f, input } = textField('Receiver IP address', out.host, '192.168.0.120', (v) => { routeFor(u).output.host = v; });
+      f.append(input);
+      box.append(f);
+    }
+  } else if (out.kind === 'enttec') {
+    const f = el('div', 'field');
+    const lab = el('label', null, 'USB port');
+    const sel = el('select');
+    sel.id = `route-${u}-port`;
+    lab.htmlFor = sel.id;
+    sel.addEventListener('change', (e) => { routeFor(u).output.port = e.target.value; markDirty(); });
+    void fillPorts(sel, out.port);
+    f.append(lab, sel, el('span', 'hint', 'A USB interface sends one universe, so each universe needs its own.'));
+    box.append(f);
+  }
+  return box;
+}
 
 // ---- Show file and backups ----
 

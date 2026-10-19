@@ -103,7 +103,7 @@
             <select id="enttecPort"></select>
             <button id="refreshPorts" class="ghost" type="button">Refresh</button>
           </div>
-          <span class="hint">ENTTEC DMX USB Pro or compatible. It has one output: the show's first universe.</span>
+          <span class="hint">ENTTEC DMX USB Pro or compatible. It sends one universe: the first one that uses this output.</span>
         </div>
       </div>
 
@@ -111,6 +111,13 @@
         <label for="universe">Universe</label>
         <input id="universe" type="number" min="0" max="32767" step="1">
         <span class="hint" id="universeHint"></span>
+      </div>
+
+      <div class="routes" id="routes" hidden>
+        <h3>Universes</h3>
+        <p class="hint">Only needed when different universes go to different boxes. Every universe uses the output above unless you give it its own.</p>
+        <p class="warn" id="unsent"></p>
+        <div id="routeList" class="route-list"></div>
       </div>
     </section>
 
