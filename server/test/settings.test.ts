@@ -4,7 +4,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { App } from '../src/app.ts';
+import { createSocket, type Socket } from 'node:dgram';
+import { App, type AppOptions } from '../src/app.ts';
 import { hashPin, verifyPin } from '../src/auth.ts';
 import { multicastAddress, sacnPacket } from '../src/output/sacn.ts';
 import { parsePollReply } from '../src/discovery.ts';
@@ -13,10 +14,10 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const seedPath = join(root, 'server/seed/demo-show.json');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function withApp(fn: (call: (method: string, path: string, body?: unknown) => Promise<{ status: number; body: any }>, app: App) => Promise<void>) {
+async function withApp(fn: (call: (method: string, path: string, body?: unknown) => Promise<{ status: number; body: any }>, app: App) => Promise<void>, extra: Partial<AppOptions> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'light-runner-settings-'));
   // Real output selection, but sending to "none" by default so tests never hit the network.
-  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath, webDir: join(root, 'web'), log: () => {} });
+  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath, webDir: join(root, 'web'), log: () => {}, ...extra });
   let cookie = '';
   const call = async (method: string, path: string, body?: unknown) => {
     const res = await fetch(`http://127.0.0.1:${app.port}${path}`, {
@@ -120,6 +121,91 @@ test('output settings save, switch off, and reach the live state', async () => {
     r = await call('PUT', '/api/settings', { output: { kind: 'none' }, universe: 3 });
     assert.equal(r.status, 200);
     assert.deepEqual(r.body.universes, [3]);
+  });
+});
+
+async function receiver(): Promise<{ socket: Socket; port: number; universes: Set<number> }> {
+  const socket = createSocket('udp4');
+  await new Promise<void>((r) => socket.bind(0, '127.0.0.1', r));
+  const universes = new Set<number>();
+  socket.on('message', (m) => universes.add(m[14] | (m[15] << 8)));
+  return { socket, port: socket.address().port, universes };
+}
+
+test('two universes routed to two Art-Net nodes go to their own node', async () => {
+  const a = await receiver();
+  const b = await receiver();
+  try {
+    // Two "nodes" (documentation addresses), redirected to two UDP ports on this machine.
+    await withApp(async (call) => {
+      const show = (await call('GET', '/api/show')).body;
+      show.fixtures.find((f: any) => f.id === 'pulpit').universe = 2;
+      assert.equal((await call('PUT', '/api/show?source=patch', show)).status, 200);
+      const r = await call('PUT', '/api/settings', {
+        output: { kind: 'artnet', host: '192.0.2.1' },
+        routes: [{ universe: 2, output: { kind: 'artnet', host: '192.0.2.2' } }],
+      });
+      assert.equal(r.status, 200);
+      assert.deepEqual(r.body.routes, [{ universe: 2, output: { kind: 'artnet', host: '192.0.2.2' } }]);
+      assert.deepEqual(r.body.fixturesPerUniverse, { 0: 12, 2: 1 });
+      await sleep(300);
+      assert.deepEqual([...a.universes], [0]);
+      assert.deepEqual([...b.universes], [2]);
+
+      // Back to one output: universe 2 goes to the default node too.
+      assert.equal((await call('PUT', '/api/settings', { routes: [] })).status, 200);
+      assert.deepEqual((await call('GET', '/api/settings')).body.routes, []);
+      await sleep(100);
+      a.universes.clear();
+      await sleep(300);
+      assert.deepEqual([...a.universes].sort(), [0, 2]);
+      await call('PUT', '/api/settings', { output: { kind: 'none' } });
+    }, { artnetRedirect: { '192.0.2.1': { host: '127.0.0.1', port: a.port }, '192.0.2.2': { host: '127.0.0.1', port: b.port } } });
+  } finally {
+    a.socket.close();
+    b.socket.close();
+  }
+});
+
+test('routes are checked: one universe per USB interface, in plain words', async () => {
+  await withApp(async (call) => {
+    let r = await call('PUT', '/api/settings', { routes: [{ universe: 1, output: { kind: 'enttec', port: 'COM3' } }, { universe: 2, output: { kind: 'enttec', port: 'COM3' } }] });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /^Universes 1 and 2 both go to the USB interface on COM3/);
+    r = await call('PUT', '/api/settings', { routes: [{ universe: 'two', output: { kind: 'none' } }] });
+    assert.equal(r.status, 400);
+    // Addresses are IP addresses: the node watch matches replies by address.
+    r = await call('PUT', '/api/settings', { routes: [{ universe: 2, output: { kind: 'artnet', host: 'node-b.local' } }] });
+    assert.equal(r.body.error, "Type the node's IP address, like 192.168.0.120, for universe 2.");
+    r = await call('PUT', '/api/settings', { output: { kind: 'artnet', host: 'node-a.local' } });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error, "Type the node's IP address, like 192.168.0.114.");
+    r = await call('PUT', '/api/settings', { output: { kind: 'sacn', host: 'receiver', priority: 100 } });
+    assert.equal(r.body.error, "Type the receiver's IP address, like 192.168.0.114.");
+    assert.deepEqual((await call('GET', '/api/settings')).body.routes, []);
+  });
+});
+
+test('a Patch page left open does not put back old output settings', async () => {
+  await withApp(async (call) => {
+    const stale = (await call('GET', '/api/show')).body;
+    // Meanwhile, in Settings: a route, and the lights handed to another desk.
+    assert.equal((await call('PUT', '/api/settings', { routes: [{ universe: 2, output: { kind: 'artnet', host: '192.168.0.120' } }], outputEnabled: false })).status, 200);
+    stale.fixtures[0].name = 'Renamed in Patch';
+    assert.equal((await call('PUT', '/api/show?source=patch', stale)).status, 200);
+    const now = (await call('GET', '/api/show')).body;
+    assert.equal(now.fixtures[0].name, 'Renamed in Patch');
+    assert.equal(now.settings.outputEnabled, false);
+    assert.deepEqual(now.settings.routes, [{ universe: 2, output: { kind: 'artnet', host: '192.168.0.120' } }]);
+  });
+});
+
+test('moving a single-universe rig moves its route with it', async () => {
+  await withApp(async (call) => {
+    await call('PUT', '/api/settings', { routes: [{ universe: 0, output: { kind: 'none' } }] });
+    const r = await call('PUT', '/api/settings', { universe: 1 });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.routes, [{ universe: 1, output: { kind: 'none' } }]);
   });
 });
 

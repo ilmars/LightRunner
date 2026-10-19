@@ -3,7 +3,8 @@
 import type { LiveState, RuntimeState, Show, StageCommand } from '../../packages/shared/src/index.ts';
 
 export type ToWorker =
-  | { type: 'init'; show: Show; runtime: RuntimeState | null }
+  /** `artnetRedirect`: test hook, send Art-Net for a host to another address and port. */
+  | { type: 'init'; show: Show; runtime: RuntimeState | null; artnetRedirect?: Record<string, { host: string; port: number }> }
   | { type: 'show'; show: Show }
   | { type: 'command'; id: number; cmd: StageCommand }
   | { type: 'snapshot'; id: number }
