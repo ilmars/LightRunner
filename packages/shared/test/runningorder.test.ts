@@ -159,12 +159,18 @@ test('Add song puts "Song 6" after the given item, holding the stage', () => {
   assert.deepEqual(checkReferences(show), []);
 });
 
-test('Add song counts Song names, and keeps ids unique', () => {
+test('Add song numbers after the highest song, and keeps ids unique', () => {
   let s = ready();
   s = deleteItem(s, look(s, 'Song 1').id);
   const { show, id } = addSong(s, s.operator.safeLook!, emptyStage);
-  assert.equal(nameOf(show, id), 'Song 5');
+  assert.equal(nameOf(show, id), 'Song 6');
   assert.equal(new Set(show.looks.map((l) => l.id)).size, show.looks.length);
+
+  // with no Song names at all, it starts at Song 1
+  let bare = ready();
+  for (let n = 1; n <= 5; n++) bare = deleteItem(bare, look(bare, `Song ${n}`).id);
+  const first = addSong(bare, bare.operator.safeLook!, emptyStage);
+  assert.equal(nameOf(first.show, first.id), 'Song 1');
 });
 
 test('Rename trims and cuts the name', () => {

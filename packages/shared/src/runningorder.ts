@@ -130,8 +130,13 @@ export function saveItem(show: Show, lookId: string, stage: Stage): Show {
 /** A new "Song N" holding the stage, placed right after `afterId` (or last). */
 export function addSong(show: Show, afterId: string, stage: Stage): { show: Show; id: string } {
   const out = structuredClone(show);
-  const songs = out.operator.runningOrder.filter((id) => /^Song \d+$/.test(out.looks.find((l) => l.id === id)?.name ?? '')).length;
-  const id = addLook(out, `Song ${songs + 1}`, []);
+  // Number after the highest song, so deleting Song 1 never makes a second Song 5.
+  let highest = 0;
+  for (const itemId of out.operator.runningOrder) {
+    const m = /^Song (\d+)$/.exec(out.looks.find((l) => l.id === itemId)?.name ?? '');
+    if (m) highest = Math.max(highest, Number(m[1]));
+  }
+  const id = addLook(out, `Song ${highest + 1}`, []);
   lookIn(out, id).groups = entriesFor(out, stage);
   const at = out.operator.runningOrder.indexOf(afterId);
   if (at < 0) out.operator.runningOrder.push(id);
