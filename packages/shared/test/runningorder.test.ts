@@ -552,6 +552,73 @@ test('setItemGroup keeps an effect as a new hidden "Custom effect" preset', () =
   assert.deepEqual(checkReferences(out), []);
 });
 
+/** The demo show with a running order and a saved wave effect for the back wall, "bw-wave". */
+const withEffectPreset = () => {
+  const { show, song } = withSong();
+  show.presets.push({ id: 'bw-wave', name: 'Wave', group: 'back-wall', layers: [wave()], fade: 3 });
+  return { show, song, basic: show.operator.safeLook! };
+};
+
+test('Basic lights is always still: setItemGroup refuses an effect for it, live or saved', () => {
+  const { show, basic } = withEffectPreset();
+  const before = structuredClone(show);
+  assert.throws(() => setItemGroup(show, basic, { group: 'back-wall', effect: wave() }), { message: 'Basic lights is always still.' });
+  assert.throws(() => setItemGroup(show, basic, { group: 'back-wall', preset: 'bw-wave' }), { message: 'Basic lights is always still.' });
+  assert.deepEqual(show, before, 'nothing changed');
+  // A colour is fine there, and an effect is fine in a song.
+  assert.ok(setItemGroup(show, basic, { group: 'back-wall', colour: '#00ff00' }));
+  assert.ok(setItemGroup(show, show.operator.runningOrder[1]!, { group: 'back-wall', preset: 'bw-wave' }));
+});
+
+test('Basic lights is always still: applyQuickLookToItem refuses a quick look with an effect for it', () => {
+  const { show, song, basic } = withEffectPreset();
+  const quickId = show.operator.quickLooks[0]!.look;
+  show.looks.find((l) => l.id === quickId)!.groups = [
+    { group: 'audience', preset: 'aud-blue' },
+    { group: 'back-wall', preset: 'bw-wave' },
+  ];
+  assert.throws(() => applyQuickLookToItem(show, basic, quickId), { message: 'Basic lights is always still.' });
+  // A song takes it.
+  assert.equal(entryOf(applyQuickLookToItem(show, song, quickId), song, 'back-wall')!.preset, 'bw-wave');
+});
+
+test('Save on Basic lights keeps what it had for a group running an effect, and saves the rest', () => {
+  const { show, basic } = withEffectPreset();
+  const basicLook = show.looks.find((l) => l.id === basic)!;
+  basicLook.groups = [
+    { group: 'back-wall', preset: firstPreset(show, 'back-wall'), level: 1 },
+    { group: 'front-wash', preset: 'front-dim', level: 1 },
+  ];
+  const fx = liveEffectId('back-wall', 2);
+  // A live effect on the back wall, another colour on the front, and the audience Basic lights didn't list.
+  const stage: Stage = {
+    groups: { 'back-wall': fx, 'front-wash': firstPreset(show, 'front-wash'), audience: 'aud-blue' },
+    levels: { 'front-wash': 0.5 },
+    effects: { [fx]: wave() },
+  };
+  const saved = saveItem(show, basic, stage);
+  assert.deepEqual(saved.looks.find((l) => l.id === basic)!.groups, [
+    { group: 'back-wall', preset: firstPreset(show, 'back-wall'), level: 1 },
+    { group: 'front-wash', preset: firstPreset(show, 'front-wash'), level: 1 },
+    { group: 'audience', preset: 'aud-blue', level: 1 },
+  ]);
+  assert.equal(saved.presets.length, show.presets.length, 'no Custom effect made');
+  // A saved effect preset is kept out the same way; a group Basic lights didn't list stays unlisted.
+  const out = saveItem(show, basic, { groups: { 'back-wall': 'bw-wave' }, levels: {} });
+  assert.deepEqual(out.looks.find((l) => l.id === basic)!.groups, [{ group: 'back-wall', preset: firstPreset(show, 'back-wall'), level: 1 }]);
+  basicLook.groups = [];
+  assert.deepEqual(saveItem(show, basic, { groups: { 'back-wall': 'bw-wave' }, levels: {} }).looks.find((l) => l.id === basic)!.groups, []);
+});
+
+test('Save as quick look and Add song still keep an effect', () => {
+  const { show, song } = withEffectPreset();
+  const stage: Stage = { groups: { 'back-wall': 'bw-wave' }, levels: {} };
+  const quick = saveQuickLook(show, { name: 'Waves', tab: 'effects', groups: ['back-wall'] }, stage);
+  assert.equal(quick.show.looks.find((l) => l.id === quick.id)!.groups[0]!.preset, 'bw-wave');
+  const added = addSong(show, song, stage);
+  assert.equal(added.show.looks.find((l) => l.id === added.id)!.groups[0]!.preset, 'bw-wave');
+});
+
 test('setItemTempo changes the tempo of a song and nothing else', () => {
   const { show, song } = withSong();
   const before = structuredClone(show);

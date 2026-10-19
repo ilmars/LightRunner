@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LiveEffectLayer, type EffectLayer, type StageCommand } from '../../shared/src/index.ts';
+import { LiveEffectLayer, ensureRunningOrder, saveItem, type EffectLayer, type StageCommand } from '../../shared/src/index.ts';
 import { Engine } from '../src/index.ts';
 import { FRAME, beyondOwnMotion, close, demoShow } from './helpers.ts';
 
@@ -157,4 +157,27 @@ test('a restart while a live effect runs shows the same effect', () => {
   const g = new Engine(demoShow());
   g.restore({ ...e.runtime(), effects: { [state.preset!]: { kind: 'effect', effect: 'nope' } as unknown as EffectLayer } }, 0);
   assert.equal(g.liveState(0, 'off').groups[G]!.preset, null);
+});
+
+test('Save on Basic lights with an effect running leaves that group as Basic lights had it, and the look no longer reads as changed', () => {
+  const show = ensureRunningOrder(demoShow());
+  const basic = show.operator.safeLook!;
+  show.looks.find((l) => l.id === basic)!.groups = [{ group: G, preset: 'back-amber' }];
+  const e = new Engine(show, 0);
+  e.apply({ type: 'safe' }, 0);
+  run(e, 0, 4);
+  assert.equal(e.liveState(4, 'off').lookChanged, false);
+  e.apply(send(wave()), 4);
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-blue', fade: 0 }, 4);
+  run(e, 4, 5);
+  assert.equal(e.liveState(5, 'off').lookChanged, true, 'the audience colour is a change');
+  const saved = saveItem(show, basic, e.runtime());
+  assert.deepEqual(saved.looks.find((l) => l.id === basic)!.groups.find((x) => x.group === G), { group: G, preset: 'back-amber', level: 1 });
+  e.setShow(saved, 5);
+  const state = e.liveState(5, 'off');
+  assert.equal(state.lookChanged, false);
+  assert.match(state.groups[G]!.preset!, /^fx:/, 'the effect keeps running until something else is picked');
+  // Basic lights again puts the back wall back on its own colour.
+  e.apply({ type: 'safe' }, 6);
+  assert.equal(e.liveState(6, 'off').groups[G]!.preset, 'back-amber');
 });

@@ -3,7 +3,7 @@
 // Error with a plain message the page can show as it is.
 
 import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, liveEffectId, livePresetId, parseLiveEffect, parseLivePreset } from './protocol.ts';
-import { effectKey, resolveColour } from './schema.ts';
+import { effectKey, isEffectPreset, resolveColour } from './schema.ts';
 import type { EffectLayer, Layer, Look, LookEntry, Preset, QuickTab, Show } from './schema.ts';
 
 /** Where the stage is going: preset ids (possibly live ones) and level targets, as in RuntimeState. */
@@ -21,6 +21,8 @@ const MAX_TEMPO = 240;
 
 const MAX_NAME = 40;
 const BASIC = 'Basic lights';
+/** Basic lights is always still, so it never takes an effect. */
+const STILL = 'Basic lights is always still.';
 
 /** Trims and cuts a name to 40 characters. Empty names are refused. */
 export function cleanName(name: string): string {
@@ -202,15 +204,32 @@ export function ensureBasicLights(show: Show): Show {
   return out;
 }
 
+/** True when the stage preset is an effect: a live one (`fx:`) or a preset of the show with an effect in it. */
+function isEffect(show: Show, preset: string): boolean {
+  if (parseLiveEffect(preset)) return true;
+  const found = show.presets.find((p) => p.id === preset);
+  return !!found && isEffectPreset(found);
+}
+
 /**
  * Replaces what a look holds with the stage as it is going; the look keeps its id, name and place.
  * Basic lights keeps no dimmer levels: it stores every group at full, as it always resets them.
+ * Basic lights is always still too: a group running an effect keeps what Basic lights had for it.
  */
 export function saveItem(show: Show, lookId: string, stage: Stage): Show {
   const out = structuredClone(show);
   const target = lookIn(out, lookId);
-  target.groups = entriesFor(out, stage);
-  if (lookId === out.operator.safeLook) for (const entry of target.groups) entry.level = 1;
+  if (lookId === out.operator.safeLook) {
+    const moving = new Set(Object.entries(stage.groups).filter(([, p]) => p && isEffect(out, p)).map(([g]) => g));
+    const fresh = entriesFor(out, stage, Object.keys(stage.groups).filter((g) => !moving.has(g)));
+    const kept = target.groups.filter((e) => moving.has(e.group));
+    // In the stage's group order, as a plain Save stores them.
+    const order = Object.keys(stage.groups);
+    target.groups = [...fresh, ...kept].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
+    for (const entry of target.groups) entry.level = 1;
+  } else {
+    target.groups = entriesFor(out, stage);
+  }
   if (stage.tempo !== undefined) target.tempo = stage.tempo;
   return out;
 }
@@ -313,7 +332,7 @@ function putEntry(show: Show, target: Look, entry: LookEntry): void {
  * Changes one group in a running-order item: a preset of the group, an Any colour
  * (kept as a new hidden "Custom" preset, as Save does), an effect (a new hidden
  * "Custom effect") and/or its level. The other groups and the item's name stay.
- * A level alone needs the group to be set already.
+ * A level alone needs the group to be set already. Basic lights is always still: it takes no effect.
  */
 export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): Show {
   const out = structuredClone(show);
@@ -335,7 +354,9 @@ export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): S
 
   let stagePreset: string;
   const effects: Record<string, EffectLayer> = {};
+  const safe = target.id === out.operator.safeLook;
   if (edit.effect !== undefined) {
+    if (safe) throw new Error(STILL);
     stagePreset = liveEffectId(edit.group, 0);
     effects[stagePreset] = edit.effect;
   } else if (edit.colour !== undefined) {
@@ -343,6 +364,7 @@ export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): S
   } else {
     const preset = out.presets.find((p) => p.id === edit.preset && p.group === edit.group);
     if (!preset) throw new Error(`unknown preset "${edit.preset}" for group "${edit.group}"`);
+    if (safe && isEffectPreset(preset)) throw new Error(STILL);
     stagePreset = preset.id;
   }
   // Without a level the group keeps the one the item has (full if it has none).
@@ -364,13 +386,15 @@ export function setItemTempo(show: Show, itemId: string, bpm: number): Show {
  * Copies a quick look into a running-order item: each group the quick look lists
  * takes its preset (referenced, not copied) and level. Other groups keep their entries.
  * Smoke machines are skipped: looks never set smoke, so an older quick look that lists one
- * doesn't put it into a song.
+ * doesn't put it into a song. Basic lights is always still: a quick look with an effect is refused there.
  */
 export function applyQuickLookToItem(show: Show, itemId: string, quickLookId: string): Show {
   const out = structuredClone(show);
   const target = itemLook(out, itemId);
   if (!out.operator.quickLooks.some((q) => q.look === quickLookId)) throw new Error('that is not a quick look');
-  for (const entry of lookIn(out, quickLookId).groups) {
+  const entries = lookIn(out, quickLookId).groups;
+  if (itemId === out.operator.safeLook && entries.some((e) => isEffect(out, e.preset))) throw new Error(STILL);
+  for (const entry of entries) {
     if (out.groups.find((g) => g.id === entry.group)?.kind === 'smoke') continue;
     putEntry(out, target, { group: entry.group, preset: entry.preset, level: entry.level ?? 1 });
   }

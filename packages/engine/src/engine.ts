@@ -216,6 +216,11 @@ function sameLight(a: CompiledPreset, b: CompiledPreset): boolean {
   return near(x.r, y.r) && near(x.g, y.g) && near(x.b, y.b) && near(x.w, y.w) && near(x.a, y.a) && near(x.u, y.u) && near(x.i, y.i);
 }
 
+/** True when the group runs (or is fading into) a preset with an effect in it, as Save sees it (isEffectPreset). */
+function runsEffect(group: GroupRun): boolean {
+  return group.presets.current?.preset.layers.some((l) => l.kind === 'effect') ?? false;
+}
+
 export interface Frame {
   /** DMX data per universe, 512 bytes each. */
   universes: Map<number, Uint8Array>;
@@ -1177,10 +1182,13 @@ export class Engine {
       group.presets.currentKey !== preset || Math.abs(group.level.target - level) > 1e-9;
     // Basic lights keeps no dimmer levels: every group it sets should be at full.
     const safe = this.look === SAFE;
+    // Basic lights is always still, so Save can't keep an effect there: a group running one
+    // doesn't count as a change on Basic lights (Save leaves that group as it was).
+    const skip = (group: GroupRun) => group.smoke || (safe && runsEffect(group));
     // Smoke groups are left out: looks never set them.
     for (const entry of look?.groups ?? []) {
       const group = this.groups.get(entry.group);
-      if (!group || group.smoke) continue;
+      if (!group || skip(group)) continue;
       // Basic lights runs its built-in wash where the safe look lists an effect.
       const preset = safe ? this.safeTarget(group).preset.id : entry.preset;
       if (differs(group, preset, safe ? 1 : entry.level ?? 1)) return true;
@@ -1188,7 +1196,7 @@ export class Engine {
     // Basic lights puts every group the safe look doesn't list on the built-in safe light at full.
     if (safe) {
       for (const group of this.groups.values()) {
-        if (!group.smoke && !listed.has(group.id) && differs(group, SAFE_ID, 1)) return true;
+        if (!skip(group) && !listed.has(group.id) && differs(group, SAFE_ID, 1)) return true;
       }
     }
     return false;

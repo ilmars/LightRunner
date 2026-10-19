@@ -1354,7 +1354,18 @@ function buildEffectGrid(group) {
     add.addEventListener('click', () => openEffectEditor(null));
     grid.append(add);
   }
-  $('fxNone').hidden = effects.length > 0 || picker.edit;
+  showStill();
+}
+
+/** In Preview, Basic lights is always still: the Effects tab shows a note instead of effects it would refuse. */
+const previewStill = () => preview.on && !!previewItem() && isBasic(previewItem());
+
+function showStill() {
+  const still = previewStill();
+  const row = pickerRow();
+  $('fxStill').hidden = !still;
+  $('fxGrid').hidden = still;
+  $('fxNone').hidden = still || picker.edit || !!row?.group.presets.some((p) => p.effect);
 }
 
 // White, Amber and UV under the Any colour strip, for groups whose fixtures have them.
@@ -1478,7 +1489,8 @@ function renderPicker() {
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
   for (const b of $('fxGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
   // The settings of the effect the group runs (in Preview: the item's), under the list.
-  $('fxSet').hidden = !info.effect;
+  $('fxSet').hidden = !info.effect || previewStill();
+  showStill();
   effectSettings.show(info.effect, preview.on ? previewItem()?.tempo ?? 120 : state?.tempo ?? 120);
   const running = runningLight(row.group, s);
   pickerColour = running.colour;
