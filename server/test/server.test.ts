@@ -145,6 +145,35 @@ test('WebSocket clients get layout, state and visualiser frames, and can send co
   }
 });
 
+test('the layout lists the running order, quick looks and white-only groups', async () => {
+  const dir = tempDir();
+  const app = makeApp(dir);
+  try {
+    await app.start();
+    const { status, body: layout } = await api(app, 'GET', '/api/layout');
+    assert.equal(status, 200);
+    assert.ok(layout.basicLights);
+    assert.equal(layout.runningOrder[0].id, layout.basicLights);
+    assert.ok(layout.runningOrder.length > 1);
+    assert.ok(layout.quickLooks.length > 0);
+    assert.ok(layout.quickLooks.every((l: any) => ['plain', 'colours', 'effects'].includes(l.tab)));
+    assert.equal(layout.runningOrder[0].levels.length, layout.groups.length);
+    assert.ok(layout.looks.length > 0, 'the old looks list stays for the HTTP API');
+    const custom = new Set(parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).presets.filter((p) => p.custom).map((p) => p.id));
+    for (const g of layout.groups) {
+      assert.equal(typeof g.whiteOnly, 'boolean');
+      assert.ok(g.presets.every((p: any) => !custom.has(p.id)));
+    }
+    // The Neewer-style CCT front lights have no colour channels; the RGB bars do.
+    assert.ok(layout.groups.some((g: any) => g.whiteOnly === false));
+    // The migrated show is saved, so the running order survives a restart.
+    assert.ok(parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).operator.runningOrder.length > 0);
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a restart restores the last look, master and group presets', async () => {
   const dir = tempDir();
   try {

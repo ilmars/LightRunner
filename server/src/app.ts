@@ -12,7 +12,7 @@ import { extname, join, normalize, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  BUILT_IN_PROFILES, Command, OutputSettings, applyPicks, describeMode, diffShows, isManualCommand, oflToProfile, parseShow,
+  BUILT_IN_PROFILES, Command, OutputSettings, applyPicks, describeMode, diffShows, ensureRunningOrder, isManualCommand, oflToProfile, parseShow,
   type OflFixture, type Pick, type Scope,
   type LiveState, type RuntimeState, type Show,
 } from '../../packages/shared/src/index.ts';
@@ -108,7 +108,12 @@ export class App {
     const loaded = this.store.loadShow();
     if (loaded.problem) this.log(`WARNING: ${loaded.problem}`);
     this.log(`Loaded show "${loaded.show.name}" from ${loaded.source}`);
-    this.show = loaded.show;
+    const migrated = ensureRunningOrder(loaded.show);
+    if (JSON.stringify(migrated) !== JSON.stringify(loaded.show)) {
+      this.store.saveShow(migrated);
+      this.log('Gave the show a running order');
+    }
+    this.show = migrated;
     this.latestRuntime = this.store.loadRuntime();
     if (this.latestRuntime) this.log(`Restoring last state: look "${this.latestRuntime.look ?? 'none'}"`);
     this.startWorker();
@@ -197,6 +202,7 @@ export class App {
         markReady();
         break;
       case 'result':
+      case 'snapshot':
       case 'timing': {
         const resolve = this.pending.get(msg.id);
         this.pending.delete(msg.id);
@@ -238,14 +244,26 @@ export class App {
 
   /** Validate, check permissions and run a command. Returns an error message or null. */
   async command(input: unknown, role: Role): Promise<string | null> {
+    return (await this.run(input, role)).error;
+  }
+
+  /** Like `command`, and also says whether the command added a step to the Undo list. */
+  private async run(input: unknown, role: Role): Promise<{ error: string | null; recorded: boolean }> {
     const parsed = Command.safeParse(input);
-    if (!parsed.success) return `invalid command: ${parsed.error.issues.map((i) => i.message).join('; ')}`;
+    if (!parsed.success) return { error: `invalid command: ${parsed.error.issues.map((i) => i.message).join('; ')}`, recorded: false };
     const cmd = parsed.data;
     if (isManualCommand(cmd) && role !== 'programmer' && !this.show.operator.manualForOperators) {
-      return 'manual control is not enabled for operators';
+      return { error: 'manual control is not enabled for operators', recorded: false };
     }
-    const reply = await this.request<{ error: string | null }>((id) => ({ type: 'command', id, cmd }));
-    return reply.error;
+    const reply = await this.request<{ error: string | null; recorded?: boolean }>((id) => ({ type: 'command', id, cmd }));
+    return { error: reply.error, recorded: !!reply.recorded };
+  }
+
+  /** The engine's stage and look as they are right now, straight from the worker. */
+  private async stage(): Promise<RuntimeState> {
+    const reply = await this.request<{ runtime?: RuntimeState; error?: string }>((id) => ({ type: 'snapshot', id }));
+    if (!reply.runtime) throw new Error(reply.error ?? 'engine did not answer');
+    return reply.runtime;
   }
 
   async timing(reset = false): Promise<TimingStats> {

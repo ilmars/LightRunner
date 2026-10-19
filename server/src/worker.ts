@@ -132,10 +132,13 @@ port.on('message', (msg: ToWorker) => {
       break;
     case 'command': {
       const error = engine ? engine.apply(msg.cmd, clock() / 1000) : 'engine not started';
-      post({ type: 'result', id: msg.id, error });
+      post({ type: 'result', id: msg.id, error, recorded: !!engine?.recorded });
       stateDue = true;
       break;
     }
+    case 'snapshot':
+      if (engine) post({ type: 'snapshot', id: msg.id, runtime: engine.runtime() });
+      break;
     case 'timing': {
       const { startedAt, ...stats } = timing;
       post({ type: 'timing', id: msg.id, stats: { ...stats, period, seconds: (clock() - startedAt) / 1000 } });

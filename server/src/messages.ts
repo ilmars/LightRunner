@@ -6,6 +6,7 @@ export type ToWorker =
   | { type: 'init'; show: Show; runtime: RuntimeState | null }
   | { type: 'show'; show: Show }
   | { type: 'command'; id: number; cmd: Command }
+  | { type: 'snapshot'; id: number }
   | { type: 'timing'; id: number; reset?: boolean }
   | { type: 'stop' };
 
@@ -23,7 +24,9 @@ export interface TimingStats {
 
 export type FromWorker =
   | { type: 'ready'; fixtures: string[] }
-  | { type: 'result'; id: number; error: string | null }
+  /** `recorded`: the command added a step to the Undo list. */
+  | { type: 'result'; id: number; error: string | null; recorded: boolean }
+  | { type: 'snapshot'; id: number; runtime: RuntimeState }
   | { type: 'state'; state: LiveState }
   | { type: 'runtime'; runtime: RuntimeState }
   | { type: 'visual'; data: Uint8Array }
