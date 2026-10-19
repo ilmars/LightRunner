@@ -118,6 +118,19 @@ Calls made while writing this up (Claude's, open to change):
 - New on the server: Flash (hold and release), saving the stage into a running-order item or a new quick look, adding, renaming, deleting and reordering running-order items, quick looks as a separate list from the running order, and Undo for all of these.
 - STATUS's "Record look / edit colours" (item 3) is largely this design. Its open question about dimmer levels is answered above. SPEC's Safe button becomes Basic lights; add that to DECISIONS when it's built. These are commands through `App.command()` like everything else.
 
+## Detailed UI (in progress)
+
+A clickable sketch at the iPad's real size is in [2026-10-19-operator-ui-sketch.html](2026-10-19-operator-ui-sketch.html). Open it in a browser; it needs no server.
+
+Decided so far:
+
+- **Group rows in the details:** one row per group, with the group name, a colour chip (colour square plus preset name, e.g. "Silti balts") and a wide horizontal dimmer bar with its percentage.
+- **Dimmers are calm:** grey fill on a dark track with a **faint tint** of the group's colour (about 14 %), and a small dim handle. They are not filled in full colour.
+- **Colour picker:** tapping a group's colour chip opens the picker over the details area, so the running order and stage preview stay visible. It shows the group's presets as swatches, plus an "Any colour" strip; Front lights (white only) get whites and a warm-to-cool strip instead. Picking changes the stage immediately and marks the item changed. **Done** closes the picker. There's an Effects tab for later.
+- **Save** fills while held (1 s). **Back to …** only shows when there are changes.
+
+Still open: how the running order is edited. The sketch has two ways to compare: an **Edit** button that turns the list into rows with delete, rename and drag handles, or **holding** a song for a menu (Rename, Move up, Move down, Duplicate, Delete). After that come Save as quick look, the quick looks tabs, Flash and the top bar.
+
 ## Left to the builder
 
 - Exact sizes, spacing and touch targets within each block (thumb-sized, iPad 1080 × 810).
