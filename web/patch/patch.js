@@ -678,7 +678,7 @@ function renderGroups() {
     head.append(name, el('span', 'note', `${presets} presets`), del);
 
     // A smoke or haze machine: only its own slider and Puff on the operator page turn it on.
-    const kind = el('div', 'kind');
+    const kind = el('div', 'group-kind');
     const sw = el('label', 'switch');
     const box = el('input');
     box.type = 'checkbox';
