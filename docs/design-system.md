@@ -1,89 +1,101 @@
 # Design system
 
-Light Runner's pages share one look: dark navy, soft raised panels instead of borders, muted at rest and lighter when selected. It is built for a dark church: large areas never get bright, and the bright accent only appears as thin marks.
+Light Runner's pages share one look: **dark navy soft glass**. Panels and controls are flat, translucent surfaces with a faint 1 px edge. There are no bevels, no inset wells and no heavy shadows. Selected, held and warning states are tinted glass: blue, amber or red. It is built for a dark church: no large area gets bright, fixture colours are mixed down, and the bright accent only appears as thin lines.
 
 Tokens and base components live in [web/shared/theme.css](../web/shared/theme.css). Every page loads it before its own stylesheet. Shared classes are prefixed `ds-` so they never clash with a page's own class names.
 
-Direction agreed with Ilmārs on 19 Oct 2026: "Premium dark neumorphic", from a reference industrial control screen, using the palette adjusted for the dark room (not the brighter one first suggested; see Brightness below).
+How the direction was agreed with Ilmārs (19 Oct 2026):
+
+1. A first "dark neumorphic" pass, with the palette adjusted for the dark room (see Brightness).
+2. A refinement pass: two surface levels, an integrated bottom strip, and running-order states.
+3. The current direction: **modern dark soft glass** (flat glassmorphism, bento layout), from a dark dashboard reference. Neumorphism, bevels, metallic controls and slider thumbs were dropped.
 
 ## Colours
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `--ds-bg` | `#0F1626` | Page background (with a soft radial gradient to `--ds-bg-deep` `#0B111E`) |
-| `--ds-surface` / `--ds-surface-hi` | `#192238` / `#1D2741` | Panels: bottom and top of their gradient |
-| `--ds-elevated` | `#25324F` | Tiles and buttons at rest |
-| `--ds-selected` | `#34466D` | Selected, active or held; the lightest large area allowed |
-| `--ds-mark` | `#68758F` | Grips, ticks, handles only (never a large area) |
-| `--ds-accent-fill` | `#3A6FB8` | Accent for areas (Save fill, at half strength) |
-| `--ds-accent` | `#4389E8` | Accent for thin lines only: focus ring, drag outline |
-| `--ds-text` | `#E6EAF2` | Text |
-| `--ds-muted` | `#9AA5BA` | Labels and inactive text on panels |
-| `--ds-muted-on` | `#B4BDCF` | Labels on tiles and selected areas (keeps contrast) |
-| `--ds-warn`, `--ds-warn-text` | `#c98a2a`, `#e0b46a` | "changed", problems with the lights |
-| `--ds-danger-text` / `--ds-danger-fill` | `#E0A3A3` / `#3A1F26` | Blackout, delete |
+| `--ds-bg` / `--ds-bg-deep` | `#0A0F1B` / `#070B14` | Page background, with a soft radial glow from the top (`#16213a`) |
+| `--ds-surface` / `--ds-surface-hi` | `#121A2B` / `#162034` | Solid surface tones |
+| `--ds-panel-fill` | translucent `rgba(27,37,60,.78)` to `rgba(17,24,40,.78)` | Panels (glass) |
+| `--ds-tile-fill` | `rgba(148,170,210,.055)` | Tiles and buttons at rest |
+| `--ds-elevated` | `rgba(148,170,210,.10)` | Pressed |
+| `--ds-tile-fill-on` + `--ds-edge-on` | blue tint `rgba(84,146,236,.17–.26)`, edge `rgba(98,155,240,.45)` | Selected: running-order item on stage, tabs, Save, Done, the current swatch |
+| `--ds-selected` | `rgba(84,146,236,.24)` | Held (Flash) |
+| `--ds-glass` | `rgba(14,20,34,.86)` + 16 px blur | Surfaces that overlap others: picker, new-quick-look sheet, Fade menu, toast |
+| `--ds-accent` | `#4389E8` | Thin lines only: focus edge, Save while held |
+| `--ds-accent-fill` | `#3A6FB8` | Save's hold fill, at 45 % |
+| `--ds-text` / `--ds-muted` / `--ds-muted-on` | `#E6EAF2` / `#8F9AB0` / `#B4BDCF` | Text, labels, labels on tinted areas |
+| `--ds-warn`, `--ds-warn-text` | `#c98a2a`, `#e0b46a` | "changed", Master below full, problems with the lights |
+| `--ds-danger` (`224,90,104`) + `-text`, `-fill`, `-edge` | red glass | Blackout, delete, error toast |
 | `--ds-ok` | `#2f9e5b` | Connected dot |
 
 ### Brightness
 
-The first suggested palette (background `#151D30`, surface `#222E4B`, elevated `#34466D`, selected `#68758F`, accent `#4389E8`) was measured at about 4× today's average screen brightness. A `#68758F` tile was 12× the old raised tile, and a solid `#4389E8` area would have been the brightest thing in the room. The adjusted palette is about 2.3× today's, and every text colour passes WCAG AA on the surfaces it sits on. Rules:
+The first suggested palette was measured at about 4× the old screen's average brightness, with a light-grey selected tile 12× the old raised tile. The rules that came out of that still hold:
 
-- No large area lighter than `--ds-selected`.
-- `--ds-accent` only as a line of 2–4 px; areas use `--ds-accent-fill` at partial opacity.
-- The light half of a soft shadow stays at 4–6 % white, so it never reads as an outline.
-- Saturated colours (swatches, colour strips) are dimmed: swatches at 0.8–0.85 opacity, the "Any colour" strip at 0.55, group tints at 0.14.
+- No large area is bright. Tints stay under about 26 % opacity.
+- `--ds-accent` is only used as a line of 1–2 px.
+- Fixture colours are mixed down. Slider fills carry 15–26 % of the group's colour, swatches are at 0.8–0.85 opacity and the "Any colour" strip at 0.55.
 - Check new values on the real iPad at the church's usual brightness; a screenshot can't show it.
 
 ## Shape and type
 
 | Token | Value |
 | --- | --- |
-| `--ds-r-panel` / `--ds-r-tile` / `--ds-r-small` | 20 / 14 / 10 px |
-| `--ds-gap` / `--ds-gap-tight` | 12 / 8 px (soft shadows need at least 12 px between panels) |
+| `--ds-r-panel` / `--ds-r-tile` / `--ds-r-small` / `--ds-r-pill` | 18 / 12 / 10 / 999 px |
+| `--ds-gap` / `--ds-gap-tight` | 12 / 8 px |
 | `--ds-target` | 44 px minimum touch target |
-| `--ds-shadow-raise` | panels |
-| `--ds-shadow-low` | tiles and buttons |
-| `--ds-shadow-inset` | sunken things: slider tracks, fields, pressed buttons |
-| Type | system font, regular weight (400, 500 for the current item); size carries the hierarchy: label 13, body 16, value 18, title 22 px |
+| `--ds-shadow-raise` | Panels: faint edge plus a very soft far shadow |
+| `--ds-shadow-low`, `--ds-shadow-inset` | Controls: faint edge only |
+| Type | System font. Panel titles semibold 15 px in title case ("Running order", "Quick looks"). Control labels in small spaced capitals (Master, Flash, Next). Group names 13 px muted. Levels 20 px with numbers that keep their width. Current item 500. |
 
 ## Components
 
 | Class | What | Notes |
 | --- | --- | --- |
-| `ds-panel` | Bento panel on the background | No border; raised shadow and faint top edge |
-| `ds-tile` (+ `ds-on`) | Raised tile inside a panel | Selected uses `--ds-selected` |
+| `ds-panel` | Glass panel of the bento layout | Faint edge; translucent fill |
+| `ds-tile` (+ `ds-on`) | Flat tile inside a panel | Selected = blue tint and blue edge |
 | `ds-label` | Muted small label above a value | "Key lights" over "Vēsi balts" |
-| `ds-btn`, `ds-btn--text` | Button, quiet text button | Pressed = inset shadow; disabled = 40 % opacity |
-| `ds-hold` + `ds-hold-fill` | Button that fills while held | Save, Blackout |
-| `ds-fill` + `-slab`, `-tint`, `-grip`, `-val` | Fill slider | Sunken track; lighter slab for the level; value inside on the left; grip at the slab's end; optional colour tint over the slab |
-| `ds-seg` | Segmented control and tabs | Selected = raised lighter tile |
-| `ds-field` | Text field | Sunken; accent focus ring |
-| `ds-sheet` | Sheet covering one panel | Colour picker, new quick look |
+| `ds-btn`, `ds-btn--text`, `ds-btn--pill` | Button, quiet text button, pill | Pressed = lighter tint; disabled = 40 % opacity |
+| `ds-hold` + `ds-hold-fill` | Button that fills while held | Save (blue), Blackout (red) |
+| `ds-fill` + `-slab`, `-val` | Fill slider | A smooth filled bar on a faint track, no thumb; the fill carries a little of the group's colour (`--c`); the value is shown beside it |
+| `ds-seg` | Segmented control and tabs | Faint track; selected = blue tint and edge |
+| `ds-field` | Text field | Flat; focus = accent edge |
+| `ds-sheet` | Glass sheet over one panel | The only place blur is used |
 | `ds-swatch` | Colour square | Dimmed |
 
 ## Where it is applied
 
 | Area | State |
 | --- | --- |
-| Operator page: everything (frame, top bar, running order and edit mode, quick looks, details, colour picker, new-quick-look sheet, bottom bar) | Done (two passes) |
+| Operator page: everything (frame, top bar, running order and edit mode, quick looks, details, colour picker, new-quick-look sheet, bottom bar) | Done |
 | Settings | To do |
 | Patch (frame and controls; the DMX map and stage plan keep their own look) | To do |
 
-### Operator page rules (second pass)
+### Operator page rules
 
-- Two levels only. Panels are level 1. Controls are level 2: raised a little (buttons, tiles, the item on stage) or sunk in (slider tracks, fields, tab bars). Group zones in Details are flat, divided by a faint line, not cards inside a card. The bottom bar is one strip with its groups divided by faint lines.
-- Section headers are small spaced capitals (`.sec-title`, 11 px, 0.09 em): Running order, Quick looks, Master, Flash, Next.
-- Levels are a clear number on the right of the group's header line (20 px, numbers keep their width), never drawn over the slider; 0 % is muted.
-- The slider's slab carries a little of the group's own colour (`--c`, mixed at 10–26 %); the thumb is a small raised pill at the slab's end.
-- Running order states: on stage = lighter tile with a 3 px accent bar; changed = amber dot and "changed"; the item Next will start = a quiet "next".
-- Operational states, each different: Flash held = pressed in and lighter; Master below 100 % = amber value; Blackout held = filling red; Blackout on = strong red button and a red top bar. Colour is only used where it says something.
+- **Surfaces:** glass panels on the background. Group zones in Details are flat and divided by a faint line, not cards inside a card. The bottom bar is one strip whose groups are divided by faint lines.
+- **Levels:** a clear number on the right of the group's header line, never drawn over the slider. 0 % is muted.
+- **Running order:**
+  - on stage: blue-tinted glass with a blue edge
+  - changed: an amber dot and "changed"
+  - the item Next will start: a quiet "next"
+- **Header actions** (Edit, Back to …, Save, Done) are pills.
+- **Operational states**, each different:
+  - Flash held: blue tint and edge.
+  - Master below 100 %: amber value and an amber fill.
+  - Blackout: faint red at rest, filling red while held. While it's on, strong red glass on the button and the whole top bar.
+  - Problems with the lights: an amber strip on the top bar.
+  - Send DMX off: a violet strip.
+
+  Colour is only used where it says something.
 
 ## Audit notes (19 Oct 2026)
 
-What the restyle is fixing, from a read-through of all three pages before the work:
+What the restyle fixed, from a read-through of all three pages before the work:
 
-- The pages didn't share tokens: operator and settings each had their own, with different text, muted and danger colours; patch borrowed settings'. The operator page had 50+ one-off colours and 7 corner radii for objects at the same level.
-- "Selected" was drawn five different ways (running order, tabs, preset tiles, segmented choices, the Fade menu). Quick-look tiles have no "current" state.
-- Held states (Save, Blackout, Flash) each looked different.
-- Some operator targets were under 44 px: the dimmers (40 px, now 48 px), the rename field (40 px) and the Master track (28 px).
-- The operator toast was always red, even for "Saved".
+- **Tokens weren't shared.** The operator and settings pages each had their own, with different text, muted and danger colours; patch borrowed settings'. The operator page had 50+ one-off colours and 7 corner radii for objects at the same level.
+- **"Selected" was drawn five different ways:** running order, tabs, preset tiles, segmented choices and the Fade menu. Quick-look tiles have no "current" state.
+- **Held states** (Save, Blackout, Flash) each looked different.
+- **Some operator targets were under 44 px:** the dimmers (40 px, now 44 px), the rename field (40 px, now 44 px) and the Master track (28 px, now 32 px inside a 58 px strip).
+- **The operator toast was always red,** even for "Saved".

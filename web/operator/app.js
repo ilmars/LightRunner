@@ -695,15 +695,14 @@ function stageItem() {
   return k >= 0 ? layout.runningOrder[k] : null;
 }
 
-// One entry per group: { group, chip, sw, chipName, dim, slab, grip, pct, dragging, holdUntil }.
+// One entry per group: { group, chip, sw, chipName, dim, slab, pct, dragging, holdUntil }.
 let detailRows = [];
 
 function showLevel(row, v) {
   const p = clamp01(v);
   row.value = p;
-  // The slab is inset 3 px inside the track; the thumb rides just inside its end.
-  row.slab.style.width = `calc(${p * 100}% - ${p * 6}px)`;
-  row.grip.style.left = `max(5px, calc(${p * 100}% - ${p * 6}px - 7px))`;
+  // A smooth filled bar: the fill's width is the level.
+  row.slab.style.width = `${p * 100}%`;
   row.pct.textContent = `${Math.round(p * 100)} %`;
   row.pct.classList.toggle('zero', p === 0);
   row.dim.setAttribute('aria-valuenow', String(Math.round(p * 100)));
@@ -720,17 +719,17 @@ function buildDetails() {
     const chip = el('button', 'chip');
     chip.append(sw, chipName);
     chip.setAttribute('aria-label', `${group.name}: choose colour`);
-    const slab = el('span', 'ds-fill-slab'), grip = el('span', 'ds-fill-grip');
+    const slab = el('span', 'ds-fill-slab');
     const pct = el('span', 'pct');
     const dim = el('div', 'ds-fill');
     dim.setAttribute('role', 'slider');
     dim.setAttribute('aria-label', `${group.name} dimmer`);
     dim.setAttribute('aria-valuemin', '0');
     dim.setAttribute('aria-valuemax', '100');
-    dim.append(slab, grip);
+    dim.append(slab);
     box.append(el('span', 'g', group.name), chip, pct, dim);
     root.append(box);
-    const row = { group, chip, sw, chipName, dim, slab, grip, pct, value: 0, dragging: false, holdUntil: 0 };
+    const row = { group, chip, sw, chipName, dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
     detailRows.push(row);
     showLevel(row, 0);
     chip.addEventListener('click', () => openPicker(group.id));
