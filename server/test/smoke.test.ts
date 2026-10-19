@@ -98,6 +98,18 @@ test('a Puff stops when the tablet holding it disconnects', () => inTempDir((dir
   await waitFor(() => watch.state()?.flashing.length === 0, 500, 'the Puff to stop');
 })));
 
+test("another tablet's Flash of several groups doesn't keep a Puff on when the puffing tablet goes", () => inTempDir((dir) => withHazeApp(dir, async (app) => {
+  const watch = await tablet(app);
+  const flasher = await tablet(app);
+  const puffer = await tablet(app);
+  // The engine leaves Haze out of this flash, so this tablet isn't holding it.
+  assert.equal(await flasher.send({ type: 'flash', groups: ['back-wall', 'haze'], on: true }), null);
+  assert.equal(await puffer.send({ type: 'flash', groups: ['haze'], on: true }), null);
+  await waitFor(() => String(watch.state()?.flashing.slice().sort()) === 'back-wall,haze', 2000, 'the flash and the Puff');
+  puffer.ws.close();
+  await waitFor(() => String(watch.state()?.flashing) === 'back-wall', 500, 'the Puff to stop while the flash stays');
+})));
+
 test('a Puff stops when the tablet holding it stops answering', () => inTempDir((dir) => withHazeApp(dir, async (app) => {
   const watch = await tablet(app);
   const silent = await tablet(app, { autoPong: false });
