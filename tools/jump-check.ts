@@ -3,8 +3,9 @@
 // largest intensity jump of any fixture between two frames.
 //
 // The spec's rule: no fixture jumps more than 5% during any fade, including
-// interruptions and manual release. Manual takeover and master moves follow
-// the finger on purpose (0.2 s), so frames right after those are not judged.
+// interruptions and manual release. Manual takeover, master moves and Any
+// colour drags follow the finger on purpose (0.2 s), so frames right after
+// those are not judged.
 // Fades are at least 1 s, the spec's shortest (Safe and Blackout): a full
 // 0–100% fade shorter than 0.75 s cannot stay under 5% per frame at 40 fps.
 //
@@ -61,7 +62,10 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
     // Half of the Any colour picks carry white, amber or UV (each one sometimes).
     const extra = () => (rand() < 0.5 ? rand() : undefined);
     const extras = rand() < 0.5 ? { white: extra(), amber: extra(), uv: extra() } : {};
-    return { cmd: { type: 'groupColour', group: pick(show.groups).id, colour: hex(), ...extras }, fast: false };
+    const cmd = { type: 'groupColour' as const, group: pick(show.groups).id, colour: hex(), ...extras };
+    // A third are sends of a drag on the operator page: they follow the finger in 0.2 s, like manual.
+    if (rand() < 0.33) return { cmd: { ...cmd, fade: 0.2, continues: rand() < 0.7 }, fast: true };
+    return { cmd, fast: false };
   }
   if (r < 0.68) {
     const target = rand() < 0.5 ? { group: pick(show.groups).id } : { fixture: pick(show.fixtures).id };

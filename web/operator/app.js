@@ -950,13 +950,28 @@ function extraLevels() {
   return out;
 }
 
-function sendColour(hex) {
-  if (picker.group) send({ type: 'groupColour', group: picker.group, colour: hex, ...extraLevels() });
+/** Every send of a drag (the strip or a slider) fades this fast, like Master and manual, so the stage follows the finger. */
+const DRAG_FADE = 0.2;
+
+/** An Any colour send. Only the first send of a drag adds an Undo step; the rest continue it. */
+function sendColour(hex, first, extras) {
+  if (!picker.group) return;
+  send({ type: 'groupColour', group: picker.group, colour: hex, ...extras, fade: DRAG_FADE, ...(first ? {} : { continues: true }) });
+}
+
+/** Throttled sends for one finger at a time: `start()` on touch, then `push` while it moves and `end` on release. */
+function dragSender(sendOne) {
+  let first = true;
+  const out = throttle((v) => {
+    sendOne(v, first);
+    first = false;
+  });
+  return { start() { first = true; }, push: (v) => out.push(v), end: (v) => out.end(v) };
 }
 
 /** Same feel as the group dimmers: the level moves relative to where the finger started. */
 function wireExtra(row) {
-  const out = throttle(() => sendColour(pickerColour));
+  const out = dragSender((_v, first) => sendColour(pickerColour, first, extraLevels()));
   let startX = 0, startV = 0;
   row.dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
@@ -965,6 +980,7 @@ function wireExtra(row) {
     row.dim.classList.add('ds-dragging');
     startX = ev.clientX;
     startV = row.value;
+    out.start();
   });
   row.dim.addEventListener('pointermove', (ev) => {
     if (!row.dragging) return;
@@ -1031,7 +1047,7 @@ for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('clic
 // The White, Amber and UV sliders' levels go with it.
 (() => {
   const strip = $('pAny');
-  const out = throttle((hex) => sendColour(hex));
+  const out = dragSender((hex, first) => sendColour(hex, first, extraLevels()));
   let dragging = false;
   const pick = (ev) => {
     const r = strip.getBoundingClientRect();
@@ -1047,6 +1063,7 @@ for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('clic
     ev.preventDefault();
     dragging = true;
     try { strip.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    out.start();
     hex = pick(ev);
     if (hex) out.push(hex);
   });
