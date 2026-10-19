@@ -1744,4 +1744,40 @@ async function keepAwake() {
 document.addEventListener('visibilitychange', keepAwake);
 keepAwake();
 
+
+// ---- Phone remote (narrow screens) ----
+// The same page as a remote: Order, Groups and Looks tabs; Master and the dock always
+// visible; nothing that saves or edits the show (the styles hide those). Flash moves from
+// the bottom bar to the top of Groups. See docs/superpowers/specs/2026-10-19-phone-remote-design.md.
+
+const phoneQuery = window.matchMedia('(max-width: 700px), (max-height: 500px)');
+
+function setPhoneTab(tab) {
+  document.body.dataset.tab = tab;
+  for (const b of $('phoneTabs').querySelectorAll('button')) {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', String(on));
+  }
+}
+
+function applyPhone() {
+  const phone = phoneQuery.matches;
+  document.body.classList.toggle('phone', phone);
+  const flash = $('flashArea');
+  if (phone) {
+    $('details').insertBefore(flash, $('groupRows'));
+    // Editing belongs to the iPad.
+    if (editing) setEditing(false);
+    closeSheet();
+  } else if (flash.parentElement !== $('masterFader').parentElement) {
+    $('masterFader').after(flash);
+  }
+  if (!document.body.dataset.tab) setPhoneTab('order');
+}
+
+for (const b of $('phoneTabs').querySelectorAll('button')) b.addEventListener('click', () => setPhoneTab(b.dataset.tab));
+phoneQuery.addEventListener('change', applyPhone);
+applyPhone();
+
 connect();

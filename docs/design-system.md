@@ -69,6 +69,7 @@ The first suggested palette was measured at about 4× the old screen's average b
 | Area | State |
 | --- | --- |
 | Operator page: everything (frame, top bar, running order and edit mode, quick looks, details, colour picker, new-quick-look sheet, bottom bar) | Done |
+| Operator page on a phone (the remote) | Done: Order, Groups and Looks tabs; Master and the dock always visible; no saving or editing; side by side when the phone is on its side |
 | Settings | Done: glass panels in a two-column bento grid on wide screens (DMX output, Show and Compare span both), tinted segmented choices and switches (Send DMX on is green), flat fields, status pills, glass top bar and save bar |
 | Patch | Done: the fixture table has no cell borders, faint row dividers and flat fields; group cards are flat glass tiles with pill chips and turn blue-tinted while one of their fields has focus; the DMX map, universe tabs, library list and Open Fixture Library search use the same glass and tinted states. Fixture blocks keep their own per-type colours and the red overlap striping; the stage plan keeps its grid and marks inside a glass frame |
 

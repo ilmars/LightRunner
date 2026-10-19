@@ -430,3 +430,86 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* A plain confirmation ("Saved to …"), not a problem. */
 .toast.quiet { background: var(--ds-glass); color: var(--ds-text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -12px rgba(0, 0, 0, 0.7); }
 [hidden] { display: none !important; }
+
+/* ---- Phone remote: narrow screens (portrait phones, and phones on their side) ----
+   The same page as a remote in the director's hand: Order, Groups and Looks tabs,
+   Master and the dock (Undo, Blackout, Next) always visible, and nothing that saves
+   or edits the show. See docs/superpowers/specs/2026-10-19-phone-remote-design.md. */
+.phone-tabs { display: none; }
+@media (max-width: 700px), (max-height: 500px) {
+  body {
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 8px;
+    padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  }
+  /* Top line: what's on stage, "changed", and a status dot (tap it for the explanation). */
+  .topbar { grid-column: 1; min-height: 44px; gap: 10px; padding: 0 2px 0 6px; }
+  .now-name { font-size: 22px; }
+  #quiet, .clock, .gear { display: none !important; }
+  .output-note { width: 36px; min-height: 36px; padding: 0; justify-content: center; max-width: none; }
+  .output-note #outputText, .output-note .info { display: none; }
+  .output-note .dot { margin: 0; }
+
+  .phone-tabs {
+    display: flex; gap: 2px; padding: 3px; border-radius: var(--ds-r-tile);
+    background: rgba(148, 170, 210, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+  .phone-tabs button {
+    flex: 1; min-height: 40px; border: 0; border-radius: var(--ds-r-small); background: transparent;
+    color: var(--ds-muted); font-size: 15px; font-weight: 500;
+  }
+  .phone-tabs button.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+
+  /* One tab at a time fills the middle. */
+  .left, .right { grid-column: 1; grid-row: 3; min-height: 0; }
+  .left { grid-template-rows: minmax(0, 1fr); }
+  .right { grid-template-rows: minmax(0, 1fr); }
+  .stage { display: none; }
+  body:not([data-tab="order"]) .left, body[data-tab="order"] .right { display: none; }
+  body[data-tab="groups"] #quickLooks, body[data-tab="looks"] #details { display: none; }
+
+  /* A remote doesn't change the prepared show. */
+  #editBtn, #orderFoot, #saveBtn, #pEditBtn, #pAddOpen, #pAdd, #pEdit, .ql.newq { display: none !important; }
+
+  /* Order: big rows. */
+  .order { padding: 6px; }
+  .order-head { min-height: 32px; }
+  .item { min-height: 52px; font-size: 18px; }
+  .item .name { font-size: 18px; }
+
+  /* Groups: one group per row; Flash (moved here from the bottom bar) along the top. */
+  .details { padding: 10px 12px 12px; gap: 8px; }
+  .rows { grid-template-columns: minmax(0, 1fr); }
+  /* The Flash buttons share the width, so All and every group fit without scrolling. */
+  #details .flash-area { flex: none; justify-content: stretch; gap: 6px; padding: 0; border: 0; }
+  #details .flash-area .flash-label { display: none; }
+  #details .flash-area button { flex: 1 1 0; width: auto; min-width: 0; min-height: 44px; }
+  .pgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pextras { grid-auto-flow: row; }
+
+  /* Looks: two columns. */
+  .quick-looks { padding: 10px 12px 12px; }
+  .qhead { flex-wrap: wrap; gap: 8px; }
+  .qgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 60px; }
+
+  /* Master on its own line, then the dock: Undo · Blackout · a wide Next. */
+  .bottom { grid-column: 1; display: grid; grid-template-columns: 1fr 1fr 2fr; grid-template-rows: auto 64px; gap: 8px; padding: 8px; }
+  .master { grid-column: 1 / -1; width: auto; padding: 2px 4px 4px; }
+  .master-track { height: 44px; }
+  .undo { order: 1; } .blackout { order: 2; } .next { order: 3; }
+  .action, .next, .blackout { min-width: 0; padding: 0 12px; }
+  .next .next-name { max-width: 100%; }
+  .toast { bottom: 172px; max-width: calc(100vw - 24px); }
+}
+/* A phone on its side: too short for tabs, content, Master and the dock stacked. The tab's
+   content goes on the left; Master and the dock become a column on the right. */
+@media (max-height: 500px) and (orientation: landscape) {
+  body { grid-template-columns: minmax(0, 1fr) 240px; grid-template-rows: auto auto minmax(0, 1fr); }
+  .topbar { grid-column: 1 / -1; }
+  .phone-tabs { grid-column: 1; grid-row: 2; }
+  .left, .right { grid-column: 1; grid-row: 3; }
+  .bottom { grid-column: 2; grid-row: 2 / 4; grid-template-columns: 1fr 1fr; grid-template-rows: auto minmax(52px, 1fr) minmax(52px, 1fr); align-content: stretch; }
+  .master { grid-column: 1 / -1; }
+  .undo { grid-column: 1; grid-row: 2; } .blackout { grid-column: 2; grid-row: 2; }
+  .next { grid-column: 1 / -1; grid-row: 3; }
+  .toast { bottom: 16px; }
+}

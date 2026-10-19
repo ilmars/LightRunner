@@ -48,6 +48,13 @@
     </a>
   </header>
 
+  <!-- Phone remote only (narrow screens): the three tabs. Hidden on the iPad. -->
+  <nav id="phoneTabs" class="phone-tabs" role="tablist" aria-label="Sections">
+    <button data-tab="order" role="tab" aria-selected="true" class="on">Order</button>
+    <button data-tab="groups" role="tab" aria-selected="false">Groups</button>
+    <button data-tab="looks" role="tab" aria-selected="false">Looks</button>
+  </nav>
+
   <!-- Left column: stage preview (looking only), then the running order. -->
   <aside class="left">
     <canvas id="stage" class="stage" aria-label="Stage view"></canvas>
