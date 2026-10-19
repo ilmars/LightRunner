@@ -731,6 +731,42 @@ test('a show edit that leaves a lit colour alone does not start a fade', () => {
   assert.equal(e.liveState(1.025, 'ok').groups.audience.progress, 1);
 });
 
+test('undoing the added colour during Blackout keeps the group\'s colour for the next look', () => {
+  const withLook = (show: Show): Show => {
+    show.looks.push({ id: 'pulpit-only', name: 'Pulpit only', section: 'Other', swatch: '#ffffff', groups: [{ group: 'pulpit', preset: 'pulpit-on' }] });
+    return show;
+  };
+  const e = new Engine(withLook(demoShow()));
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#00ff80', fade: 0 }, 0);
+  e.setShow(withLook(withAddedColour('#00ff80')), 1);
+  assert.equal(e.liveState(1, 'ok').groups.audience.preset, 'aud-new');
+  e.apply({ type: 'blackout' }, 2);
+  e.frame(4);
+  assert.equal(e.runtime().beforeBlackout?.audience, 'aud-new');
+  e.setShow(withLook(demoShow()), 4); // Undo of the add while Blackout is on
+  assert.equal(e.runtime().beforeBlackout?.audience, 'live:audience:#00ff80');
+  assert.equal(e.apply({ type: 'look', id: 'pulpit-only' }, 5), null);
+  e.frame(10);
+  assert.equal(e.liveState(10, 'ok').groups.audience.preset, 'live:audience:#00ff80');
+  const l = lightOf(e, 'aud-1');
+  assert.ok(close(l.g, 1) && l.i > 0.9, JSON.stringify(l));
+});
+
+test('a Blackout memory of a removed preset that is not a plain colour is cleared', () => {
+  const withLook = (show: Show): Show => {
+    show.looks.push({ id: 'pulpit-only', name: 'Pulpit only', section: 'Other', swatch: '#ffffff', groups: [{ group: 'pulpit', preset: 'pulpit-on' }] });
+    return show;
+  };
+  const e = new Engine(withLook(demoShow()));
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-low', fade: 0 }, 0);
+  e.apply({ type: 'blackout' }, 1);
+  const smaller = withLook(demoShow());
+  smaller.presets = smaller.presets.filter((p) => p.id !== 'aud-low');
+  e.setShow(smaller, 2);
+  assert.equal(e.runtime().beforeBlackout?.audience ?? null, null);
+  assert.equal(e.apply({ type: 'look', id: 'pulpit-only' }, 3), null);
+});
+
 test('a group on a preset the show loses, that is not a plain colour, is left alone', () => {
   const e = new Engine(demoShow());
   e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-low', fade: 0 }, 0);

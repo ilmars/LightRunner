@@ -1,6 +1,6 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { groupIsWhiteOnly, presetUsers } from '../../packages/shared/src/index.ts';
+import { canRecolour, groupIsWhiteOnly, presetUsers } from '../../packages/shared/src/index.ts';
 import type { QuickTab, Show } from '../../packages/shared/src/index.ts';
 
 export interface OperatorLook {
@@ -20,7 +20,7 @@ export interface OperatorGroup {
   /** True when no fixture in the group can make colour, so the colour picker has nothing to do. */
   whiteOnly: boolean;
   /** `usedBy` names the running-order items and quick looks that use the colour, for the editor. */
-  presets: { id: string; name: string; swatch: string | null; usedBy: string[] }[];
+  presets: { id: string; name: string; swatch: string | null; usedBy: string[]; canRecolour: boolean }[];
 }
 
 export interface OperatorLayout {
@@ -71,7 +71,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
       if (!g) return [];
       const presets = show.presets
         .filter((p) => p.group === id && !p.custom)
-        .map((p) => ({ id: p.id, name: p.name, swatch: p.swatch ?? null, usedBy: presetUsers(show, p.id) }));
+        .map((p) => ({ id: p.id, name: p.name, swatch: p.swatch ?? null, usedBy: presetUsers(show, p.id), canRecolour: canRecolour(p) }));
       return [{ id: g.id, name: g.name, whiteOnly: groupIsWhiteOnly(show, g.id), presets }];
     }),
     fixtures: fixtureOrder.flatMap((id) => {

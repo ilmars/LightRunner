@@ -58,19 +58,19 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
   if (!out.groups.some((g) => g.id === input.group)) throw new Error(`the show has no group "${input.group}"`);
 
   const whiteOnly = groupIsWhiteOnly(out, input.group);
-  const shown = out.operator.groups.length ? out.operator.groups : out.groups.map((g) => g.id);
+  const shown = shownGroups(out);
   const targets = input.allGroups
     ? out.groups.filter((g) => g.id === input.group || (shown.includes(g.id) && groupIsWhiteOnly(out, g.id) === whiteOnly)).map((g) => g.id)
     : [input.group];
 
   const layer: Layer = { kind: 'static', colour: { hex: colour }, intensity: 1 };
   const wanted = JSON.stringify([colour, 0, 1]);
-  const typed = input.name.trim() ? cleanName(input.name) : null;
+  // One name for the whole set, numbered after the highest "Colour N" in any of the groups.
+  const name = input.name.trim() ? cleanName(input.name) : nextColourName(out.presets.filter((p) => targets.includes(p.group)));
   const ids: string[] = [];
   for (const group of targets) {
     const own = out.presets.filter((p) => p.group === group);
     if (own.some((p) => !p.custom && plainLight(out, p) === wanted)) continue;
-    const name = typed ?? nextColourName(own);
     const id = uniqueId(`${group} ${name}`, out.presets.map((p) => p.id));
     out.presets.push({ id, name, group, layers: [structuredClone(layer)], fade: 3, swatch: colour });
     ids.push(id);
@@ -130,22 +130,49 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
   if (input.colour !== undefined && !HEX_COLOUR.test(input.colour)) throw new Error('that is not a colour');
   const colour = input.colour?.toLowerCase();
 
-  const oldName = target.name;
-  const chosen = out.presets.filter((p) => p.id === target.id
-    || (input.sameName && !p.custom && p.group !== target.group && p.name === oldName));
+  if (colour !== undefined && !canRecolour(target)) {
+    throw new Error(isOff(target) ? "Off can't be given a colour; add a new colour instead." : "that colour can't be changed here");
+  }
+
   const ids: string[] = [];
-  for (const p of chosen) {
+  for (const p of sameNamePresets(out, target, input.sameName)) {
     const before = JSON.stringify(p);
     if (name !== undefined) p.name = name;
-    if (colour !== undefined) {
-      const first = p.layers[0];
-      p.layers = [{ kind: 'static', colour: { hex: colour }, intensity: p.layers.length === 1 && first && first.intensity > 0 ? first.intensity : 1 }];
+    // An Off (or other kind of) colour of the same name only takes the new name.
+    if (colour !== undefined && canRecolour(p)) {
+      p.layers = [recoloured(out, p.layers[0]!, colour)];
       p.swatch = colour;
     }
     if (JSON.stringify(p) !== before) ids.push(p.id);
   }
   if (!ids.length) throw new Error('nothing changed');
   return { show: out, ids };
+}
+
+/** One plain, lit layer: the only kind of colour the editor can recolour. */
+export const isOff = (p: Preset) => p.layers.length === 1 && p.layers[0]!.intensity === 0;
+export const canRecolour = (p: Preset) => p.layers.length === 1 && !isOff(p);
+
+/**
+ * The layer with a new hex. Everything else of its colour stays (white, and any other channel a
+ * colour carries); a palette reference becomes a hex colour that keeps the palette entry's fields.
+ */
+function recoloured(show: Show, layer: Layer, hex: string): Layer {
+  const spec = layer.colour;
+  const base = 'palette' in spec ? show.palettes.find((p) => p.id === spec.palette)?.colours[spec.index] ?? {} : spec;
+  return { ...layer, colour: { ...base, hex } };
+}
+
+/** The group ids the operator page shows (all of them when it lists none). */
+function shownGroups(show: Show): string[] {
+  return show.operator.groups.length ? show.operator.groups : show.groups.map((g) => g.id);
+}
+
+/** The preset, and with `sameName` the non-hidden presets of the same name in the other groups the operator page shows. */
+export function sameNamePresets(show: Show, target: Preset, sameName: boolean): Preset[] {
+  const shown = shownGroups(show);
+  return show.presets.filter((p) => p.id === target.id
+    || (sameName && !p.custom && p.group !== target.group && shown.includes(p.group) && p.name === target.name));
 }
 
 /** Removes a colour from a group's list, unless a look uses it. */

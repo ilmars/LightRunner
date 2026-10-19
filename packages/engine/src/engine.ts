@@ -5,7 +5,7 @@
 import {
   BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, findProfile, livePresetId, parseLivePreset,
   type StageCommand, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
-  type Palette, type RuntimeState, type Show,
+  type Palette, type Preset, type RuntimeState, type Show,
 } from '../../shared/src/index.ts';
 import { Crossfade, Ramp } from './fade.ts';
 import { compilePreset, fixedPreset, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
@@ -307,15 +307,25 @@ export class Engine {
   private releaseRemoved(before: Show): void {
     const gone = new Map(before.presets.filter((p) => !this.presets.has(p.id)).map((p) => [p.id, p]));
     if (!gone.size) return;
+    /** The live colour that is the same light as a removed plain preset, or null. */
+    const liveOf = (old: Preset | undefined, group: string): string | null => {
+      if (!old || old.group !== group || old.layers.length !== 1) return null;
+      const layer = old.layers[0]!;
+      if (!('hex' in layer.colour) || layer.colour.white || layer.intensity !== 1) return null;
+      return livePresetId(group, layer.colour.hex);
+    };
     for (const group of this.groups.values()) {
       const key = group.presets.currentKey;
       const running = group.presets.current;
-      const old = key ? gone.get(key) : undefined;
-      if (!key || !running || !old || old.group !== group.id || old.layers.length !== 1) continue;
-      const layer = old.layers[0]!;
-      if (!('hex' in layer.colour) || layer.colour.white || layer.intensity !== 1) continue;
-      const live = this.presetFor(livePresetId(group.id, layer.colour.hex), group.id);
-      if (live) group.presets.rekey(key, live.id, { preset: live, time: running.time });
+      const id = key ? liveOf(gone.get(key), group.id) : null;
+      const live = id ? this.presetFor(id, group.id) : undefined;
+      if (key && running && live) group.presets.rekey(key, live.id, { preset: live, time: running.time });
+    }
+    // Blackout remembers what each group ran; the next look brings that back, so it must not name a removed preset.
+    if (this.beforeBlackout) {
+      for (const [gid, pid] of Object.entries(this.beforeBlackout)) {
+        if (pid && gone.has(pid)) this.beforeBlackout[gid] = liveOf(gone.get(pid), gid);
+      }
     }
   }
 

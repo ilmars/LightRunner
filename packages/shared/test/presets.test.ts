@@ -52,6 +52,14 @@ test('a long name is cut to 40 characters', () => {
   assert.equal(show.presets.at(-1)!.name, 'x'.repeat(40));
 });
 
+test('with every group and no name, the whole set shares one "Colour N"', () => {
+  let s = addColour(rig(), { group: 'key-lights', colour: '#111111', name: '', allGroups: false }).show; // Colour 1 in the key lights only
+  s = addColour(s, { group: 'background', colour: '#222222', name: '', allGroups: true }).show;
+  const made = s.presets.filter((p) => p.swatch === '#222222');
+  assert.equal(made.length, 4);
+  assert.deepEqual([...new Set(made.map((p) => p.name))], ['Colour 2']);
+});
+
 test('every colour group gets it, and white-only groups are left out', () => {
   const { show, ids } = addColour(rig(), { group: 'background', colour: '#2a4b9c', name: 'Deep blue', allGroups: true });
   assert.equal(ids.length, COLOUR_GROUPS.length);
@@ -136,13 +144,50 @@ test('a colour can be renamed and recoloured; the swatch and layer follow', () =
   assert.equal(colourOnly.swatch, '#103a7c');
 });
 
-test('a dimmer colour keeps its brightness; an off colour turns on when given a colour', () => {
+test('a dimmer colour keeps its brightness', () => {
   const s = rig();
   const half = s.presets.find((p) => p.name === 'Silti 50%')!;
   const dim = preset(editColour(s, { preset: half.id, colour: '#ff0000', sameName: false }).show, half.id);
   assert.equal(dim.layers[0]!.intensity, 0.5);
-  const off = preset(editColour(s, { preset: 'key-lights-off', colour: '#ff0000', sameName: false }).show, 'key-lights-off');
-  assert.equal(off.layers[0]!.intensity, 1);
+});
+
+test('an Off colour can be renamed but not given a colour', () => {
+  const s = rig();
+  assert.throws(() => editColour(s, { preset: 'key-lights-off', colour: '#ff0000', sameName: false }), /^Error: Off can't be given a colour; add a new colour instead\.$/);
+  assert.throws(() => editColour(s, { preset: 'key-lights-off', name: 'Dark', colour: '#ff0000', sameName: true }), /Off can't be given a colour/);
+  const { show, ids } = editColour(s, { preset: 'key-lights-off', name: 'Dark', sameName: true });
+  assert.equal(ids.length, 5); // every group's "Izslēgts"
+  for (const id of ids) {
+    assert.equal(preset(show, id).name, 'Dark');
+    assert.deepEqual(preset(show, id).layers, preset(s, id).layers);
+    assert.equal(preset(show, id).swatch, preset(s, id).swatch);
+  }
+});
+
+test('the same-name switch leaves an Off colour of that name unlit, and only the groups the page shows change', () => {
+  const s = rig();
+  // A lit colour in the key lights that shares a name with another group's Off.
+  s.presets.find((p) => p.id === 'key-lights-zils')!.name = 'Izslēgts';
+  s.operator.groups = s.operator.groups.filter((g) => g !== 'drum-cage');
+  const { show, ids } = editColour(s, { preset: 'key-lights-zils', colour: '#103a7c', sameName: true });
+  assert.deepEqual(ids, ['key-lights-zils']); // the Offs of the other groups have no colour to change
+  const named = editColour(s, { preset: 'key-lights-zils', name: 'Dark', sameName: true });
+  assert.ok(!named.ids.includes('drum-cage-off'), 'a group the page does not show is not changed');
+  assert.ok(named.ids.includes('background-off') && named.ids.includes('b8-side-bar-off'));
+  assert.equal(preset(show, 'key-lights-zils').swatch, '#103a7c');
+});
+
+test('a colour change keeps the other channels of the colour, also from a palette', () => {
+  const s = rig();
+  s.presets.push({ id: 'warm-mix', name: 'Warm mix', group: 'key-lights', fade: 3, swatch: '#112233', layers: [{ kind: 'static', colour: { hex: '#112233', white: 0.4 }, intensity: 0.8 }] });
+  const mixed = preset(editColour(s, { preset: 'warm-mix', colour: '#445566', sameName: false }).show, 'warm-mix');
+  assert.deepEqual(mixed.layers, [{ kind: 'static', colour: { hex: '#445566', white: 0.4 }, intensity: 0.8 }]);
+  assert.equal(mixed.swatch, '#445566');
+  // A palette colour becomes a hex colour that carries the palette entry's white.
+  const palette = s.palettes.find((p) => p.id === 'lightkey')!;
+  palette.colours[7] = { hex: '#0000ff', white: 0.3 };
+  const zils = preset(editColour(s, { preset: 'key-lights-zils', colour: '#103a7c', sameName: false }).show, 'key-lights-zils');
+  assert.deepEqual(zils.layers, [{ kind: 'static', colour: { hex: '#103a7c', white: 0.3 }, intensity: 1 }]);
 });
 
 test('with the same-name switch, the other groups\' colours of that name change too', () => {

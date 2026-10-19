@@ -679,7 +679,27 @@ test('Delete colour removes an unused one, refuses a used or lit one, and Undo b
   assert.equal(await t.send({ type: 'deleteColour', preset: 'nope' }), 'that colour is not in the list');
 }));
 
-test('colours can be edited and deleted during Blackout, with no PIN', () => withApp(async (app) => {
+test('an Off colour cannot be given a colour over the wire, but can be renamed in every group', async () => {
+  const dir = tempDir();
+  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'shows/stage-l1.json'), webDir: join(root, 'web'), output: { kind: 'none' }, log: () => {} });
+  try {
+    await app.start();
+    const t = await tablet(app);
+    await waitFor(t.layout);
+    const off = (group: string) => presetsOf(t.layout(), group).find((p) => p.name === 'Izslēgts')!;
+    assert.equal(await t.send({ type: 'editColour', preset: off('key-lights').id, colour: '#ff0000', sameName: true }), "Off can't be given a colour; add a new colour instead.");
+    assert.equal(off('front-lights').swatch, '#000000');
+    assert.equal(await t.send({ type: 'editColour', preset: off('key-lights').id, name: 'Dark', sameName: true }), null);
+    for (const g of ['front-lights', 'key-lights', 'background']) {
+      assert.equal(presetsOf(t.layout(), g).find((p) => p.name === 'Dark')!.swatch, '#000000', g);
+    }
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('colours can be edited and deleted during Blackout, with no PIN',() => withApp(async (app) => {
   assert.equal((await api(app, 'POST', '/api/pin', { next: '1234' })).status, 200);
   const t = await tablet(app);
   await waitFor(t.layout);
