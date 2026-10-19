@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { Show } from '../../shared/src/index.ts';
 import { Engine } from '../src/index.ts';
 import { close, demoShow, levelsShow, lightOf, maxStep } from './helpers.ts';
 
@@ -535,4 +536,86 @@ test('a group on the built-in safe light before Blackout comes back to it', () =
   e.frame(12);
   assert.equal(e.liveState(12, 'ok').groups.audience.preset, '__safe');
   assert.ok(lightOf(e, 'aud-1').i > 0.3);
+});
+
+/** The demo show with a look "mine" that lists only the audience, and a custom audience preset of the given light. */
+function savedShow(layer: { hex: string; white?: number; intensity: number }, point: boolean): Show {
+  const show = demoShow();
+  show.presets.push({
+    id: 'custom-1', name: 'Custom', group: 'audience', custom: true, fade: 3, swatch: layer.hex,
+    layers: [{ kind: 'static', colour: { hex: layer.hex, ...(layer.white ? { white: layer.white } : {}) }, intensity: layer.intensity }],
+  });
+  show.looks.push({ id: 'mine', name: 'Mine', section: 'Other', swatch: '#ffffff', groups: [{ group: 'audience', preset: point ? 'custom-1' : 'aud-low' }] });
+  return show;
+}
+
+test('Save clears changed: a live colour is adopted by the saved custom preset without a visual change', () => {
+  const e = new Engine(savedShow({ hex: '#00ff80', intensity: 1 }, false));
+  e.apply({ type: 'look', id: 'mine', fade: 0 }, 0);
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#00ff80', fade: 0 }, 1);
+  e.frame(2);
+  assert.equal(e.liveState(2, 'ok').lookChanged, true);
+  const before = Array.from(e.frame(2.025).universes.get(0)!);
+  const undoable = e.liveState(2, 'ok').canUndo;
+  e.setShow(savedShow({ hex: '#00ff80', intensity: 1 }, true), 2.05);
+  const after = Array.from(e.frame(2.05).universes.get(0)!);
+  assert.deepEqual(after, before);
+  const s = e.liveState(2.05, 'ok');
+  assert.equal(s.lookChanged, false);
+  assert.equal(s.groups.audience.preset, 'custom-1');
+  assert.equal(s.canUndo, undoable);
+  assert.equal(e.runtime().groups.audience, 'custom-1');
+  const step = maxStep(e, 2.05, 6);
+  assert.ok(step < 1e-9, `largest step ${step}`);
+});
+
+test('Save clears changed for a group on the built-in safe light', () => {
+  const light = { hex: '#ffd2a0', white: 0.5, intensity: 0.8 };
+  const empty = savedShow(light, false);
+  empty.looks.push({ id: 'basic', name: 'Basic lights', section: 'Other', swatch: '#ffd2a0', groups: [] });
+  empty.operator.safeLook = 'basic';
+  const e = new Engine(empty);
+  e.apply({ type: 'look', id: 'mine', fade: 0 }, 0);
+  e.apply({ type: 'safe' }, 1);
+  e.frame(4);
+  assert.equal(e.liveState(4, 'ok').groups.audience.preset, '__safe');
+  assert.equal(e.liveState(4, 'ok').lookChanged, false);
+  const before = Array.from(e.frame(4.025).universes.get(0)!);
+  // Save on Basic lights: the audience entry now names the "Basic light" custom preset.
+  const saved = savedShow(light, false);
+  saved.looks.push({ id: 'basic', name: 'Basic lights', section: 'Other', swatch: '#ffd2a0', groups: [{ group: 'audience', preset: 'custom-1' }] });
+  saved.operator.safeLook = 'basic';
+  e.setShow(saved, 4.05);
+  assert.deepEqual(Array.from(e.frame(4.05).universes.get(0)!), before);
+  const s = e.liveState(4.05, 'ok');
+  assert.equal(s.groups.audience.preset, 'custom-1');
+  assert.equal(s.groups['back-wall'].preset, '__safe');
+  assert.equal(s.lookChanged, false);
+});
+
+test('a custom preset of a different colour is not adopted', () => {
+  const e = new Engine(savedShow({ hex: '#00ff80', intensity: 1 }, false));
+  e.apply({ type: 'look', id: 'mine', fade: 0 }, 0);
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#00ff81', fade: 0 }, 1);
+  e.setShow(savedShow({ hex: '#00ff80', intensity: 1 }, true), 2);
+  const s = e.liveState(2, 'ok');
+  assert.equal(s.lookChanged, true);
+  assert.equal(s.groups.audience.preset, 'live:audience:#00ff81');
+});
+
+test('Basic lights notices a change to a group the safe look does not list', () => {
+  const show = demoShow();
+  show.looks.push({ id: 'basic', name: 'Basic lights', section: 'Other', swatch: '#ffd2a0', groups: [] });
+  show.operator.safeLook = 'basic';
+  const e = new Engine(show);
+  e.apply({ type: 'safe' }, 0);
+  e.frame(3);
+  assert.equal(e.liveState(3, 'ok').lookChanged, false);
+  e.apply({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 }, 3);
+  e.frame(4);
+  assert.equal(e.liveState(4, 'ok').lookChanged, true);
+  assert.equal(e.apply({ type: 'backToLook' }, 4), null);
+  e.frame(9);
+  assert.equal(e.liveState(9, 'ok').lookChanged, false);
+  assert.equal(e.liveState(9, 'ok').groups['back-wall'].preset, '__safe');
 });

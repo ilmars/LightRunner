@@ -306,6 +306,20 @@ test('Save to an item stores the stage, then the item is no longer changed', () 
   assert.equal(await t.send({ type: 'saveItem', id: quick }), 'only running-order items can be saved');
 }));
 
+test('Save after an Any colour pick clears changed and keeps the colour running', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupColour', group: 'back-wall', colour: '#12ab34', fade: 0 }), null);
+  await waitFor(() => t.state()?.lookChanged, 2000, 'the look to show as changed');
+  assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+  await waitFor(() => t.state()?.lookChanged === false, 2000, 'the look to no longer show as changed');
+  const saved = savedLook(dir, song)!.groups.find((e) => e.group === 'back-wall')!;
+  assert.ok(!saved.preset.startsWith('live:'), 'Save stores a custom preset');
+  assert.equal(t.state().groups['back-wall'].preset, saved.preset);
+}));
+
 test('Save during a fade stores where the fade is going', () => withApp(async (app, dir) => {
   const t = await tablet(app);
   await waitFor(t.layout);

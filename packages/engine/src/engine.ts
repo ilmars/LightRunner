@@ -119,6 +119,14 @@ class FixtureRun {
   }
 }
 
+/** True when two presets are one static layer of the same light. */
+function sameLight(a: CompiledPreset, b: CompiledPreset): boolean {
+  if (a.layers.length !== 1 || b.layers.length !== 1) return false;
+  const x = a.layers[0]!.light, y = b.layers[0]!.light;
+  const near = (p: number, q: number) => Math.abs(p - q) < 1e-9;
+  return near(x.r, y.r) && near(x.g, y.g) && near(x.b, y.b) && near(x.w, y.w) && near(x.i, y.i);
+}
+
 export interface Frame {
   /** DMX data per universe, 512 bytes each. */
   universes: Map<number, Uint8Array>;
@@ -212,6 +220,37 @@ export class Engine {
 
     for (const id of this.flash) if (!this.groups.has(id)) this.flash.delete(id);
     this.updateFlashed();
+    this.adoptSaved();
+  }
+
+  /** The look whose entries the operator page compares the stage with: the current look, or the safe look on Basic lights. */
+  private currentLook(): Look | undefined {
+    if (!this.look || this.look === BLACKOUT) return undefined;
+    const id = this.look === SAFE ? this.show.operator.safeLook : this.look;
+    return id ? this.looks.get(id) : undefined;
+  }
+
+  /**
+   * After Save, a look's entry names a custom preset for what a group was
+   * already showing (an Any colour pick, Basic lights or Off). The group then
+   * runs that preset under its own id, with no fade, so the look no longer
+   * reads as changed. Groups running anything else are left alone.
+   */
+  private adoptSaved(): void {
+    const look = this.currentLook();
+    if (!look) return;
+    for (const entry of look.groups) {
+      const group = this.groups.get(entry.group);
+      const key = group?.presets.currentKey;
+      if (!group || !key || key === entry.preset) continue;
+      if (!(key === SAFE_ID || key === BLACKOUT_ID || parseLivePreset(key))) continue;
+      const saved = this.show.presets.find((p) => p.id === entry.preset);
+      const target = this.presets.get(entry.preset);
+      const running = group.presets.current?.preset;
+      if (!saved?.custom || !target || !running || target.group !== group.id) continue;
+      if (!sameLight(target, running)) continue;
+      group.presets.rekey(key, target.id, { preset: target, time: group.presets.current!.time });
+    }
   }
 
   private updateFlashed(): void {
@@ -630,14 +669,20 @@ export class Engine {
   /** A group the current look lists runs another preset, or has another level target, than the look says. */
   private lookChanged(): boolean {
     if (!this.look || this.look === BLACKOUT) return false;
-    const id = this.look === SAFE ? this.show.operator.safeLook : this.look;
-    const look = id ? this.looks.get(id) : undefined;
-    if (!look) return false;
-    return look.groups.some((entry) => {
+    const look = this.currentLook();
+    if (!look && this.look !== SAFE) return false;
+    const listed = new Set(look?.groups.map((e) => e.group));
+    const differs = (group: GroupRun, preset: string, level: number) =>
+      group.presets.currentKey !== preset || Math.abs(group.level.target - level) > 1e-9;
+    for (const entry of look?.groups ?? []) {
       const group = this.groups.get(entry.group);
-      if (!group) return false;
-      return group.presets.currentKey !== entry.preset || Math.abs(group.level.target - (entry.level ?? 1)) > 1e-9;
-    });
+      if (group && differs(group, entry.preset, entry.level ?? 1)) return true;
+    }
+    // Basic lights puts every group the safe look doesn't list on the built-in safe light at full.
+    if (this.look === SAFE) {
+      for (const group of this.groups.values()) if (!listed.has(group.id) && differs(group, SAFE_ID, 1)) return true;
+    }
+    return false;
   }
 
   runtime(): RuntimeState {
