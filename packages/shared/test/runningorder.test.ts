@@ -140,6 +140,17 @@ test('Save stores the targets it is given, so saving mid-fade saves where the fa
   assert.deepEqual(look(saved, 'Song 3').groups, [{ group: 'background', preset: target, level: 0.25 }]);
 });
 
+test('Save to Basic lights stores every group at full: Basic lights keeps no dimmer levels', () => {
+  const s = ready();
+  const target = firstPreset(s, 'background');
+  const front = firstPreset(s, 'front-lights');
+  const saved = saveItem(s, s.operator.safeLook!, { groups: { background: target, 'front-lights': front }, levels: { background: 0.25, 'front-lights': 0.6 } });
+  assert.deepEqual(look(saved, 'Basic lights').groups, [
+    { group: 'background', preset: target, level: 1 },
+    { group: 'front-lights', preset: front, level: 1 },
+  ]);
+});
+
 test('Save refuses an unknown look, group or preset', () => {
   const s = ready();
   assert.throws(() => saveItem(s, 'nope', emptyStage), /isn't in the show/);

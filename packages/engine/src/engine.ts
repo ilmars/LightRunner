@@ -420,18 +420,22 @@ export class Engine {
     this.releaseAll(now);
     this.master.set(1, now, SAFE_RESET);
     this.speed.set(1, now, SAFE_RESET);
-    for (const group of this.groups.values()) group.level.set(this.safeTarget(group).level, now, SAFE_RESET);
+    // Basic lights recovers the stage: every dimmer back to full.
+    for (const group of this.groups.values()) group.level.set(1, now, SAFE_RESET);
     this.beforeBlackout = null;
     this.setLook(SAFE, now, SAFE_FADE);
   }
 
-  /** What Safe (Basic lights) sets for a group: the safe look's entry, or the built-in warm wash at full. */
+  /**
+   * What Safe (Basic lights) sets for a group: the safe look's preset, or the built-in
+   * warm wash. The level is always full: Basic lights doesn't keep dimmer levels.
+   */
   private safeTarget(group: GroupRun): { preset: CompiledPreset; level: number; fade: number } {
     const safeLook = this.show.operator.safeLook ? this.looks.get(this.show.operator.safeLook) : undefined;
     const entry = safeLook?.groups.find((e) => e.group === group.id);
     const own = entry && this.presets.get(entry.preset);
-    if (entry && own) return { preset: own, level: entry.level ?? 1, fade: entry.fade ?? own.fade };
-    return { preset: fixedPreset(SAFE_ID, group.id, SAFE_LIGHT, SAFE_FADE), level: entry?.level ?? 1, fade: SAFE_FADE };
+    if (entry && own) return { preset: own, level: 1, fade: entry.fade ?? own.fade };
+    return { preset: fixedPreset(SAFE_ID, group.id, SAFE_LIGHT, SAFE_FADE), level: 1, fade: SAFE_FADE };
   }
 
   private goBlackout(now: number): void {
@@ -449,7 +453,7 @@ export class Engine {
   private backToLook(now: number): string | null {
     this.releaseAll(now);
     if (this.look === SAFE) {
-      // Basic lights is not a look in the show; put back what Safe set, but leave Master and speed.
+      // Basic lights is not a look in the show; put back what Safe set (dimmers at full), but leave Master and speed.
       for (const group of this.groups.values()) {
         const { preset, level, fade } = this.safeTarget(group);
         const t = preset.id === SAFE_ID ? fade : this.fadeTime ?? fade;
@@ -674,12 +678,14 @@ export class Engine {
     const listed = new Set(look?.groups.map((e) => e.group));
     const differs = (group: GroupRun, preset: string, level: number) =>
       group.presets.currentKey !== preset || Math.abs(group.level.target - level) > 1e-9;
+    // Basic lights keeps no dimmer levels: every group it sets should be at full.
+    const safe = this.look === SAFE;
     for (const entry of look?.groups ?? []) {
       const group = this.groups.get(entry.group);
-      if (group && differs(group, entry.preset, entry.level ?? 1)) return true;
+      if (group && differs(group, entry.preset, safe ? 1 : entry.level ?? 1)) return true;
     }
     // Basic lights puts every group the safe look doesn't list on the built-in safe light at full.
-    if (this.look === SAFE) {
+    if (safe) {
       for (const group of this.groups.values()) if (!listed.has(group.id) && differs(group, SAFE_ID, 1)) return true;
     }
     return false;

@@ -163,11 +163,15 @@ export function ensureBasicLights(show: Show): Show {
   return out;
 }
 
-/** Replaces what a look holds with the stage as it is going; the look keeps its id, name and place. */
+/**
+ * Replaces what a look holds with the stage as it is going; the look keeps its id, name and place.
+ * Basic lights keeps no dimmer levels: it stores every group at full, as it always resets them.
+ */
 export function saveItem(show: Show, lookId: string, stage: Stage): Show {
   const out = structuredClone(show);
   const target = lookIn(out, lookId);
   target.groups = entriesFor(out, stage);
+  if (lookId === out.operator.safeLook) for (const entry of target.groups) entry.level = 1;
   return out;
 }
 

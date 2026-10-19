@@ -345,10 +345,11 @@ test('Undo after a look brings the levels back too', () => {
   assert.ok(close(lightOf(e, 'aud-1').i, 0.15));
 });
 
-test("Safe uses the safe look's saved levels and is not changed right after", () => {
+test("Safe uses the safe look's presets, resets every dimmer to full and is not changed right after", () => {
   const e = new Engine(levelsShow(true));
   e.apply({ type: 'look', id: 'song-3' }, 0);
   e.apply({ type: 'master', value: 0.2 }, 0);
+  e.apply({ type: 'groupLevel', group: 'back-wall', value: 0.3 }, 0);
   e.frame(4);
   e.apply({ type: 'safe' }, 4);
   const step = maxStep(e, 4, 8);
@@ -358,12 +359,18 @@ test("Safe uses the safe look's saved levels and is not changed right after", ()
   assert.equal(s.lookChanged, false);
   assert.equal(s.master, 1);
   assert.equal(s.groups['front-wash'].preset, 'front-dim');
-  assert.equal(s.groups['front-wash'].level, 0.5);
+  // The safe look's saved level (0.5) is not used: Basic lights keeps no dimmer levels.
+  assert.equal(s.groups['front-wash'].level, 1);
+  assert.equal(s.groups.audience.level, 1);
   // Groups the safe look does not list keep the plain warm wash at full.
   assert.equal(s.groups['back-wall'].level, 1);
   assert.ok(close(lightOf(e, 'back-1').i, 0.8));
-  e.apply({ type: 'groupLevel', group: 'front-wash', value: 1 }, 8);
+  e.apply({ type: 'groupLevel', group: 'front-wash', value: 0.5 }, 8);
   assert.equal(e.liveState(9, 'ok').lookChanged, true);
+  e.apply({ type: 'groupLevel', group: 'front-wash', value: 1 }, 9);
+  assert.equal(e.liveState(10, 'ok').lookChanged, false);
+  e.apply({ type: 'groupLevel', group: 'back-wall', value: 0.5 }, 10);
+  assert.equal(e.liveState(11, 'ok').lookChanged, true, 'a group the safe look does not list counts too');
 });
 
 test('recorded is true for a look and false for a dimmer change', () => {
@@ -388,7 +395,8 @@ test('Back to look works after Basic lights and keeps Master where it was', () =
   e.apply({ type: 'look', id: 'song-3' }, 0);
   e.apply({ type: 'safe' }, 4);
   e.apply({ type: 'master', value: 0.6 }, 8);
-  e.apply({ type: 'groupLevel', group: 'front-wash', value: 1 }, 8);
+  e.apply({ type: 'groupLevel', group: 'front-wash', value: 0.3 }, 8);
+  e.apply({ type: 'groupLevel', group: 'back-wall', value: 0.4 }, 8);
   e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-blue' }, 8);
   e.frame(9);
   assert.equal(e.liveState(9, 'ok').lookChanged, true);
@@ -398,7 +406,8 @@ test('Back to look works after Basic lights and keeps Master where it was', () =
   const s = e.liveState(14, 'ok');
   assert.equal(s.look, 'safe');
   assert.equal(s.lookChanged, false);
-  assert.equal(s.groups['front-wash'].level, 0.5);
+  assert.equal(s.groups['front-wash'].level, 1);
+  assert.equal(s.groups['back-wall'].level, 1);
   assert.equal(s.groups.audience.preset, 'aud-low');
   assert.equal(s.groups['back-wall'].preset, '__safe');
   assert.equal(s.master, 0.6);
