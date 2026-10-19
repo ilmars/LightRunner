@@ -65,10 +65,13 @@
   <main class="right">
     <!-- Quick looks: three tabs and a grid; the last tile opens the "new quick look" sheet over the details. -->
     <section id="quickLooks" class="block quick-looks" aria-label="Quick looks">
+      <div class="qhead">
+      <span class="sec-title">Quick looks</span>
       <div class="qtabs" role="tablist" aria-label="Quick look tabs">
         <button class="tab on" data-qt="plain" role="tab" aria-selected="true">Plain</button>
         <button class="tab" data-qt="colours" role="tab" aria-selected="false">Colours</button>
         <button class="tab" data-qt="effects" role="tab" aria-selected="false">Effects</button>
+      </div>
       </div>
       <div id="qGrid" class="qgrid"></div>
     </section>

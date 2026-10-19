@@ -65,13 +65,18 @@ The first suggested palette (background `#151D30`, surface `#222E4B`, elevated `
 
 | Area | State |
 | --- | --- |
-| Operator: page frame (background, panels, top bar, stage preview) | Done |
-| Operator: details (group tiles, fill sliders, Save, Back, colour picker) | Done: the reference section |
-| Operator: running order and its edit mode | Next |
-| Operator: quick looks and the new-quick-look sheet | To do |
-| Operator: bottom bar (Master as a fill slider, Flash, Undo, Next, Blackout) | To do |
+| Operator page: everything (frame, top bar, running order and edit mode, quick looks, details, colour picker, new-quick-look sheet, bottom bar) | Done (two passes) |
 | Settings | To do |
 | Patch (frame and controls; the DMX map and stage plan keep their own look) | To do |
+
+### Operator page rules (second pass)
+
+- Two levels only. Panels are level 1. Controls are level 2: raised a little (buttons, tiles, the item on stage) or sunk in (slider tracks, fields, tab bars). Group zones in Details are flat, divided by a faint line, not cards inside a card. The bottom bar is one strip with its groups divided by faint lines.
+- Section headers are small spaced capitals (`.sec-title`, 11 px, 0.09 em): Running order, Quick looks, Master, Flash, Next.
+- Levels are a clear number on the right of the group's header line (20 px, numbers keep their width), never drawn over the slider; 0 % is muted.
+- The slider's slab carries a little of the group's own colour (`--c`, mixed at 10–26 %); the thumb is a small raised pill at the slab's end.
+- Running order states: on stage = lighter tile with a 3 px accent bar; changed = amber dot and "changed"; the item Next will start = a quiet "next".
+- Operational states, each different: Flash held = pressed in and lighter; Master below 100 % = amber value; Blackout held = filling red; Blackout on = strong red button and a red top bar. Colour is only used where it says something.
 
 ## Audit notes (19 Oct 2026)
 

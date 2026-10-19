@@ -38,12 +38,21 @@
   --ds-pad: 14px;
   --ds-target: 44px;
 
-  /* Depth: a dark drop shadow plus a faint lighter top edge. Kept soft so
-     nothing reads as a bright outline in the dark. */
+  /* Depth, two levels only: panels (level 1) sit on the page; controls (level 2)
+     sit in panels, either raised a little or sunk in. Light comes from the top
+     left: a soft dark shadow down-right and a faint lighter top-left edge, kept
+     soft so nothing reads as a bright outline in the dark. */
   --ds-edge: rgba(255, 255, 255, 0.045);
-  --ds-shadow-raise: 0 8px 18px rgba(0, 0, 0, 0.42), inset 0 1px 0 var(--ds-edge);
-  --ds-shadow-low: 0 3px 8px rgba(0, 0, 0, 0.35), inset 0 1px 0 var(--ds-edge);
-  --ds-shadow-inset: inset 0 2px 6px rgba(0, 0, 0, 0.5), inset 0 -1px 0 var(--ds-edge);
+  --ds-shadow-raise: 0 14px 28px -10px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.25), inset 1px 1px 0 rgba(255, 255, 255, 0.04);
+  --ds-shadow-low: 2px 4px 10px -3px rgba(0, 0, 0, 0.55), inset 1px 1px 0 rgba(255, 255, 255, 0.055);
+  --ds-shadow-inset: inset 2px 3px 7px rgba(0, 0, 0, 0.55), inset -1px -1px 0 rgba(255, 255, 255, 0.03);
+
+  /* Fills: gentle gradients lit from the top left. */
+  --ds-panel-fill: linear-gradient(160deg, #1E2943 0%, #19223A 45%, #172035 100%);
+  --ds-tile-fill: linear-gradient(160deg, #2A3756, #222D48);
+  --ds-tile-fill-on: linear-gradient(160deg, #3B4D75, #2F3F62);
+  --ds-slab-fill: linear-gradient(180deg, #394A70, #2C3A5A);
+  --ds-thumb: linear-gradient(180deg, #B4BDCF, #7C879E);
 
   /* Type: regular weights; size, not boldness, carries the hierarchy. */
   --ds-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
@@ -59,20 +68,20 @@
 
 /* Panel: a bento tile on the page background. */
 .ds-panel {
-  background: linear-gradient(180deg, var(--ds-surface-hi), var(--ds-surface));
+  background: var(--ds-panel-fill);
   border-radius: var(--ds-r-panel);
   box-shadow: var(--ds-shadow-raise);
 }
 
 /* Tile: a raised control or card inside a panel. */
 .ds-tile {
-  background: linear-gradient(180deg, var(--ds-elevated), var(--ds-surface-hi));
+  background: var(--ds-tile-fill);
   border-radius: var(--ds-r-tile);
   box-shadow: var(--ds-shadow-low);
   color: var(--ds-text);
 }
 .ds-tile.ds-on {
-  background: linear-gradient(180deg, var(--ds-selected), var(--ds-elevated));
+  background: var(--ds-tile-fill-on);
 }
 
 /* Muted label above a value ("Key lights" over "Vēsi balts"). */
@@ -92,7 +101,7 @@
   font: inherit;
   font-size: 15px;
   color: var(--ds-text);
-  background: linear-gradient(180deg, var(--ds-elevated), var(--ds-surface-hi));
+  background: var(--ds-tile-fill);
   box-shadow: var(--ds-shadow-low);
   cursor: pointer;
   white-space: nowrap;
@@ -111,28 +120,33 @@
 }
 .ds-hold > :not(.ds-hold-fill) { position: relative; }
 
-/* Fill slider: a sunken track with a lighter slab for the level, the value
-   inside on the left and a small grip at the end of the slab. */
+/* Fill slider: a sunken track, a raised slab for the level carrying a little of
+   the control's own colour (--c, set by the page), and a small raised thumb at
+   the slab's end. The value is shown next to the slider, not on it. */
 .ds-fill {
+  --c: #5a6478;
   position: relative;
-  height: 48px;
-  border-radius: var(--ds-r-tile);
+  height: 44px;
+  border-radius: var(--ds-r-small);
   background: var(--ds-bg-deep);
   box-shadow: var(--ds-shadow-inset);
   overflow: hidden;
   touch-action: none;
   cursor: ew-resize;
 }
-.ds-fill > .ds-fill-tint { position: absolute; inset: 0 auto 0 0; width: 0; opacity: 0.14; border-radius: var(--ds-r-tile); pointer-events: none; }
+.ds-fill > .ds-fill-tint { display: none; }
 .ds-fill > .ds-fill-slab {
-  position: absolute; inset: 0 auto 0 0; width: 0;
-  border-radius: var(--ds-r-tile);
-  background: linear-gradient(180deg, var(--ds-selected), var(--ds-elevated));
+  position: absolute; inset: 3px auto 3px 3px; width: 0; min-width: 0;
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--c) 10%, transparent), color-mix(in srgb, var(--c) 26%, transparent)),
+    var(--ds-slab-fill);
   box-shadow: var(--ds-shadow-low);
 }
 .ds-fill > .ds-fill-grip {
-  position: absolute; top: 50%; left: 0; width: 8px; height: 18px; margin: -9px 0 0 -16px;
-  border-left: 2px solid var(--ds-mark); border-right: 2px solid var(--ds-mark);
+  position: absolute; top: 50%; left: 0; width: 6px; height: 24px; margin-top: -12px;
+  border-radius: 3px; background: var(--ds-thumb);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .ds-fill > .ds-fill-val {
   position: absolute; top: 0; bottom: 0; left: 14px;
@@ -171,7 +185,7 @@
 
 /* Sheet: covers one panel (the colour picker, the new quick look). */
 .ds-sheet {
-  background: linear-gradient(180deg, var(--ds-surface-hi), var(--ds-surface));
+  background: var(--ds-panel-fill);
   border-radius: var(--ds-r-panel);
 }
 

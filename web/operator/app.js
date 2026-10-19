@@ -553,6 +553,8 @@ function render() {
   top.classList.toggle('problem', lost);
   top.classList.toggle('off', off);
   top.classList.toggle('flash', flashing.length > 0 && !lost && !off);
+  // Blackout is the most important state on the page: the whole bar says so.
+  top.classList.toggle('blackout', blackedOut);
 
   const fade = state.fadeTime ?? null;
   $('fadeValue').textContent = fade === null ? 'Auto' : fade === 0 ? 'Instant' : `${fade} s`;
@@ -578,8 +580,9 @@ function render() {
     if (onId) reveal(orderRows[on].button);
   }
 
-  // Bottom bar.
+  // Bottom bar (and a quiet "next" mark on the item Next will start).
   const next = nextItem();
+  orderRows.forEach((row) => row.button.classList.toggle('is-next', !editing && !!next && row.item.id === next.id));
   $('nextName').textContent = next ? next.name : 'End of list';
   $('next').disabled = !next || editing;
   $('undo').disabled = !state.canUndo;
@@ -605,6 +608,7 @@ const master = (() => {
       m.v = Math.min(1, Math.max(0, v));
       const pct = `${Math.round(m.v * 100)}%`;
       $('masterValue').textContent = pct;
+      box.classList.toggle('dimmed', m.v < 0.995);
       $('masterFill').style.width = `${m.v * 100}%`;
       $('masterHandle').style.left = `${m.v * 100}%`;
       track.setAttribute('aria-valuenow', String(Math.round(m.v * 100)));
@@ -691,18 +695,17 @@ function stageItem() {
   return k >= 0 ? layout.runningOrder[k] : null;
 }
 
-// One entry per group: { group, chip, sw, chipName, dim, slab, tint, grip, pct, dragging, holdUntil }.
+// One entry per group: { group, chip, sw, chipName, dim, slab, grip, pct, dragging, holdUntil }.
 let detailRows = [];
 
 function showLevel(row, v) {
   const p = clamp01(v);
   row.value = p;
-  row.slab.style.width = `${p * 100}%`;
-  row.tint.style.width = `${p * 100}%`;
-  // The grip sits just inside the end of the slab; hidden while the slab is too short to hold it.
-  row.grip.style.left = `${p * 100}%`;
-  row.grip.hidden = p < 0.12;
+  // The slab is inset 3 px inside the track; the thumb rides just inside its end.
+  row.slab.style.width = `calc(${p * 100}% - ${p * 6}px)`;
+  row.grip.style.left = `max(5px, calc(${p * 100}% - ${p * 6}px - 7px))`;
   row.pct.textContent = `${Math.round(p * 100)} %`;
+  row.pct.classList.toggle('zero', p === 0);
   row.dim.setAttribute('aria-valuenow', String(Math.round(p * 100)));
 }
 
@@ -717,17 +720,17 @@ function buildDetails() {
     const chip = el('button', 'chip');
     chip.append(sw, chipName);
     chip.setAttribute('aria-label', `${group.name}: choose colour`);
-    const tint = el('span', 'ds-fill-tint'), slab = el('span', 'ds-fill-slab'), grip = el('span', 'ds-fill-grip');
-    const pct = el('span', 'ds-fill-val');
+    const slab = el('span', 'ds-fill-slab'), grip = el('span', 'ds-fill-grip');
+    const pct = el('span', 'pct');
     const dim = el('div', 'ds-fill');
     dim.setAttribute('role', 'slider');
     dim.setAttribute('aria-label', `${group.name} dimmer`);
     dim.setAttribute('aria-valuemin', '0');
     dim.setAttribute('aria-valuemax', '100');
-    dim.append(slab, tint, grip, pct);
-    box.append(el('span', 'g', group.name), chip, dim);
+    dim.append(slab, grip);
+    box.append(el('span', 'g', group.name), chip, pct, dim);
     root.append(box);
-    const row = { group, chip, sw, chipName, dim, slab, tint, grip, pct, value: 0, dragging: false, holdUntil: 0 };
+    const row = { group, chip, sw, chipName, dim, slab, grip, pct, value: 0, dragging: false, holdUntil: 0 };
     detailRows.push(row);
     showLevel(row, 0);
     chip.addEventListener('click', () => openPicker(group.id));
@@ -786,7 +789,8 @@ function renderDetails() {
     const info = presetInfo(row.group, s?.preset);
     row.sw.style.background = info.colour ?? '#0d0e11';
     row.chipName.textContent = info.name;
-    row.tint.style.background = info.colour ?? 'transparent';
+    // The slider carries a little of the group's colour.
+    row.dim.style.setProperty('--c', info.colour && info.colour !== '#000000' ? info.colour : '#5a6478');
     if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
   }
   if (picker.group) renderPicker();
