@@ -12,9 +12,10 @@ import { extname, join, normalize, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  BUILT_IN_PROFILES, Command, OutputSettings, applyPicks, describeMode, diffShows, ensureRunningOrder, isManualCommand, oflToProfile, parseShow,
+  BUILT_IN_PROFILES, Command, OutputSettings, addSong, applyPicks, deleteItem, describeMode, diffShows, ensureRunningOrder, isManualCommand,
+  isShowEdit, moveItem, oflToProfile, parseShow, renameItem, saveItem, saveQuickLook,
   type OflFixture, type Pick, type Scope,
-  type LiveState, type RuntimeState, type Show,
+  type LiveState, type RuntimeState, type Show, type ShowEdit,
 } from '../../packages/shared/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
 import { discoverArtNet } from './discovery.ts';
@@ -51,6 +52,9 @@ const MIME: Record<string, string> = {
   '.webmanifest': 'application/manifest+json',
 };
 
+/** Steps the Undo list keeps, as the engine does. */
+const UNDO_KEPT = 20;
+
 class HttpError extends Error {
   readonly status: number;
   constructor(status: number, message: string) {
@@ -72,7 +76,17 @@ export class App {
   private nextId = 1;
   private pending = new Map<number, (value: unknown) => void>();
   private layout: OperatorLayout | null = null;
+  /** The state as the worker last sent it, before node-watch news and show Undo steps are added. */
+  private engineState: LiveState | null = null;
+  /** What every device was last sent. */
   private latestState: LiveState | null = null;
+  /**
+   * One Undo list for the stage and the show, newest last: the show as it was
+   * before an operator edit, or 'stage' for a step the engine keeps itself.
+   */
+  private undoLog: (Show | 'stage')[] = [];
+  /** Groups each tablet is holding a Flash on, so they go out if it disconnects. */
+  private readonly flashes = new Map<WebSocket, Set<string>>();
   private latestRuntime: RuntimeState | null = null;
   private ready!: Promise<void>;
   private readonly sessions = new Sessions();
@@ -84,7 +98,7 @@ export class App {
   private readonly nodeWatch = new NodeWatch((problem) => {
     if (problem !== this.outputProblem) this.log(problem ? `DMX: ${problem}` : 'DMX: node answering again');
     this.outputProblem = problem;
-    if (this.latestState) this.publishState(this.latestState);
+    this.publishState();
   });
 
   constructor(opts: AppOptions) {
@@ -138,7 +152,6 @@ export class App {
     this.stopping = true;
     this.nodeWatch.stop();
     for (const t of this.identifyTimers.values()) clearTimeout(t);
-    this.saver.flush();
     for (const ws of this.wss?.clients ?? []) ws.terminate();
     this.wss?.close();
     await new Promise<void>((resolve) => (this.server ? this.server.close(() => resolve()) : resolve()));
@@ -149,6 +162,8 @@ export class App {
       await Promise.race([exited, new Promise((r) => setTimeout(r, 1000))]);
       await w.terminate();
     }
+    // Last, so a state the worker sent while stopping is saved now rather than after the app is gone.
+    this.saver.flush();
   }
 
   /** The show as the engine runs it: tests can force the output off. */
@@ -157,10 +172,15 @@ export class App {
     return this.opts.output ? { ...show, settings: { ...show.settings, output: this.opts.output } } : show;
   }
 
-  /** Live state plus what the node watch knows, sent to every device. */
-  private publishState(state: LiveState): void {
+  /** The engine's live state plus what the node watch and the Undo list know, sent to every device. */
+  private publishState(): void {
+    const state = this.engineState;
+    if (!state) return;
     const problem = state.outputProblem ?? this.outputProblem;
-    const merged: LiveState = problem && state.output === 'ok' ? { ...state, output: 'lost', outputProblem: problem } : { ...state, outputProblem: problem };
+    const canUndo = state.canUndo || this.undoLog.some((step) => step !== 'stage');
+    const merged: LiveState = problem && state.output === 'ok'
+      ? { ...state, canUndo, output: 'lost', outputProblem: problem }
+      : { ...state, canUndo, outputProblem: problem };
     this.latestState = merged;
     this.broadcast(JSON.stringify({ type: 'state', state: merged }));
   }
@@ -185,6 +205,8 @@ export class App {
       this.log(`Engine worker stopped (code ${code}); restarting`);
       for (const resolve of this.pending.values()) resolve({ error: 'engine restarted' });
       this.pending.clear();
+      // The new engine starts with no Undo steps of its own; the show's are kept.
+      this.undoLog = this.undoLog.filter((step) => step !== 'stage');
       setTimeout(() => this.startWorker(), 200);
     });
     this.post({ type: 'init', show: this.engineShow(), runtime: this.latestRuntime });
@@ -210,7 +232,8 @@ export class App {
         break;
       }
       case 'state':
-        this.publishState(msg.state);
+        this.engineState = msg.state;
+        this.publishState();
         break;
       case 'runtime':
         this.latestRuntime = msg.runtime;
@@ -255,8 +278,64 @@ export class App {
     if (isManualCommand(cmd) && role !== 'programmer' && !this.show.operator.manualForOperators) {
       return { error: 'manual control is not enabled for operators', recorded: false };
     }
+    if (isShowEdit(cmd)) {
+      try {
+        await this.editShow(cmd);
+      } catch (err) {
+        return { error: (err as Error).message, recorded: false };
+      }
+      return { error: null, recorded: true };
+    }
+    if (cmd.type === 'undo') {
+      const last = this.undoLog.at(-1);
+      if (last && last !== 'stage') {
+        // Undo of a show edit puts the show back and leaves the stage as it is.
+        this.undoLog.pop();
+        try {
+          await this.putShow(last);
+        } catch (err) {
+          this.undoLog.push(last); // still there to try again
+          return { error: (err as Error).message, recorded: false };
+        }
+        this.publishState();
+        return { error: null, recorded: false };
+      }
+      // A stage step (or an empty list, after a restart) is the engine's to undo.
+      if (last) this.undoLog.pop();
+    }
     const reply = await this.request<{ error: string | null; recorded?: boolean }>((id) => ({ type: 'command', id, cmd }));
+    if (reply.recorded) this.remember('stage');
     return { error: reply.error, recorded: !!reply.recorded };
+  }
+
+  private remember(step: Show | 'stage'): void {
+    this.undoLog.push(step);
+    if (this.undoLog.length > UNDO_KEPT) this.undoLog.shift();
+  }
+
+  /** Operator edits to the running order and quick looks. Throws with a plain message when refused. */
+  private async editShow(cmd: ShowEdit): Promise<void> {
+    const usesStage = cmd.type === 'saveItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook';
+    const stage = usesStage ? await this.stage() : null;
+    // Nothing below waits until the show is replaced, so no other edit can slip in between.
+    const before = this.show;
+    let next: Show;
+    switch (cmd.type) {
+      case 'saveItem':
+        // Quick looks are made with Save stage as quick look, never overwritten by Save.
+        if (!before.operator.runningOrder.includes(cmd.id)) throw new Error('only running-order items can be saved');
+        next = saveItem(before, cmd.id, stage!);
+        break;
+      case 'addSong': next = addSong(before, cmd.after, stage!).show; break;
+      case 'renameItem': next = renameItem(before, cmd.id, cmd.name); break;
+      case 'deleteItem': next = deleteItem(before, cmd.id); break;
+      case 'moveItem': next = moveItem(before, cmd.id, cmd.to); break;
+      case 'saveQuickLook': next = saveQuickLook(before, { name: cmd.name, tab: cmd.tab, groups: cmd.groups }, stage!).show; break;
+    }
+    await this.putShow(next);
+    this.remember(before);
+    // Undo lights up at once, without waiting for the engine's next state.
+    this.publishState();
   }
 
   /** The engine's stage and look as they are right now, straight from the worker. */
@@ -271,8 +350,19 @@ export class App {
     return reply.stats;
   }
 
-  /** Replace the show (programmer edits, import). Saves it with a backup first. */
+  /**
+   * Replace the show (programmer edits, import). Saves it with a backup first.
+   * Undo can no longer take the show back past this, as that would throw these changes away too.
+   */
   async setShow(show: Show): Promise<void> {
+    const hadShowSteps = this.undoLog.some((step) => step !== 'stage');
+    this.undoLog = this.undoLog.filter((step) => step === 'stage');
+    await this.putShow(show);
+    if (hadShowSteps) this.publishState();
+  }
+
+  /** Save the show, hand it to the engine and send every device the new layout. */
+  private async putShow(show: Show): Promise<void> {
     // A show that arrives without a running order (import, restore, merge) gets one, as at start.
     if (!show.operator.runningOrder.length) show = ensureRunningOrder(show);
     this.store.saveShow(show);
@@ -288,6 +378,21 @@ export class App {
   private onSocket(ws: WebSocket, role: Role): void {
     if (this.layout) ws.send(JSON.stringify({ type: 'layout', layout: this.layout }));
     if (this.latestState) ws.send(JSON.stringify({ type: 'state', state: this.latestState }));
+    const held = new Set<string>();
+    this.flashes.set(ws, held);
+    let closed = false;
+    // A tablet that drops off (closed, asleep, out of Wi-Fi) must not leave its Flash on.
+    // Groups another tablet is still holding stay on.
+    const release = (groups: Iterable<string>) => {
+      const others = [...this.flashes.values()];
+      const free = [...groups].filter((g) => !others.some((set) => set.has(g)));
+      if (free.length && !this.stopping) void this.run({ type: 'flash', groups: free, on: false }, 'operator');
+    };
+    ws.on('close', () => {
+      closed = true;
+      this.flashes.delete(ws);
+      release(held);
+    });
     ws.on('message', async (data, isBinary) => {
       if (isBinary) return;
       let msg: { type?: string; ref?: unknown; cmd?: unknown };
@@ -298,6 +403,18 @@ export class App {
       }
       if (msg.type === 'command') {
         const error = await this.command(msg.cmd, role);
+        const cmd = Command.safeParse(msg.cmd);
+        if (!error && cmd.success && cmd.data.type === 'flash') {
+          if (closed) {
+            // The tablet went away while its Flash was on its way.
+            if (cmd.data.on) release(cmd.data.groups);
+          } else {
+            for (const g of cmd.data.groups) {
+              if (cmd.data.on) held.add(g);
+              else held.delete(g);
+            }
+          }
+        }
         if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'result', ref: msg.ref ?? null, error }));
       }
     });

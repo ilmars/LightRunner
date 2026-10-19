@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { parseShow, type Command } from '../packages/shared/src/index.ts';
+import { parseShow, type StageCommand } from '../packages/shared/src/index.ts';
 import { Engine } from '../packages/engine/src/index.ts';
 
 const { values } = parseArgs({
@@ -47,7 +47,7 @@ for (const look of show.looks) {
 }
 const hex = () => '#' + Math.floor(rand() * 0xffffff).toString(16).padStart(6, '0');
 
-function randomCommand(): { cmd: Command; fast: boolean } {
+function randomCommand(): { cmd: StageCommand; fast: boolean } {
   const r = rand();
   if (r < 0.35) {
     const fade = rand() < 0.3 ? 1 + rand() * 5 : undefined;

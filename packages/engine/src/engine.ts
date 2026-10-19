@@ -4,7 +4,7 @@
 
 import {
   BLACKOUT, HEX_COLOUR, SAFE, findProfile, livePresetId, parseLivePreset,
-  type Command, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
+  type StageCommand, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
   type Palette, type RuntimeState, type Show,
 } from '../../shared/src/index.ts';
 import { Crossfade, Ramp } from './fade.ts';
@@ -220,7 +220,7 @@ export class Engine {
   }
 
   /** Apply a command. Returns an error message, or null when it worked. */
-  apply(cmd: Command, now: number): string | null {
+  apply(cmd: StageCommand, now: number): string | null {
     this.recorded = false;
     if (cmd.type === 'undo') return this.undo(now);
     if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || cmd.type === 'groupColour' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') {
@@ -275,7 +275,7 @@ export class Engine {
     return pid ? this.presets.get(pid) : undefined;
   }
 
-  private run(cmd: Command, now: number): string | null {
+  private run(cmd: StageCommand, now: number): string | null {
     switch (cmd.type) {
       case 'undo': return this.undo(now);
       case 'look': return this.goLook(cmd.id, cmd.fade, now);

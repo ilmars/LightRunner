@@ -2,6 +2,7 @@
 // state every device receives back. The server is the single source of truth.
 
 import { z } from 'zod';
+import { QuickTab } from './schema.ts';
 
 const id = z.string().min(1).max(64);
 /** A #rrggbb colour. */
@@ -37,8 +38,29 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('undo') }),
   /** Fade time for every look and preset change; null = each look's own fade. */
   z.object({ type: z.literal('fadeTime'), value: z.number().min(0).max(600).nullable() }),
+  // Edits to the show from the operator page. The server handles these itself; the engine never sees them.
+  /** Store the stage (where it is going) in a running-order item. */
+  z.object({ type: z.literal('saveItem'), id }),
+  /** A new song holding the stage, right after `after`. */
+  z.object({ type: z.literal('addSong'), after: id }),
+  z.object({ type: z.literal('renameItem'), id, name: z.string() }),
+  z.object({ type: z.literal('deleteItem'), id }),
+  /** Move a running-order item to position `to` (0 is Basic lights). */
+  z.object({ type: z.literal('moveItem'), id, to: z.number().int() }),
+  /** A new quick look from the chosen groups of the stage. */
+  z.object({ type: z.literal('saveQuickLook'), name: z.string(), tab: QuickTab, groups: z.array(id).min(1).max(64) }),
 ]);
 export type Command = z.infer<typeof Command>;
+
+const SHOW_EDITS = ['saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook'] as const;
+/** Commands that change the show rather than the stage. */
+export type ShowEdit = Extract<Command, { type: (typeof SHOW_EDITS)[number] }>;
+/** Commands the engine runs. */
+export type StageCommand = Exclude<Command, ShowEdit>;
+
+export function isShowEdit(cmd: Command): cmd is ShowEdit {
+  return (SHOW_EDITS as readonly string[]).includes(cmd.type);
+}
 
 /** Commands that need manual control rights. */
 export function isManualCommand(cmd: Command): boolean {

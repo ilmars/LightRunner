@@ -229,3 +229,238 @@ test('a restart restores the last look, master and group presets', async () => {
 test('the demo show is valid', () => {
   parseShow(JSON.parse(readFileSync(seedPath, 'utf8')));
 });
+
+// ---- Operator edits to the show, and the one Undo list ----
+
+async function waitFor<T>(get: () => T | null | undefined | false, ms = 2000, what = 'a condition'): Promise<T> {
+  const until = Date.now() + ms;
+  for (;;) {
+    const value = get();
+    if (value) return value;
+    if (Date.now() > until) throw new Error(`timed out waiting for ${what}`);
+    await sleep(10);
+  }
+}
+
+/** A tablet on the WebSocket: sends commands and keeps the latest state and layout. */
+async function tablet(app: App) {
+  const ws = new WebSocket(`ws://127.0.0.1:${app.port}/ws`);
+  const seen: any[] = [];
+  ws.on('message', (data, isBinary) => {
+    if (!isBinary) seen.push(JSON.parse(String(data)));
+  });
+  await new Promise((r) => ws.once('open', r));
+  let ref = 0;
+  const latest = (type: string) => seen.findLast((m) => m.type === type)?.[type];
+  return {
+    ws,
+    state: () => latest('state'),
+    layout: () => latest('layout'),
+    order: () => latest('layout').runningOrder.map((l: any) => l.id) as string[],
+    /** Sends a command and resolves with its error (null when it worked). */
+    async send(cmd: unknown): Promise<string | null> {
+      const mine = ++ref;
+      ws.send(JSON.stringify({ type: 'command', ref: mine, cmd }));
+      const reply = await waitFor(() => seen.find((m) => m.type === 'result' && m.ref === mine), 3000, `the reply to ${JSON.stringify(cmd)}`);
+      return reply.error;
+    },
+  };
+}
+
+async function withApp(fn: (app: App, dir: string) => Promise<void>) {
+  const dir = tempDir();
+  const app = makeApp(dir);
+  try {
+    await app.start();
+    await fn(app, dir);
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const savedLook = (dir: string, id: string) =>
+  parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).looks.find((l) => l.id === id);
+
+test('Save to an item stores the stage, then the item is no longer changed', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupPreset', group: 'audience', preset: 'aud-blue', fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupLevel', group: 'audience', value: 0.4 }), null);
+  await waitFor(() => t.state()?.lookChanged, 2000, 'the look to show as changed');
+
+  assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+  await waitFor(() => t.state()?.lookChanged === false, 2000, 'the look to no longer show as changed');
+  assert.equal(t.state().look, song);
+  const look = savedLook(dir, song)!;
+  assert.deepEqual(look.groups.find((e) => e.group === 'back-wall'), { group: 'back-wall', preset: 'back-amber', level: 1 });
+  assert.deepEqual(look.groups.find((e) => e.group === 'audience'), { group: 'audience', preset: 'aud-blue', level: 0.4 });
+  const item = t.layout().runningOrder.find((l: any) => l.id === song);
+  assert.ok(item.colours.includes('#ff8a1f'), 'the layout shows the saved colours');
+
+  // Quick looks are made with "Save stage as quick look", never overwritten by Save.
+  const quick = t.layout().quickLooks[0].id;
+  assert.equal(await t.send({ type: 'saveItem', id: quick }), 'only running-order items can be saved');
+}));
+
+test('Save during a fade stores where the fade is going', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 30 }), null);
+  assert.equal(await t.send({ type: 'groupPreset', group: 'audience', preset: 'aud-blue', fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupLevel', group: 'audience', value: 0.3 }), null);
+  assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+  assert.ok(t.state().groups['back-wall'].progress < 1, 'the back wall is still fading');
+  const look = savedLook(dir, song)!;
+  assert.equal(look.groups.find((e) => e.group === 'back-wall')?.preset, 'back-amber');
+  assert.equal(look.groups.find((e) => e.group === 'audience')?.level, 0.3);
+}));
+
+test('Add, rename, move and delete edit the running order, and Undo takes each back', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const start = t.order();
+  const song = start[1]!;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+
+  assert.equal(await t.send({ type: 'addSong', after: song }), null);
+  const added = t.order()[2]!;
+  assert.ok(!start.includes(added));
+  const name = (id: string) => t.layout().runningOrder.find((l: any) => l.id === id)?.name;
+  assert.equal(name(added), 'Song 6');
+
+  assert.equal(await t.send({ type: 'renameItem', id: added, name: '  Amazing grace ' }), null);
+  assert.equal(name(added), 'Amazing grace');
+  assert.equal(await t.send({ type: 'moveItem', id: added, to: 5 }), null);
+  assert.equal(t.order().indexOf(added), 5);
+  assert.equal(await t.send({ type: 'deleteItem', id: added }), null);
+  assert.ok(!t.order().includes(added));
+
+  // Refused edits leave the show, and the Undo list, alone.
+  assert.equal(await t.send({ type: 'renameItem', id: song, name: '   ' }), 'a name is needed');
+  assert.equal(await t.send({ type: 'deleteItem', id: start[0] }), "Basic lights can't be deleted");
+  assert.equal(await t.send({ type: 'moveItem', id: added, to: 2 }), `"${added}" isn't in the running order`);
+  assert.match((await t.send({ type: 'moveItem', id: song, to: 1.5 }))!, /^invalid command/);
+  assert.match((await t.send({ type: 'renameItem', id: song }))!, /^invalid command/);
+
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(t.order().indexOf(added), 5);
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(t.order().indexOf(added), 2);
+  assert.equal(name(added), 'Amazing grace');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(name(added), 'Song 6');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.deepEqual(t.order(), start);
+  await sleep(60);
+  assert.equal(t.state().look, song, 'undoing show edits leaves the stage alone');
+}));
+
+test('Undo goes back through stage changes and show edits in the order they happened', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const [, one, two] = t.order();
+  assert.equal(await t.send({ type: 'look', id: one, fade: 0 }), null);
+  await waitFor(() => t.state()?.look === one);
+  const before = t.state().groups['back-wall'].preset;
+  assert.notEqual(before, 'back-amber');
+  assert.equal(await t.send({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 }), null);
+  assert.equal(await t.send({ type: 'saveItem', id: one }), null);
+  assert.equal(await t.send({ type: 'look', id: two, fade: 0 }), null);
+  await waitFor(() => t.state()?.look === two);
+
+  assert.equal(await t.send({ type: 'undo' }), null); // the look change
+  await waitFor(() => t.state()?.look === one, 2000, 'the first song back on stage');
+  assert.equal(savedLook(dir, one!)!.groups.find((e) => e.group === 'back-wall')?.preset, 'back-amber');
+
+  assert.equal(await t.send({ type: 'undo' }), null); // the Save
+  assert.equal(savedLook(dir, one!)!.groups.find((e) => e.group === 'back-wall')?.preset, before);
+  await sleep(60);
+  assert.equal(t.state().groups['back-wall'].preset, 'back-amber', 'the stage stays as it is');
+  assert.ok(t.state().canUndo);
+
+  assert.equal(await t.send({ type: 'undo' }), null); // the preset change
+  await waitFor(() => t.state()?.groups['back-wall'].preset === before, 2000, 'the back wall back as it was');
+  assert.equal(await t.send({ type: 'undo' }), null); // the first look
+  await waitFor(() => t.state()?.canUndo === false, 2000, 'Undo to have nothing left');
+  assert.equal(await t.send({ type: 'undo' }), 'nothing to undo');
+}));
+
+test('a show edit enables Undo straight away', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(() => t.state() && t.layout());
+  assert.equal(t.state().canUndo, false);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'renameItem', id: song, name: 'Opening' }), null);
+  // The new state is sent before the reply, without waiting for the engine.
+  assert.equal(t.state().canUndo, true);
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(t.state().canUndo, false);
+}));
+
+test("Undo doesn't take back an operator edit from before a programmer change", () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'renameItem', id: song, name: 'Opening' }), null);
+  assert.equal((await api(app, 'PUT', '/api/settings', { showName: 'Sunday' })).status, 200);
+  await waitFor(() => t.state()?.canUndo === false, 2000, 'Undo to have nothing left');
+  assert.equal(await t.send({ type: 'undo' }), 'nothing to undo');
+  assert.equal((await api(app, 'GET', '/api/settings')).body.showName, 'Sunday');
+}));
+
+test('deleting the item on stage leaves the stage alone and nothing breaks', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const [, one, two] = t.order();
+  assert.equal(await t.send({ type: 'look', id: two, fade: 0 }), null);
+  await waitFor(() => t.state()?.look === two);
+  assert.equal(await t.send({ type: 'deleteItem', id: two }), null);
+  assert.ok(!t.order().includes(two!));
+  await sleep(80);
+  assert.equal(t.state().look, two);
+  assert.equal(await t.send({ type: 'look', id: one, fade: 0 }), null);
+  await waitFor(() => t.state()?.look === one, 2000, 'the first song on stage');
+}));
+
+test('Flash stops when the tablet that held it disconnects', () => withApp(async (app) => {
+  const watch = await tablet(app);
+  const a = await tablet(app);
+  const b = await tablet(app);
+  assert.equal(await a.send({ type: 'flash', groups: ['back-wall', 'audience'], on: true }), null);
+  assert.equal(await a.send({ type: 'flash', groups: ['audience'], on: false }), null);
+  assert.equal(await b.send({ type: 'flash', groups: ['audience'], on: true }), null);
+  await waitFor(() => watch.state()?.flashing.length === 2, 2000, 'two groups flashing');
+
+  a.ws.close();
+  await waitFor(() => String(watch.state()?.flashing) === 'audience', 200, "the first tablet's flash to stop");
+  b.ws.close();
+  await waitFor(() => watch.state()?.flashing.length === 0, 200, 'every flash to stop');
+}));
+
+test('show edits are open to operators without the PIN', () => withApp(async (app, dir) => {
+  assert.equal((await api(app, 'POST', '/api/pin', { next: '1234' })).status, 200);
+  assert.equal((await api(app, 'GET', '/api/settings')).status, 401);
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+  assert.equal(await t.send({ type: 'addSong', after: song }), null);
+  assert.equal(await t.send({ type: 'renameItem', id: song, name: 'Opening' }), null);
+  assert.equal(await t.send({ type: 'moveItem', id: song, to: 3 }), null);
+  assert.equal(await t.send({ type: 'deleteItem', id: song }), null);
+  assert.equal(await t.send({ type: 'saveQuickLook', name: 'Warm wall', tab: 'colours', groups: ['back-wall'] }), null);
+  const quick = t.layout().quickLooks.find((q: any) => q.name === 'Warm wall');
+  assert.equal(quick?.tab, 'colours');
+  assert.deepEqual(savedLook(dir, quick.id)!.groups.map((e) => e.group), ['back-wall']);
+  assert.match((await t.send({ type: 'saveQuickLook', name: 'None', tab: 'plain', groups: [] }))!, /^invalid command/);
+  assert.match((await t.send({ type: 'saveQuickLook', name: 'Odd', tab: 'nope', groups: ['audience'] }))!, /^invalid command/);
+  // The PIN is still set after all those saves.
+  assert.equal((await api(app, 'GET', '/api/settings')).status, 401);
+}));

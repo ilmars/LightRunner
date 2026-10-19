@@ -1,11 +1,11 @@
 // Messages between the main thread and the engine worker.
 
-import type { Command, LiveState, RuntimeState, Show } from '../../packages/shared/src/index.ts';
+import type { LiveState, RuntimeState, Show, StageCommand } from '../../packages/shared/src/index.ts';
 
 export type ToWorker =
   | { type: 'init'; show: Show; runtime: RuntimeState | null }
   | { type: 'show'; show: Show }
-  | { type: 'command'; id: number; cmd: Command }
+  | { type: 'command'; id: number; cmd: StageCommand }
   | { type: 'snapshot'; id: number }
   | { type: 'timing'; id: number; reset?: boolean }
   | { type: 'stop' };
