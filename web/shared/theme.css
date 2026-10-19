@@ -47,15 +47,17 @@
   /* Surfaces: flat glass. Panels get a faint edge and a very soft far shadow;
      controls get only the faint edge. No bevels, no inset wells. */
   --ds-edge: rgba(255, 255, 255, 0.06);
-  --ds-shadow-raise: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 24px 48px -32px rgba(0, 0, 0, 0.75);
+  /* Panels: a faint all-round edge, a slightly brighter line along the top (light falling on the glass), and a very soft far shadow. */
+  --ds-shadow-raise: inset 0 1px 0 rgba(255, 255, 255, 0.075), inset 0 0 0 1px rgba(255, 255, 255, 0.05), 0 24px 48px -32px rgba(0, 0, 0, 0.75);
   --ds-shadow-low: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
   --ds-shadow-inset: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
 
-  /* Fills: gentle top-to-bottom tone, translucent so panels read as glass. */
-  --ds-panel-fill: linear-gradient(180deg, rgba(27, 37, 60, 0.78) 0%, rgba(17, 24, 40, 0.78) 100%);
+  /* Fills, translucent so panels read as glass. Glass panel: a little lighter at the top, settling into the navy below. */
+  --ds-panel-fill: linear-gradient(180deg, rgba(36, 49, 78, 0.80) 0%, rgba(25, 34, 56, 0.78) 34%, rgba(17, 24, 40, 0.78) 100%);
   --ds-tile-fill: rgba(148, 170, 210, 0.055);
   --ds-tile-fill-on: linear-gradient(180deg, rgba(84, 146, 236, 0.26), rgba(84, 146, 236, 0.17));
-  --ds-slab-fill: linear-gradient(90deg, rgba(76, 122, 204, 0.32), rgba(96, 148, 232, 0.44));
+  --ds-fill-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 50%, rgba(0, 0, 0, 0.05) 100%);
+  --ds-slab-fill: var(--ds-fill-sheen), linear-gradient(90deg, rgba(76, 122, 204, 0.32), rgba(96, 148, 232, 0.44));
   --ds-glass: rgba(14, 20, 34, 0.86);
 
   /* Type: size and weight carry the hierarchy; panel titles semibold, the rest regular. */
@@ -145,10 +147,13 @@
 .ds-fill > .ds-fill-slab {
   position: absolute; inset: 0 auto 0 0; width: 0; min-width: 0;
   border-radius: var(--ds-r-tile);
-  background: linear-gradient(90deg,
-    color-mix(in srgb, var(--c) 15%, rgba(70, 104, 170, 0.32)),
-    color-mix(in srgb, var(--c) 26%, rgba(92, 132, 206, 0.40)));
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.10);
+  /* A soft sheen (about 7 % lighter at the top, a touch darker at the bottom)
+     over the colour, which itself deepens a little towards the level. */
+  background:
+    var(--ds-fill-sheen),
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--c) 15%, rgba(70, 104, 170, 0.32)),
+      color-mix(in srgb, var(--c) 26%, rgba(92, 132, 206, 0.40)));
 }
 .ds-fill > .ds-fill-val {
   position: absolute; top: 0; bottom: 0; left: 14px;
