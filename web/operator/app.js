@@ -953,13 +953,16 @@ function extraLevels() {
   return out;
 }
 
-/** Every send of a drag (the strip or a slider) fades this fast, like Master and manual, so the stage follows the finger. */
+/** The sends that continue a drag (the strip or a slider) fade this fast, like Master and manual, so the stage follows the finger. */
 const DRAG_FADE = 0.2;
 
-/** An Any colour send. Only the first send of a drag adds an Undo step; the rest continue it. */
+/**
+ * An Any colour send. The first send of a gesture (a tap, or the start of a drag) fades like
+ * a swatch and adds an Undo step; the rest continue it, in 0.2 s each.
+ */
 function sendColour(hex, first, extras) {
   if (!picker.group) return;
-  send({ type: 'groupColour', group: picker.group, colour: hex, ...extras, fade: DRAG_FADE, ...(first ? {} : { continues: true }) });
+  send({ type: 'groupColour', group: picker.group, colour: hex, ...extras, ...(first ? {} : { continues: true, fade: DRAG_FADE }) });
 }
 
 /** Throttled sends for one finger at a time: `start()` on touch, then `push` while it moves and `end` on release. */

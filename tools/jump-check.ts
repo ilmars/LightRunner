@@ -64,8 +64,8 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
     const extra = () => (rand() < 0.5 ? rand() : undefined);
     const extras = rand() < 0.5 ? { white: extra(), amber: extra(), uv: extra() } : {};
     const cmd = { type: 'groupColour' as const, group: pick(show.groups).id, colour: hex(), ...extras };
-    // A third are sends of a drag on the operator page: they follow the finger in 0.2 s, like manual.
-    if (rand() < 0.33) return { cmd: { ...cmd, fade: 0.2, continues: rand() < 0.7 }, fast: true };
+    // A third are later sends of a drag on the operator page: they follow the finger in 0.2 s, like manual.
+    if (rand() < 0.33) return { cmd: { ...cmd, fade: 0.2, continues: true }, fast: true };
     return { cmd, fast: false };
   }
   if (r < 0.68) {
