@@ -49,10 +49,14 @@
   <aside class="left">
     <canvas id="stage" class="stage" aria-label="Stage view"></canvas>
     <nav class="order" aria-label="Running order">
-      <!-- Task 9 puts the Edit button and the Add song row here. -->
-      <div id="orderHead" class="order-head"></div>
+      <div id="orderHead" class="order-head">
+        <span class="order-title">Running order</span>
+        <button id="editBtn" class="ebtn" aria-pressed="false">Edit</button>
+      </div>
       <div id="runningOrder" class="order-list"></div>
-      <div id="orderFoot" class="order-foot"></div>
+      <div id="orderFoot" class="order-foot">
+        <button id="addSong" class="add-song">＋ Add song</button>
+      </div>
     </nav>
   </aside>
 
