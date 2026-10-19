@@ -34,6 +34,18 @@ const kindsFor = (scope: Scope): ItemKind[] => (scope === 'patch' ? ['profile', 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const list = (show: Show, kind: ItemKind) => show[LISTS[kind]] as Item[];
 
+/**
+ * Whether a group is a smoke machine belongs to this installation: show files and
+ * Lightkey projects don't know about smoke, and every group in them reads as a light.
+ * So an import never changes it, and it is never shown as a difference.
+ */
+const withoutKind = (kind: ItemKind, x: Item): unknown => {
+  if (kind !== 'group') return x;
+  const { kind: _ignored, ...rest } = x as Group;
+  return rest;
+};
+const sameItem = (kind: ItemKind, a: Item, b: Item) => same(withoutKind(kind, a), withoutKind(kind, b));
+
 function describe(kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show): string[] {
   const out: string[] = [];
   if (a.name !== b.name) out.push(`name "${a.name}" → "${b.name}"`);
@@ -95,7 +107,7 @@ export function diffShows(current: Show, incoming: Show, scope: Scope = 'all'): 
     for (const [id, b] of next) {
       const a = now.get(id);
       if (!a) items.push({ kind, id, change: 'added', name: label(b, incoming), details: [] });
-      else if (!same(a, b)) items.push({ kind, id, change: 'changed', name: label(b, incoming), details: describe(kind, a, b, current, incoming) });
+      else if (!sameItem(kind, a, b)) items.push({ kind, id, change: 'changed', name: label(b, incoming), details: describe(kind, a, b, current, incoming) });
     }
     for (const [id, a] of now) {
       if (!next.has(id)) items.push({ kind, id, change: 'removed', name: label(a, current), details: [] });
@@ -124,8 +136,12 @@ export function applyPicks(current: Show, incoming: Show, picks: Pick[]): Show {
     const item = (list(incoming, p.kind)).find((x) => x.id === p.id);
     if (!item) throw new Error(`the file has no ${p.kind} "${p.id}"`);
     const k = items.findIndex((x) => x.id === p.id);
-    if (k >= 0) items[k] = structuredClone(item);
-    else {
+    if (k >= 0) {
+      const taken = structuredClone(item);
+      // A smoke group stays a smoke group (and a light group a light group), whatever the file says.
+      if (p.kind === 'group') (taken as Group).kind = (items[k] as Group).kind;
+      items[k] = taken;
+    } else {
       items.push(structuredClone(item));
       // New groups and looks show up on the operator page too.
       if (p.kind === 'group' && out.operator.groups.length) out.operator.groups.push(p.id);

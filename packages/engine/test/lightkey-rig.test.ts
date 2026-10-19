@@ -34,6 +34,58 @@ test('the imported rig drives every channel of a look', () => {
   assert.deepEqual(Array.from(u.slice(171, 175)), [0, 0, 255, 0]);
 });
 
+test('Any colour with white, amber and UV lights those LEDs of the SixBar 500, and the other fixtures make do', () => {
+  const e = new Engine(show());
+  e.apply({ type: 'look', id: 'sermon', fade: 0 }, 0);
+  const plain = e.frame(1);
+  const plainCct = plain.universes.get(1)![1]!;
+  e.apply({ type: 'groupColour', group: 'key-lights', colour: '#ff0000', white: 0.4, amber: 0.6, uv: 0.2, fade: 0 }, 1);
+  e.apply({ type: 'groupColour', group: 'background', colour: '#000000', amber: 0.5, fade: 0 }, 1);
+  e.apply({ type: 'groupColour', group: 'front-lights', colour: '#ffffff', amber: 1, fade: 0 }, 1);
+  const frame = e.frame(2);
+  const u = frame.universes.get(1)!;
+  // B1 at 10 and B2 at 30: red, green, blue, white, amber, UV in each of the three segments.
+  const seg = [255, 0, 0, dmx(0.4), dmx(0.6), dmx(0.2)];
+  for (const at of [9, 15, 21, 29, 35, 41]) assert.deepEqual(Array.from(u.slice(at, at + 6)), seg, `segment at ${at + 1}`);
+  // B6 SonicPulse (no amber channel) at 165: dimmer at half, amber made from red and green.
+  assert.equal(u[164], dmx(0.5));
+  assert.deepEqual(Array.from(u.slice(171, 175)), [255, dmx(0xbf / 255), 0, 0]);
+  // P1 AS600B: amber makes it warmer than the same white without.
+  assert.ok(u[1]! < plainCct, `cct ${u[1]} vs ${plainCct}`);
+  // The visualiser shows B1 with the amber and white added in.
+  const b1 = e.fixtureIds().indexOf('b1') * 3;
+  const vis = Array.from(frame.visual.slice(b1, b1 + 3));
+  assert.ok(vis[0] === 255 && vis[1]! > 100 && vis[2]! > 100, `b1 visual ${vis}`);
+});
+
+test('UV on bars without UV LEDs: dark, no violet in the visualiser, and a fade to red stays under 5% per frame', () => {
+  const e = new Engine(show());
+  const b6 = e.fixtureIds().indexOf('b6');
+  const b1 = e.fixtureIds().indexOf('b1');
+  e.apply({ type: 'groupColour', group: 'background', colour: '#000000', uv: 1, fade: 0 }, 0);
+  e.apply({ type: 'groupColour', group: 'key-lights', colour: '#000000', uv: 1, fade: 0 }, 0);
+  let frame = e.frame(0.5);
+  // B6 SonicPulse (no UV): nothing to show, so dark; B1 SixBar (UV LEDs): UV and a faint violet on the stage view.
+  assert.equal(e.lights()[b6]!.i, 0);
+  assert.equal(frame.universes.get(1)![164], 0, 'B6 dimmer');
+  assert.deepEqual(Array.from(frame.visual.slice(b6 * 3, b6 * 3 + 3)), [0, 0, 0]);
+  assert.equal(frame.universes.get(1)![14], 255, 'B1 UV');
+  assert.ok(frame.visual[b1 * 3 + 2]! > 0);
+  // Fading the bars from UV to red brings red up smoothly (it used to jump about 14 % a frame half way).
+  e.apply({ type: 'groupColour', group: 'background', colour: '#ff0000', fade: 1 }, 1);
+  let prev = e.visibleLevels()[b6]!;
+  let worst = 0;
+  for (let t = 1; t <= 3 + 1e-9; t += 0.025) {
+    frame = e.frame(t);
+    const now = e.visibleLevels()[b6]!;
+    worst = Math.max(worst, Math.abs(now - prev));
+    prev = now;
+  }
+  assert.ok(worst < 0.05, `largest visible step ${worst}`);
+  assert.equal(prev, 1);
+  assert.equal(frame.universes.get(1)![171], 255, 'B6 red');
+});
+
 test('key lights are off in Walk-in while the front lights sit at half', () => {
   const e = new Engine(show());
   e.apply({ type: 'look', id: 'walk-in' }, 0);

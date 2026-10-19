@@ -1,7 +1,9 @@
 // Turning a fixture's abstract light into DMX channel values.
 
 import type { Fixture, Profile, ChannelRole } from '../../shared/src/index.ts';
-import type { Light } from './light.ts';
+import { copy, dark, withoutUv, type Light } from './light.ts';
+
+const scratch = dark();
 
 interface PlannedChannel {
   role: ChannelRole;
@@ -18,6 +20,10 @@ export interface ChannelPlan {
   channels: PlannedChannel[];
   hasDimmer: boolean;
   hasWhite: boolean;
+  hasAmber: boolean;
+  hasUv: boolean;
+  /** Has a channel that makes visible colour (red, green, blue, white or amber). */
+  hasColour: boolean;
   gamma: number;
 }
 
@@ -37,14 +43,24 @@ export function planChannels(fixture: Fixture, profile: Profile, defaultGamma: n
     }
     channels.push({ role: ch.role, at: base + n, fineAt: -1, fixed: ch.default ?? 0, kelvin: ch.kelvin ?? null });
   });
+  const has = (role: ChannelRole) => channels.some((c) => c.role === role);
   return {
     universe: fixture.universe,
     channels: channels.filter((c) => c.at < 512),
-    hasDimmer: channels.some((c) => c.role === 'dimmer'),
-    hasWhite: channels.some((c) => c.role === 'white'),
+    hasDimmer: has('dimmer'),
+    hasWhite: has('white'),
+    hasAmber: has('amber'),
+    hasUv: has('uv'),
+    hasColour: (['red', 'green', 'blue', 'white', 'amber'] as const).some(has),
     gamma: fixture.gamma ?? profile.gamma ?? defaultGamma,
   };
 }
+
+/** Amber is about #FFBF00: full red and three quarters green. */
+const AMBER_GREEN = 0xbf / 255;
+/** How the visualiser shows UV: a faint violet. */
+const UV_RED = 0.25;
+const UV_BLUE = 0.4;
 
 function put(buf: Uint8Array, ch: PlannedChannel, v: number): void {
   const x = Math.min(1, Math.max(0, v));
@@ -64,6 +80,8 @@ function put(buf: Uint8Array, ch: PlannedChannel, v: number): void {
  * multiplied together on the colour channels.
  */
 export function writeFixture(buf: Uint8Array, plan: ChannelPlan, light: Light): void {
+  // The engine has already taken UV out for fixtures that can't make it; this keeps a direct call right too.
+  if (!plan.hasUv && light.u > 0) light = withoutUv(copy(scratch, light));
   // Fully dark writes zeros everywhere, so Blackout looks like Blackout on any desk monitor.
   if (light.i <= 0) {
     for (const ch of plan.channels) {
@@ -74,26 +92,81 @@ export function writeFixture(buf: Uint8Array, plan: ChannelPlan, light: Light): 
     return;
   }
   const g = plan.gamma;
-  // A fixture without a white channel makes white from red, green and blue.
+  // A fixture without a white channel makes white from red, green and blue;
+  // one without an amber channel makes amber from red and green.
   const fold = plan.hasWhite ? 0 : light.w;
+  const amber = plan.hasAmber ? 0 : light.a;
   const level = plan.hasDimmer ? 1 : light.i;
-  const col = (c: number) => Math.pow(Math.min(1, c + fold) * level, g);
+  const col = (c: number, a: number) => Math.pow(Math.min(1, c + fold + a) * level, g);
   for (const ch of plan.channels) {
     switch (ch.role) {
       case 'dimmer': put(buf, ch, Math.pow(light.i, g)); break;
-      case 'red': put(buf, ch, col(light.r)); break;
-      case 'green': put(buf, ch, col(light.g)); break;
-      case 'blue': put(buf, ch, col(light.b)); break;
+      case 'red': put(buf, ch, col(light.r, amber)); break;
+      case 'green': put(buf, ch, col(light.g, amber * AMBER_GREEN)); break;
+      case 'blue': put(buf, ch, col(light.b, 0)); break;
       case 'white': put(buf, ch, Math.pow(light.w * level, g)); break;
+      case 'amber': put(buf, ch, Math.pow(light.a * level, g)); break;
+      case 'uv': put(buf, ch, Math.pow(light.u * level, g)); break;
       case 'cct': {
         const k = ch.kelvin ?? { min: 2700, max: 6500 };
         put(buf, ch, (kelvinOf(light) - k.min) / (k.max - k.min));
         break;
       }
-      // Amber and UV are driven by effect layers from Phase 2b.
-      case 'amber':
-      case 'uv': put(buf, ch, 0); break;
       default: buf[ch.at] = ch.fixed;
+    }
+  }
+}
+
+/**
+ * How bright a fixture looks, 0..1: its brightest colour channel as written
+ * (before gamma, with white and amber folded in where there is no channel for
+ * them) times its intensity. A fixture with only a dimmer (or dimmer and
+ * colour temperature) looks as bright as its dimmer. The jump check judges this.
+ */
+export function visibleLevel(plan: ChannelPlan, light: Light): number {
+  if (!plan.hasUv && light.u > 0) light = withoutUv(copy(scratch, light));
+  if (light.i <= 0) return 0;
+  if (!plan.hasColour && !plan.hasUv) return light.i;
+  const fold = plan.hasWhite ? 0 : light.w;
+  const amber = plan.hasAmber ? 0 : light.a;
+  let top = 0;
+  for (const ch of plan.channels) {
+    switch (ch.role) {
+      case 'red': top = Math.max(top, light.r + fold + amber); break;
+      case 'green': top = Math.max(top, light.g + fold + amber * AMBER_GREEN); break;
+      case 'blue': top = Math.max(top, light.b + fold); break;
+      case 'white': top = Math.max(top, light.w); break;
+      case 'amber': top = Math.max(top, light.a); break;
+      case 'uv': top = Math.max(top, light.u); break;
+    }
+  }
+  return Math.min(1, top) * light.i;
+}
+
+/**
+ * The colour the visualiser shows for a light, as RGB bytes at `out[at..at+2]`:
+ * white adds to all three, amber to red and green, UV a faint violet.
+ */
+export function visualOf(light: Light, out: Uint8Array, at: number): void {
+  const byte = (c: number) => Math.round(Math.min(1, c) * light.i * 255);
+  out[at] = byte(light.r + light.w + light.a + UV_RED * light.u);
+  out[at + 1] = byte(light.g + light.w + AMBER_GREEN * light.a);
+  out[at + 2] = byte(light.b + light.w + UV_BLUE * light.u);
+}
+
+/**
+ * Write a smoke or haze machine: only its output level, linear (no gamma), on
+ * its dimmer channel, or on its one channel when the profile has a single
+ * channel of another role. Every other channel keeps its fixed value (fan,
+ * mode, ...), and colour channels stay at 0.
+ */
+export function writeSmoke(buf: Uint8Array, plan: ChannelPlan, level: number): void {
+  const single = plan.channels.length === 1;
+  for (const ch of plan.channels) {
+    if (ch.role === 'dimmer' || single) put(buf, ch, level);
+    else {
+      buf[ch.at] = ch.fixed;
+      if (ch.fineAt >= 0 && ch.fineAt < 512) buf[ch.fineAt] = 0;
     }
   }
 }
@@ -105,10 +178,11 @@ const KELVIN_BY_RATIO: [number, number][] = [
 
 /**
  * Colour temperature for a fixture that only has a CCT channel (no RGB):
- * warm colours give warm white, blue colours give cool white.
+ * warm colours give warm white, blue colours give cool white, and amber makes
+ * it warmer. UV is left out.
  */
 export function kelvinOf(light: Light): number {
-  const r = Math.min(1, light.r + light.w);
+  const r = Math.min(1, light.r + light.w) + light.a;
   const b = Math.min(1, light.b + light.w);
   if (r <= 0) return KELVIN_BY_RATIO[KELVIN_BY_RATIO.length - 1][1];
   const ratio = b / r;

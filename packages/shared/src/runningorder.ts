@@ -2,7 +2,7 @@
 // show and returns a new one; the input is never changed. Bad input throws an
 // Error with a plain message the page can show as it is.
 
-import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, parseLivePreset } from './protocol.ts';
+import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, parseLivePreset } from './protocol.ts';
 import type { Layer, Look, LookEntry, Preset, QuickTab, Show } from './schema.ts';
 
 /** Where the stage is going: preset ids (possibly live ones) and level targets, as in RuntimeState. */
@@ -26,7 +26,7 @@ function slug(text: string): string {
 }
 
 /** A slug of the name that no id in `taken` uses: "song-6", then "song-6-2", "song-6-3", ... */
-function uniqueId(name: string, taken: Iterable<string>): string {
+export function uniqueId(name: string, taken: Iterable<string>): string {
   const used = new Set(taken);
   const base = slug(name);
   let id = base;
@@ -51,7 +51,10 @@ const BUILT_IN = new Map<string, { name: string; swatch: string; layer: Layer }>
   [BLACKOUT_PRESET, { name: 'Off', swatch: '#000000', layer: { kind: 'static', colour: { hex: '#000000' }, intensity: 0 } }],
 ]);
 
-const layerKey = (l: Layer) => JSON.stringify(['palette' in l.colour ? l.colour : [l.colour.hex.toLowerCase(), l.colour.white ?? 0], l.intensity]);
+const layerKey = (l: Layer) => JSON.stringify([
+  'palette' in l.colour ? l.colour : [l.colour.hex.toLowerCase(), l.colour.white ?? 0, l.colour.amber ?? 0, l.colour.uv ?? 0],
+  l.intensity,
+]);
 
 /** The group's custom preset for a built-in light, made the first time and reused after. */
 function builtInPreset(show: Show, group: string, made: { name: string; swatch: string; layer: Layer }): string {
@@ -67,27 +70,32 @@ function builtInPreset(show: Show, group: string, made: { name: string; swatch: 
  * The look entries for these groups: one per group with a preset. A live preset
  * (an "Any colour" pick) becomes a new custom preset in `show`; an existing one
  * is only referenced. The engine's Safe light and Blackout become the group's
- * "Basic light" and "Off" custom presets, shared by every save.
+ * "Basic light" and "Off" custom presets, shared by every save. Smoke groups
+ * are left out: starting a look never turns a smoke machine on or off.
  */
 function entriesFor(show: Show, stage: Stage, only?: string[]): LookEntry[] {
   const entries: LookEntry[] = [];
   for (const [group, preset] of Object.entries(stage.groups)) {
     if (!preset || (only && !only.includes(group))) continue;
-    if (!show.groups.some((g) => g.id === group)) throw new Error(`the show has no group "${group}"`);
+    const found = show.groups.find((g) => g.id === group);
+    if (!found) throw new Error(`the show has no group "${group}"`);
+    if (found.kind === 'smoke') continue;
     const level = stage.levels[group] ?? 1;
     const live = parseLivePreset(preset);
     const builtIn = BUILT_IN.get(preset);
     if (builtIn) {
       entries.push({ group, preset: builtInPreset(show, group, builtIn), level });
     } else if (live) {
+      // White, amber and UV go with it (each only when the pick had it).
+      const { group: _group, colour: hex, ...extras } = live;
       const made: Preset = {
         id: uniqueId('Custom', show.presets.map((p) => p.id)),
         name: 'Custom',
         group,
         custom: true,
-        layers: [{ kind: 'static', colour: { hex: live.colour }, intensity: 1 }],
+        layers: [{ kind: 'static', colour: { hex, ...extras }, intensity: 1 }],
         fade: 3,
-        swatch: live.colour,
+        swatch: displayColour(hex, extras),
       };
       show.presets.push(made);
       entries.push({ group, preset: made.id, level });
@@ -232,7 +240,9 @@ export function saveQuickLook(
   stage: Stage,
 ): { show: Show; id: string } {
   const name = cleanName(input.name);
-  if (!input.groups.length) throw new Error('pick at least one group');
+  // Smoke groups never go into a look, so they don't count.
+  const lights = input.groups.filter((id) => show.groups.find((g) => g.id === id)?.kind !== 'smoke');
+  if (!lights.length) throw new Error('pick at least one group');
   const out = structuredClone(show);
   const id = addLook(out, name, []);
   lookIn(out, id).groups = entriesFor(out, stage, input.groups);

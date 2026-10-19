@@ -11,9 +11,10 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OutputSettings, addSong, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureRunningOrder, isManualCommand,
-  isShowEdit, moveItem, oflToProfile, parseShow, renameItem, saveItem, saveQuickLook,
+  BUILT_IN_PROFILES, Command, OutputRoute, OutputSettings, addColour, addSong, deleteColour, editColour, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureRunningOrder, isManualCommand,
+  isShowEdit, moveItem, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook,
   type OflFixture, type Pick, type Scope,
   BLACKOUT, type LiveState, type RuntimeState, type Show, type ShowEdit,
 } from '../../packages/shared/src/index.ts';
@@ -32,8 +33,10 @@ export interface AppOptions {
   dataDir: string;
   seedPath: string;
   webDir: string;
-  /** Replace the show's output, e.g. `{ kind: 'none' }` in tests. */
+  /** Replace the show's output, e.g. `{ kind: 'none' }` in tests. Routes are ignored then. */
   output?: OutputSettings;
+  /** For tests: send Art-Net for these hosts to another address and UDP port instead (normally the host, port 6454). */
+  artnetRedirect?: Record<string, { host: string; port: number }>;
   /** For tests: stands in for the network when talking to the Open Fixture Library. */
   fetch?: typeof fetch;
   log?: (msg: string) => void;
@@ -102,13 +105,16 @@ export class App {
   private ready!: Promise<void>;
   private readonly sessions = new Sessions();
   private outputProblem: string | null = null;
+  /** Every node-watch problem is another desk sending (no node missing). */
+  private otherDeskOnly = false;
   private readonly identifyTimers = new Map<string, NodeJS.Timeout>();
   private ofl!: OflClient;
   /** Files waiting for someone to pick what to take from them. */
   private readonly imports = new Map<string, { show: Show; scope: Scope; at: number }>();
-  private readonly nodeWatch = new NodeWatch((problem) => {
+  private readonly nodeWatch = new NodeWatch((problem, otherDesk) => {
     if (problem !== this.outputProblem) this.log(problem ? `DMX: ${problem}` : 'DMX: node answering again');
     this.outputProblem = problem;
+    this.otherDeskOnly = otherDesk;
     this.publishState();
   });
 
@@ -182,28 +188,32 @@ export class App {
     this.saver.flush();
   }
 
-  /** The show as the engine runs it: tests can force the output off. */
+  /** The show as the engine runs it: tests (and LIGHT_RUNNER_OUTPUT=none) can force the output, routes included. */
   private engineShow(): Show {
     const show = this.show;
-    return this.opts.output ? { ...show, settings: { ...show.settings, output: this.opts.output } } : show;
+    return this.opts.output ? { ...show, settings: { ...show.settings, output: this.opts.output, routes: undefined } } : show;
   }
 
   /** The engine's live state plus what the node watch and the Undo list know, sent to every device. */
   private publishState(): void {
     const state = this.engineState;
     if (!state) return;
-    const problem = state.outputProblem ?? this.outputProblem;
+    // The worker names outputs it can't send to; the node watch names nodes that don't answer.
+    const problem = [state.outputProblem, this.outputProblem].filter(Boolean).join('. ') || null;
     const canUndo = state.canUndo || this.undoLog.some((step) => step !== 'stage');
-    const merged: LiveState = problem && state.output === 'ok'
-      ? { ...state, canUndo, output: 'lost', outputProblem: problem }
-      : { ...state, canUndo, outputProblem: problem };
+    const output = problem && state.output === 'ok' ? 'lost' : state.output;
+    // A worker problem (an output it can't send to) is never another desk.
+    const kind = output !== 'lost' ? null : !state.outputProblem && this.outputProblem && this.otherDeskOnly ? 'other-desk' : 'not-answering';
+    const merged: LiveState = { ...state, canUndo, output, outputProblem: problem, outputProblemKind: kind };
     this.latestState = merged;
     this.broadcast(JSON.stringify({ type: 'state', state: merged }));
   }
 
+  /** Watch every Art-Net node the show sends to (the default output's and each route's). */
   private watchNode(): void {
-    const s = this.engineShow().settings;
-    this.nodeWatch.watch(s.outputEnabled && s.output.kind === 'artnet' ? s.output.host : null);
+    const show = this.engineShow();
+    const plan = planRoutes(show.settings, show.fixtures.map((f) => f.universe));
+    this.nodeWatch.watch(plan.destinations.map((d) => (d.output.kind === 'artnet' ? d.output.host : null)));
   }
 
   // ---- Engine worker ----
@@ -225,7 +235,7 @@ export class App {
       this.undoLog = this.undoLog.filter((step) => step !== 'stage');
       setTimeout(() => this.startWorker(), 200);
     });
-    this.post({ type: 'init', show: this.engineShow(), runtime: this.latestRuntime });
+    this.post({ type: 'init', show: this.engineShow(), runtime: this.latestRuntime, artnetRedirect: this.opts.artnetRedirect });
   }
 
   private post(msg: ToWorker): void {
@@ -334,8 +344,9 @@ export class App {
   /** Operator edits to the running order and quick looks. Throws with a plain message when refused. */
   private async editShow(cmd: ShowEdit): Promise<void> {
     const usesStage = cmd.type === 'saveItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook';
-    const stage = usesStage ? await this.stage() : null;
-    if (stage?.look === BLACKOUT) throw new Error('Blackout is on. Bring the lights back, then save.');
+    // Deleting a colour only looks at the stage to keep a lit colour; it is fine during Blackout.
+    const stage = usesStage || cmd.type === 'deleteColour' ? await this.stage() : null;
+    if (usesStage && stage?.look === BLACKOUT) throw new Error('Blackout is on. Bring the lights back, then save.');
     // Nothing below waits until the show is replaced, so no other edit can slip in between.
     const before = this.show;
     let next: Show;
@@ -350,6 +361,18 @@ export class App {
       case 'deleteItem': next = deleteItem(before, cmd.id); break;
       case 'moveItem': next = moveItem(before, cmd.id, cmd.to); break;
       case 'saveQuickLook': next = saveQuickLook(before, { name: cmd.name, tab: cmd.tab, groups: cmd.groups }, stage!).show; break;
+      // A colour doesn't depend on the stage, so it is fine during Blackout.
+      case 'addColour': next = addColour(before, cmd).show; break;
+      case 'editColour': next = editColour(before, cmd).show; break;
+      case 'deleteColour': {
+        // A colour that is lit (or was, before Blackout) stays: the group would name a preset that is gone.
+        next = deleteColour(before, cmd.preset); // refuses while a look uses it
+        const group = before.presets.find((p) => p.id === cmd.preset)!.group;
+        if (stage!.groups[group] === cmd.preset || stage!.beforeBlackout?.[group] === cmd.preset) {
+          throw new Error('That colour is on stage now. Pick another colour for the group first.');
+        }
+        break;
+      }
     }
     await this.operatorSave(next);
     this.remember(before);
@@ -439,7 +462,11 @@ export class App {
             // The tablet went away while its Flash was on its way.
             if (cmd.data.on) release(cmd.data.groups);
           } else {
+            // The engine leaves smoke groups out of a flash of several groups (only a Puff runs them),
+            // so this tablet doesn't hold them; counting them would keep another tablet's Puff on.
+            const several = cmd.data.groups.length > 1;
             for (const g of cmd.data.groups) {
+              if (cmd.data.on && several && this.isSmokeGroup(g)) continue;
               if (cmd.data.on) held.add(g);
               else held.delete(g);
             }
@@ -448,6 +475,10 @@ export class App {
         if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'result', ref: msg.ref ?? null, error }));
       }
     });
+  }
+
+  private isSmokeGroup(id: string): boolean {
+    return this.show.groups.some((g) => g.id === id && g.kind === 'smoke');
   }
 
   /** Pings every tablet; one that missed the last two pings is dropped, which ends its Flash. */
@@ -519,9 +550,16 @@ export class App {
 
   private settingsView() {
     const s = this.show.settings;
+    const perUniverse: Record<number, number> = {};
+    for (const f of this.show.fixtures) perUniverse[f.universe] = (perUniverse[f.universe] ?? 0) + 1;
     return {
       showName: this.show.name,
       output: s.output,
+      routes: s.routes ?? [],
+      /** Fixtures patched on each universe. */
+      fixturesPerUniverse: perUniverse,
+      /** Universes in the patch that no output sends (a USB interface sends one). */
+      unsent: planRoutes(s, this.show.fixtures.map((f) => f.universe)).unsent,
       outputEnabled: s.outputEnabled,
       forcedOff: Boolean(this.opts.output),
       outputStatus: this.latestState?.output ?? null,
@@ -639,10 +677,15 @@ export class App {
         } catch (err) {
           throw new HttpError(400, `not a valid show: ${(err as Error).message}`);
         }
-        // Keep this installation's PIN: an imported file must not change who can log in.
-        show = { ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash } };
+        const fromPatch = url.searchParams.get('source') === 'patch';
+        // Patch never edits settings, and a Patch page left open holds an old copy of them: keep the live ones
+        // (Send DMX, output, routes), or saving the patch could start sending DMX again.
+        // An imported file keeps this installation's PIN: it must not change who can log in.
+        show = fromPatch
+          ? { ...show, settings: this.show.settings }
+          : { ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash } };
         await this.setShow(show);
-        this.log(url.searchParams.get('source') === 'patch' ? 'Patch saved' : `Imported show "${show.name}"`);
+        this.log(fromPatch ? 'Patch saved' : `Imported show "${show.name}"`);
         json(res, 200, this.settingsView());
         return true;
       }
@@ -817,7 +860,15 @@ export class App {
     const show: Show = structuredClone(this.show);
     try {
       if (typeof body.showName === 'string' && body.showName.trim()) show.name = body.showName.trim();
-      if (body.output !== undefined) show.settings.output = OutputSettings.parse(body.output);
+      if (body.output !== undefined) {
+        show.settings.output = OutputSettings.parse(body.output);
+        const problem = outputAddressProblem(show.settings.output);
+        if (problem) throw new Error(problem);
+      }
+      if (body.routes !== undefined) {
+        const routes = OutputRoute.array().parse(body.routes);
+        show.settings.routes = routes.length ? routes.sort((a, b) => a.universe - b.universe) : undefined;
+      }
       if (typeof body.outputEnabled === 'boolean') show.settings.outputEnabled = body.outputEnabled;
       if (body.frameRate !== undefined) show.settings.frameRate = Number(body.frameRate);
       if (body.gamma !== undefined) show.settings.gamma = Number(body.gamma);
@@ -828,10 +879,18 @@ export class App {
         if (used.size > 1) throw new Error('this show uses several universes; change them per fixture');
         const u = Number(body.universe);
         if (!Number.isInteger(u) || u < 0 || u > 32767) throw new Error('universe must be 0–32767');
+        const [from] = used;
         for (const f of show.fixtures) f.universe = u;
+        // A route for the rig's universe moves with it.
+        const routes = show.settings.routes;
+        if (routes && from !== u && !routes.some((r) => r.universe === u)) for (const r of routes) if (r.universe === from) r.universe = u;
       }
       return parseShow(show);
     } catch (err) {
+      if (err instanceof ZodError) {
+        const issue = err.issues[0];
+        throw new HttpError(400, issue.code === 'custom' ? issue.message : `${issue.path.join('.') || 'settings'}: ${issue.message}`);
+      }
       throw new HttpError(400, (err as Error).message.split('\n')[0]);
     }
   }

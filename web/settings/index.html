@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0b0c0e">
+  <meta name="theme-color" content="#0F1625">
   <title>Light Runner Settings</title>
+  <link rel="stylesheet" href="/shared/theme.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -28,7 +29,7 @@
   </section>
 
   <main id="main" hidden>
-    <section class="card compare" id="comparePanel" hidden>
+    <section class="card compare span2" id="comparePanel" hidden>
       <div class="card-head">
         <h2>Compare with <span id="compareName"></span></h2>
         <button id="compareCancel" class="ghost small">Cancel</button>
@@ -46,7 +47,7 @@
       </div>
     </section>
 
-    <section class="card" id="outputCard">
+    <section class="card span2" id="outputCard">
       <div class="card-head">
         <h2>DMX output</h2>
         <label class="switch big">
@@ -102,7 +103,7 @@
             <select id="enttecPort"></select>
             <button id="refreshPorts" class="ghost" type="button">Refresh</button>
           </div>
-          <span class="hint">ENTTEC DMX USB Pro or compatible. It has one output: the show's first universe.</span>
+          <span class="hint">ENTTEC DMX USB Pro or compatible. It sends one universe: the first one that uses this output.</span>
         </div>
       </div>
 
@@ -110,6 +111,13 @@
         <label for="universe">Universe</label>
         <input id="universe" type="number" min="0" max="32767" step="1">
         <span class="hint" id="universeHint"></span>
+      </div>
+
+      <div class="routes" id="routes" hidden>
+        <h3>Universes</h3>
+        <p class="hint">Only needed when different universes go to different boxes. Every universe uses the output above unless you give it its own.</p>
+        <p class="warn" id="unsent"></p>
+        <div id="routeList" class="route-list"></div>
       </div>
     </section>
 
@@ -165,7 +173,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card span2">
       <h2>Show</h2>
       <div class="field">
         <label for="showName">Name</label>
@@ -178,7 +186,7 @@
       </div>
       <details class="backups">
         <summary>Backups <span id="backupCount" class="count"></span></summary>
-        <p class="hint">A copy is kept every time the show is saved; the last 20 are kept.</p>
+        <p class="hint">A copy is kept every time the show is saved; the last 20 are kept. A backup from before a group was marked as a smoke machine brings it back as a light: mark it again in Patch.</p>
         <ul id="backupList"></ul>
       </details>
     </section>

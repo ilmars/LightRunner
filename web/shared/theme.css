@@ -1,0 +1,204 @@
+/* Light Runner design system: one set of tokens and base components for every page.
+   Dark navy, soft tinted glass: panels and controls are flat translucent surfaces
+   with a faint 1 px edge, no bevels, no heavy shadows. Selected, held and warning
+   states are tinted glass (blue, amber, red). Brightness is capped for a dark
+   room: no large area is bright, saturated colours are mixed down, and the bright
+   accent (#4389E8) is only used for thin lines.
+   See docs/design-system.md. Class names are prefixed ds- so they never clash
+   with a page's own classes. */
+:root {
+  /* Page and panels, darkest to lightest. */
+  --ds-bg: #0F1625;
+  --ds-bg-deep: #0C121F;
+  --ds-surface: #121A2B;
+  --ds-surface-hi: #162034;
+  /* Translucent layers on top of a panel. */
+  --ds-elevated: rgba(148, 170, 210, 0.10);
+  --ds-selected: rgba(84, 146, 236, 0.24);
+  /* Small marks only (ticks, focus edges): never a large area. */
+  --ds-mark: #68758F;
+  /* Accent: a soft tint for areas, the bright one for thin lines and focus. */
+  --ds-accent-fill: #3A6FB8;
+  --ds-accent: #4389E8;
+  --ds-edge-on: rgba(98, 155, 240, 0.45);
+  /* Text. */
+  --ds-text: #E6EAF2;
+  --ds-muted: #8F9AB0;
+  --ds-muted-on: #B4BDCF;
+  /* Status. */
+  --ds-ok: #2f9e5b;
+  --ds-warn: #c98a2a;
+  --ds-warn-text: #e0b46a;
+  --ds-danger: 224, 90, 104;
+  --ds-danger-text: #EBA9B0;
+  --ds-danger-fill: rgba(224, 90, 104, 0.10);
+  --ds-danger-edge: rgba(224, 90, 104, 0.30);
+
+  /* Shape. */
+  --ds-r-panel: 18px;
+  --ds-r-tile: 12px;
+  --ds-r-small: 10px;
+  --ds-r-pill: 999px;
+  --ds-gap: 10px;
+  --ds-gap-tight: 8px;
+  --ds-pad: 14px;
+  --ds-target: 44px;
+
+  /* Surfaces: flat glass. Panels get a faint edge and a very soft far shadow;
+     controls get only the faint edge. No bevels, no inset wells. */
+  --ds-edge: rgba(255, 255, 255, 0.06);
+  /* Panels: a faint all-round edge, a slightly brighter line along the top (light falling on the glass), and a very soft far shadow. */
+  --ds-shadow-raise: inset 0 1px 0 rgba(255, 255, 255, 0.075), inset 0 0 0 1px rgba(255, 255, 255, 0.05), 0 24px 48px -32px rgba(0, 0, 0, 0.75);
+  --ds-shadow-low: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --ds-shadow-inset: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+
+  /* Fills, translucent so panels read as glass. Glass panel: a little lighter at the top, settling into the navy below. */
+  --ds-panel-fill: linear-gradient(180deg, rgba(36, 49, 78, 0.80) 0%, rgba(25, 34, 56, 0.78) 34%, rgba(17, 24, 40, 0.78) 100%);
+  --ds-tile-fill: rgba(148, 170, 210, 0.055);
+  --ds-tile-fill-on: linear-gradient(180deg, rgba(84, 146, 236, 0.26), rgba(84, 146, 236, 0.17));
+  --ds-fill-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 50%, rgba(0, 0, 0, 0.05) 100%);
+  --ds-slab-fill: var(--ds-fill-sheen), linear-gradient(90deg, rgba(76, 122, 204, 0.32), rgba(96, 148, 232, 0.44));
+  --ds-glass: rgba(14, 20, 34, 0.86);
+
+  /* Type: size and weight carry the hierarchy; panel titles semibold, the rest regular. */
+  --ds-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  --ds-fs-label: 13px;
+  --ds-fs-body: 16px;
+  --ds-fs-value: 18px;
+  --ds-fs-title: 22px;
+
+  color-scheme: dark;
+}
+
+/* ---- Base components ---- */
+
+/* Panel: a glass tile of the bento layout. */
+.ds-panel {
+  background: var(--ds-panel-fill);
+  border-radius: var(--ds-r-panel);
+  box-shadow: var(--ds-shadow-raise);
+}
+
+/* Tile: a flat control or card inside a panel. */
+.ds-tile {
+  background: var(--ds-tile-fill);
+  border-radius: var(--ds-r-tile);
+  box-shadow: var(--ds-shadow-low);
+  color: var(--ds-text);
+}
+.ds-tile.ds-on {
+  background: var(--ds-tile-fill-on);
+  box-shadow: inset 0 0 0 1px var(--ds-edge-on);
+}
+
+/* Muted label above a value ("Key lights" over "Vēsi balts"). */
+.ds-label {
+  font-size: var(--ds-fs-label);
+  font-weight: 400;
+  color: var(--ds-muted);
+  letter-spacing: 0.01em;
+}
+
+/* Buttons: flat, softly tinted; pressed is a lighter tint. */
+.ds-btn {
+  min-height: var(--ds-target);
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--ds-r-tile);
+  font: inherit;
+  font-size: 15px;
+  color: var(--ds-text);
+  background: var(--ds-tile-fill);
+  box-shadow: var(--ds-shadow-low);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ds-btn:active { background: var(--ds-elevated); }
+.ds-btn:disabled { opacity: 0.4; }
+.ds-btn--text { background: transparent; box-shadow: none; color: var(--ds-muted); }
+.ds-btn--text:active { background: var(--ds-elevated); }
+/* Pill: small header actions ("Edit", "Back to Song 3"). */
+.ds-btn--pill { border-radius: var(--ds-r-pill); min-height: 36px; padding: 0 16px; font-size: 14px; }
+
+/* Hold: a button that fills while held (Save, Blackout). The fill is a soft
+   tint, never a solid bright slab. */
+.ds-hold { position: relative; overflow: hidden; }
+.ds-hold > .ds-hold-fill {
+  position: absolute; inset: 0 auto 0 0; width: 0;
+  background: var(--ds-accent-fill); opacity: 0.4;
+}
+.ds-hold > :not(.ds-hold-fill) { position: relative; }
+
+/* Fill slider: a smooth filled bar on a faint glass track. The fill carries a
+   little of the control's own colour (--c, set by the page). No thumb; the
+   value is shown next to the slider. */
+.ds-fill {
+  --c: #6a7898;
+  position: relative;
+  height: 44px;
+  border-radius: var(--ds-r-tile);
+  background: rgba(148, 170, 210, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+  touch-action: none;
+  cursor: ew-resize;
+}
+.ds-fill > .ds-fill-tint, .ds-fill > .ds-fill-grip { display: none; }
+.ds-fill > .ds-fill-slab {
+  position: absolute; inset: 0 auto 0 0; width: 0; min-width: 0;
+  border-radius: var(--ds-r-tile);
+  /* A soft sheen (about 7 % lighter at the top, a touch darker at the bottom)
+     over the colour, which itself deepens a little towards the level. */
+  background:
+    var(--ds-fill-sheen),
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--c) 15%, rgba(70, 104, 170, 0.32)),
+      color-mix(in srgb, var(--c) 26%, rgba(92, 132, 206, 0.40)));
+}
+.ds-fill > .ds-fill-val {
+  position: absolute; top: 0; bottom: 0; left: 14px;
+  display: flex; align-items: center;
+  font-size: var(--ds-fs-value); font-weight: 400; color: var(--ds-text);
+  font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.ds-fill.ds-dragging { box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+
+/* Segmented control (tabs, choices): a faint glass track; selected is tinted. */
+.ds-seg {
+  display: inline-flex; gap: 2px; padding: 3px;
+  border-radius: var(--ds-r-tile);
+  background: rgba(148, 170, 210, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+.ds-seg > button {
+  min-height: 38px; padding: 0 16px; border: 0; border-radius: var(--ds-r-small);
+  background: transparent; color: var(--ds-muted); font: inherit; font-size: 15px; cursor: pointer;
+}
+.ds-seg > button.on, .ds-seg > button[aria-selected="true"], .ds-seg > button[aria-checked="true"] {
+  background: var(--ds-tile-fill-on);
+  color: var(--ds-text);
+  box-shadow: inset 0 0 0 1px var(--ds-edge-on);
+}
+
+/* Field: a flat text box on a faint track. */
+.ds-field {
+  min-height: var(--ds-target); padding: 0 14px; border: 0;
+  border-radius: var(--ds-r-small);
+  background: rgba(148, 170, 210, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  color: var(--ds-text); font: inherit; font-size: 17px;
+}
+.ds-field:focus { outline: none; box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.ds-field::placeholder { color: var(--ds-muted); }
+
+/* Sheet: glass over one panel (the colour picker, the new quick look). The only
+   place blur is used, because it sits on top of other content. */
+.ds-sheet {
+  background: var(--ds-glass);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border-radius: var(--ds-r-panel);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+
+/* Swatch: a small colour square. Saturated colours are dimmed a little. */
+.ds-swatch { display: inline-block; width: 18px; height: 18px; border-radius: 6px; opacity: 0.85; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }

@@ -1,4 +1,4 @@
-// Watches the Art-Net node DMX is sent to. UDP can't confirm delivery, but a
+// Watches the Art-Net nodes DMX is sent to. UDP can't confirm delivery, but a
 // node answers an ArtPoll and says whether it is outputting and whether it is
 // merging another source (another desk sending at the same time).
 
@@ -18,10 +18,10 @@ export interface NodeHealth {
   name: string | null;
 }
 
-/** Poll one node and collect its replies (one per port) for `waitMs`. */
-export function pollNode(host: string, waitMs = 1500): Promise<NodeHealth> {
+/** Poll these nodes from one socket and collect their replies (one per port) for `waitMs`. */
+export function pollNodes(hosts: string[], waitMs = 1500): Promise<Map<string, NodeHealth>> {
   return new Promise((resolve) => {
-    const health: NodeHealth = { seen: false, merging: false, name: null };
+    const health = new Map<string, NodeHealth>(hosts.map((h) => [h, { seen: false, merging: false, name: null }]));
     const socket = createSocket({ type: 'udp4', reuseAddr: true });
     const done = () => {
       try {
@@ -32,55 +32,73 @@ export function pollNode(host: string, waitMs = 1500): Promise<NodeHealth> {
       resolve(health);
     };
     socket.on('message', (m, from) => {
-      if (from.address !== host || m.length < 186 || m.subarray(0, 8).toString('latin1') !== 'Art-Net\0') return;
+      const h = health.get(from.address);
+      if (!h || m.length < 186 || m.subarray(0, 8).toString('latin1') !== 'Art-Net\0') return;
       if (m.readUInt16LE(8) !== OP_POLL_REPLY) return;
-      health.seen = true;
-      health.name = m.subarray(44, 108).toString('utf8').replace(/\0.*$/s, '') || health.name;
+      h.seen = true;
+      h.name = m.subarray(44, 108).toString('utf8').replace(/\0.*$/s, '') || h.name;
       const ports = Math.min(4, m.readUInt16BE(172));
-      for (let k = 0; k < ports; k++) if (m[182 + k] & GOOD_OUTPUT_MERGING) health.merging = true;
+      for (let k = 0; k < ports; k++) if (m[182 + k] & GOOD_OUTPUT_MERGING) h.merging = true;
     });
     socket.on('error', done);
     socket.bind(ARTNET_PORT, () => {
-      socket.send(POLL, ARTNET_PORT, host, () => {});
+      for (const host of hosts) socket.send(POLL, ARTNET_PORT, host, () => {});
       setTimeout(done, waitMs);
     });
   });
+}
+
+/** Poll one node. */
+export async function pollNode(host: string, waitMs = 1500): Promise<NodeHealth> {
+  return (await pollNodes([host], waitMs)).get(host)!;
 }
 
 export function isBroadcast(host: string): boolean {
   return host === '255.255.255.255' || host.endsWith('.255') || host.startsWith('2.') || host.startsWith('10.255');
 }
 
+type Poll = (hosts: string[]) => Promise<Map<string, NodeHealth>>;
+
 /**
- * Polls the target every few seconds. Reports a problem after three missed
- * polls in a row (a single lost UDP reply is normal), or when the node says
- * it is merging another source.
+ * Polls every node DMX goes to unicast, every few seconds. Reports a problem
+ * after three missed polls in a row (a single lost UDP reply is normal), or
+ * when a node says it is merging another source. With several nodes their
+ * problems are joined into one message, each naming its node. `otherDesk` says
+ * whether every problem is another desk sending (no node is missing).
  */
 export class NodeWatch {
-  private host: string | null = null;
+  private readonly nodes = new Map<string, { misses: number; problem: string | null; otherDesk: boolean }>();
   private timer: NodeJS.Timeout | null = null;
-  private misses = 0;
   private busy = false;
   private paused = 0;
   private problem: string | null = null;
-  private readonly onChange: (problem: string | null) => void;
+  private readonly onChange: (problem: string | null, otherDesk: boolean) => void;
   private readonly everyMs: number;
+  private readonly poll: Poll;
 
-  constructor(onChange: (problem: string | null) => void, everyMs = 4000) {
+  constructor(onChange: (problem: string | null, otherDesk: boolean) => void, everyMs = 4000, poll: Poll = (hosts) => pollNodes(hosts)) {
     this.onChange = onChange;
     this.everyMs = everyMs;
+    this.poll = poll;
   }
 
-  /** Watch this unicast host, or nothing (null, broadcast, other output types). */
-  watch(host: string | null): void {
-    const next = host && !isBroadcast(host) ? host : null;
-    if (next === this.host) return;
-    this.host = next;
-    this.misses = 0;
-    this.set(null);
-    if (this.timer) clearInterval(this.timer);
-    this.timer = next ? setInterval(() => void this.check(), this.everyMs) : null;
-    if (next) void this.check();
+  /** Watch these unicast hosts; broadcast addresses and null are skipped. */
+  watch(hosts: string | null | (string | null)[]): void {
+    const list = Array.isArray(hosts) ? hosts : [hosts];
+    const next = [...new Set(list.filter((h): h is string => Boolean(h) && !isBroadcast(h!)))];
+    const same = next.length === this.nodes.size && next.every((h) => this.nodes.has(h));
+    if (same) return;
+    for (const h of [...this.nodes.keys()]) if (!next.includes(h)) this.nodes.delete(h);
+    const added = next.filter((h) => !this.nodes.has(h));
+    for (const h of added) this.nodes.set(h, { misses: 0, problem: null, otherDesk: false });
+    this.report();
+    if (!this.nodes.size) {
+      if (this.timer) clearInterval(this.timer);
+      this.timer = null;
+      return;
+    }
+    if (!this.timer) this.timer = setInterval(() => void this.check(), this.everyMs);
+    if (added.length) void this.check();
   }
 
   /** Skip checks for a moment, e.g. while node discovery has port 6454. */
@@ -91,30 +109,37 @@ export class NodeWatch {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    this.host = null;
+    this.nodes.clear();
   }
 
   private async check(): Promise<void> {
-    const host = this.host;
-    if (!host || this.busy || Date.now() < this.paused) return;
+    if (!this.nodes.size || this.busy || Date.now() < this.paused) return;
     this.busy = true;
     try {
-      const h = await pollNode(host);
-      if (host !== this.host) return;
-      if (h.seen) {
-        this.misses = 0;
-        this.set(h.merging ? `Another desk is also sending to ${h.name ?? host}` : null);
-      } else if (++this.misses >= 3) {
-        this.set(`Art-Net node ${host} is not answering`);
+      const results = await this.poll([...this.nodes.keys()]);
+      for (const [host, h] of results) {
+        const node = this.nodes.get(host);
+        if (!node) continue; // no longer watched
+        if (h.seen) {
+          node.misses = 0;
+          node.problem = h.merging ? `Another desk is also sending to ${h.name ?? host}` : null;
+          node.otherDesk = h.merging;
+        } else if (++node.misses >= 3) {
+          node.problem = `Art-Net node ${host} is not answering`;
+          node.otherDesk = false;
+        }
       }
+      this.report();
     } finally {
       this.busy = false;
     }
   }
 
-  private set(problem: string | null): void {
+  private report(): void {
+    const failing = [...this.nodes.values()].filter((n) => n.problem);
+    const problem = failing.length ? failing.map((n) => n.problem).join('. ') : null;
     if (problem === this.problem) return;
     this.problem = problem;
-    this.onChange(problem);
+    this.onChange(problem, failing.length > 0 && failing.every((n) => n.otherDesk));
   }
 }

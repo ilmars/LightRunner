@@ -61,3 +61,45 @@ test('colour temperature, fine channels and 2D matrices', () => {
   show.groups = []; show.presets = []; show.looks = []; show.operator = { looks: [], groups: [], manualForOperators: false, runningOrder: [], quickLooks: [] };
   parseShow(show);
 });
+
+// Smoke and haze machines describe their output as "Fog" (or "FogOutput") capabilities, as these
+// shapes from the Open Fixture Library do (a 1-channel fogger, a hazer with a fan channel).
+test('a fog or haze output channel becomes the dimmer, so a smoke group can drive it', () => {
+  const fogger: OflFixture = {
+    name: 'Fogger',
+    availableChannels: {
+      'Fog Output': { capabilities: [
+        { type: 'Fog', dmxRange: [0, 5], fogOutput: 'off' } as never,
+        { type: 'Fog', dmxRange: [6, 255], fogOutputStart: '0%', fogOutputEnd: '100%' } as never,
+      ] },
+    },
+    modes: [{ name: '1-channel', channels: ['Fog Output'] }],
+  };
+  assert.deepEqual(oflToProfile(fogger, 0, 'x', 'fogger', 'X').channels.map((c) => c.role), ['dimmer']);
+
+  const hazer: OflFixture = {
+    name: 'Hazer',
+    availableChannels: {
+      Haze: { defaultValue: 40, capability: { type: 'FogOutput', fogOutputStart: 'off', fogOutputEnd: 'strong' } as never },
+      Fan: { capability: { type: 'Speed', speedStart: '80%', speedEnd: '100%' } as never },
+    },
+    modes: [{ name: '2-channel', channels: ['Haze', 'Fan'] }],
+  };
+  const profile = oflToProfile(hazer, 0, 'x', 'hazer', 'X');
+  assert.deepEqual(roles(profile), ['dimmer', 'other']);
+  assert.equal(describeMode(hazer, hazer.modes[0]!).roles.join(), 'dimmer');
+});
+
+test('a channel that mixes fog output with other functions is parked at 0, whatever its default', () => {
+  const mixed: OflFixture = {
+    name: 'Fog light',
+    availableChannels: {
+      Program: { defaultValue: 200, capabilities: [
+        { type: 'Effect', dmxRange: [0, 127] } as never,
+        { type: 'Fog', dmxRange: [128, 255], fogOutputStart: 'weak', fogOutputEnd: 'strong' } as never,
+      ] },
+    },
+    modes: [{ name: '1-channel', channels: ['Program'] }],
+  };
+  assert.deepEqual(roles(oflToProfile(mixed, 0, 'x', 'fog-light', 'X')), ['other']);
+});

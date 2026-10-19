@@ -3,14 +3,14 @@
 // same code drives output, tests, blind preview and the soak test.
 
 import {
-  BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, findProfile, livePresetId, parseLivePreset,
+  BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, displayColour, findProfile, livePresetId, parseLivePreset,
   type StageCommand, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
-  type Palette, type RuntimeState, type Show,
+  type GroupStatus, type Palette, type Preset, type RuntimeState, type Show,
 } from '../../shared/src/index.ts';
 import { Crossfade, Ramp } from './fade.ts';
 import { compilePreset, fixedPreset, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
-import { copy, dark, fromHex, mix, mix2, type Light } from './light.ts';
-import { planChannels, writeFixture, type ChannelPlan } from './output.ts';
+import { copy, dark, fromHex, mix, mix2, withoutUv, type Light } from './light.ts';
+import { planChannels, visibleLevel, visualOf, writeFixture, writeSmoke, type ChannelPlan } from './output.ts';
 
 /** Safe's fixed warm white stage wash. */
 const SAFE_LIGHT = fromHex(SAFE_COLOUR.hex, SAFE_COLOUR.white, SAFE_COLOUR.intensity);
@@ -33,6 +33,13 @@ const MANUAL_IN = 0.2;
 /** Release fades back to the running preset over this long. */
 const MANUAL_OUT = 1;
 const DEFAULT_FADE = 3;
+
+/** A held Puff runs a smoke machine at this level, whatever its slider says. */
+const PUFF_LEVEL = 1;
+/** A Puff held longer than this (seconds) ends by itself, even with the button still down. */
+const PUFF_MAX = 15;
+/** Basic lights and Blackout turn smoke off over this long (keeps the 5% rule). */
+const SMOKE_OFF = 1;
 
 /** Undo fades back over this long, and keeps this many steps. */
 const UNDO_FADE = 2;
@@ -76,6 +83,8 @@ class ManualRun {
     c.g += (t.g - c.g) * a;
     c.b += (t.b - c.b) * a;
     c.w += (t.w - c.w) * a;
+    c.a += (t.a - c.a) * a;
+    c.u += (t.u - c.u) * a;
     c.i += (t.i - c.i) * a;
   }
 }
@@ -89,6 +98,14 @@ class GroupRun {
   presets = new Crossfade<PresetRun>();
   manual: ManualRun | null = null;
   level = new Ramp(1);
+  /**
+   * A smoke or haze machine. It has no presets: its output is its level (or
+   * PUFF_LEVEL while Puff is held), and only its slider, Puff, Basic lights
+   * and Blackout change it.
+   */
+  smoke = false;
+  /** A smoke group's output this frame. */
+  smokeOut = 0;
   /** This group's light for each of its fixtures, in group order. */
   out: Light[] = [];
 
@@ -110,6 +127,8 @@ class FixtureRun {
   /** Which group drives this fixture. The most recent change wins, and the handover fades. */
   owners = new Crossfade<string>();
   manual: ManualRun | null = null;
+  /** Smoke groups this fixture is in. When there are any, only they drive it. */
+  smokeGroups: GroupRun[] = [];
   /** Final light after manual and master, before gamma. */
   light: Light = dark();
 
@@ -119,12 +138,24 @@ class FixtureRun {
   }
 }
 
+/** An Any colour pick as the operator page shows it, or null for any other preset. */
+function liveView(preset: string | null): GroupStatus['live'] {
+  const live = preset ? parseLivePreset(preset) : null;
+  if (!live) return null;
+  const { colour, white = 0, amber = 0, uv = 0 } = live;
+  return { colour, white, amber, uv, display: displayColour(colour, live) };
+}
+
+function smokeRefusal(name: string): string {
+  return `"${name}" is a smoke machine: use its slider or Puff`;
+}
+
 /** True when two presets are one static layer of the same light. */
 function sameLight(a: CompiledPreset, b: CompiledPreset): boolean {
   if (a.layers.length !== 1 || b.layers.length !== 1) return false;
   const x = a.layers[0]!.light, y = b.layers[0]!.light;
   const near = (p: number, q: number) => Math.abs(p - q) < 1e-9;
-  return near(x.r, y.r) && near(x.g, y.g) && near(x.b, y.b) && near(x.w, y.w) && near(x.i, y.i);
+  return near(x.r, y.r) && near(x.g, y.g) && near(x.b, y.b) && near(x.w, y.w) && near(x.a, y.a) && near(x.u, y.u) && near(x.i, y.i);
 }
 
 export interface Frame {
@@ -147,6 +178,8 @@ export class Engine {
   /** Groups being flashed, and the fixtures in them (recomputed when either changes). */
   private flash = new Set<string>();
   private flashed = new Set<number>();
+  /** When each smoke group's Puff started, for the PUFF_MAX cap. */
+  private puffStart = new Map<string, number>();
 
   private master = new Ramp(1);
   private speed = new Ramp(1);
@@ -159,6 +192,8 @@ export class Engine {
   private history: Snapshot[] = [];
   /** True when the last apply() added an Undo step. */
   recorded = false;
+  /** The group and live preset of the last Any colour send that added an Undo step, for the drag it starts. */
+  private lastColourStep: { group: string; key: string } | null = null;
   private lastLook: string | null = null;
   /** Operator's fade time for look and preset changes; null = each look's own. */
   private fadeTime: number | null = null;
@@ -173,6 +208,7 @@ export class Engine {
 
   /** Load a new or edited show without disturbing what is on stage. */
   setShow(show: Show, now: number): void {
+    const before = this.show as Show | undefined;
     this.show = show;
     const palettes = new Map<string, Palette>(show.palettes.map((p) => [p.id, p]));
     this.presets = new Map(show.presets.map((p) => [p.id, compilePreset(p, palettes)]));
@@ -195,20 +231,42 @@ export class Engine {
     this.groups = new Map();
     for (const g of show.groups) {
       const run = oldGroups.get(g.id) ?? new GroupRun(g.id);
+      const smoke = g.kind === 'smoke';
+      if (smoke && !run.smoke) {
+        // A new smoke group, or a light group that became one, starts off. A flash held on it is no Puff.
+        run.level.set(0, now, 0);
+        run.presets = new Crossfade<PresetRun>();
+        run.manual = null;
+        this.flash.delete(g.id);
+      } else if (!smoke && run.smoke) {
+        // Back to a light group: a light's dimmer starts at full, not at whatever the smoke was.
+        run.level.set(1, now, 0);
+        this.flash.delete(g.id);
+        this.puffStart.delete(g.id);
+      }
+      run.smoke = smoke;
       run.setFixtures(g.fixtures.map((id) => this.fixtureIndex.get(id)).filter((i): i is number => i !== undefined));
+      // A colour edited while it is lit fades to the new colour instead of snapping.
+      const lit = this.editedColour(run, before, now);
       // Running presets pick up edits; deleted ones keep running until they fade out.
       run.presets.update((key, item) => {
         const fresh = this.presets.get(key);
         return fresh ? { ...item, preset: fresh } : item;
       });
+      if (lit) this.setPreset(run, lit, this.fadeTime ?? lit.fade, now, false);
       this.groups.set(g.id, run);
     }
 
-    // A fixture nobody has driven yet belongs to its first group.
+    // A fixture nobody has driven yet belongs to its first group. A fixture in a smoke group is a smoke machine.
+    for (const f of this.fixtures) f.smokeGroups = [];
     for (const g of this.groups.values()) {
       for (const f of g.fixtures) {
         const run = this.fixtures[f];
         if (run.owners.size === 0) run.owners.push(g.id, () => g.id, now, 0);
+        if (g.smoke) {
+          run.smokeGroups.push(g);
+          run.manual = null;
+        }
       }
     }
 
@@ -219,8 +277,13 @@ export class Engine {
     this.visual = new Uint8Array(this.fixtures.length * 3);
 
     for (const id of this.flash) if (!this.groups.has(id)) this.flash.delete(id);
+    for (const id of this.puffStart.keys()) if (!this.flash.has(id)) this.puffStart.delete(id);
     this.updateFlashed();
     this.adoptSaved();
+    if (before) {
+      this.adoptAdded(before);
+      this.releaseRemoved(before);
+    }
   }
 
   /** The look whose entries the operator page compares the stage with: the current look, or the safe look on Basic lights. */
@@ -242,7 +305,7 @@ export class Engine {
     for (const entry of look.groups) {
       const group = this.groups.get(entry.group);
       const key = group?.presets.currentKey;
-      if (!group || !key || key === entry.preset) continue;
+      if (!group || group.smoke || !key || key === entry.preset) continue;
       if (!(key === SAFE_ID || key === BLACKOUT_ID || parseLivePreset(key))) continue;
       const saved = this.show.presets.find((p) => p.id === entry.preset);
       const target = this.presets.get(entry.preset);
@@ -253,15 +316,104 @@ export class Engine {
     }
   }
 
+  /**
+   * The group runs a plain one-colour preset whose colour the new show changed: the running copy
+   * is set aside under a spare key to fade out, and the new one to fade in. Returns the new
+   * preset to start, or null (everything else just takes the edit in place).
+   */
+  private editedColour(group: GroupRun, before: Show | undefined, now: number): CompiledPreset | null {
+    const key = group.presets.currentKey;
+    const running = group.presets.current;
+    if (!before || !key || !running) return null;
+    const was = before.presets.find((p) => p.id === key);
+    const is = this.show.presets.find((p) => p.id === key);
+    const fresh = this.presets.get(key);
+    if (!was || !is || !fresh || was.layers.length !== 1 || is.layers.length !== 1) return null;
+    if (JSON.stringify(was.layers) === JSON.stringify(is.layers)) return null;
+    if (!group.presets.rekey(key, `${key}~${now}`, running)) return null;
+    return fresh;
+  }
+
+  /**
+   * A colour added to a group's list (Add to colours) while the group runs that
+   * same colour live: the group runs the new preset under its own id, with no
+   * fade, so the picker shows its name. Only presets that weren't in the show
+   * before count, and only when the light is identical.
+   */
+  private adoptAdded(before: Show): void {
+    const known = new Set(before.presets.map((p) => p.id));
+    const added = this.show.presets.filter((p) => !known.has(p.id) && !p.custom);
+    if (!added.length) return;
+    for (const group of this.groups.values()) {
+      const key = group.presets.currentKey;
+      const running = group.presets.current;
+      if (!key || !running || !parseLivePreset(key)) continue;
+      const found = added.find((p) => p.group === group.id && sameLight(this.presets.get(p.id)!, running.preset));
+      const target = found && this.presets.get(found.id);
+      if (target) group.presets.rekey(key, target.id, { preset: target, time: running.time });
+    }
+  }
+
+  /**
+   * The reverse, for an Undo of that edit: a group running a plain single-colour
+   * preset the new show no longer has carries on as the same colour live, rather than
+   * naming a preset that isn't there (the next Save would refuse it).
+   */
+  private releaseRemoved(before: Show): void {
+    const gone = new Map(before.presets.filter((p) => !this.presets.has(p.id)).map((p) => [p.id, p]));
+    if (!gone.size) return;
+    /** The live colour that is the same light as a removed plain preset, or null. */
+    const liveOf = (old: Preset | undefined, group: string): string | null => {
+      if (!old || old.group !== group || old.layers.length !== 1) return null;
+      const layer = old.layers[0]!;
+      if (!('hex' in layer.colour) || layer.intensity !== 1) return null;
+      // White, amber and UV go with it, so the stage keeps the same light.
+      return livePresetId(group, layer.colour.hex, layer.colour);
+    };
+    for (const group of this.groups.values()) {
+      const key = group.presets.currentKey;
+      const running = group.presets.current;
+      const id = key ? liveOf(gone.get(key), group.id) : null;
+      const live = id ? this.presetFor(id, group.id) : undefined;
+      if (key && running && live) group.presets.rekey(key, live.id, { preset: live, time: running.time });
+    }
+    // Blackout remembers what each group ran; the next look brings that back, so it must not name a removed preset.
+    if (this.beforeBlackout) {
+      for (const [gid, pid] of Object.entries(this.beforeBlackout)) {
+        if (pid && gone.has(pid)) this.beforeBlackout[gid] = liveOf(gone.get(pid), gid);
+      }
+    }
+  }
+
+  /** Fixtures that light groups are flashing. A smoke group's flash is its Puff, worked out per group. */
   private updateFlashed(): void {
     this.flashed = new Set();
-    for (const id of this.flash) for (const f of this.groups.get(id)?.fixtures ?? []) this.flashed.add(f);
+    for (const id of this.flash) {
+      const group = this.groups.get(id);
+      if (group && !group.smoke) for (const f of group.fixtures) this.flashed.add(f);
+    }
   }
 
   /** Apply a command. Returns an error message, or null when it worked. */
   apply(cmd: StageCommand, now: number): string | null {
     this.recorded = false;
-    if (cmd.type === 'undo') return this.undo(now);
+    if (cmd.type === 'undo') {
+      this.lastColourStep = null;
+      return this.undo(now);
+    }
+    // A later send of the same Any colour drag joins the drag's one Undo step,
+    // as long as nothing else has changed the group since.
+    if (cmd.type === 'groupColour' && cmd.continues) {
+      const step = this.lastColourStep;
+      const group = this.groups.get(cmd.group);
+      if (step && group && step.group === cmd.group && group.presets.currentKey === step.key) {
+        const error = this.run(cmd, now);
+        step.key = group.presets.currentKey ?? step.key;
+        return error;
+      }
+    }
+    // A send that doesn't continue starts a new drag, so it never joins the last one's step.
+    if (cmd.type === 'groupColour' && !cmd.continues) this.lastColourStep = null;
     if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || cmd.type === 'groupColour' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') {
       const before = this.snapshot();
       const error = this.run(cmd, now);
@@ -270,6 +422,8 @@ export class Engine {
         this.history.push(before);
         if (this.history.length > UNDO_STEPS) this.history.shift();
         this.recorded = true;
+        const key = cmd.type === 'groupColour' ? this.groups.get(cmd.group)?.presets.currentKey : null;
+        this.lastColourStep = key ? { group: (cmd as { group: string }).group, key } : null;
       }
       return error;
     }
@@ -291,6 +445,8 @@ export class Engine {
     const prev = this.history.pop();
     if (!prev) return 'nothing to undo';
     for (const group of this.groups.values()) {
+      // Undo never turns smoke on or off.
+      if (group.smoke) continue;
       // A group that had no preset yet was dark.
       const preset = this.presetFor(prev.groups[group.id] ?? BLACKOUT_ID, group.id);
       if (preset && group.presets.currentKey !== preset.id) {
@@ -310,7 +466,7 @@ export class Engine {
     if (pid === SAFE_ID) return fixedPreset(SAFE_ID, group, SAFE_LIGHT, SAFE_FADE);
     if (pid === BLACKOUT_ID) return fixedPreset(BLACKOUT_ID, group, dark(), BLACKOUT_FADE);
     const live = pid ? parseLivePreset(pid) : null;
-    if (live) return live.group === group ? fixedPreset(pid!, group, fromHex(live.colour), DEFAULT_FADE) : undefined;
+    if (live) return live.group === group ? fixedPreset(pid!, group, fromHex(live.colour, live), DEFAULT_FADE) : undefined;
     return pid ? this.presets.get(pid) : undefined;
   }
 
@@ -323,6 +479,7 @@ export class Engine {
         const group = this.groups.get(cmd.group);
         const preset = this.presets.get(cmd.preset);
         if (!group) return `unknown group "${cmd.group}"`;
+        if (group.smoke) return smokeRefusal(cmd.group);
         if (!preset || preset.group !== cmd.group) return `unknown preset "${cmd.preset}" for group "${cmd.group}"`;
         this.setPreset(group, preset, cmd.fade ?? this.fadeTime ?? preset.fade, now);
         return null;
@@ -330,14 +487,22 @@ export class Engine {
       case 'groupColour': {
         const group = this.groups.get(cmd.group);
         if (!group) return `unknown group "${cmd.group}"`;
+        if (group.smoke) return smokeRefusal(cmd.group);
         if (!HEX_COLOUR.test(cmd.colour)) return `bad colour "${cmd.colour}"`;
-        const preset = this.presetFor(livePresetId(cmd.group, cmd.colour), cmd.group)!;
+        const extras = { white: cmd.white, amber: cmd.amber, uv: cmd.uv };
+        const preset = this.presetFor(livePresetId(cmd.group, cmd.colour, extras), cmd.group)!;
         this.setPreset(group, preset, cmd.fade ?? this.fadeTime ?? preset.fade, now);
         return null;
       }
       case 'flash': {
         for (const id of cmd.groups) if (!this.groups.has(id)) return `unknown group "${id}"`;
         for (const id of cmd.groups) {
+          const smoke = this.groups.get(id)!.smoke;
+          // A smoke group's flash is its Puff, and only happens on its own: Flash All never puffs.
+          if (cmd.on && smoke && cmd.groups.length > 1) continue;
+          // The 15 s cap counts from the start of a Puff; another "on" while it is held doesn't restart it.
+          if (cmd.on && smoke && !this.flash.has(id)) this.puffStart.set(id, now);
+          if (!cmd.on) this.puffStart.delete(id);
           if (cmd.on) this.flash.add(id);
           else this.flash.delete(id);
         }
@@ -356,6 +521,8 @@ export class Engine {
       case 'groupLevel': {
         const group = this.groups.get(cmd.group);
         if (!group) return `unknown group "${cmd.group}"`;
+        // Blackout keeps smoke off: its slider waits until the lights are back, like Puff.
+        if (group.smoke && this.look === BLACKOUT) return 'Blackout is on.';
         group.level.set(cmd.value, now, SMOOTH);
         return null;
       }
@@ -402,7 +569,8 @@ export class Engine {
     for (const entry of entries) {
       const group = this.groups.get(entry.group);
       const preset = this.presets.get(entry.preset);
-      if (!group || !preset) continue;
+      // Looks never touch smoke, even an imported look that lists a smoke group.
+      if (!group || group.smoke || !preset) continue;
       const t = fade ?? this.fadeTime ?? entry.fade ?? preset.fade;
       this.setPreset(group, preset, t, now);
       group.level.set(entry.level ?? 1, now, t * LEVEL_FADE_FACTOR);
@@ -414,14 +582,18 @@ export class Engine {
 
   private goSafe(now: number): void {
     for (const group of this.groups.values()) {
+      if (group.smoke) continue;
       const { preset } = this.safeTarget(group);
       this.setPreset(group, preset, SAFE_FADE, now, false);
     }
     this.releaseAll(now);
     this.master.set(1, now, SAFE_RESET);
     this.speed.set(1, now, SAFE_RESET);
-    // Basic lights recovers the stage: every dimmer back to full.
-    for (const group of this.groups.values()) group.level.set(1, now, SAFE_RESET);
+    // Basic lights recovers the stage: every dimmer back to full, and smoke off.
+    for (const group of this.groups.values()) {
+      if (group.smoke) group.level.set(0, now, SMOKE_OFF);
+      else group.level.set(1, now, SAFE_RESET);
+    }
     this.beforeBlackout = null;
     this.setLook(SAFE, now, SAFE_FADE);
   }
@@ -444,7 +616,8 @@ export class Engine {
       for (const group of this.groups.values()) this.beforeBlackout[group.id] = group.presets.currentKey;
     }
     for (const group of this.groups.values()) {
-      this.setPreset(group, fixedPreset(BLACKOUT_ID, group.id, dark(), BLACKOUT_FADE), BLACKOUT_FADE, now, false);
+      if (group.smoke) group.level.set(0, now, SMOKE_OFF);
+      else this.setPreset(group, fixedPreset(BLACKOUT_ID, group.id, dark(), BLACKOUT_FADE), BLACKOUT_FADE, now, false);
     }
     this.releaseAll(now);
     this.setLook(BLACKOUT, now, BLACKOUT_FADE);
@@ -455,6 +628,10 @@ export class Engine {
     if (this.look === SAFE) {
       // Basic lights is not a look in the show; put back what Safe set (dimmers at full), but leave Master and speed.
       for (const group of this.groups.values()) {
+        if (group.smoke) {
+          group.level.set(0, now, SMOKE_OFF);
+          continue;
+        }
         const { preset, level, fade } = this.safeTarget(group);
         const t = preset.id === SAFE_ID ? fade : this.fadeTime ?? fade;
         this.setPreset(group, preset, t, now, false);
@@ -480,6 +657,8 @@ export class Engine {
    * so handing fixtures over would only add a second fade on top.
    */
   private setPreset(group: GroupRun, preset: CompiledPreset, fade: number, now: number, own = true): void {
+    // A smoke group runs no presets: nothing but its level drives it.
+    if (group.smoke) return;
     group.presets.push(preset.id, () => ({ preset, time: 0 }), now, fade);
     if (own) this.takeOwnership(group, now, fade);
   }
@@ -498,12 +677,14 @@ export class Engine {
     if ('group' in target) {
       const group = this.groups.get(target.group);
       if (!group) return `unknown group "${target.group}"`;
+      if (group.smoke) return smokeRefusal(target.group);
       holder = group;
       showing = group.out[0] ?? dark();
       this.takeOwnership(group, now, MANUAL_IN);
     } else {
       const index = this.fixtureIndex.get(target.fixture);
       if (index === undefined) return `unknown fixture "${target.fixture}"`;
+      if (this.fixtures[index].smokeGroups.length) return smokeRefusal(target.fixture);
       holder = this.fixtures[index];
       showing = this.fixtures[index].light;
     }
@@ -518,7 +699,7 @@ export class Engine {
     }
     if (colour) {
       const c = fromHex(colour);
-      m.target.r = c.r; m.target.g = c.g; m.target.b = c.b; m.target.w = c.w;
+      m.target.r = c.r; m.target.g = c.g; m.target.b = c.b; m.target.w = c.w; m.target.a = c.a; m.target.u = c.u;
       if (intensity === undefined && c.i < 1) m.target.i = c.i;
     }
     if (intensity !== undefined) m.target.i = intensity;
@@ -555,7 +736,19 @@ export class Engine {
     const weights = this.scratchWeights;
 
     // 1–3. Each group renders and blends its presets, then its manual override and level.
+    const blackedOut = this.look === BLACKOUT;
     for (const group of this.groups.values()) {
+      if (group.smoke) {
+        // A Puff that has run its 15 s ends here, as if the button had been let go.
+        const started = this.puffStart.get(group.id);
+        if (started !== undefined && now - started >= PUFF_MAX) {
+          this.flash.delete(group.id);
+          this.puffStart.delete(group.id);
+        }
+        // Puff (its own flash) runs it at full, but not during Blackout.
+        group.smokeOut = this.flash.has(group.id) && !blackedOut ? PUFF_LEVEL : group.level.value(now);
+        continue;
+      }
       const mix0 = group.presets.weights(now);
       for (const w of mix0) w.item.time += dt * speed;
       const level = group.level.value(now);
@@ -564,6 +757,8 @@ export class Engine {
       for (let k = 0; k < group.fixtures.length; k++) {
         ctx.index = k;
         const out = group.out[k];
+        // A fixture without UV mixes only the light it can make, so its intensity is what it shows.
+        const noUv = !this.fixtures[group.fixtures[k]!]!.plan.hasUv;
         if (mix0.length === 0) copy(out, dark());
         else {
           parts.length = 0;
@@ -571,7 +766,8 @@ export class Engine {
           for (let n = 0; n < mix0.length; n++) {
             ctx.time = mix0[n].item.time;
             if (!this.scratchLights[n]) this.scratchLights[n] = dark();
-            parts.push(renderPreset(this.scratchLights[n], mix0[n].item.preset, ctx));
+            const part = renderPreset(this.scratchLights[n], mix0[n].item.preset, ctx);
+            parts.push(noUv ? withoutUv(part) : part);
             weights.push(mix0[n].weight);
           }
           mix(out, parts, weights);
@@ -583,10 +779,14 @@ export class Engine {
 
     // 4–6. Each fixture takes its owning group's light, then manual and master, then gamma and channels.
     const master = this.master.value(now);
-    const flashing = this.flashed.size > 0 && this.look !== BLACKOUT;
+    const flashing = this.flashed.size > 0 && !blackedOut;
     for (const buf of this.universes.values()) buf.fill(0);
     for (let f = 0; f < this.fixtures.length; f++) {
       const run = this.fixtures[f];
+      if (run.smokeGroups.length) {
+        this.frameSmoke(f, run);
+        continue;
+      }
       const owners = run.owners.weights(now);
       parts.length = 0;
       weights.length = 0;
@@ -603,18 +803,32 @@ export class Engine {
       else mix(light, parts, weights);
       const manual = this.liveManual(run, now, dt);
       if (manual) mix2(light, light, manual.current, manual.weight.value(now));
+      if (!run.plan.hasUv) withoutUv(light);
       light.i *= master;
       // Flash overrides everything above, but not Blackout.
       if (flashing && this.flashed.has(f)) copy(light, FLASH_LIGHT);
 
       const buf = this.universes.get(run.plan.universe);
       if (buf) writeFixture(buf, run.plan, light);
-      const v = f * 3;
-      this.visual[v] = Math.round(Math.min(1, light.r + light.w) * light.i * 255);
-      this.visual[v + 1] = Math.round(Math.min(1, light.g + light.w) * light.i * 255);
-      this.visual[v + 2] = Math.round(Math.min(1, light.b + light.w) * light.i * 255);
+      visualOf(light, this.visual, f * 3);
     }
     return { universes: this.universes, visual: this.visual };
+  }
+
+  /**
+   * A smoke machine: the highest output of its smoke groups, untouched by
+   * Master, Flash and any light group it is also in. Shown as quiet grey.
+   */
+  private frameSmoke(f: number, run: FixtureRun): void {
+    let level = 0;
+    for (const g of run.smokeGroups) level = Math.max(level, g.smokeOut);
+    const light = run.light;
+    copy(light, dark());
+    light.i = level;
+    const buf = this.universes.get(run.plan.universe);
+    if (buf) writeSmoke(buf, run.plan, level);
+    const grey = Math.round(level * 140);
+    this.visual[f * 3] = this.visual[f * 3 + 1] = this.visual[f * 3 + 2] = grey;
   }
 
   /** The holder's manual override if it still has weight; clears it once released. */
@@ -634,6 +848,11 @@ export class Engine {
     return this.fixtures.map((f) => f.light);
   }
 
+  /** How bright each fixture looks (its brightest written colour channel × intensity), in show order. */
+  visibleLevels(): number[] {
+    return this.fixtures.map((f) => visibleLevel(f.plan, f.light));
+  }
+
   fixtureIds(): string[] {
     return this.fixtures.map((f) => f.id);
   }
@@ -643,13 +862,15 @@ export class Engine {
     const groups: LiveState['groups'] = {};
     for (const g of this.groups.values()) {
       const preset = g.presets.currentKey;
-      const expected = look?.groups.find((e) => e.group === g.id)?.preset;
+      // Looks never set smoke, so a smoke group never counts as changed.
+      const expected = g.smoke ? undefined : look?.groups.find((e) => e.group === g.id)?.preset;
       groups[g.id] = {
         preset,
         changed: expected !== undefined && expected !== preset,
         manual: g.manual !== null && !g.manual.releasing,
         progress: g.presets.progress(now),
         level: g.level.target,
+        live: liveView(preset),
       };
     }
     return {
@@ -667,6 +888,7 @@ export class Engine {
       speed: this.speed.target,
       output,
       outputProblem: null,
+      outputProblemKind: null,
     };
   }
 
@@ -680,13 +902,16 @@ export class Engine {
       group.presets.currentKey !== preset || Math.abs(group.level.target - level) > 1e-9;
     // Basic lights keeps no dimmer levels: every group it sets should be at full.
     const safe = this.look === SAFE;
+    // Smoke groups are left out: looks never set them.
     for (const entry of look?.groups ?? []) {
       const group = this.groups.get(entry.group);
-      if (group && differs(group, entry.preset, safe ? 1 : entry.level ?? 1)) return true;
+      if (group && !group.smoke && differs(group, entry.preset, safe ? 1 : entry.level ?? 1)) return true;
     }
     // Basic lights puts every group the safe look doesn't list on the built-in safe light at full.
     if (safe) {
-      for (const group of this.groups.values()) if (!listed.has(group.id) && differs(group, SAFE_ID, 1)) return true;
+      for (const group of this.groups.values()) {
+        if (!group.smoke && !listed.has(group.id) && differs(group, SAFE_ID, 1)) return true;
+      }
     }
     return false;
   }
@@ -713,6 +938,11 @@ export class Engine {
   /** Put the stage back as it was saved, with no fade, so a restart matches what the node is holding. */
   restore(rt: RuntimeState, now: number): void {
     for (const group of this.groups.values()) {
+      if (group.smoke) {
+        // Smoke never starts by itself: after a restart it is off, whatever it was.
+        group.level.set(0, now, 0);
+        continue;
+      }
       const preset = this.presetFor(rt.groups[group.id] ?? null, group.id);
       if (preset) this.setPreset(group, preset, 0, now);
       group.level.set(rt.levels[group.id] ?? 1, now, 0);

@@ -6,8 +6,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="theme-color" content="#0b0c0e">
+  <meta name="theme-color" content="#0F1626">
   <title>Light Runner</title>
+  <link rel="stylesheet" href="/shared/theme.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -38,12 +39,21 @@
       </div>
       <span class="q link" id="link"><span class="dot"></span><span id="linkText">Connecting</span></span>
     </span>
-    <span id="outputNote" class="output-note" hidden><span class="dot"></span><span id="outputText"></span></span>
+    <!-- Outside the quiet items: the DMX box holds its last frame, so smoke can still be running during a problem. -->
+    <span id="smokeNote" class="q" hidden></span>
+    <button id="outputNote" class="output-note" type="button" hidden><span class="dot"></span><span id="outputText"></span><span class="info" aria-hidden="true">ⓘ</span></button>
     <span class="clock" id="clock"></span>
     <a class="gear" href="/settings/" aria-label="Settings" title="Settings (PIN)">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.3 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.3-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
     </a>
   </header>
+
+  <!-- Phone remote only (narrow screens): the three tabs. Hidden on the iPad. -->
+  <nav id="phoneTabs" class="phone-tabs" role="tablist" aria-label="Sections">
+    <button data-tab="order" role="tab" aria-selected="true" class="on">Order</button>
+    <button data-tab="groups" role="tab" aria-selected="false">Groups</button>
+    <button data-tab="looks" role="tab" aria-selected="false">Looks</button>
+  </nav>
 
   <!-- Left column: stage preview (looking only), then the running order. -->
   <aside class="left">
@@ -64,10 +74,13 @@
   <main class="right">
     <!-- Quick looks: three tabs and a grid; the last tile opens the "new quick look" sheet over the details. -->
     <section id="quickLooks" class="block quick-looks" aria-label="Quick looks">
+      <div class="qhead">
+      <span class="sec-title">Quick looks</span>
       <div class="qtabs" role="tablist" aria-label="Quick look tabs">
         <button class="tab on" data-qt="plain" role="tab" aria-selected="true">Plain</button>
         <button class="tab" data-qt="colours" role="tab" aria-selected="false">Colours</button>
         <button class="tab" data-qt="effects" role="tab" aria-selected="false">Effects</button>
+      </div>
       </div>
       <div id="qGrid" class="qgrid"></div>
     </section>
@@ -83,6 +96,7 @@
         <div class="phead">
           <h2 id="pTitle"></h2>
           <span id="pCur" class="cur"><i id="pCurSw"></i><span id="pCurText"></span></span>
+          <button id="pEditBtn" class="ghost" aria-pressed="false">Edit</button>
           <button id="pDone" class="done">Done</button>
         </div>
         <div class="ptabs" role="tablist">
@@ -91,8 +105,47 @@
         </div>
         <div id="pCol" class="pcol">
           <div id="pGrid" class="pgrid"></div>
-          <p id="pAnyLab" class="lab2">Any colour</p>
+          <div class="labrow">
+            <p id="pAnyLab" class="lab2">Any colour</p>
+            <!-- Only while the group runs a colour picked on the strip. -->
+            <button id="pAddOpen" class="ghost pill-add" hidden>＋ Add to colours</button>
+          </div>
           <div id="pAny" class="strip2 hue" aria-label="Any colour"><span id="pAnyH" class="strip-handle" hidden></span></div>
+          <div id="pExtras" class="pextras" hidden></div>
+          <!-- Edit mode: tapping a swatch opens this, prefilled. -->
+          <div id="pEdit" class="padd pedit" hidden>
+            <div class="padd-top">
+              <i id="peSw" class="padd-sw"></i>
+              <input id="peName" class="qs-name" type="text" maxlength="40" placeholder="Name" aria-label="Name" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
+            </div>
+            <div id="peStrip" class="strip2 hue pe-strip" aria-label="Change the colour"><span id="peH" class="strip-handle" hidden></span></div>
+            <p id="peUsed" class="pe-used"></p>
+            <label id="peSameWrap" class="pswitch" hidden>
+              <input id="peSame" type="checkbox" role="switch">
+              <span class="track"><span class="knob"></span></span>
+              <span>Change in every group with this name</span>
+            </label>
+            <div class="padd-btns">
+              <button id="peDelete" class="ghost danger">Delete</button>
+              <button id="peCancel" class="ghost">Cancel</button>
+              <button id="peSave" class="done">Save</button>
+            </div>
+          </div>
+          <div id="pAdd" class="padd" hidden>
+            <div class="padd-top">
+              <i id="paSw" class="padd-sw"></i>
+              <input id="paName" class="qs-name" type="text" maxlength="40" placeholder="e.g. Deep blue" aria-label="Name" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
+            </div>
+            <label class="pswitch">
+              <input id="paAll" type="checkbox" role="switch">
+              <span class="track"><span class="knob"></span></span>
+              <span id="paAllText">Add to every colour group</span>
+            </label>
+            <div class="padd-btns">
+              <button id="paCancel" class="ghost">Cancel</button>
+              <button id="paAddBtn" class="done">Add</button>
+            </div>
+          </div>
         </div>
         <p id="pFx" class="soon" hidden>Effects come later.</p>
       </div>

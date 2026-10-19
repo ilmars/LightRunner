@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import { BUILT_IN_PROFILES } from './profiles.ts';
+import { routeProblems } from './routing.ts';
 
 export const SCHEMA_VERSION = 1;
 
@@ -58,9 +59,17 @@ export const Fixture = z.object({
 });
 export type Fixture = z.infer<typeof Fixture>;
 
+/**
+ * What a group drives. A smoke group is a smoke or haze machine: only its own
+ * level and Puff turn it on, never looks, Basic lights or Flash All.
+ */
+export const GroupKind = z.enum(['light', 'smoke']);
+export type GroupKind = z.infer<typeof GroupKind>;
+
 export const Group = z.object({
   id,
   name: z.string(),
+  kind: GroupKind.default('light'),
   // Order matters: waves and chases travel along it.
   fixtures: z.array(id),
 });
@@ -69,6 +78,8 @@ export type Group = z.infer<typeof Group>;
 export const PaletteColour = z.object({
   hex,
   white: unit.optional(),
+  amber: unit.optional(),
+  uv: unit.optional(),
 });
 export type PaletteColour = z.infer<typeof PaletteColour>;
 
@@ -86,6 +97,12 @@ export const ColourSpec = z.union([
   z.object({ palette: id, index: z.number().int().min(0) }),
 ]);
 export type ColourSpec = z.infer<typeof ColourSpec>;
+
+/** The colour a spec stands for, looking palette colours up (white if the palette or colour is missing). */
+export function resolveColour(c: ColourSpec, palettes: ReadonlyMap<string, Palette>): PaletteColour {
+  if (!('palette' in c)) return c;
+  return palettes.get(c.palette)?.colours[c.index] ?? { hex: '#ffffff' };
+}
 
 export const StaticLayer = z.object({
   kind: z.literal('static'),
@@ -157,13 +174,25 @@ export const OutputSettings = z.discriminatedUnion('kind', [
 ]);
 export type OutputSettings = z.infer<typeof OutputSettings>;
 
+/** One universe sent somewhere other than the default output (see routing.ts). */
+export const OutputRoute = z.object({
+  universe: z.number().int().min(0).max(32767),
+  output: OutputSettings,
+});
+export type OutputRoute = z.infer<typeof OutputRoute>;
+
 export const Settings = z.object({
+  /** The default output: every universe goes here unless a route says otherwise. */
   output: OutputSettings.default({ kind: 'artnet', host: '2.255.255.255' }),
+  /** Universes with their own output. Absent in older shows. */
+  routes: z.array(OutputRoute).max(64).optional(),
   /** Master switch for sending DMX. Off lets another desk (e.g. Lightkey) keep the lights. */
   outputEnabled: z.boolean().default(true),
   frameRate: z.number().int().min(10).max(44).default(40),
   gamma: z.number().min(1).max(4).default(2.2),
   pinHash: z.string().optional(),
+}).superRefine((s, ctx) => {
+  for (const message of routeProblems(s.output, s.routes)) ctx.addIssue({ code: 'custom', message, path: ['routes'] });
 });
 export type Settings = z.infer<typeof Settings>;
 

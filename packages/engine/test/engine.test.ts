@@ -628,3 +628,150 @@ test('Basic lights notices a change to a group the safe look does not list', () 
   assert.equal(e.liveState(9, 'ok').lookChanged, false);
   assert.equal(e.liveState(9, 'ok').groups['back-wall'].preset, '__safe');
 });
+
+/** The demo show with a plain preset "aud-new" added to a group, as Add to colours makes it. */
+function withAddedColour(hex: string, intensity = 1, group = 'audience'): Show {
+  const show = demoShow();
+  show.presets.push({ id: 'aud-new', name: 'Colour 1', group, fade: 3, swatch: hex, layers: [{ kind: 'static', colour: { hex }, intensity }] });
+  return show;
+}
+
+test('a group running a colour live adopts the same colour added to its list, with no visible change', () => {
+  const e = new Engine(demoShow());
+  e.apply({ type: 'look', id: 'worship', fade: 0 }, 0);
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#00ff80' }, 1);
+  e.frame(2);
+  const mid = e.liveState(2, 'ok').groups.audience.progress;
+  assert.ok(mid < 1, 'still fading in when the colour is added');
+  const before = Array.from(e.frame(2.025).universes.get(0)!);
+  const undoable = e.liveState(2.025, 'ok').canUndo;
+  e.setShow(withAddedColour('#00ff80'), 2.025);
+  assert.deepEqual(Array.from(e.frame(2.025).universes.get(0)!), before);
+  const s = e.liveState(2.025, 'ok');
+  assert.equal(s.groups.audience.preset, 'aud-new');
+  assert.equal(s.canUndo, undoable);
+  assert.equal(e.runtime().groups.audience, 'aud-new');
+  const step = maxStep(e, 2.05, 9);
+  assert.ok(step < 0.05, `largest step ${step}`);
+});
+
+test('a live colour is not adopted by a different colour, another group or a different level', () => {
+  const run = (show: Show) => {
+    const e = new Engine(demoShow());
+    e.apply({ type: 'groupColour', group: 'audience', colour: '#00ff80', fade: 0 }, 0);
+    e.setShow(show, 1);
+    return e.liveState(1, 'ok').groups.audience.preset;
+  };
+  const live = 'live:audience:#00ff80';
+  assert.equal(run(withAddedColour('#00ff81')), live);
+  assert.equal(run(withAddedColour('#00ff80', 1, 'pulpit')), live);
+  assert.equal(run(withAddedColour('#00ff80', 0.5)), live);
+  assert.equal(run(withAddedColour('#00ff80')), 'aud-new');
+});
+
+test('a preset the show already had is not taken over by a live colour of the same light', () => {
+  const e = new Engine(withAddedColour('#00ff80'));
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#00ff80', fade: 0 }, 0);
+  e.setShow(withAddedColour('#00ff80'), 1);
+  assert.equal(e.liveState(1, 'ok').groups.audience.preset, 'live:audience:#00ff80');
+});
+
+test('undoing the added colour turns the group back into the same colour live', () => {
+  const e = new Engine(demoShow());
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#00ff80', fade: 0 }, 0);
+  e.setShow(withAddedColour('#00ff80'), 1);
+  assert.equal(e.liveState(1, 'ok').groups.audience.preset, 'aud-new');
+  e.frame(2);
+  const before = Array.from(e.frame(2.025).universes.get(0)!);
+  e.setShow(demoShow(), 2.025); // Undo takes the preset away again
+  assert.deepEqual(Array.from(e.frame(2.025).universes.get(0)!), before);
+  assert.equal(e.liveState(2.025, 'ok').groups.audience.preset, 'live:audience:#00ff80');
+  assert.equal(e.runtime().groups.audience, 'live:audience:#00ff80');
+  assert.ok(maxStep(e, 2.05, 6) < 0.05);
+});
+
+test('a colour edited while it is lit fades to the new colour with its own fade, and stays the same preset', () => {
+  const plain = (hex: string): Show => {
+    const show = demoShow();
+    const p = show.presets.find((x) => x.id === 'aud-blue')!;
+    p.layers = [{ kind: 'static', colour: { hex }, intensity: 1 }];
+    p.fade = 4;
+    return show;
+  };
+  const e = new Engine(plain('#0000ff'));
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-blue', fade: 0 }, 0);
+  e.frame(1);
+  const undoable = e.liveState(1, 'ok').canUndo;
+  const before = lightOf(e, 'aud-1');
+  e.setShow(plain('#ff8000'), 1);
+  const at = (t: number) => { e.frame(t); return lightOf(e, 'aud-1'); };
+  const start = at(1.025);
+  assert.ok(close(start.r, before.r, 0.02) && close(start.b, before.b, 0.02), 'no jump when the edit lands');
+  const mid = at(3);
+  assert.ok(mid.r > 0.2 && mid.b > 0.2, `halfway between the two colours (${mid.r}, ${mid.b})`);
+  const end = at(6);
+  assert.ok(close(end.r, 1, 0.01) && close(end.g, 0.5, 0.02) && close(end.b, 0, 0.01), `settled on the new colour (${end.r}, ${end.g}, ${end.b})`);
+  const s = e.liveState(6, 'ok');
+  assert.equal(s.groups.audience.preset, 'aud-blue');
+  assert.equal(s.canUndo, undoable);
+  const e2 = new Engine(plain('#0000ff'));
+  e2.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-blue', fade: 0 }, 0);
+  e2.frame(1);
+  e2.setShow(plain('#ff8000'), 1);
+  assert.ok(maxStep(e2, 1.025, 8) < 0.05);
+});
+
+test('a show edit that leaves a lit colour alone does not start a fade', () => {
+  const e = new Engine(demoShow());
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-blue', fade: 0 }, 0);
+  e.frame(1);
+  const edited = demoShow();
+  edited.looks.push({ id: 'extra', name: 'Extra', section: 'Other', swatch: '#ffffff', groups: [] });
+  e.setShow(edited, 1);
+  assert.equal(e.liveState(1.025, 'ok').groups.audience.progress, 1);
+});
+
+test('undoing the added colour during Blackout keeps the group\'s colour for the next look', () => {
+  const withLook = (show: Show): Show => {
+    show.looks.push({ id: 'pulpit-only', name: 'Pulpit only', section: 'Other', swatch: '#ffffff', groups: [{ group: 'pulpit', preset: 'pulpit-on' }] });
+    return show;
+  };
+  const e = new Engine(withLook(demoShow()));
+  e.apply({ type: 'groupColour', group: 'audience', colour: '#00ff80', fade: 0 }, 0);
+  e.setShow(withLook(withAddedColour('#00ff80')), 1);
+  assert.equal(e.liveState(1, 'ok').groups.audience.preset, 'aud-new');
+  e.apply({ type: 'blackout' }, 2);
+  e.frame(4);
+  assert.equal(e.runtime().beforeBlackout?.audience, 'aud-new');
+  e.setShow(withLook(demoShow()), 4); // Undo of the add while Blackout is on
+  assert.equal(e.runtime().beforeBlackout?.audience, 'live:audience:#00ff80');
+  assert.equal(e.apply({ type: 'look', id: 'pulpit-only' }, 5), null);
+  e.frame(10);
+  assert.equal(e.liveState(10, 'ok').groups.audience.preset, 'live:audience:#00ff80');
+  const l = lightOf(e, 'aud-1');
+  assert.ok(close(l.g, 1) && l.i > 0.9, JSON.stringify(l));
+});
+
+test('a Blackout memory of a removed preset that is not a plain colour is cleared', () => {
+  const withLook = (show: Show): Show => {
+    show.looks.push({ id: 'pulpit-only', name: 'Pulpit only', section: 'Other', swatch: '#ffffff', groups: [{ group: 'pulpit', preset: 'pulpit-on' }] });
+    return show;
+  };
+  const e = new Engine(withLook(demoShow()));
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-low', fade: 0 }, 0);
+  e.apply({ type: 'blackout' }, 1);
+  const smaller = withLook(demoShow());
+  smaller.presets = smaller.presets.filter((p) => p.id !== 'aud-low');
+  e.setShow(smaller, 2);
+  assert.equal(e.runtime().beforeBlackout?.audience ?? null, null);
+  assert.equal(e.apply({ type: 'look', id: 'pulpit-only' }, 3), null);
+});
+
+test('a group on a preset the show loses, that is not a plain colour, is left alone', () => {
+  const e = new Engine(demoShow());
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-low', fade: 0 }, 0);
+  const smaller = demoShow();
+  smaller.presets = smaller.presets.filter((p) => p.id !== 'aud-low');
+  e.setShow(smaller, 1);
+  assert.equal(e.liveState(1, 'ok').groups.audience.preset, 'aud-low');
+});

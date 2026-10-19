@@ -9,6 +9,30 @@ const el = (tag, cls, text) => {
   return e;
 };
 
+/**
+ * How a light's colour is drawn on screen. Whites (light colours with little
+ * colour in them: warm white #ffb46b, cool white #dcebff, the safe light) are
+ * drawn as soft whites instead of their raw values, which look orange or blue
+ * on a screen. Saturated colours are left as they are. Only the drawing
+ * changes; what is sent to the lights doesn't.
+ */
+const CREAM = [241, 236, 228];
+function shownRgb(r, g, b) {
+  const max = Math.max(r, g, b);
+  if (max <= 0) return [r, g, b];
+  const chroma = (max - Math.min(r, g, b)) / max;
+  if (chroma >= 0.65) return [r, g, b];
+  // Mix the colour (at full brightness) 60 % towards cream, then put its brightness back.
+  const k = max / 255;
+  return [r, g, b].map((v, i) => Math.round(((v / k) * 0.4 + CREAM[i] * 0.6) * k));
+}
+function shown(hex) {
+  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return hex;
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = shownRgb((n >> 16) & 255, (n >> 8) & 255, n & 255);
+  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
+}
+
 let layout = null;
 let state = null;
 let visual = new Uint8Array(0);
@@ -22,6 +46,8 @@ let seenLook = null;
 let previousLook = null;
 // The ref of a Save from the new-quick-look sheet that the server hasn't answered yet.
 let pendingSave = null;
+// The ref of an Add to colours that the server hasn't answered yet.
+let pendingColour = null;
 
 // ---- Connection: reconnect every 2 s and resync on reconnect ----
 
@@ -64,6 +90,8 @@ function connect() {
         if (!msg.error) finishSaveQuick();
         else renderSheet();
       }
+      if (msg.ref !== null && msg.ref === pendingColour) finishAddColour(msg.error);
+      if (msg.ref !== null && msg.ref === pendingEdit) finishEdit(msg.error);
       if (itemSave && msg.ref === itemSave.ref) {
         if (!msg.error) toast(`Saved to ${itemSave.name}`, true);
         itemSave = null;
@@ -88,6 +116,14 @@ function setConnected(on) {
     renames.clear();
     moves.clear();
   }
+  if (!on && pendingEdit !== null) {
+    pendingEdit = null;
+    $('peSave').disabled = false;
+  }
+  if (!on && pendingColour !== null) {
+    pendingColour = null;
+    $('paAddBtn').disabled = false;
+  }
   if (!on && pendingSave !== null) {
     // The answer may never come; let the user try Save again.
     pendingSave = null;
@@ -103,6 +139,23 @@ function send(cmd) {
   }
   socket.send(JSON.stringify({ type: 'command', ref: ++ref, cmd }));
   return ref;
+}
+
+// ---- Groups: lights, and smoke or haze machines ----
+
+/** A smoke or haze machine: a level and a Puff button, no colour, no Flash, never set by a look. */
+const isSmoke = (group) => group?.kind === 'smoke';
+const lightGroups = () => (layout?.groups ?? []).filter((g) => !isSmoke(g));
+
+/** Colour-strip blocks for a look, one per light group (smoke groups have no colour). */
+function stripBlocks(colours) {
+  const blocks = [];
+  (colours ?? []).forEach((c, i) => {
+    const group = layout.groups[i];
+    if (isSmoke(group)) return;
+    blocks.push({ colour: c, name: group?.name ?? '' });
+  });
+  return blocks;
 }
 
 // ---- Running order ----
@@ -180,14 +233,16 @@ function buildPlainRows(order) {
   order.forEach((item, k) => {
     const basic = isBasic(item);
     const b = el('button', basic ? 'item fixed' : 'item');
-    // A thin strip: one block per group, the colour this item gives it.
-    const strip = el('span', 'strip');
-    (item.colours ?? []).forEach((c, i) => {
-      const block = el('i', c ? null : 'unset');
-      if (c) block.style.background = c;
-      block.title = layout.groups[i]?.name ?? '';
-      strip.append(block);
-    });
+    // One small dot per group (smoke machines left out), in group order: the colour this item
+    // gives it, whites drawn as whites. Basic lights' groups without a saved colour run the built-in warm light.
+    const strip = el('span', 'dots');
+    for (const { colour: c, name } of stripBlocks(item.colours)) {
+      const colour = c ?? (basic ? layout.basicSwatch : null);
+      const dot = el('i', colour ? null : 'unset');
+      if (colour) dot.style.background = shown(colour);
+      dot.title = name;
+      strip.append(dot);
+    }
     const mark = el('span', 'mark', 'changed');
     mark.hidden = true;
     b.append(strip, el('span', 'name', item.name), mark);
@@ -517,6 +572,10 @@ function lookName(id) {
   return layout.runningOrder.find((i) => i.id === id)?.name ?? layout.looks.find((l) => l.id === id)?.name ?? (id ? 'Deleted item' : '—');
 }
 
+/** The full explanation behind the short status label in the top bar. */
+let outputDetail = '';
+$('outputNote').addEventListener('click', () => toast(outputDetail, true));
+
 function render() {
   if (!state || !layout) return;
   const blackedOut = state.look === 'blackout';
@@ -535,9 +594,13 @@ function render() {
   note.hidden = !(lost || off);
   note.classList.toggle('problem', lost);
   note.classList.toggle('off', off);
-  $('outputText').textContent = lost
+  // A short label; the full explanation on hover (title) or tap (a message).
+  const otherDesk = lost && state.outputProblemKind === 'other-desk';
+  $('outputText').textContent = !lost ? 'DMX output inactive' : otherDesk ? 'Another desk is sending' : 'Lights not answering';
+  outputDetail = lost
     ? state.outputProblem ?? 'Lights not answering. Check the lighting network box.'
-    : 'Not sending to the lights (Lightkey has them)';
+    : 'Light Runner is not sending to the lights (Lightkey has them). Turn Send DMX on in Settings.';
+  note.title = outputDetail;
   $('quiet').hidden = lost || off;
 
   $('fading').hidden = !fading;
@@ -545,14 +608,25 @@ function render() {
     $('fadeFill').style.width = `${Math.round(state.lookProgress * 100)}%`;
     $('fadeLeft').textContent = `${state.lookFadeLeft.toFixed(1)} s`;
   }
-  // Flash does nothing during Blackout, so the bar doesn't claim it.
-  const flashing = blackedOut ? [] : state.flashing ?? [];
+  // Flash does nothing during Blackout, so the bar doesn't claim it. A Puff shows as smoke, not as a flash.
+  const groupOf = (id) => layout.groups.find((g) => g.id === id);
+  const held = blackedOut ? [] : state.flashing ?? [];
+  const flashing = held.filter((id) => !isSmoke(groupOf(id)));
   $('flashNote').hidden = !flashing.length;
-  $('flashNote').textContent = `Flash: ${flashing.map((id) => layout.groups.find((g) => g.id === id)?.name ?? id).join(', ')}`;
+  $('flashNote').textContent = `Flash: ${flashing.map((id) => groupOf(id)?.name ?? id).join(', ')}`;
+  // A quiet readout while any smoke machine is running (the highest, if there are several).
+  let smoke = 0;
+  for (const g of layout.groups) {
+    if (isSmoke(g)) smoke = Math.max(smoke, held.includes(g.id) ? 1 : state.groups?.[g.id]?.level ?? 0);
+  }
+  $('smokeNote').hidden = smoke <= 0;
+  $('smokeNote').textContent = `Smoke: ${Math.round(smoke * 100)} %`;
   const top = $('topBar');
   top.classList.toggle('problem', lost);
   top.classList.toggle('off', off);
   top.classList.toggle('flash', flashing.length > 0 && !lost && !off);
+  // Blackout is the most important state on the page: the whole bar says so.
+  top.classList.toggle('blackout', blackedOut);
 
   const fade = state.fadeTime ?? null;
   $('fadeValue').textContent = fade === null ? 'Auto' : fade === 0 ? 'Instant' : `${fade} s`;
@@ -578,8 +652,9 @@ function render() {
     if (onId) reveal(orderRows[on].button);
   }
 
-  // Bottom bar.
+  // Bottom bar (and a quiet "next" mark on the item Next will start).
   const next = nextItem();
+  orderRows.forEach((row) => row.button.classList.toggle('is-next', !editing && !!next && row.item.id === next.id));
   $('nextName').textContent = next ? next.name : 'End of list';
   $('next').disabled = !next || editing;
   $('undo').disabled = !state.canUndo;
@@ -605,6 +680,7 @@ const master = (() => {
       m.v = Math.min(1, Math.max(0, v));
       const pct = `${Math.round(m.v * 100)}%`;
       $('masterValue').textContent = pct;
+      box.classList.toggle('dimmed', m.v < 0.995);
       $('masterFill').style.width = `${m.v * 100}%`;
       $('masterHandle').style.left = `${m.v * 100}%`;
       track.setAttribute('aria-valuenow', String(Math.round(m.v * 100)));
@@ -652,18 +728,31 @@ const master = (() => {
 const NEUTRAL = '#5a5f69';
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
-/** `live:<group>:<#rrggbb>` is a colour picked with Any colour. */
-function liveColour(id) {
-  const m = /^live:([^:]+):(#[0-9a-f]{6})$/i.exec(id ?? '');
-  return m ? m[2].toLowerCase() : null;
+/**
+ * The colour of a plain Any colour pick (no white, amber or UV) a group runs, or null. "Add to
+ * colours" keeps only plain colours for now; a pick with extras stays a live colour.
+ * `s` is the group's live status; the server reads Any colour picks for the page (`s.live`).
+ */
+function liveColour(s) {
+  const live = s?.live;
+  return live && !live.white && !live.amber && !live.uv ? live.colour : null;
 }
 
-/** Name and colour to show for a preset id of a group (never throws on an id the layout doesn't list). */
-function presetInfo(group, id) {
+/** What a group runs, as an Any colour pick would make it: { colour, white, amber, uv }. */
+function runningLight(group, s) {
+  if (s?.live) return s.live;
+  const id = s?.preset;
+  const light = id === '__safe' ? layout.basicLight : group?.presets.find((x) => x.id === id)?.light;
+  if (light) return { colour: light.hex, white: light.white, amber: light.amber, uv: light.uv };
+  return { colour: '#000000', white: 0, amber: 0, uv: 0 };
+}
+
+/** Name and colour to show for what a group runs (never throws on an id the layout doesn't list). */
+function presetInfo(group, s) {
+  const id = s?.preset;
   if (id === null || id === undefined || id === '__blackout') return { name: 'Off', colour: null };
-  if (id === '__safe') return { name: 'Basic light', colour: '#ffd2a0' };
-  const hex = liveColour(id);
-  if (hex) return { name: 'Custom', colour: hex };
+  if (id === '__safe') return { name: 'Basic light', colour: layout.basicSwatch };
+  if (s.live) return { name: 'Custom', colour: s.live.display };
   const p = group?.presets.find((x) => x.id === id);
   if (p) return { name: p.name, colour: p.swatch ?? NEUTRAL };
   return { name: 'Custom', colour: NEUTRAL };
@@ -691,16 +780,17 @@ function stageItem() {
   return k >= 0 ? layout.runningOrder[k] : null;
 }
 
-// One entry per group: { group, chip, sw, chipName, dim, lvl, tint, handle, pct, dragging, holdUntil }.
+// One entry per group: { group, smoke, chip, sw, chipName, dim, slab, pct, dragging, holdUntil }.
+// A smoke group's row has no chip (a "Smoke" label and a Puff button instead).
 let detailRows = [];
 
 function showLevel(row, v) {
   const p = clamp01(v);
   row.value = p;
-  row.lvl.style.width = `${p * 100}%`;
-  row.tint.style.width = `${p * 100}%`;
-  row.handle.style.left = `calc(${p * 100}% - ${p * 4}px)`;
-  row.pct.textContent = `${Math.round(p * 100)}%`;
+  // A smooth filled bar: the fill's width is the level.
+  row.slab.style.width = `${p * 100}%`;
+  row.pct.textContent = `${Math.round(p * 100)} %`;
+  row.pct.classList.toggle('zero', p === 0);
   row.dim.setAttribute('aria-valuenow', String(Math.round(p * 100)));
 }
 
@@ -709,26 +799,36 @@ function buildDetails() {
   root.replaceChildren();
   detailRows = [];
   for (const group of layout.groups) {
-    const box = el('div', 'row');
-    const sw = el('i');
-    const chipName = el('span');
-    const chip = el('button', 'chip');
-    chip.append(sw, chipName);
-    chip.setAttribute('aria-label', `${group.name}: choose colour`);
-    const lvl = el('span', 'lvl'), tint = el('span', 'tint'), handle = el('span', 'handle');
-    const dim = el('div', 'dim');
+    const smoke = isSmoke(group);
+    const box = el('div', smoke ? 'row smoke' : 'row');
+    const slab = el('span', 'ds-fill-slab');
+    const pct = el('span', 'pct');
+    const dim = el('div', 'ds-fill');
     dim.setAttribute('role', 'slider');
-    dim.setAttribute('aria-label', `${group.name} dimmer`);
+    dim.setAttribute('aria-label', smoke ? `${group.name} smoke level` : `${group.name} dimmer`);
     dim.setAttribute('aria-valuemin', '0');
     dim.setAttribute('aria-valuemax', '100');
-    dim.append(lvl, tint, handle);
-    const pct = el('span', 'pct');
-    box.append(el('span', 'g', group.name), chip, dim, pct);
+    dim.append(slab);
+    const row = { group, smoke, dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
+    if (smoke) {
+      // No colour to pick: a plain "Smoke" label, and Puff (hold) for a burst at full.
+      const puff = el('button', 'puff', 'Puff');
+      puff.setAttribute('aria-label', `Puff ${group.name} (hold)`);
+      wireHold(puff, [group.id]);
+      box.append(el('span', 'g', group.name), el('span', 'smoke-tag', 'Smoke'), pct, puff, dim);
+    } else {
+      const sw = el('i');
+      const chipName = el('span');
+      const chip = el('button', 'chip');
+      chip.append(sw, chipName);
+      chip.setAttribute('aria-label', `${group.name}: choose colour`);
+      chip.addEventListener('click', () => openPicker(group.id));
+      Object.assign(row, { chip, sw, chipName });
+      box.append(el('span', 'g', group.name), chip, pct, dim);
+    }
     root.append(box);
-    const row = { group, chip, sw, chipName, dim, lvl, tint, handle, pct, value: 0, dragging: false, holdUntil: 0 };
     detailRows.push(row);
     showLevel(row, 0);
-    chip.addEventListener('click', () => openPicker(group.id));
     wireDimmer(row);
   }
   // A new layout can drop the group the picker was showing.
@@ -745,9 +845,14 @@ function wireDimmer(row) {
   let startX = 0, startV = 0;
   row.dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
+    // The server refuses smoke during Blackout; say so once and leave the slider where it is.
+    if (row.smoke && state?.look === 'blackout') {
+      toast('Blackout is on.');
+      return;
+    }
     row.dragging = true;
     try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
-    row.dim.classList.add('dragging');
+    row.dim.classList.add('ds-dragging');
     startX = ev.clientX;
     startV = row.value;
   });
@@ -759,7 +864,7 @@ function wireDimmer(row) {
   const end = () => {
     if (!row.dragging) return;
     row.dragging = false;
-    row.dim.classList.remove('dragging');
+    row.dim.classList.remove('ds-dragging');
     // Keep what the finger set until the server has caught up with it.
     row.holdUntil = performance.now() + 600;
     if (row.value !== startV) out.end(row.value);
@@ -781,10 +886,16 @@ function renderDetails() {
   const now = performance.now();
   for (const row of detailRows) {
     const s = state.groups?.[row.group.id];
-    const info = presetInfo(row.group, s?.preset);
-    row.sw.style.background = info.colour ?? '#0d0e11';
+    if (row.smoke) {
+      // The slider shows the smoke's own level; a Puff doesn't move it.
+      if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
+      continue;
+    }
+    const info = presetInfo(row.group, s);
+    row.sw.style.background = shown(info.colour) ?? '#0d0e11';
     row.chipName.textContent = info.name;
-    row.tint.style.background = info.colour ?? 'transparent';
+    // The slider carries a little of the group's colour.
+    row.dim.style.setProperty('--c', info.colour && info.colour !== '#000000' ? shown(info.colour) : '#5a6478');
     if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
   }
   if (picker.group) renderPicker();
@@ -826,7 +937,7 @@ saveBtn.addEventListener('click', (ev) => ev.preventDefault());
 
 // ---- Colour picker (covers the details panel only) ----
 
-const picker = { group: null };
+const picker = { group: null, edit: false };
 
 const HUE_STOPS = ['#ff0000', '#ffc800', '#00ff00', '#00ffc8', '#0000ff', '#8c00ff', '#ff008c', '#ff0000'];
 const WHITE_STOPS = ['#ffb46b', '#f4f8ff'];
@@ -852,34 +963,223 @@ function buildPickerGrid() {
     const b = el('button', 'pc');
     b.dataset.preset = p.id;
     const sw = el('i');
-    sw.style.background = p.swatch ?? NEUTRAL;
+    sw.style.background = shown(p.swatch) ?? NEUTRAL;
     b.append(sw, el('span', null, p.name));
-    b.addEventListener('click', () => send({ type: 'groupPreset', group: row.group.id, preset: p.id }));
+    b.classList.toggle('editable', picker.edit);
+    b.classList.toggle('editing', colourEdit?.id === p.id);
+    // While editing, a tap opens the colour's editor and leaves the stage alone.
+    b.addEventListener('click', () => {
+      if (picker.edit) openEditor(row.group.presets.find((x) => x.id === p.id) ?? p);
+      else send({ type: 'groupPreset', group: row.group.id, preset: p.id });
+    });
     grid.append(b);
   }
   $('pTitle').textContent = row.group.name;
   $('pAnyLab').textContent = row.group.whiteOnly ? 'Any white, warm to cool' : 'Any colour';
   $('pAny').className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'}`;
   $('pAny').setAttribute('aria-label', $('pAnyLab').textContent);
+  buildExtras(row.group);
 }
 
-/** Keeps "current", the highlighted swatch and the dimmer in step with the live state. */
+// White, Amber and UV under the Any colour strip, for groups whose fixtures have them.
+const EXTRAS = [
+  { key: 'white', label: 'White', tint: '#f4f8ff' },
+  { key: 'amber', label: 'Amber', tint: '#ffbf00' },
+  { key: 'uv', label: 'UV', tint: '#8c5cff' },
+];
+// One entry per slider shown: { key, dim, slab, pct, value, dragging, holdUntil }.
+let extraRows = [];
+// The colour the group runs, which a slider move sends again with the new levels.
+let pickerColour = '#000000';
+// The group runs an Any colour pick (so its White, Amber and UV levels are the user's own).
+let pickerLive = false;
+// A White, Amber or UV slider was moved since the picker opened.
+let extrasMoved = false;
+const NO_EXTRAS = { white: 0, amber: 0, uv: 0 };
+
+function buildExtras(group) {
+  const box = $('pExtras');
+  box.replaceChildren();
+  extraRows = [];
+  for (const x of EXTRAS) {
+    if (!group.extras?.[x.key]) continue;
+    const slab = el('span', 'ds-fill-slab');
+    const dim = el('div', 'ds-fill');
+    dim.setAttribute('role', 'slider');
+    dim.setAttribute('aria-label', `${group.name} ${x.label}`);
+    dim.setAttribute('aria-valuemin', '0');
+    dim.setAttribute('aria-valuemax', '100');
+    dim.style.setProperty('--c', x.tint);
+    dim.append(slab);
+    const pct = el('span', 'pct');
+    const cell = el('div', 'xcell');
+    cell.append(el('span', 'lab2', x.label), pct, dim);
+    box.append(cell);
+    const row = { key: x.key, dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
+    extraRows.push(row);
+    showLevel(row, 0);
+    wireExtra(row);
+  }
+  box.hidden = extraRows.length === 0;
+}
+
+/** The levels the sliders show; extras the group has no slider for are 0. */
+function extraLevels() {
+  const out = { white: 0, amber: 0, uv: 0 };
+  for (const r of extraRows) out[r.key] = Math.round(r.value * 100) / 100;
+  return out;
+}
+
+/** The sends that continue a drag (the strip or a slider) fade this fast, like Master and manual, so the stage follows the finger. */
+const DRAG_FADE = 0.2;
+
+/**
+ * An Any colour send. The first send of a gesture (a tap, or the start of a drag) fades like
+ * a swatch and adds an Undo step; the rest continue it, in 0.2 s each.
+ */
+function sendColour(hex, first, extras) {
+  if (!picker.group) return;
+  send({ type: 'groupColour', group: picker.group, colour: hex, ...extras, ...(first ? {} : { continues: true, fade: DRAG_FADE }) });
+}
+
+/** Throttled sends for one finger at a time: `start()` on touch, then `push` while it moves and `end` on release. */
+function dragSender(sendOne) {
+  let first = true;
+  const out = throttle((v) => {
+    sendOne(v, first);
+    first = false;
+  });
+  return { start() { first = true; }, push: (v) => out.push(v), end: (v) => out.end(v) };
+}
+
+/** Same feel as the group dimmers: the level moves relative to where the finger started. */
+function wireExtra(row) {
+  const out = dragSender((_v, first) => sendColour(pickerColour, first, extraLevels()));
+  let startX = 0, startV = 0;
+  row.dim.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    row.dragging = true;
+    try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    row.dim.classList.add('ds-dragging');
+    startX = ev.clientX;
+    startV = row.value;
+    out.start();
+  });
+  row.dim.addEventListener('pointermove', (ev) => {
+    if (!row.dragging) return;
+    showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
+    if (row.value !== startV) extrasMoved = true;
+    out.push();
+  });
+  const end = () => {
+    if (!row.dragging) return;
+    row.dragging = false;
+    row.dim.classList.remove('ds-dragging');
+    row.holdUntil = performance.now() + 600;
+    if (row.value !== startV) out.end();
+  };
+  row.dim.addEventListener('pointerup', end);
+  row.dim.addEventListener('pointercancel', end);
+}
+
+/** Keeps "current", the highlighted swatch, the dimmer and the White, Amber and UV sliders in step with the live state. */
 function renderPicker() {
   const row = pickerRow();
   if (!row) return;
   const s = state.groups?.[row.group.id];
-  const info = presetInfo(row.group, s?.preset);
-  $('pCurSw').style.background = info.colour ?? '#0d0e11';
+  const info = presetInfo(row.group, s);
+  $('pCurSw').style.background = shown(info.colour) ?? '#0d0e11';
   $('pCurText').textContent = `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
+  const running = runningLight(row.group, s);
+  pickerColour = running.colour;
+  pickerLive = !!s?.live;
+  const now = performance.now();
+  for (const r of extraRows) if (!r.dragging && now >= r.holdUntil) showLevel(r, running[r.key]);
+  renderAddColour();
+  renderEditor();
+}
+
+// ---- Keep a strip colour: "＋ Add to colours" ----
+
+/** The colour the picker's group runs live from the strip, or null. */
+function liveOfPicker() {
+  const row = pickerRow();
+  return row ? liveColour(state?.groups?.[row.group.id]) : null;
+}
+
+/** Shows the pill while the group runs a strip colour that isn't a swatch yet; keeps the form in step. */
+function renderAddColour() {
+  const row = pickerRow();
+  const hex = liveOfPicker();
+  const listed = !!hex && row.group.presets.some((p) => p.swatch?.toLowerCase() === hex);
+  const open = !$('pAdd').hidden;
+  // The form follows the colour: it goes when the group no longer runs a new strip colour.
+  if (open && (!hex || listed)) $('pAdd').hidden = true;
+  $('pAddOpen').hidden = !hex || listed || !$('pAdd').hidden || picker.edit;
+  if (hex) $('paSw').style.background = hex;
+  if (row) $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
+}
+
+function openAddColour() {
+  if (!liveOfPicker()) return;
+  $('paName').value = '';
+  $('paAll').checked = false;
+  $('pAdd').hidden = false;
+  renderAddColour();
+  // With a long colour list the form opens below the fold of the picker.
+  $('pAdd').scrollIntoView({ block: 'nearest' });
+}
+
+function closeAddColour() {
+  pendingColour = null;
+  $('pAdd').hidden = true;
+  $('paName').blur();
+  if (picker.group) renderAddColour();
+}
+
+$('pAddOpen').addEventListener('click', openAddColour);
+$('paCancel').addEventListener('click', closeAddColour);
+// The keyboard's Done closes the keyboard; nothing else on the page reacts to typing.
+$('paName').addEventListener('keydown', (ev) => {
+  ev.stopPropagation();
+  if (ev.key === 'Enter') $('paName').blur();
+});
+// A plain tap. The form closes when the server says yes; on an error it stays to fix.
+$('paAddBtn').addEventListener('click', () => {
+  const hex = liveOfPicker();
+  if (pendingColour !== null || !picker.group) return;
+  if (!hex) {
+    closeAddColour();
+    return;
+  }
+  pendingColour = send({ type: 'addColour', group: picker.group, colour: hex, name: $('paName').value, allGroups: $('paAll').checked });
+  $('paAddBtn').disabled = pendingColour !== null;
+});
+
+function finishAddColour(error) {
+  pendingColour = null;
+  $('paAddBtn').disabled = false;
+  if (!error) {
+    closeAddColour();
+    toast('Added to colours', true);
+  }
 }
 
 function openPicker(groupId) {
+  if (isSmoke(layout?.groups.find((g) => g.id === groupId))) return;
   closeSheet();
   if (picker.group !== groupId) {
     $('pAnyH').hidden = true;
   }
+  $('pAdd').hidden = true;
   picker.group = groupId;
+  picker.edit = false;
+  $('pEditBtn').classList.remove('on');
+  $('pEditBtn').setAttribute('aria-pressed', 'false');
+  $('pCol').classList.remove('editing');
+  closeEditor();
+  extrasMoved = false;
   buildPickerGrid();
   showPickerTab('col');
   $('picker').hidden = false;
@@ -887,6 +1187,11 @@ function openPicker(groupId) {
 }
 
 function closePicker() {
+  pendingColour = null;
+  $('paAddBtn').disabled = false;
+  $('pAdd').hidden = true;
+  picker.edit = false;
+  closeEditor();
   picker.group = null;
   $('picker').hidden = true;
 }
@@ -904,44 +1209,187 @@ function showPickerTab(name) {
 $('pDone').addEventListener('click', closePicker);
 for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('click', () => showPickerTab(t.dataset.pt));
 
-// Any colour: picking sends right away; moves are throttled and the last one always goes.
-(() => {
-  const strip = $('pAny');
-  const out = throttle((hex) => {
-    if (picker.group) send({ type: 'groupColour', group: picker.group, colour: hex });
-  });
+/**
+ * Makes a strip pick colours: `onStart()` when a finger touches, then `onColour(hex, last)`
+ * while it moves and once more with `last` when it lifts. `whiteOnly()` says which colours
+ * the strip holds.
+ */
+function attachStrip(strip, handle, whiteOnly, onColour, onStart) {
   let dragging = false;
+  let hex = null;
   const pick = (ev) => {
     const r = strip.getBoundingClientRect();
     const p = clamp01((ev.clientX - r.left) / r.width);
-    const row = pickerRow();
-    if (!row) return null;
-    $('pAnyH').hidden = false;
-    $('pAnyH').style.left = `calc(${p * 100}% - ${p * 4}px)`;
-    return stripColour(row.group.whiteOnly ? WHITE_STOPS : HUE_STOPS, p);
+    if (whiteOnly() === null) return null;
+    handle.hidden = false;
+    handle.style.left = `calc(${p * 100}% - ${p * 4}px)`;
+    return stripColour(whiteOnly() ? WHITE_STOPS : HUE_STOPS, p);
   };
-  let hex = null;
   strip.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
     dragging = true;
     try { strip.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    onStart?.();
     hex = pick(ev);
-    if (hex) out.push(hex);
+    if (hex) onColour(hex, false);
   });
   strip.addEventListener('pointermove', (ev) => {
     if (!dragging) return;
     hex = pick(ev) ?? hex;
-    if (hex) out.push(hex);
+    if (hex) onColour(hex, false);
   });
   const end = () => {
     if (!dragging) return;
     dragging = false;
-    if (hex) out.end(hex);
+    if (hex) onColour(hex, true);
     hex = null;
   };
   strip.addEventListener('pointerup', end);
   strip.addEventListener('pointercancel', end);
+}
+
+// Any colour: picking sends right away; moves are throttled and the last one always goes.
+// The White, Amber and UV sliders' levels go with it when they are the user's: the group
+// already runs an Any colour pick, or a slider was moved since the picker opened. Otherwise
+// (a preset or Basic light with its own white) the pick is the plain colour.
+(() => {
+  let keep = false;
+  const out = dragSender((hex, first) => sendColour(hex, first, keep ? extraLevels() : NO_EXTRAS));
+  attachStrip($('pAny'), $('pAnyH'), () => pickerRow()?.group.whiteOnly ?? null,
+    (hex, last) => (last ? out.end(hex) : out.push(hex)),
+    () => { out.start(); keep = pickerLive || extrasMoved; });
 })();
+
+// ---- Edit colours: tap a swatch to rename it, change its colour or delete it ----
+
+/** The preset the editor is open on: { id, name, colour (picked, or null), swatch (as listed) }. */
+let colourEdit = null;
+let deleteArmed = 0;
+// The ref of an edit or delete the server hasn't answered yet.
+let pendingEdit = null;
+let pendingEditDelete = false;
+
+const editedPreset = () => (colourEdit ? pickerRow()?.group.presets.find((p) => p.id === colourEdit.id) : undefined);
+
+function setEditMode(on) {
+  picker.edit = on;
+  closeEditor();
+  $('pEditBtn').classList.toggle('on', on);
+  $('pEditBtn').setAttribute('aria-pressed', String(on));
+  $('pCol').classList.toggle('editing', on);
+  if (on) $('pAdd').hidden = true;
+  buildPickerGrid();
+  renderPicker();
+}
+
+function openEditor(preset) {
+  const row = pickerRow();
+  if (!row) return;
+  colourEdit = { id: preset.id, name: preset.name, colour: null, swatch: preset.swatch ?? NEUTRAL };
+  pendingEdit = null;
+  disarmDelete();
+  $('peName').value = preset.name;
+  $('peStrip').className = `strip2 pe-strip ${row.group.whiteOnly ? 'cct' : 'hue'}`;
+  $('peStrip').setAttribute('aria-label', row.group.whiteOnly ? 'Change the colour: warm to cool' : 'Change the colour');
+  $('peH').hidden = true;
+  $('peSw').style.background = colourEdit.swatch;
+  // The switch never carries over from an earlier colour: a change reaches other groups only when asked for each time.
+  $('peSame').checked = false;
+  $('peSave').disabled = false;
+  $('pEdit').hidden = false;
+  renderEditor();
+  for (const b of $('pGrid').children) b.classList.toggle('editing', b.dataset.preset === preset.id);
+  $('pEdit').scrollIntoView({ block: 'nearest' });
+}
+
+function closeEditor(keepPending = false) {
+  colourEdit = null;
+  if (!keepPending) pendingEdit = null;
+  disarmDelete();
+  $('peName').blur();
+  $('pEdit').hidden = true;
+  for (const b of $('pGrid').children) b.classList.remove('editing');
+}
+
+/** Who uses it, and whether other groups have a colour of the same name. */
+function renderEditor() {
+  const p = editedPreset();
+  if (!p) {
+    if (colourEdit) closeEditor(true);
+    return;
+  }
+  const others = layout.groups.filter((g) => g.id !== picker.group).flatMap((g) => g.presets.filter((x) => x.name === p.name));
+  $('peSameWrap').hidden = !others.length;
+  if (!others.length) $('peSame').checked = false;
+  // With the switch on, the change reaches every same-named colour, so list where any of them is used.
+  const affected = $('peSame').checked ? [p, ...others] : [p];
+  const used = [...new Set(affected.flatMap((x) => x.usedBy ?? []))];
+  $('peUsed').textContent = used.length ? `Used in ${used.slice(0, 4).join(', ')}${used.length > 4 ? ` and ${used.length - 4} more` : ''}` : 'Not used in any song or quick look';
+  // An Off colour can be renamed but has no colour to change.
+  $('peStrip').hidden = p.canRecolour === false;
+}
+
+function disarmDelete() {
+  clearTimeout(deleteArmed);
+  deleteArmed = 0;
+  $('peDelete').classList.remove('armed');
+  $('peDelete').textContent = 'Delete';
+}
+
+$('pEditBtn').addEventListener('click', () => setEditMode(!picker.edit));
+$('peCancel').addEventListener('click', () => closeEditor());
+$('peName').addEventListener('keydown', (ev) => {
+  ev.stopPropagation();
+  if (ev.key === 'Enter') $('peName').blur();
+});
+$('peName').addEventListener('input', disarmDelete);
+$('peSame').addEventListener('change', renderEditor);
+attachStrip($('peStrip'), $('peH'), () => (pickerRow() ? pickerRow().group.whiteOnly : null), (hex) => {
+  if (!colourEdit) return;
+  colourEdit.colour = hex;
+  $('peSw').style.background = hex;
+  disarmDelete();
+});
+
+// A plain tap. Only what changed is sent; the editor closes when the server says yes.
+$('peSave').addEventListener('click', () => {
+  if (!colourEdit || pendingEdit !== null) return;
+  const name = $('peName').value;
+  const cmd = { type: 'editColour', preset: colourEdit.id, sameName: $('peSame').checked && !$('peSameWrap').hidden };
+  if (name.trim() !== colourEdit.name) cmd.name = name;
+  if (colourEdit.colour && !$('peStrip').hidden) cmd.colour = colourEdit.colour;
+  if (cmd.name === undefined && cmd.colour === undefined) {
+    closeEditor();
+    return;
+  }
+  pendingEdit = send(cmd);
+  pendingEditDelete = false;
+  $('peSave').disabled = pendingEdit !== null;
+});
+
+// First tap arms it ("Delete?"), the second one deletes. It disarms after a few seconds.
+$('peDelete').addEventListener('click', () => {
+  if (!colourEdit || pendingEdit !== null) return;
+  if (!deleteArmed) {
+    deleteArmed = setTimeout(disarmDelete, 4000);
+    $('peDelete').classList.add('armed');
+    $('peDelete').textContent = 'Delete?';
+    return;
+  }
+  pendingEdit = send({ type: 'deleteColour', preset: colourEdit.id });
+  pendingEditDelete = true;
+  disarmDelete();
+});
+
+function finishEdit(error) {
+  const deleted = pendingEditDelete;
+  pendingEdit = null;
+  $('peSave').disabled = false;
+  if (!error) {
+    closeEditor();
+    toast(deleted ? 'Colour deleted' : 'Colour saved', true);
+  }
+}
 
 // ---- Quick looks: tabs and grid ----
 
@@ -967,12 +1415,12 @@ function buildQuick() {
     b.append(el('span', 'qname', q.name));
     // A thin strip along the bottom: one block per group, the colour this quick look gives it.
     const strip = el('span', 'qstrip');
-    (q.colours ?? []).forEach((c, i) => {
+    for (const { colour, name } of stripBlocks(q.colours)) {
       const block = el('i');
-      if (c) block.style.background = c;
-      block.title = layout.groups[i]?.name ?? '';
+      if (colour) block.style.background = shown(colour);
+      block.title = name;
       strip.append(block);
-    });
+    }
     b.append(strip);
     b.addEventListener('click', () => send({ type: 'quickLook', id: q.id }));
     grid.append(b);
@@ -1011,9 +1459,10 @@ function buildSheetGroups() {
   const root = $('qsGroups');
   root.replaceChildren();
   if (!layout) return;
-  const ids = new Set(layout.groups.map((g) => g.id));
+  // A quick look never sets smoke, so smoke groups aren't offered.
+  const ids = new Set(lightGroups().map((g) => g.id));
   for (const id of [...qs.left]) if (!ids.has(id)) qs.left.delete(id);
-  for (const group of layout.groups) {
+  for (const group of lightGroups()) {
     const b = el('button');
     b.dataset.group = group.id;
     const line = el('span', 'gs');
@@ -1037,11 +1486,11 @@ function renderSheet() {
   for (const b of $('qsGroups').children) {
     const group = layout.groups.find((g) => g.id === b.dataset.group);
     const s = state?.groups?.[b.dataset.group];
-    const info = presetInfo(group, s?.preset);
+    const info = presetInfo(group, s);
     const left = qs.left.has(b.dataset.group);
     b.classList.toggle('off', left);
     b.setAttribute('aria-pressed', String(!left));
-    b.querySelector('i').style.background = info.colour ?? '#0d0e11';
+    b.querySelector('i').style.background = shown(info.colour) ?? '#0d0e11';
     b.querySelector('.gs span').textContent = left ? 'left out' : info.name;
     b.querySelector('.gl').textContent = left ? '' : `${Math.round((s?.level ?? 0) * 100)}%`;
   }
@@ -1063,7 +1512,7 @@ $('qsName').addEventListener('keydown', (ev) => {
 // A plain tap: a new quick look overwrites nothing. The sheet closes when the server says yes.
 $('qsSave').addEventListener('click', () => {
   if (pendingSave !== null || !layout) return;
-  const groups = layout.groups.map((g) => g.id).filter((id) => !qs.left.has(id));
+  const groups = lightGroups().map((g) => g.id).filter((id) => !qs.left.has(id));
   // The server would say this too, but in less friendly words.
   if (!groups.length) {
     toast('pick at least one group');
@@ -1122,29 +1571,39 @@ function flashOff(pointerId) {
 
 const flashAllOff = () => { for (const id of [...flashHeld.keys()]) flashOff(id); };
 
+/**
+ * Holding the button flashes the groups; letting go (or losing the finger) puts
+ * them out. Flash buttons and a smoke group's Puff both work this way.
+ */
+function wireHold(b, groups) {
+  b.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    if (flashHeld.has(ev.pointerId)) return;
+    // Keep getting the release when the finger slides off the button.
+    try { b.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    if (send({ type: 'flash', groups, on: true }) === null) return;
+    flashHeld.set(ev.pointerId, { button: b, groups });
+    b.classList.add('down');
+  });
+  const end = (ev) => flashOff(ev.pointerId);
+  for (const name of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) b.addEventListener(name, end);
+  b.addEventListener('contextmenu', (ev) => ev.preventDefault());
+}
+
 function buildFlash() {
   flashAllOff();
   const root = $('flashArea');
   root.replaceChildren(el('span', 'flash-label', 'Flash'));
-  const labels = flashLabels(layout.groups);
-  const buttons = [['All', layout.groups.map((g) => g.id), 'All lights']];
-  layout.groups.forEach((g, i) => buttons.push([labels[i], [g.id], g.name]));
+  // Smoke machines have Puff in the details instead, and "All" never includes them.
+  const lights = lightGroups();
+  const labels = flashLabels(lights);
+  const buttons = [['All', lights.map((g) => g.id), 'All lights']];
+  lights.forEach((g, i) => buttons.push([labels[i], [g.id], g.name]));
   for (const [text, groups, full] of buttons) {
     const b = el('button', null, text);
     b.setAttribute('aria-label', `Flash ${full} (hold)`);
     root.append(b);
-    b.addEventListener('pointerdown', (ev) => {
-      ev.preventDefault();
-      if (flashHeld.has(ev.pointerId)) return;
-      // Keep getting the release when the finger slides off the button.
-      try { b.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
-      if (send({ type: 'flash', groups, on: true }) === null) return;
-      flashHeld.set(ev.pointerId, { button: b, groups });
-      b.classList.add('down');
-    });
-    const end = (ev) => flashOff(ev.pointerId);
-    for (const name of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) b.addEventListener(name, end);
-    b.addEventListener('contextmenu', (ev) => ev.preventDefault());
+    wireHold(b, groups);
   }
 }
 
@@ -1170,7 +1629,7 @@ function drawStage() {
   const pad = 14, r = Math.max(5, Math.min(9, h / 16));
   layout.fixtures.forEach((f, k) => {
     const x = pad + f.x * (w - 2 * pad), y = pad + f.y * (h - 2 * pad);
-    const R = visual[k * 3] ?? 0, G = visual[k * 3 + 1] ?? 0, B = visual[k * 3 + 2] ?? 0;
+    const [R, G, B] = shownRgb(visual[k * 3] ?? 0, visual[k * 3 + 1] ?? 0, visual[k * 3 + 2] ?? 0);
     const lit = Math.max(R, G, B) / 255;
     if (f.w || f.h) {
       // A bar or strip: a lit rounded rectangle at its real size.
@@ -1260,5 +1719,43 @@ async function keepAwake() {
 }
 document.addEventListener('visibilitychange', keepAwake);
 keepAwake();
+
+
+// ---- Phone remote (narrow screens) ----
+// The same page as a remote: Order, Groups and Looks tabs; Master and the dock always
+// visible; nothing that saves or edits the show (the styles hide those). Flash moves from
+// the bottom bar to the top of Groups. See docs/superpowers/specs/2026-10-19-phone-remote-design.md.
+
+const phoneQuery = window.matchMedia('(max-width: 700px), (max-height: 500px)');
+
+function setPhoneTab(tab) {
+  document.body.dataset.tab = tab;
+  for (const b of $('phoneTabs').querySelectorAll('button')) {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', String(on));
+  }
+}
+
+function applyPhone() {
+  const phone = phoneQuery.matches;
+  document.body.classList.toggle('phone', phone);
+  const flash = $('flashArea');
+  if (phone) {
+    $('details').insertBefore(flash, $('groupRows'));
+    // Editing belongs to the iPad: the running order's, and the colour list's (its buttons are hidden here,
+    // and in Edit a swatch tap opens the editor instead of setting the colour).
+    if (editing) setEditing(false);
+    if (picker.edit) setEditMode(false);
+    closeSheet();
+  } else if (flash.parentElement !== $('masterFader').parentElement) {
+    $('masterFader').after(flash);
+  }
+  if (!document.body.dataset.tab) setPhoneTab('order');
+}
+
+for (const b of $('phoneTabs').querySelectorAll('button')) b.addEventListener('click', () => setPhoneTab(b.dataset.tab));
+phoneQuery.addEventListener('change', applyPhone);
+applyPhone();
 
 connect();
