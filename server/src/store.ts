@@ -95,7 +95,8 @@ export class Store {
 export function writeAtomic(path: string, text: string): void {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, text);
-  const fd = openSync(tmp, 'r');
+  // 'r+', not 'r': Windows refuses to flush a file opened read-only (EPERM).
+  const fd = openSync(tmp, 'r+');
   try {
     fsyncSync(fd);
   } finally {
