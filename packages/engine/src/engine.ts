@@ -3,7 +3,7 @@
 // same code drives output, tests, blind preview and the soak test.
 
 import {
-  BLACKOUT, SAFE, findProfile,
+  BLACKOUT, HEX_COLOUR, SAFE, findProfile, livePresetId, parseLivePreset,
   type Command, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
   type Palette, type RuntimeState, type Show,
 } from '../../shared/src/index.ts';
@@ -14,6 +14,8 @@ import { planChannels, writeFixture, type ChannelPlan } from './output.ts';
 
 /** Safe's fixed warm white stage wash. */
 const SAFE_LIGHT = fromHex('#ffd2a0', 0.5, 0.8);
+/** Flash: full white, snapping on and off. */
+const FLASH_LIGHT = fromHex('#ffffff');
 const SAFE_FADE = 1;
 /**
  * Safe also brings master, speed and group levels back to default. Those
@@ -134,6 +136,10 @@ export class Engine {
   private universes = new Map<number, Uint8Array>();
   private visual = new Uint8Array(0);
 
+  /** Groups being flashed, and the fixtures in them (recomputed when either changes). */
+  private flash = new Set<string>();
+  private flashed = new Set<number>();
+
   private master = new Ramp(1);
   private speed = new Ramp(1);
   private look: string | null = null;
@@ -203,13 +209,21 @@ export class Engine {
       if (!this.universes.has(f.plan.universe)) this.universes.set(f.plan.universe, new Uint8Array(512));
     }
     this.visual = new Uint8Array(this.fixtures.length * 3);
+
+    for (const id of this.flash) if (!this.groups.has(id)) this.flash.delete(id);
+    this.updateFlashed();
+  }
+
+  private updateFlashed(): void {
+    this.flashed = new Set();
+    for (const id of this.flash) for (const f of this.groups.get(id)?.fixtures ?? []) this.flashed.add(f);
   }
 
   /** Apply a command. Returns an error message, or null when it worked. */
   apply(cmd: Command, now: number): string | null {
     this.recorded = false;
     if (cmd.type === 'undo') return this.undo(now);
-    if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') {
+    if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || cmd.type === 'groupColour' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') {
       const before = this.snapshot();
       const error = this.run(cmd, now);
       const after = this.snapshot();
@@ -256,6 +270,8 @@ export class Engine {
   private presetFor(pid: string | null, group: string): CompiledPreset | undefined {
     if (pid === SAFE_ID) return fixedPreset(SAFE_ID, group, SAFE_LIGHT, SAFE_FADE);
     if (pid === BLACKOUT_ID) return fixedPreset(BLACKOUT_ID, group, dark(), BLACKOUT_FADE);
+    const live = pid ? parseLivePreset(pid) : null;
+    if (live) return live.group === group ? fixedPreset(pid!, group, fromHex(live.colour), DEFAULT_FADE) : undefined;
     return pid ? this.presets.get(pid) : undefined;
   }
 
@@ -270,6 +286,23 @@ export class Engine {
         if (!group) return `unknown group "${cmd.group}"`;
         if (!preset || preset.group !== cmd.group) return `unknown preset "${cmd.preset}" for group "${cmd.group}"`;
         this.setPreset(group, preset, cmd.fade ?? this.fadeTime ?? preset.fade, now);
+        return null;
+      }
+      case 'groupColour': {
+        const group = this.groups.get(cmd.group);
+        if (!group) return `unknown group "${cmd.group}"`;
+        if (!HEX_COLOUR.test(cmd.colour)) return `bad colour "${cmd.colour}"`;
+        const preset = this.presetFor(livePresetId(cmd.group, cmd.colour), cmd.group)!;
+        this.setPreset(group, preset, cmd.fade ?? this.fadeTime ?? preset.fade, now);
+        return null;
+      }
+      case 'flash': {
+        for (const id of cmd.groups) if (!this.groups.has(id)) return `unknown group "${id}"`;
+        for (const id of cmd.groups) {
+          if (cmd.on) this.flash.add(id);
+          else this.flash.delete(id);
+        }
+        this.updateFlashed();
         return null;
       }
       case 'manual': return this.setManual(cmd.target, cmd.colour, cmd.intensity, now);
@@ -506,6 +539,7 @@ export class Engine {
 
     // 4–6. Each fixture takes its owning group's light, then manual and master, then gamma and channels.
     const master = this.master.value(now);
+    const flashing = this.flashed.size > 0 && this.look !== BLACKOUT;
     for (const buf of this.universes.values()) buf.fill(0);
     for (let f = 0; f < this.fixtures.length; f++) {
       const run = this.fixtures[f];
@@ -526,6 +560,8 @@ export class Engine {
       const manual = this.liveManual(run, now, dt);
       if (manual) mix2(light, light, manual.current, manual.weight.value(now));
       light.i *= master;
+      // Flash overrides everything above, but not Blackout.
+      if (flashing && this.flashed.has(f)) copy(light, FLASH_LIGHT);
 
       const buf = this.universes.get(run.plan.universe);
       if (buf) writeFixture(buf, run.plan, light);
@@ -582,6 +618,7 @@ export class Engine {
       fadeTime: this.fadeTime,
       groups,
       fixturesManual: this.fixtures.filter((f) => f.manual && !f.manual.releasing).map((f) => f.id),
+      flashing: [...this.flash],
       master: this.master.target,
       speed: this.speed.target,
       output,

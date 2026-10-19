@@ -1,5 +1,5 @@
 // Runs the engine headless through hours of random look, preset, manual,
-// Safe and Blackout changes, tapping mid-fade on purpose, and reports the
+// Safe, Blackout and Any colour changes (Flash is left out: it snaps by design), tapping mid-fade on purpose, and reports the
 // largest intensity jump of any fixture between two frames.
 //
 // The spec's rule: no fixture jumps more than 5% during any fade, including
@@ -53,10 +53,11 @@ function randomCommand(): { cmd: Command; fast: boolean } {
     const fade = rand() < 0.3 ? 1 + rand() * 5 : undefined;
     return { cmd: { type: rand() < 0.2 ? 'quickLook' : 'look', id: pick(show.looks).id, fade }, fast: false };
   }
-  if (r < 0.6) {
+  if (r < 0.55) {
     const p = pick(show.presets);
     return { cmd: { type: 'groupPreset', group: p.group, preset: p.id }, fast: false };
   }
+  if (r < 0.6) return { cmd: { type: 'groupColour', group: pick(show.groups).id, colour: hex() }, fast: false };
   if (r < 0.68) {
     const target = rand() < 0.5 ? { group: pick(show.groups).id } : { fixture: pick(show.fixtures).id };
     return { cmd: { type: 'manual', target, colour: hex(), intensity: rand() }, fast: true };

@@ -402,3 +402,108 @@ test('Back to look works after Basic lights and keeps Master where it was', () =
   assert.equal(s.groups['back-wall'].preset, '__safe');
   assert.equal(s.master, 0.6);
 });
+
+test('Any colour runs a live colour on the group and Undo brings back the preset before it', () => {
+  const e = new Engine(demoShow());
+  e.apply({ type: 'look', id: 'walk-in' }, 0);
+  e.frame(5);
+  const before = e.liveState(5, 'ok').groups['back-wall'].preset;
+  assert.ok(before);
+  assert.equal(e.apply({ type: 'groupColour', group: 'back-wall', colour: '#FF8000', fade: 1 }, 5), null);
+  assert.equal(e.recorded, true);
+  e.frame(6.5);
+  assert.equal(e.liveState(6.5, 'ok').groups['back-wall'].preset, 'live:back-wall:#ff8000');
+  const l = lightOf(e, 'back-1');
+  assert.ok(close(l.r, 1) && close(l.g, 128 / 255) && close(l.b, 0) && close(l.i, 1), JSON.stringify(l));
+  // the other groups are untouched
+  assert.notEqual(e.liveState(6.5, 'ok').groups['front-wash'].preset, 'live:back-wall:#ff8000');
+  assert.equal(e.apply({ type: 'undo' }, 7), null);
+  e.frame(10);
+  assert.equal(e.liveState(10, 'ok').groups['back-wall'].preset, before);
+});
+
+test('a live colour survives a restart through runtime() and restore()', () => {
+  const a = new Engine(demoShow());
+  a.apply({ type: 'look', id: 'walk-in' }, 0);
+  a.apply({ type: 'groupColour', group: 'audience', colour: '#00ff80', fade: 0 }, 1);
+  const before = Array.from(a.frame(5).universes.get(0)!);
+  const rt = a.runtime();
+  assert.equal(rt.groups.audience, 'live:audience:#00ff80');
+  const b = new Engine(demoShow());
+  b.restore(rt, 100);
+  assert.deepEqual(Array.from(b.frame(100).universes.get(0)!), before);
+  assert.equal(b.liveState(100, 'ok').groups.audience.preset, 'live:audience:#00ff80');
+});
+
+test('Any colour reports an unknown group and a colour that is not hex', () => {
+  const e = new Engine(demoShow());
+  assert.match(e.apply({ type: 'groupColour', group: 'nope', colour: '#ffffff' }, 0)!, /unknown group "nope"/);
+  assert.match(e.apply({ type: 'groupColour', group: 'audience', colour: 'red' }, 0)!, /colour/);
+  assert.equal(e.recorded, false);
+});
+
+test('Flash puts the group at full white whatever the master and level, and drops back on release', () => {
+  const e = new Engine(demoShow());
+  e.apply({ type: 'look', id: 'walk-in' }, 0);
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-blue', fade: 0 }, 0);
+  e.apply({ type: 'master', value: 0.2 }, 0);
+  e.apply({ type: 'groupLevel', group: 'audience', value: 0.3 }, 0);
+  e.frame(5);
+  const dim = lightOf(e, 'aud-1');
+  assert.ok(dim.i < 0.2);
+  assert.equal(e.apply({ type: 'flash', groups: ['audience'], on: true }, 5), null);
+  assert.deepEqual(e.liveState(5, 'ok').flashing, ['audience']);
+  e.frame(5.025);
+  for (const id of ['aud-1', 'aud-2']) {
+    const l = lightOf(e, id);
+    assert.equal(l.i, 1);
+    assert.ok(l.r === l.g && l.g === l.b && l.w === 0, JSON.stringify(l));
+  }
+  // other groups are not flashed
+  assert.ok(lightOf(e, 'back-1').i < 0.2);
+  // releasing a group that is not flashing does nothing
+  assert.equal(e.apply({ type: 'flash', groups: ['back-wall'], on: false }, 5.05), null);
+  assert.deepEqual(e.liveState(5.05, 'ok').flashing, ['audience']);
+  e.apply({ type: 'flash', groups: ['audience'], on: false }, 6);
+  e.frame(6.025);
+  assert.ok(close(lightOf(e, 'aud-1').i, dim.i));
+  assert.deepEqual(e.liveState(6.025, 'ok').flashing, []);
+  assert.match(e.apply({ type: 'flash', groups: ['nope'], on: true }, 7)!, /unknown group "nope"/);
+});
+
+test('Flash does nothing during Blackout', () => {
+  const e = new Engine(demoShow());
+  e.apply({ type: 'look', id: 'word' }, 0);
+  e.apply({ type: 'blackout' }, 5);
+  e.frame(7);
+  e.apply({ type: 'flash', groups: ['audience', 'front-wash'], on: true }, 7);
+  e.frame(7.025);
+  assert.ok(e.lights().every((l) => l.i === 0));
+  assert.ok(e.frame(7.05).universes.get(0)!.every((v) => v === 0));
+});
+
+test('Flash is not an Undo step and is not saved in runtime()', () => {
+  const e = new Engine(demoShow());
+  e.apply({ type: 'look', id: 'walk-in' }, 0);
+  const rt = JSON.stringify(e.runtime());
+  e.apply({ type: 'flash', groups: ['audience'], on: true }, 1);
+  assert.equal(e.recorded, false);
+  assert.equal(JSON.stringify(e.runtime()), rt);
+  e.apply({ type: 'flash', groups: ['audience'], on: false }, 2);
+  e.apply({ type: 'undo' }, 3);
+  assert.equal(e.liveState(3, 'ok').look, null);
+  assert.equal(e.liveState(3, 'ok').canUndo, false);
+});
+
+test('Flash follows group membership when the show is edited', () => {
+  const e = new Engine(demoShow());
+  e.apply({ type: 'flash', groups: ['audience'], on: true }, 0);
+  e.frame(0);
+  assert.equal(lightOf(e, 'aud-1').i, 1);
+  const edited = demoShow();
+  edited.groups.find((g) => g.id === 'audience')!.fixtures = ['aud-2'];
+  e.setShow(edited, 1);
+  e.frame(1.025);
+  assert.equal(lightOf(e, 'aud-2').i, 1);
+  assert.equal(lightOf(e, 'aud-1').i, 0);
+});

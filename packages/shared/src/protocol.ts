@@ -4,7 +4,9 @@
 import { z } from 'zod';
 
 const id = z.string().min(1).max(64);
-const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+/** A #rrggbb colour. */
+export const HEX_COLOUR = /^#[0-9a-fA-F]{6}$/;
+const hex = z.string().regex(HEX_COLOUR);
 const unit = z.number().min(0).max(1);
 const fade = z.number().min(0).max(600).optional();
 
@@ -19,6 +21,10 @@ export const Command = z.discriminatedUnion('type', [
   /** Set only the groups a look lists, leaving the current look and the other groups alone. */
   z.object({ type: z.literal('quickLook'), id, fade }),
   z.object({ type: z.literal('groupPreset'), group: id, preset: id, fade }),
+  /** Any colour: run this exact colour on a group, as a live preset. */
+  z.object({ type: z.literal('groupColour'), group: id, colour: hex, fade }),
+  /** Hold the groups at full white while `on`; snaps, and is not saved or undone. */
+  z.object({ type: z.literal('flash'), groups: z.array(id).max(64), on: z.boolean() }),
   z.object({ type: z.literal('manual'), target: ManualTarget, colour: hex.optional(), intensity: unit.optional() }),
   z.object({ type: z.literal('release'), target: ManualTarget }),
   z.object({ type: z.literal('releaseAll') }),
@@ -70,6 +76,8 @@ export interface LiveState {
   fadeTime: number | null;
   groups: Record<string, GroupStatus>;
   fixturesManual: string[];
+  /** Groups being flashed (full white) right now. */
+  flashing: string[];
   master: number;
   speed: number;
   output: OutputStatus;
