@@ -136,17 +136,17 @@ test('two universes routed to two Art-Net nodes go to their own node', async () 
   const a = await receiver();
   const b = await receiver();
   try {
-    // Two "nodes" on this machine: two names for it, each sent to its own UDP port.
+    // Two "nodes" (documentation addresses), redirected to two UDP ports on this machine.
     await withApp(async (call) => {
       const show = (await call('GET', '/api/show')).body;
       show.fixtures.find((f: any) => f.id === 'pulpit').universe = 2;
       assert.equal((await call('PUT', '/api/show?source=patch', show)).status, 200);
       const r = await call('PUT', '/api/settings', {
-        output: { kind: 'artnet', host: '127.0.0.1' },
-        routes: [{ universe: 2, output: { kind: 'artnet', host: 'localhost' } }],
+        output: { kind: 'artnet', host: '192.0.2.1' },
+        routes: [{ universe: 2, output: { kind: 'artnet', host: '192.0.2.2' } }],
       });
       assert.equal(r.status, 200);
-      assert.deepEqual(r.body.routes, [{ universe: 2, output: { kind: 'artnet', host: 'localhost' } }]);
+      assert.deepEqual(r.body.routes, [{ universe: 2, output: { kind: 'artnet', host: '192.0.2.2' } }]);
       assert.deepEqual(r.body.fixturesPerUniverse, { 0: 12, 2: 1 });
       await sleep(300);
       assert.deepEqual([...a.universes], [0]);
@@ -160,7 +160,7 @@ test('two universes routed to two Art-Net nodes go to their own node', async () 
       await sleep(300);
       assert.deepEqual([...a.universes].sort(), [0, 2]);
       await call('PUT', '/api/settings', { output: { kind: 'none' } });
-    }, { artnetPorts: { '127.0.0.1': a.port, localhost: b.port } });
+    }, { artnetRedirect: { '192.0.2.1': { host: '127.0.0.1', port: a.port }, '192.0.2.2': { host: '127.0.0.1', port: b.port } } });
   } finally {
     a.socket.close();
     b.socket.close();
@@ -174,6 +174,14 @@ test('routes are checked: one universe per USB interface, in plain words', async
     assert.match(r.body.error, /^Universes 1 and 2 both go to the USB interface on COM3/);
     r = await call('PUT', '/api/settings', { routes: [{ universe: 'two', output: { kind: 'none' } }] });
     assert.equal(r.status, 400);
+    // Addresses are IP addresses: the node watch matches replies by address.
+    r = await call('PUT', '/api/settings', { routes: [{ universe: 2, output: { kind: 'artnet', host: 'node-b.local' } }] });
+    assert.equal(r.body.error, "Type the node's IP address, like 192.168.0.120, for universe 2.");
+    r = await call('PUT', '/api/settings', { output: { kind: 'artnet', host: 'node-a.local' } });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error, "Type the node's IP address, like 192.168.0.114.");
+    r = await call('PUT', '/api/settings', { output: { kind: 'sacn', host: 'receiver', priority: 100 } });
+    assert.equal(r.body.error, "Type the receiver's IP address, like 192.168.0.114.");
     assert.deepEqual((await call('GET', '/api/settings')).body.routes, []);
   });
 });

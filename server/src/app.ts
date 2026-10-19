@@ -14,7 +14,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { ZodError } from 'zod';
 import {
   BUILT_IN_PROFILES, Command, OutputRoute, OutputSettings, addSong, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureRunningOrder, isManualCommand,
-  isShowEdit, moveItem, oflToProfile, parseShow, planRoutes, renameItem, saveItem, saveQuickLook,
+  isShowEdit, moveItem, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook,
   type OflFixture, type Pick, type Scope,
   BLACKOUT, type LiveState, type RuntimeState, type Show, type ShowEdit,
 } from '../../packages/shared/src/index.ts';
@@ -35,8 +35,8 @@ export interface AppOptions {
   webDir: string;
   /** Replace the show's output, e.g. `{ kind: 'none' }` in tests. Routes are ignored then. */
   output?: OutputSettings;
-  /** For tests: the UDP port to send Art-Net to, per host (normally 6454). */
-  artnetPorts?: Record<string, number>;
+  /** For tests: send Art-Net for these hosts to another address and UDP port instead (normally the host, port 6454). */
+  artnetRedirect?: Record<string, { host: string; port: number }>;
   /** For tests: stands in for the network when talking to the Open Fixture Library. */
   fetch?: typeof fetch;
   log?: (msg: string) => void;
@@ -231,7 +231,7 @@ export class App {
       this.undoLog = this.undoLog.filter((step) => step !== 'stage');
       setTimeout(() => this.startWorker(), 200);
     });
-    this.post({ type: 'init', show: this.engineShow(), runtime: this.latestRuntime, artnetPorts: this.opts.artnetPorts });
+    this.post({ type: 'init', show: this.engineShow(), runtime: this.latestRuntime, artnetRedirect: this.opts.artnetRedirect });
   }
 
   private post(msg: ToWorker): void {
@@ -835,7 +835,11 @@ export class App {
     const show: Show = structuredClone(this.show);
     try {
       if (typeof body.showName === 'string' && body.showName.trim()) show.name = body.showName.trim();
-      if (body.output !== undefined) show.settings.output = OutputSettings.parse(body.output);
+      if (body.output !== undefined) {
+        show.settings.output = OutputSettings.parse(body.output);
+        const problem = outputAddressProblem(show.settings.output);
+        if (problem) throw new Error(problem);
+      }
       if (body.routes !== undefined) {
         const routes = OutputRoute.array().parse(body.routes);
         show.settings.routes = routes.length ? routes.sort((a, b) => a.universe - b.universe) : undefined;

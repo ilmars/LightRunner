@@ -19,10 +19,13 @@ const STATE_EVERY = 100;
 const VISUAL_EVERY = 50;
 
 let engine: Engine | null = null;
-/** Test hook: the UDP port to send Art-Net to, per host (normally 6454 for all). */
-let artnetPorts: Record<string, number> = {};
-const outputs = new OutputSet((o) =>
-  o.kind === 'artnet' ? new ArtNetOutput(o.host, artnetPorts[o.host] ?? ARTNET_PORT) : createOutput(o));
+/** Test hook: send Art-Net for a host to another address and port (normally the host itself, port 6454). */
+let artnetRedirect: Record<string, { host: string; port: number }> = {};
+const outputs = new OutputSet((o) => {
+  if (o.kind !== 'artnet') return createOutput(o);
+  const to = artnetRedirect[o.host];
+  return to ? new ArtNetOutput(to.host, to.port) : new ArtNetOutput(o.host, ARTNET_PORT);
+});
 let period = 25;
 let running = false;
 let lastStateJson = '';
@@ -115,7 +118,7 @@ function loop(): void {
 port.on('message', (msg: ToWorker) => {
   switch (msg.type) {
     case 'init': {
-      artnetPorts = msg.artnetPorts ?? {};
+      artnetRedirect = msg.artnetRedirect ?? {};
       applyShow(msg.show);
       if (msg.runtime) engine!.restore(msg.runtime, clock() / 1000);
       post({ type: 'ready', fixtures: engine!.fixtureIds() });

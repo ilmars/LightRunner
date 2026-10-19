@@ -73,6 +73,19 @@ export function planRoutes(
   return plan;
 }
 
+/** A dotted IPv4 address such as 192.168.0.114 (spaces around it are ignored). */
+export function isIPv4(text: string): boolean {
+  const parts = text.trim().split('.');
+  return parts.length === 4 && parts.every((p) => /^[0-9]{1,3}$/.test(p) && Number(p) <= 255);
+}
+
+/** Plain-language problem with the default output's address, or null. Older shows may still hold a name; only new edits are checked. */
+export function outputAddressProblem(o: OutputSettings): string | null {
+  if (o.kind === 'artnet' && !isIPv4(o.host)) return "Type the node's IP address, like 192.168.0.114.";
+  if (o.kind === 'sacn' && o.host.trim() && !isIPv4(o.host)) return "Type the receiver's IP address, like 192.168.0.114.";
+  return null;
+}
+
 /** Plain-language problems with a set of routes; empty when they are fine. */
 export function routeProblems(output: OutputSettings, routes: OutputRoute[] | undefined): string[] {
   const problems: string[] = [];
@@ -81,7 +94,10 @@ export function routeProblems(output: OutputSettings, routes: OutputRoute[] | un
   for (const r of routes ?? []) {
     if (seen.has(r.universe)) problems.push(`Universe ${r.universe} has its own output twice. Keep one.`);
     seen.add(r.universe);
-    if (r.output.kind === 'artnet' && !r.output.host.trim()) problems.push(`Type the node's IP address for universe ${r.universe}.`);
+    // Addresses must be IP addresses: the node watch recognises replies by address,
+    // and a name would be looked up on every packet.
+    if (r.output.kind === 'artnet' && !isIPv4(r.output.host)) problems.push(`Type the node's IP address, like 192.168.0.120, for universe ${r.universe}.`);
+    if (r.output.kind === 'sacn' && r.output.host.trim() && !isIPv4(r.output.host)) problems.push(`Type the receiver's IP address, like 192.168.0.120, for universe ${r.universe}.`);
     if (r.output.kind !== 'enttec') continue;
     const port = r.output.port.trim();
     if (!port) {

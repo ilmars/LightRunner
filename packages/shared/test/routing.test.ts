@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { planRoutes, routeProblems, Settings, Show, parseShow, type OutputSettings } from '../src/index.ts';
+import { isIPv4, planRoutes, routeProblems, Settings, Show, parseShow, type OutputSettings } from '../src/index.ts';
 
 const artnet = (host: string): OutputSettings => ({ kind: 'artnet', host });
 const enttec = (port: string): OutputSettings => ({ kind: 'enttec', port });
@@ -18,12 +18,25 @@ test('routes parse, and bad ones are refused with a plain message', () => {
   const ok = Settings.parse({ output: artnet('192.168.0.114'), routes: [{ universe: 2, output: artnet('192.168.0.120') }] });
   assert.deepEqual(ok.routes, [{ universe: 2, output: artnet('192.168.0.120') }]);
 
-  const twice = Settings.safeParse({ routes: [{ universe: 2, output: artnet('a') }, { universe: 2, output: artnet('b') }] });
+  const twice = Settings.safeParse({ routes: [{ universe: 2, output: artnet('10.0.0.1') }, { universe: 2, output: artnet('10.0.0.2') }] });
   assert.equal(twice.success, false);
   assert.match(twice.error!.issues[0].message, /Universe 2 has its own output twice/);
 
   assert.equal(Settings.safeParse({ routes: [{ universe: -1, output: artnet('a') }] }).success, false);
-  assert.deepEqual(routeProblems(artnet('x'), [{ universe: 2, output: artnet(' ') }]), ["Type the node's IP address for universe 2."]);
+});
+
+test('route addresses must be IP addresses, so the node watch can recognise the node', () => {
+  const ip = "Type the node's IP address, like 192.168.0.120, for universe 2.";
+  assert.deepEqual(routeProblems(artnet('x'), [{ universe: 2, output: artnet(' ') }]), [ip]);
+  assert.deepEqual(routeProblems(artnet('x'), [{ universe: 2, output: artnet('node-b.local') }]), [ip]);
+  assert.deepEqual(routeProblems(artnet('x'), [{ universe: 2, output: artnet('192.168.0.300') }]), [ip]);
+  assert.deepEqual(routeProblems(artnet('x'), [{ universe: 2, output: artnet(' 192.168.0.120 ') }]), []);
+  const sacn = (host: string): OutputSettings => ({ kind: 'sacn', host, priority: 100 });
+  assert.deepEqual(routeProblems(artnet('x'), [{ universe: 3, output: sacn('receiver') }]), ["Type the receiver's IP address, like 192.168.0.120, for universe 3."]);
+  assert.deepEqual(routeProblems(artnet('x'), [{ universe: 3, output: sacn('') }]), []); // multicast
+  assert.ok(isIPv4('2.255.255.255'));
+  assert.ok(!isIPv4('localhost'));
+  assert.ok(!isIPv4('1.2.3'));
 });
 
 test('two universes on the same ENTTEC port are refused', () => {
