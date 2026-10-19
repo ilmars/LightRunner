@@ -95,8 +95,27 @@
         </div>
         <div id="pCol" class="pcol">
           <div id="pGrid" class="pgrid"></div>
-          <p id="pAnyLab" class="lab2">Any colour</p>
+          <div class="labrow">
+            <p id="pAnyLab" class="lab2">Any colour</p>
+            <!-- Only while the group runs a colour picked on the strip. -->
+            <button id="pAddOpen" class="ghost pill-add" hidden>＋ Add to colours</button>
+          </div>
           <div id="pAny" class="strip2 hue" aria-label="Any colour"><span id="pAnyH" class="strip-handle" hidden></span></div>
+          <div id="pAdd" class="padd" hidden>
+            <div class="padd-top">
+              <i id="paSw" class="padd-sw"></i>
+              <input id="paName" class="qs-name" type="text" maxlength="40" placeholder="e.g. Deep blue" aria-label="Name" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
+            </div>
+            <label class="pswitch">
+              <input id="paAll" type="checkbox" role="switch">
+              <span class="track"><span class="knob"></span></span>
+              <span id="paAllText">Add to every colour group</span>
+            </label>
+            <div class="padd-btns">
+              <button id="paCancel" class="ghost">Cancel</button>
+              <button id="paAddBtn" class="done">Add</button>
+            </div>
+          </div>
         </div>
         <p id="pFx" class="soon" hidden>Effects come later.</p>
       </div>

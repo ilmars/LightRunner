@@ -22,6 +22,8 @@ let seenLook = null;
 let previousLook = null;
 // The ref of a Save from the new-quick-look sheet that the server hasn't answered yet.
 let pendingSave = null;
+// The ref of an Add to colours that the server hasn't answered yet.
+let pendingColour = null;
 
 // ---- Connection: reconnect every 2 s and resync on reconnect ----
 
@@ -64,6 +66,7 @@ function connect() {
         if (!msg.error) finishSaveQuick();
         else renderSheet();
       }
+      if (msg.ref !== null && msg.ref === pendingColour) finishAddColour(msg.error);
       if (itemSave && msg.ref === itemSave.ref) {
         if (!msg.error) toast(`Saved to ${itemSave.name}`, true);
         itemSave = null;
@@ -87,6 +90,10 @@ function setConnected(on) {
     addWanted = false;
     renames.clear();
     moves.clear();
+  }
+  if (!on && pendingColour !== null) {
+    pendingColour = null;
+    $('paAddBtn').disabled = false;
   }
   if (!on && pendingSave !== null) {
     // The answer may never come; let the user try Save again.
@@ -885,6 +892,74 @@ function renderPicker() {
   $('pCurSw').style.background = info.colour ?? '#0d0e11';
   $('pCurText').textContent = `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
+  renderAddColour();
+}
+
+// ---- Keep a strip colour: "＋ Add to colours" ----
+
+/** The colour the picker's group runs live from the strip, or null. */
+function liveOfPicker() {
+  const row = pickerRow();
+  const hex = row ? liveColour(state?.groups?.[row.group.id]?.preset) : null;
+  return hex;
+}
+
+/** Shows the pill while the group runs a strip colour that isn't a swatch yet; keeps the form in step. */
+function renderAddColour() {
+  const row = pickerRow();
+  const hex = liveOfPicker();
+  const listed = !!hex && row.group.presets.some((p) => p.swatch?.toLowerCase() === hex);
+  const open = !$('pAdd').hidden;
+  // The form follows the colour: it goes when the group no longer runs a new strip colour.
+  if (open && (!hex || listed)) $('pAdd').hidden = true;
+  $('pAddOpen').hidden = !hex || listed || !$('pAdd').hidden;
+  if (hex) $('paSw').style.background = hex;
+  if (row) $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
+}
+
+function openAddColour() {
+  if (!liveOfPicker()) return;
+  $('paName').value = '';
+  $('paAll').checked = false;
+  $('pAdd').hidden = false;
+  renderAddColour();
+  // With a long colour list the form opens below the fold of the picker.
+  $('pAdd').scrollIntoView({ block: 'nearest' });
+}
+
+function closeAddColour() {
+  pendingColour = null;
+  $('pAdd').hidden = true;
+  $('paName').blur();
+  if (picker.group) renderAddColour();
+}
+
+$('pAddOpen').addEventListener('click', openAddColour);
+$('paCancel').addEventListener('click', closeAddColour);
+// The keyboard's Done closes the keyboard; nothing else on the page reacts to typing.
+$('paName').addEventListener('keydown', (ev) => {
+  ev.stopPropagation();
+  if (ev.key === 'Enter') $('paName').blur();
+});
+// A plain tap. The form closes when the server says yes; on an error it stays to fix.
+$('paAddBtn').addEventListener('click', () => {
+  const hex = liveOfPicker();
+  if (pendingColour !== null || !picker.group) return;
+  if (!hex) {
+    closeAddColour();
+    return;
+  }
+  pendingColour = send({ type: 'addColour', group: picker.group, colour: hex, name: $('paName').value, allGroups: $('paAll').checked });
+  $('paAddBtn').disabled = pendingColour !== null;
+});
+
+function finishAddColour(error) {
+  pendingColour = null;
+  $('paAddBtn').disabled = false;
+  if (!error) {
+    closeAddColour();
+    toast('Added to colours', true);
+  }
 }
 
 function openPicker(groupId) {
@@ -892,6 +967,7 @@ function openPicker(groupId) {
   if (picker.group !== groupId) {
     $('pAnyH').hidden = true;
   }
+  $('pAdd').hidden = true;
   picker.group = groupId;
   buildPickerGrid();
   showPickerTab('col');
@@ -900,6 +976,9 @@ function openPicker(groupId) {
 }
 
 function closePicker() {
+  pendingColour = null;
+  $('paAddBtn').disabled = false;
+  $('pAdd').hidden = true;
   picker.group = null;
   $('picker').hidden = true;
 }
