@@ -55,7 +55,7 @@ test('only picked changes are applied, and removals take their dependants', () =
 test('a pick that leaves the show broken is refused with a readable reason', () => {
   const current = rig();
   const incoming = rig();
-  incoming.groups.push({ id: 'balcony', name: 'Balcony', fixtures: ['b9'] });
+  incoming.groups.push({ id: 'balcony', name: 'Balcony', kind: 'light', fixtures: ['b9'] });
   incoming.fixtures.push({ id: 'b9', name: 'B9', profile: 'generic-rgb', universe: 1, address: 400, x: 0.5, y: 0.5 });
   assert.throws(
     () => applyPicks(current, incoming, [{ kind: 'group', id: 'balcony', change: 'added' }]),
