@@ -327,4 +327,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%); z-index: 20;
   background: #3a1f1f; color: #ffd9d9; padding: 10px 16px; border-radius: 10px; border: 1px solid #6a2a2a;
 }
+/* A plain confirmation ("Saved to …"), not a problem. */
+.toast.quiet { background: var(--raised); color: var(--text); border-color: var(--line); }
 [hidden] { display: none !important; }

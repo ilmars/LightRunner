@@ -64,6 +64,10 @@ function connect() {
         if (!msg.error) finishSaveQuick();
         else renderSheet();
       }
+      if (itemSave && msg.ref === itemSave.ref) {
+        if (!msg.error) toast(`Saved to ${itemSave.name}`, true);
+        itemSave = null;
+      }
       if (msg.error) toast(msg.error);
     }
   };
@@ -285,7 +289,8 @@ function wireEditRow(row, grip) {
   });
   row.input.addEventListener('keydown', (ev) => {
     ev.stopPropagation();
-    if (ev.key === 'Enter') row.input.blur();
+    // Enter while a keyboard is still composing a letter (accents, other scripts) only finishes the letter.
+    if (ev.key === 'Enter' && !ev.isComposing) row.input.blur();
   });
   row.input.addEventListener('blur', () => commitName(row));
   wireDrag(row, grip);
@@ -531,7 +536,7 @@ function render() {
   note.classList.toggle('problem', lost);
   note.classList.toggle('off', off);
   $('outputText').textContent = lost
-    ? state.outputProblem ?? 'Lights not answering: check the network and the DMX box'
+    ? state.outputProblem ?? 'Lights not answering. Check the lighting network box.'
     : 'Not sending to the lights (Lightkey has them)';
   $('quiet').hidden = lost || off;
 
@@ -793,6 +798,8 @@ $('backBtn').addEventListener('click', () => send({ type: 'backToLook' }));
 const saveBtn = $('saveBtn');
 let saveTimer = 0;
 let saveFor = null;
+/** The Save hold waiting for its answer: { ref, name }, to say "Saved to …" when it works. */
+let itemSave = null;
 saveBtn.addEventListener('pointerdown', (ev) => {
   ev.preventDefault();
   const item = stageItem();
@@ -804,7 +811,10 @@ saveBtn.addEventListener('pointerdown', (ev) => {
     saveBtn.classList.remove('holding');
     // Only if the same item is still on stage; for Basic lights the id is the safe look's.
     const now = stageItem();
-    if (now && now.id === saveFor) send({ type: 'saveItem', id: now.id });
+    if (now && now.id === saveFor) {
+      const sent = send({ type: 'saveItem', id: now.id });
+      if (sent !== null) itemSave = { ref: sent, name: now.name };
+    }
   }, 1000);
 });
 const stopSave = () => {
@@ -1229,9 +1239,11 @@ setInterval(tick, 10_000);
 tick();
 
 let toastTimer = 0;
-function toast(text) {
+/** Shows a short message: a problem, or with `quiet` a plain confirmation. */
+function toast(text, quiet = false) {
   const t = $('toast');
   t.textContent = text;
+  t.classList.toggle('quiet', quiet);
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (t.hidden = true), 3500);
