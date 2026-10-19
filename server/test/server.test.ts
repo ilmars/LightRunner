@@ -18,8 +18,8 @@ const seedPath = join(root, 'server/seed/demo-show.json');
 const tempDir = () => mkdtempSync(join(tmpdir(), 'light-runner-'));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function makeApp(dataDir: string) {
-  return new App({ port: 0, host: '127.0.0.1', dataDir, seedPath, webDir: join(root, 'web'), output: { kind: 'none' }, log: () => {} });
+function makeApp(dataDir: string, heartbeatMs?: number) {
+  return new App({ port: 0, host: '127.0.0.1', dataDir, seedPath, webDir: join(root, 'web'), output: { kind: 'none' }, log: () => {}, heartbeatMs });
 }
 
 async function api(app: App, method: string, path: string, body?: unknown) {
@@ -243,8 +243,8 @@ async function waitFor<T>(get: () => T | null | undefined | false, ms = 2000, wh
 }
 
 /** A tablet on the WebSocket: sends commands and keeps the latest state and layout. */
-async function tablet(app: App) {
-  const ws = new WebSocket(`ws://127.0.0.1:${app.port}/ws`);
+async function tablet(app: App, opts: { autoPong?: boolean } = {}) {
+  const ws = new WebSocket(`ws://127.0.0.1:${app.port}/ws`, opts);
   const seen: any[] = [];
   ws.on('message', (data, isBinary) => {
     if (!isBinary) seen.push(JSON.parse(String(data)));
@@ -267,9 +267,9 @@ async function tablet(app: App) {
   };
 }
 
-async function withApp(fn: (app: App, dir: string) => Promise<void>) {
+async function withApp(fn: (app: App, dir: string) => Promise<void>, heartbeatMs?: number) {
   const dir = tempDir();
-  const app = makeApp(dir);
+  const app = makeApp(dir, heartbeatMs);
   try {
     await app.start();
     await fn(app, dir);
@@ -526,6 +526,17 @@ test('show edits are open to operators without the PIN', () => withApp(async (ap
   // The PIN is still set after all those saves.
   assert.equal((await api(app, 'GET', '/api/settings')).status, 401);
 }));
+
+test('a tablet that stops answering is dropped and its Flash goes out', () => withApp(async (app) => {
+  const watch = await tablet(app);
+  const silent = await tablet(app, { autoPong: false });
+  assert.equal(await silent.send({ type: 'flash', groups: ['back-wall'], on: true }), null);
+  await waitFor(() => watch.state()?.flashing.length === 1, 2000, 'the flash to start');
+  // Checks every 50 ms: dropped after two missed answers, while the answering tablet stays.
+  await waitFor(() => watch.state()?.flashing.length === 0, 1000, "the silent tablet's flash to stop");
+  assert.equal(watch.ws.readyState, WebSocket.OPEN);
+  await waitFor(() => silent.ws.readyState === WebSocket.CLOSED, 1000, 'the silent tablet to be dropped');
+}, 50));
 
 /** Starts a song, picks Any colour on the back wall, saves it, then takes the Save back with Undo. */
 async function saveThenUndo(t: Awaited<ReturnType<typeof tablet>>, dir: string) {

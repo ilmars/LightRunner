@@ -37,6 +37,8 @@ export interface AppOptions {
   /** For tests: stands in for the network when talking to the Open Fixture Library. */
   fetch?: typeof fetch;
   log?: (msg: string) => void;
+  /** How often each tablet is checked (ms); one that misses two checks is dropped. Tests make it short. */
+  heartbeatMs?: number;
 }
 
 export type Role = 'operator' | 'programmer';
@@ -93,6 +95,9 @@ export class App {
   private operatorBackedUp = false;
   /** Groups each tablet is holding a Flash on, so they go out if it disconnects. */
   private readonly flashes = new Map<WebSocket, Set<string>>();
+  /** Checks each tablet missed in a row; reset when it answers. */
+  private readonly missedPongs = new Map<WebSocket, number>();
+  private heartbeat: NodeJS.Timeout | null = null;
   private latestRuntime: RuntimeState | null = null;
   private ready!: Promise<void>;
   private readonly sessions = new Sessions();
@@ -150,6 +155,10 @@ export class App {
       const role: Role = this.isProgrammer(req) ? 'programmer' : 'operator';
       this.wss!.handleUpgrade(req, socket, head, (ws) => this.onSocket(ws, role));
     });
+    // A tablet that drops off the network never closes its socket; ping each one and drop it
+    // after two missed answers, so its Flash goes out like on a clean close.
+    this.heartbeat = setInterval(() => this.checkTablets(), this.opts.heartbeatMs ?? 2000);
+    this.heartbeat.unref();
     await new Promise<void>((resolve) => this.server!.listen(this.opts.port, this.opts.host ?? '0.0.0.0', resolve));
     this.log(`Light Runner on http://localhost:${this.port}/`);
   }
@@ -157,6 +166,7 @@ export class App {
   async stop(): Promise<void> {
     this.stopping = true;
     this.nodeWatch.stop();
+    if (this.heartbeat) clearInterval(this.heartbeat);
     for (const t of this.identifyTimers.values()) clearTimeout(t);
     for (const ws of this.wss?.clients ?? []) ws.terminate();
     this.wss?.close();
@@ -404,8 +414,11 @@ export class App {
       const free = [...groups].filter((g) => !others.some((set) => set.has(g)));
       if (free.length && !this.stopping) void this.run({ type: 'flash', groups: free, on: false }, 'operator');
     };
+    this.missedPongs.set(ws, 0);
+    ws.on('pong', () => this.missedPongs.set(ws, 0));
     ws.on('close', () => {
       closed = true;
+      this.missedPongs.delete(ws);
       this.flashes.delete(ws);
       release(held);
     });
@@ -434,6 +447,20 @@ export class App {
         if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'result', ref: msg.ref ?? null, error }));
       }
     });
+  }
+
+  /** Pings every tablet; one that missed the last two pings is dropped, which ends its Flash. */
+  private checkTablets(): void {
+    for (const ws of this.wss?.clients ?? []) {
+      const missed = this.missedPongs.get(ws) ?? 0;
+      if (missed >= 2) {
+        this.log('A tablet stopped answering; dropped it');
+        ws.terminate();
+        continue;
+      }
+      this.missedPongs.set(ws, missed + 1);
+      ws.ping();
+    }
   }
 
   private broadcast(text: string): void {
