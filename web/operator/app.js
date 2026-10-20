@@ -2034,8 +2034,9 @@ function renderEditor() {
   if (!shared) $('peShared').checked = false;
   if (shared) $('peSharedText').textContent = `Change it everywhere — shared colour, used by ${shared.groups} ${shared.groups === 1 ? 'group' : 'groups'}`;
   // With a switch on, the change reaches more colours, so list where any of them is used.
+  // "Change it everywhere" only reaches the shared set with a new colour (brightness and fade stay per colour).
   const affected = $('peSame').checked ? [p, ...others] : [p];
-  const used = shared && $('peShared').checked ? [{ usedBy: shared.usedBy }, ...affected] : affected;
+  const used = shared && $('peShared').checked && colourEdit.colour ? [{ usedBy: shared.usedBy }, ...affected] : affected;
   $('peUsed').textContent = usedText(used);
   // An Off colour can be renamed but has no colour to change.
   $('peStrip').hidden = p.canRecolour === false;
@@ -2089,9 +2090,12 @@ $('peShared').addEventListener('change', renderEditor);
 }
 attachStrip($('peStrip'), $('peH'), () => (pickerRow() ? pickerRow().group.whiteOnly : null), (hex) => {
   if (!colourEdit) return;
+  const first = !colourEdit.colour;
   colourEdit.colour = hex;
   $('peSw').style.background = hex;
   disarmDelete();
+  // A new colour can widen "Used in" (with "Change it everywhere" on).
+  if (first) renderEditor();
 });
 
 // A plain tap. Only what changed is sent; the editor closes when the server says yes.
