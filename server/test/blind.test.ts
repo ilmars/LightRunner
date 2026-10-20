@@ -16,9 +16,9 @@ const tempDir = () => mkdtempSync(join(tmpdir(), 'light-runner-'));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const REAL_STAGE_ONLY = 'That works on the real stage only.';
-const BLIND_OFF = 'Blind is off.';
-const BLIND_PROBLEM = 'Blind stopped because of a problem. The lights were not changed.';
-const TOO_MANY = 'Too many tablets are in Blind.';
+const BLIND_OFF = 'Prepare is off.';
+const BLIND_PROBLEM = 'Prepare stopped because of a problem. The lights were not changed.';
+const TOO_MANY = 'Too many tablets are preparing.';
 
 function makeApp(dataDir: string, log: (msg: string) => void = () => {}) {
   return new App({ port: 0, host: '127.0.0.1', dataDir, seedPath, webDir: join(root, 'web'), output: { kind: 'none' }, log });
@@ -169,7 +169,7 @@ test('Blind refuses what works on the real stage only, and needs Blind on', () =
   // A light group's dimmer is the draft's.
   assert.equal(await t.send({ type: 'draft', cmd: { type: 'groupLevel', group: 'audience', value: 0.5 } }), null);
   // A whole stage is only ever sent by Go.
-  assert.equal(await t.send({ type: 'applyStage', stage: { look: null, groups: {}, levels: {} } }), 'Use Blind and Go to send a whole stage.');
+  assert.equal(await t.send({ type: 'applyStage', stage: { look: null, groups: {}, levels: {} } }), 'Use Prepare and Go to send a whole stage.');
   assert.match(await t.send({ type: 'draft', cmd: { type: 'saveItem', id: 'worship' } }) ?? '', /^invalid command/);
   assert.match(await t.send({ type: 'draft', cmd: { type: 'draft', cmd: { type: 'safe' } } }) ?? '', /^invalid command/);
 
@@ -214,6 +214,50 @@ test('Save, Add song and Save as quick look in Blind store the draft, not the st
   assert.equal(t.state().groups['back-wall'].preset, liveWall);
   assert.equal(t.state().tempo, liveTempo);
   assert.equal(t.draft().groups['back-wall'].preset, 'back-amber');
+}));
+
+test('Prepare: a song started in the draft is what Save stores, Live drops it, and the other tablet never sees it', () => withApp(async (app, dir) => {
+  const a = await onWorship(app);
+  const b = await tablet(app);
+  await waitFor(b.state);
+  const song = a.order().find((id) => id !== 'worship' && id !== a.layout().basicLights)!;
+  const before = savedLook(dir, song)!;
+  const worshipBefore = savedLook(dir, 'worship')!;
+
+  // Prepare on, then a running-order tap: the draft starts the song, the stage keeps worship.
+  assert.equal(await a.send({ type: 'blindStart' }), null);
+  assert.equal(await a.send({ type: 'draft', cmd: { type: 'look', id: song, fade: 0 } }), null);
+  await waitFor(() => a.draft()?.look === song, 2000, 'the draft on the song');
+  assert.equal(await a.send({ type: 'draft', cmd: { type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 } }), null);
+  assert.equal(await a.send({ type: 'draft', cmd: { type: 'groupLevel', group: 'audience', value: 0.35 } }), null);
+  await waitFor(() => a.draft()?.groups.audience.level === 0.35, 2000, 'the draft change');
+
+  // Save to the song stores the draft in it, without touching the lights.
+  assert.equal(await a.send({ type: 'saveItem', id: song }), null);
+  const saved = savedLook(dir, song)!;
+  assert.equal(saved.groups.find((e) => e.group === 'back-wall')!.preset, 'back-amber');
+  assert.equal(saved.groups.find((e) => e.group === 'audience')!.level, 0.35);
+  assert.notDeepEqual(saved.groups, before.groups);
+  assert.deepEqual(savedLook(dir, 'worship')!.groups, worshipBefore.groups, 'the song on stage is not changed');
+  await sleep(150);
+  for (const t of [a, b]) {
+    assert.equal(t.state().look, 'worship');
+    assert.equal(t.state().groups['back-wall'].preset, 'back-purple');
+    assert.equal(t.state().groups.audience.level, 1);
+  }
+
+  // Live drops the draft: no Go, no more draft states, the stage as it was.
+  assert.equal(await a.send({ type: 'blindEnd' }), null);
+  assert.equal(app.drafts, 0);
+  assert.equal(await a.send({ type: 'blindGo' }), BLIND_OFF);
+  const drafts = a.seen.filter((m) => m.type === 'draftState').length;
+  await sleep(200);
+  assert.equal(a.seen.filter((m) => m.type === 'draftState').length, drafts, 'no more draft states');
+  assert.equal(b.state().look, 'worship');
+  assert.equal(b.state().groups['back-wall'].preset, 'back-purple');
+
+  // The other tablet never heard of the draft.
+  assert.ok(!b.seen.some((m) => m.type === 'draftState' || m.type === 'draftVisual' || m.type === 'draftEnded'));
 }));
 
 test('Go sends the draft to the stage with the Fade setting, as one Undo step, and ends Blind', () => withApp(async (app) => {

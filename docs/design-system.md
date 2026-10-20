@@ -58,7 +58,7 @@ The first suggested palette was measured at about 4× the old screen's average b
 | `ds-label` | Muted small label above a value | "Key lights" over "Vēsi balts" |
 | `ds-btn`, `ds-btn--text`, `ds-btn--pill` | Button, quiet text button, pill | Pressed = lighter tint; disabled = 40 % opacity |
 | `ds-hold` + `ds-hold-fill` | Button that fills while held | Save (blue), Blackout (red) |
-| `ds-fill` + `-slab`, `-val` | Fill slider | A smooth filled bar on a faint track, no thumb; the fill carries a little of the group's colour (`--c`); the value is shown beside it; `ds-disabled` = 40 % opacity and it doesn't react to a finger (a group a song doesn't set, or Basic lights in Preview) |
+| `ds-fill` + `-slab`, `-val` | Fill slider | A smooth filled bar on a faint track, no thumb; the fill carries a little of the group's colour (`--c`); the value is shown beside it; `ds-disabled` = 40 % opacity and it doesn't react to a finger (no page uses it since Preview went; kept for a control that can't move) |
 | `ds-seg` | Segmented control and tabs | Faint track; selected = blue tint and edge |
 | `ds-field` | Text field | Flat; focus = accent edge |
 | `ds-sheet` | Glass sheet over one panel | The only place blur is used |
@@ -96,8 +96,7 @@ The first suggested palette was measured at about 4× the old screen's average b
   - Problems with the lights: an amber strip on the top bar.
   - Send DMX off: an amber pill, **DMX output inactive**, with a faint amber strip on the top bar. Hover or tap the pill for the full explanation.
   - Lights not answering, or another desk is sending: the same amber pill with that short label; the full message on hover or tap.
-  - Preview on: a neutral strip on the top bar (no colour of its own); the Preview switch blue-tinted.
-  - Blind on: a faint violet strip on the top bar (`--blind` in the operator page's styles, 8 % fill, 26 % edge) and the Blind switch in the same violet, so **Go** is the one blue control in the bar: the Save and Done pill (blue tint and edge), 44 px high, never brighter. Go sits after the name, away from the Blind switch (which throws the draft away). In the running order the draft's song is the blue "on stage" tile and the song on the real stage keeps a quiet grey outline. The stage view says "Blind" in small muted text. Blackout, problems and Flash still win over the strip.
+  - Live / Prepare: one segmented switch in the top bar (Live on: blue tint and edge; Prepare on: violet). Prepare's violet is the designer's (`--prep-text` #B0A6F5, `--prep-tint` 161 147 242 at 11–16 %, `--prep-edge` 171 160 244 at 38–50 %, in the operator page's styles) and is used only for Prepare. Prepare on: the whole top bar violet (11 % fill, 38 % edge) with "Preparing · the lights don't change" (11 px upper case, violet) over the prepared item's name and a muted "On stage: <name>"; it wins over the problem, Flash and Blackout strips, whose own pills and buttons still show. **Go ▸** sits right after the switch and is the one blue control in the bar (blue tint and edge, 44 px, radius 10). In the running order the prepared item is a violet tile (14 % fill, 50 % edge) with a violet "preparing", and the item on the real stage a dashed grey outline with "on stage". The stage view says "Draft · <name>" in small violet capitals at the bottom right. The Groups header says "<name> · draft", and Save is violet.
 
   Colour is only used where it says something.
 

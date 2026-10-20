@@ -11,8 +11,10 @@
   --accent: var(--ds-accent);
   --warn: var(--ds-warn);
   --danger: #7a2626;
-  /* Blind's tint (as r, g, b): only for its top-bar strip and its switch. */
-  --blind: 150, 124, 226;
+  /* Prepare's violet (the designer's): text, and the tint and edge as r, g, b. Only for what Prepare shows. */
+  --prep-text: #B0A6F5;
+  --prep-tint: 161, 147, 242;
+  --prep-edge: 171, 160, 244;
   --radius: var(--ds-r-panel);
   color-scheme: dark;
 }
@@ -49,18 +51,23 @@ button { font: inherit; color: inherit; cursor: pointer; }
   display: flex; align-items: center; gap: 18px; padding: 0 2px 0 8px;
 }
 /* A state that matters gets a quiet tinted strip behind the bar, not a bright frame. */
-.topbar.problem, .topbar.off, .topbar.flash, .topbar.preview, .topbar.blind { border-radius: var(--ds-r-tile); }
-/* Preview is on: a neutral strip (no colour of its own). Written first so the states below win over it. */
-.topbar.preview { background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10); }
-/* Blind is on: a faint violet strip, so it can't be taken for Preview (neutral), Flash (blue) or a problem (amber).
-   Also written before the states below, which win over it. */
-.topbar.blind { background: rgba(var(--blind), 0.08); box-shadow: inset 0 0 0 1px rgba(var(--blind), 0.26); }
+.topbar.problem, .topbar.off, .topbar.flash, .topbar.prepare { border-radius: var(--ds-r-tile); }
 .topbar.problem { background: rgba(201, 138, 42, 0.10); box-shadow: inset 0 0 0 1px rgba(201, 138, 42, 0.30); }
 .topbar.off { background: rgba(201, 138, 42, 0.07); box-shadow: inset 0 0 0 1px rgba(201, 138, 42, 0.22); }
 .topbar.flash { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
 .topbar.blackout { border-radius: var(--ds-r-tile); background: rgba(var(--ds-danger), 0.22); box-shadow: inset 0 0 0 1px rgba(var(--ds-danger), 0.55); }
 .topbar.blackout .now-name { color: #ffdfe2; }
-.now { flex: 1; min-width: 0; display: flex; align-items: baseline; white-space: nowrap; overflow: hidden; }
+/* Prepare is on: the violet bar. Written after the states above and wins over them: this tablet's bar is about
+   the draft (the problem pill, Flash and Blackout still show in their own places). */
+.topbar.prepare { background: rgba(var(--prep-tint), 0.11); box-shadow: inset 0 0 0 1px rgba(var(--prep-edge), 0.38); color: var(--ds-text); padding-left: 14px; }
+.now { flex: 1; min-width: 0; display: flex; align-items: center; white-space: nowrap; overflow: hidden; }
+.live-head { display: flex; align-items: baseline; min-width: 0; overflow: hidden; }
+/* "Preparing · the lights don't change" over the prepared item's name and "On stage: <name>". */
+.prep-head { display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 0; overflow: hidden; }
+.prep-label { font-size: 11px; line-height: 13px; letter-spacing: 0.09em; text-transform: uppercase; font-weight: 600; color: var(--prep-text); }
+.prep-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; white-space: nowrap; overflow: hidden; }
+.prep-name { font-size: 20px; line-height: 1.15; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.prep-stage { flex: none; font-size: 13px; color: var(--ds-muted); }
 .now-name { font-size: var(--ds-fs-title); font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
 .changed { color: var(--warn); font-size: 14px; font-weight: 600; margin-left: 8px; }
 .quiet { display: flex; align-items: center; gap: 18px; }
@@ -83,15 +90,17 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .clock { color: var(--dim); font-size: 14px; font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; }
 .gear { color: var(--dim); display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 8px; }
 .gear:hover { color: var(--text); background: var(--raised); }
-.preview-btn { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--dim); font: inherit; font-size: 14px; }
-.preview-btn:hover { color: var(--text); background: var(--raised); }
-.preview-btn[aria-pressed="true"] { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-/* Blind on: the strip's violet, so Go stays the one blue control in the bar. */
-.blind-btn[aria-pressed="true"] { background: rgba(var(--blind), 0.14); box-shadow: inset 0 0 0 1px rgba(var(--blind), 0.40); }
-/* Go: the Save and Done pill (blue tint, blue edge), 44 px high; never brighter than that. */
+/* Live / Prepare: one segmented switch. Live on is blue, Prepare on is violet. The edge is drawn inside,
+   so the buttons keep the full 44 px. */
+.mode-seg { flex: none; display: flex; gap: 2px; border-radius: 12px; background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
+.mode-seg button { min-height: 44px; min-width: 64px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: var(--ds-muted); font: inherit; font-size: 13px; white-space: nowrap; }
+.mode-seg button.prep { min-width: 84px; }
+.mode-seg button[aria-pressed="true"] { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.mode-seg button.prep[aria-pressed="true"] { background: rgba(var(--prep-tint), 0.16); box-shadow: inset 0 0 0 1px rgba(var(--prep-edge), 0.5); }
+/* Go ▸: the one blue control while preparing (blue tint, blue edge), 44 px high; never brighter than that. */
 .go-btn {
-  flex: none; min-height: 44px; min-width: 88px; padding: 0 22px; border: 0; border-radius: var(--ds-r-pill);
-  background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-text); font: inherit; font-size: 16px; font-weight: 600;
+  flex: none; min-height: 44px; min-width: 84px; padding: 0 14px; border: 0; border-radius: 10px;
+  background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-text); font: inherit; font-size: 15px; font-weight: 700;
 }
 .go-btn:active { background: var(--ds-selected); }
 .go-btn:disabled { opacity: 0.5; }
@@ -175,12 +184,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 .item.on .name { font-weight: 500; }
-/* The item Preview is showing: a quiet outline, no fill, so it can't be taken for the one on stage. */
-.item.selected { box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-/* Selected and on stage at once: the same edge, a little thicker, so the two can be told apart. */
-.item.on.selected { box-shadow: inset 0 0 0 2px var(--ds-edge-on); }
-/* In Blind, the item on the real stage (when the draft has another): a quiet grey outline, no fill. */
-.item.live:not(.on) { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); }
+/* Prepare: the item being prepared (the draft's) is violet with "preparing"; the item on the real stage
+   (when it is another) has a dashed outline with "on stage". */
+.item .tag { flex: none; color: var(--ds-muted); font-size: 12px; white-space: nowrap; }
+.item.prep { background: rgba(var(--prep-tint), 0.14); color: var(--ds-text); box-shadow: inset 0 0 0 1px rgba(var(--prep-edge), 0.5); }
+.item.prep .name { font-weight: 600; }
+.item.prep .dots i { opacity: 1; }
+.item.prep .tag { color: var(--prep-text); }
+.item.live { outline: 1px dashed rgba(148, 163, 184, 0.45); outline-offset: -1px; }
 /* The item Next will start: a quiet hint, not a second selection. */
 .item.is-next:not(.on)::after { content: "next"; color: var(--ds-muted); font-size: 12px; }
 .sep { flex: none; height: 1px; margin: 3px 12px; background: rgba(255, 255, 255, 0.05); }
@@ -253,6 +264,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .details { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 10px 14px 14px; }
 .dhead { display: flex; align-items: center; gap: 8px; flex: none; min-height: 44px; }
 .dhead h2 { flex: 1; min-width: 0; margin: 0 0 0 4px; font-size: var(--ds-fs-value); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Prepare: "Groups" with "<item> · draft" beside it. */
+body.prepare .dhead h2 { flex: none; }
+.dsub { flex: 1; min-width: 0; margin-left: 4px; color: var(--ds-muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Quiet text buttons (Back, Cancel). */
 .ghost {
   min-height: 36px; padding: 0 16px; border: 0; border-radius: var(--ds-r-pill); background: transparent;
@@ -268,6 +282,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .save.holding { box-shadow: inset 0 0 0 1px var(--ds-accent); }
 .save.holding .fill { width: 100%; transition: width 1s linear; }
 .save .label { position: relative; }
+/* In Prepare, Save keeps the draft in the item: violet, as the rest of Prepare. */
+body.prepare .save { background: rgba(var(--prep-tint), 0.14); box-shadow: inset 0 0 0 1px rgba(var(--prep-edge), 0.5); }
+body.prepare .save.holding { box-shadow: inset 0 0 0 1px var(--prep-text); }
 .save small { color: var(--ds-muted-on); font-size: 12px; margin-left: 4px; }
 
 .rows {
@@ -309,18 +326,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* Held: tinted, like a held Flash button. */
 .puff.down { background: var(--ds-selected); color: var(--ds-text); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
 
-/* Preview: a group the selected item doesn't set says "not set" quietly. */
-.chip.unset span { color: var(--ds-muted); }
-
-/* ---- Preview: the details work on the selected item ----
-   Smoke isn't part of a song, and these work on other things than the item:
-   Save stage as quick look, the colour list's Edit and Add to colours. */
-body.preview .row.smoke,
-body.preview .ql.newq,
-body.preview #pEditBtn,
-body.preview #fxEdit,
-body.preview #pAddOpen,
-body.preview #pAdd { display: none; }
 
 /* ---- Colour picker: covers the details panel only ---- */
 .picker {
@@ -575,9 +580,9 @@ body.preview #pAdd { display: none; }
   .flash-area { grid-area: flash; border: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding: 0 0 6px; }
   .flash-area button { flex: 1 1 0; width: auto; min-width: 0; }
   .undo { grid-area: undo; } .next { grid-area: next; } .blackout { grid-area: blackout; }
-  /* Blind adds Go to the top bar: tighter spacing so the name keeps some room. */
-  .topbar.blind, .topbar.blind .quiet { gap: 8px; }
-  .go-btn { min-width: 64px; padding: 0 16px; }
+  /* Prepare adds Go to the top bar: tighter spacing so the name keeps some room. */
+  .topbar.prepare, .topbar.prepare .quiet { gap: 8px; }
+  .go-btn { min-width: 64px; padding: 0 12px; }
 }
 
 /* ---- Phone remote: narrow screens (portrait phones, and phones on their side) ----
@@ -593,7 +598,7 @@ body.preview #pAdd { display: none; }
   /* Top line: what's on stage, "changed", and a status dot (tap it for the explanation). */
   .topbar { grid-column: 1; min-height: 44px; gap: 10px; padding: 0 2px 0 6px; }
   .now-name { font-size: 22px; }
-  #quiet, .clock, .gear, #previewBtn, #blindBtn, #goBtn { display: none !important; }
+  #quiet, .clock, .gear, #modeSwitch, #goBtn { display: none !important; }
   .output-note { width: 44px; min-height: 44px; padding: 0; justify-content: center; max-width: none; }
   .output-note #outputText, .output-note .info { display: none; }
   .output-note .dot { margin: 0; }

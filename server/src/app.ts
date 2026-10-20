@@ -437,7 +437,7 @@ export class App {
     }
     if (isBlindCommand(cmd)) return this.blindCommand(cmd, tablet);
     // Only Go sends a whole stage, from a tablet's draft.
-    if (cmd.type === 'applyStage') return { error: 'Use Blind and Go to send a whole stage.', recorded: false };
+    if (cmd.type === 'applyStage') return { error: 'Use Prepare and Go to send a whole stage.', recorded: false };
     if (isShowEdit(cmd)) {
       try {
         await this.editShow(cmd, tablet ? this.blind.get(tablet) : undefined);
@@ -484,7 +484,7 @@ export class App {
 
   private async blindCommand(cmd: BlindCommand, tablet: WebSocket | undefined): Promise<{ error: string | null; recorded: boolean }> {
     const done = (error: string | null, recorded = false) => ({ error, recorded });
-    if (!tablet) return done('Blind works on a tablet only.');
+    if (!tablet) return done('Prepare works on a tablet only.');
     const session = this.blind.get(tablet);
     switch (cmd.type) {
       case 'blindStart': {

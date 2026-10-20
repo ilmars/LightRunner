@@ -1,4 +1,4 @@
-// Blind: a tablet's draft copy of the stage. The server keeps one per tablet in Blind, runs it
+// Blind (Prepare on the operator page): a tablet's draft copy of the stage. The server keeps one per tablet in Blind, runs it
 // with its own Engine (which never sends DMX) and shows only that tablet its state and picture.
 // Go hands the draft's runtime to the live engine as one applyStage.
 
@@ -6,12 +6,12 @@ import { Engine, type StageClock } from '../../packages/engine/src/index.ts';
 import type { LiveState, RuntimeState, Show, StageCommand } from '../../packages/shared/src/index.ts';
 
 export const REAL_STAGE_ONLY = 'That works on the real stage only.';
-export const BLIND_OFF = 'Blind is off.';
+export const BLIND_OFF = 'Prepare is off.';
 /** Sent with `draftEnded` (and as the answer to the command that met it) when a tablet's draft throws. */
-export const BLIND_PROBLEM = 'Blind stopped because of a problem. The lights were not changed.';
+export const BLIND_PROBLEM = 'Prepare stopped because of a problem. The lights were not changed.';
 /** Tablets in Blind at once: each draft is an engine on the server's main thread. */
 export const MAX_DRAFTS = 6;
-export const TOO_MANY_DRAFTS = 'Too many tablets are in Blind.';
+export const TOO_MANY_DRAFTS = 'Too many tablets are preparing.';
 
 /** Commands that always act on the real stage (Master, Flash, Blackout, manual control, speed, Fade), and Go's own. */
 const LIVE_ONLY = new Set<StageCommand['type']>(['master', 'speed', 'flash', 'blackout', 'manual', 'release', 'releaseAll', 'fadeTime', 'applyStage']);
