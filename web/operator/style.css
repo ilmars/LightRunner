@@ -466,6 +466,11 @@ body.preview #pAdd { display: none; }
 .fecol span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fecol.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
 .fecol .fenum { position: absolute; right: 8px; font-size: 13px; font-weight: 400; font-variant-numeric: tabular-nums; color: var(--ds-muted-on); }
+/* ＋ Own colour (and None for the base): quiet outlines like ＋ New effect. */
+.fecol.add { justify-content: center; padding: 0 8px; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-muted); }
+.fecol.add.open { box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-muted-on); }
+.fe-own { height: 40px; }
+.fe-own[hidden], .fe-base-row[hidden] { display: none; }
 
 /* ---- Bottom bar: one control strip; groups divided by faint lines ---- */
 .bottom {

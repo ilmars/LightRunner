@@ -1809,17 +1809,21 @@ function effectUses(effect) {
 /** The choice nearest to v. */
 const nearest = (choices, v) => choices.reduce((best, c) => (Math.abs(c - v) < Math.abs(best - v) ? c : best));
 
-/** An effect as groupEffect takes it: plain colours, every setting, nothing else. */
+/** A colour as an effect takes it: its hex, and White, Amber and UV when it has them. */
+function plainColour(c) {
+  const out = { hex: c.hex };
+  for (const k of ['white', 'amber', 'uv']) if (typeof c[k] === 'number') out[k] = c[k];
+  return out;
+}
+
+/** An effect as groupEffect takes it: plain colours, every setting and the base colour (when it has one), nothing else. */
 function liveLayer(fx) {
   return {
     kind: 'effect', effect: fx.effect,
-    colours: fx.colours.map((c) => {
-      const out = { hex: c.hex };
-      for (const k of ['white', 'amber', 'uv']) if (typeof c[k] === 'number') out[k] = c[k];
-      return out;
-    }),
+    colours: fx.colours.map(plainColour),
     speed: 'beats' in fx.speed ? { beats: fx.speed.beats } : { seconds: fx.speed.seconds },
     direction: fx.direction, waves: fx.waves, size: fx.size, edge: fx.edge, intensity: fx.intensity,
+    ...(fx.base ? { base: { colour: plainColour(fx.base.colour), level: fx.base.level } } : {}),
   };
 }
 
@@ -2353,28 +2357,39 @@ const EFFECT_NAMES = [
 const colourKey = (c) => [c.hex.toLowerCase(), ...['white', 'amber', 'uv'].map((k) => Math.round((c[k] ?? 0) * 1000) / 1000)].join('|');
 
 /** An effect as one string, the colours by their keys, for telling whether the editor changed it. */
-const effectSig = (layer) => JSON.stringify({ ...layer, colours: layer.colours.map(colourKey) });
+const effectSig = (layer) => JSON.stringify({
+  ...layer, colours: layer.colours.map(colourKey), base: layer.base ? [colourKey(layer.base.colour), layer.base.level] : null,
+});
+
+/** Yo-yo and meteor run in one colour: tapping a colour picks it instead of adding it. */
+const ONE_COLOUR = new Set(['yoyo', 'meteor']);
 
 /**
- * The colours the editor offers: the group's own colour list, then any colour the effect already
- * has that is not in the list (a colour picked on the strip, say), so it can be taken out and put back.
+ * The colours the editor offers: the group's own colour list, then the effect's own colours (any
+ * colour it has, or has as its base, that is not in the list), so they can be taken out and put back.
  */
 function effectChoices(group, effect) {
   const choices = [];
-  const seen = new Set();
-  const add = (name, swatch, colour) => {
-    const key = colourKey(colour);
-    if (seen.has(key)) return;
-    seen.add(key);
-    choices.push({ key, name, swatch, colour });
-  };
   for (const p of group.presets) {
     if (p.effect || !p.light) continue;
-    add(p.name, p.swatch ?? NEUTRAL, { hex: p.light.hex, white: p.light.white, amber: p.light.amber, uv: p.light.uv });
+    addChoice(choices, p.name, p.swatch ?? NEUTRAL, { hex: p.light.hex, white: p.light.white, amber: p.light.amber, uv: p.light.uv });
   }
-  for (const c of effect.colours) add('Custom', c.hex, { ...c });
+  for (const c of [...effect.colours, ...(effect.base ? [effect.base.colour] : [])]) addOwnChoice(choices, c);
   return choices;
 }
+
+/** Adds a choice unless one of the same colour is there already; returns the one there. */
+function addChoice(choices, name, swatch, colour) {
+  const key = colourKey(colour);
+  const found = choices.find((c) => c.key === key);
+  if (found) return found;
+  const choice = { key, name, swatch, colour };
+  choices.push(choice);
+  return choice;
+}
+
+/** An own colour: one the effect has that is in no list of the group's. */
+const addOwnChoice = (choices, colour) => addChoice(choices, 'Own', colour.hex, plainColour(colour));
 
 /** A new effect starts as a wave of the group's first two colours (not Off), one round every 4 beats. */
 function newEffectLayer(choices) {
@@ -2399,6 +2414,7 @@ function openEffectEditor(preset) {
   $('feSave').textContent = preset ? 'Save' : 'Add';
   $('feDelete').hidden = $('feCopy').hidden = $('feUsed').hidden = !preset;
   $('fxEdit').hidden = false;
+  closeOwnStrips();
   drawEffectEditor();
   startEffectStrip(picker.group);
   renderEffectEditor();
@@ -2408,6 +2424,7 @@ function openEffectEditor(preset) {
 
 function closeEffectEditor() {
   effectEdit = null;
+  closeOwnStrips();
   stopEffectStrip();
   $('feName').blur();
   $('fxEdit').hidden = true;
@@ -2435,24 +2452,82 @@ function drawEffectEditor() {
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
+  const one = ONE_COLOUR.has(effect.effect);
+  $('feColLab').textContent = one ? 'Colour' : 'Colours';
+  $('feColNote').textContent = one ? '· tap to choose' : '· tap to add or remove, 1 to 6, in the order they play';
   const order = effect.colours.map(colourKey);
   const box = $('feColours');
   box.replaceChildren();
+  box.setAttribute('role', one ? 'radiogroup' : 'group');
+  box.setAttribute('aria-label', one ? 'Colour' : 'Colours');
   for (const c of choices) {
     const at = order.indexOf(c.key);
-    const b = el('button', 'fecol');
-    b.type = 'button';
-    b.setAttribute('role', 'checkbox');
-    b.setAttribute('aria-checked', String(at >= 0));
-    const sw = el('i');
-    sw.style.background = shown(c.swatch) ?? NEUTRAL;
-    b.append(sw, el('span', null, c.name));
-    if (at >= 0) b.append(el('b', 'fenum', String(at + 1)));
-    b.classList.toggle('on', at >= 0);
+    const b = colourChip(c, at >= 0, one ? 'radio' : 'checkbox');
+    if (at >= 0 && !one) b.append(el('b', 'fenum', String(at + 1)));
     b.addEventListener('click', () => toggleEffectColour(c));
     box.append(b);
   }
+  box.append(ownChip('feOwn', 'Pick an own colour for the effect'));
+
+  // The base: None, or one of the same colours, at its brightness.
+  const baseKey = effect.base ? colourKey(effect.base.colour) : null;
+  const bases = $('feBase');
+  bases.replaceChildren();
+  const none = colourChip({ name: 'None', swatch: null }, baseKey === null, 'radio');
+  none.addEventListener('click', () => setEffectBase(null));
+  bases.append(none);
+  for (const c of choices) {
+    const b = colourChip(c, c.key === baseKey, 'radio');
+    b.addEventListener('click', () => setEffectBase(c.colour));
+    bases.append(b);
+  }
+  bases.append(ownChip('feBaseOwn', 'Pick an own colour for the base'));
+  $('feBaseRow').hidden = !effect.base;
+  if (effect.base && !baseLevel.dragging) showLevel(baseLevel, effect.base.level);
   effectEditSettings.show(effect, shownState()?.tempo ?? 120);
+}
+
+/** One colour to choose in the editor: its swatch and name, on when chosen. */
+function colourChip(c, on, role) {
+  const b = el('button', 'fecol');
+  b.type = 'button';
+  b.setAttribute('role', role);
+  b.setAttribute('aria-checked', String(on));
+  const sw = el('i');
+  sw.style.background = c.swatch ? shown(c.swatch) ?? NEUTRAL : 'transparent';
+  b.append(sw, el('span', null, c.name));
+  b.classList.toggle('on', on);
+  return b;
+}
+
+/** ＋ Own colour: opens (or closes) the colour strip under its row. */
+function ownChip(stripId, label) {
+  const open = !$(stripId).hidden;
+  const b = el('button', 'fecol add', '＋ Own colour');
+  b.type = 'button';
+  b.setAttribute('aria-label', label);
+  b.setAttribute('aria-expanded', String(open));
+  b.classList.toggle('open', open);
+  b.addEventListener('click', () => {
+    closeOwnStrips();
+    if (!open) openOwnStrip(stripId);
+    drawEffectEditor();
+  });
+  return b;
+}
+
+/** Which colours the own colour strips hold: hues, or warm to cool for a white-only group. */
+const ownWhiteOnly = () => (pickerRow() ? pickerRow().group.whiteOnly : null);
+
+function openOwnStrip(id) {
+  const strip = $(id);
+  strip.className = `strip2 ${ownWhiteOnly() ? 'cct' : 'hue'} fe-own`;
+  strip.hidden = false;
+  $(`${id}H`).hidden = true;
+}
+
+function closeOwnStrips() {
+  for (const id of ['feOwn', 'feBaseOwn']) $(id).hidden = true;
 }
 
 function setEffectEdit(next) {
@@ -2463,9 +2538,16 @@ function setEffectEdit(next) {
   effectStripSoon();
 }
 
-/** A tap on a colour adds it at the end of the order, or takes it out. An effect has one to six. */
+/**
+ * A tap on a colour adds it at the end of the order, or takes it out. An effect has one to six.
+ * Yo-yo and meteor have one: a tap picks it instead.
+ */
 function toggleEffectColour(choice) {
   const { effect } = effectEdit;
+  if (ONE_COLOUR.has(effect.effect)) {
+    if (colourKey(effect.colours[0]) !== choice.key) setEffectEdit({ ...effect, colours: [{ ...choice.colour }] });
+    return;
+  }
   const at = effect.colours.map(colourKey).indexOf(choice.key);
   if (at >= 0) {
     if (effect.colours.length === 1) return toast('An effect needs at least one colour', true);
@@ -2482,7 +2564,10 @@ for (const [kind, text] of EFFECT_NAMES) {
   b.dataset.kind = kind;
   b.setAttribute('role', 'radio');
   b.addEventListener('click', () => {
-    if (effectEdit && effectEdit.effect.effect !== kind) setEffectEdit({ ...effectEdit.effect, effect: kind });
+    if (!effectEdit || effectEdit.effect.effect === kind) return;
+    const { colours } = effectEdit.effect;
+    // Yo-yo and meteor run in one colour: they keep the first.
+    setEffectEdit({ ...effectEdit.effect, effect: kind, colours: ONE_COLOUR.has(kind) ? colours.slice(0, 1) : colours });
   });
   $('feKind').append(b);
 }
@@ -2496,6 +2581,96 @@ const effectEditSettings = effectControls($('feSet'), (effect, how) => {
   if (how === 'move' || how === 'end') effectStripDrag(how);
   else effectStripSoon();
 });
+
+/** The base colour: a colour (at the brightness it had, or half for a new base), or none. */
+function setEffectBase(colour) {
+  const { effect } = effectEdit;
+  if (!colour) {
+    if (!effect.base) return;
+    const { base, ...rest } = effect;
+    setEffectEdit(rest);
+    return;
+  }
+  if (effect.base && colourKey(effect.base.colour) === colourKey(colour)) return;
+  setEffectEdit({ ...effect, base: { colour: plainColour(colour), level: effect.base?.level ?? 0.5 } });
+}
+
+/**
+ * The own colour strips. A touch adds an own colour at once (to the effect's colours, or as its
+ * base); it follows the finger, and the strip closes when the finger lifts. Own colours join the
+ * effect only, never the group's list.
+ */
+{
+  // Where the colour being picked goes: its place in the colours (the end, or the only one), or the base.
+  let place = null;
+  // The own colour this pick added to the choices, replaced as the finger moves.
+  let made = null;
+  const own = (stripId, put) => attachStrip($(stripId), $(`${stripId}H`), ownWhiteOnly, (hex, last) => {
+    if (!effectEdit || place === null) return;
+    const { choices } = effectEdit;
+    if (made && choices.includes(made)) choices.splice(choices.indexOf(made), 1);
+    const count = choices.length;
+    const choice = addOwnChoice(choices, { hex });
+    made = choices.length > count ? choice : null;
+    put(choice.colour, place);
+    disarmDelete();
+    if (last) {
+      place = null;
+      closeOwnStrips();
+    }
+    drawEffectEditor();
+    effectStripDrag(last ? 'end' : 'move');
+  }, () => {
+    place = null;
+    made = null;
+    if (!effectEdit) return;
+    const { effect } = effectEdit;
+    const at = ONE_COLOUR.has(effect.effect) ? 0 : effect.colours.length;
+    if (stripId === 'feOwn' && at >= 6) return toast('An effect has at most six colours', true);
+    place = at;
+  });
+  own('feOwn', (colour, at) => {
+    const colours = [...effectEdit.effect.colours];
+    colours[at] = { ...colour };
+    effectEdit.effect = { ...effectEdit.effect, colours };
+  });
+  own('feBaseOwn', (colour) => {
+    effectEdit.effect = { ...effectEdit.effect, base: { colour: { ...colour }, level: effectEdit.effect.base?.level ?? 0.5 } };
+  });
+}
+
+// Base brightness: moves relative to where the finger starts, like Size. Only the edited effect changes; Save keeps it.
+const baseLevel = { dim: $('feBaseLevel'), slab: $('feBaseLevelSlab'), pct: $('feBaseLevelPct'), value: 0.5, dragging: false };
+{
+  let startX = 0, startV = 0;
+  const dim = baseLevel.dim;
+  dim.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    if (!effectEdit?.effect.base) return;
+    baseLevel.dragging = true;
+    try { dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    dim.classList.add('ds-dragging');
+    startX = ev.clientX;
+    startV = baseLevel.value;
+  });
+  dim.addEventListener('pointermove', (ev) => {
+    if (!baseLevel.dragging || !effectEdit?.effect.base) return;
+    showLevel(baseLevel, startV + (ev.clientX - startX) / dim.clientWidth);
+    const level = Math.round(baseLevel.value * 100) / 100;
+    if (level === effectEdit.effect.base.level) return;
+    effectEdit.effect = { ...effectEdit.effect, base: { ...effectEdit.effect.base, level } };
+    disarmDelete();
+    effectStripDrag('move');
+  });
+  const end = () => {
+    if (!baseLevel.dragging) return;
+    baseLevel.dragging = false;
+    dim.classList.remove('ds-dragging');
+    if (effectEdit) effectStripDrag('end');
+  };
+  dim.addEventListener('pointerup', end);
+  dim.addEventListener('pointercancel', end);
+}
 
 $('feCancel').addEventListener('click', () => closeEditor());
 $('feName').addEventListener('keydown', (ev) => {

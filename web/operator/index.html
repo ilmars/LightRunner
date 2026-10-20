@@ -205,8 +205,20 @@
             <!-- The effect as it is being edited, moving along the group's lights (drawn from the server's engine; nothing goes to the lights). -->
             <canvas id="feStrip" class="fe-strip" role="img" aria-label="How the effect moves along the group"></canvas>
             <div id="feKind" class="ds-seg fe-kind" role="radiogroup" aria-label="Kind of effect"></div>
-            <p class="lab2">Colours <span class="lab-note">· tap to add or remove, 1 to 6, in the order they play</span></p>
+            <p class="lab2"><span id="feColLab">Colours</span> <span id="feColNote" class="lab-note">· tap to add or remove, 1 to 6, in the order they play</span></p>
             <div id="feColours" class="fe-colours"></div>
+            <!-- ＋ Own colour opens this: a colour picked here joins the effect's colours (not the group's list). -->
+            <div id="feOwn" class="strip2 hue fe-own" aria-label="Pick an own colour" hidden><span id="feOwnH" class="strip-handle" hidden></span></div>
+            <p class="lab2">Base <span class="lab-note">· a colour under the effect, where it is dark</span></p>
+            <div id="feBase" class="fe-colours" role="radiogroup" aria-label="Base colour"></div>
+            <div id="feBaseOwn" class="strip2 hue fe-own" aria-label="Pick an own colour for the base" hidden><span id="feBaseOwnH" class="strip-handle" hidden></span></div>
+            <div id="feBaseRow" class="fxrow fe-base-row" hidden>
+              <span class="fxitem fxsize">
+                <span class="lab2">Base brightness</span>
+                <div id="feBaseLevel" class="ds-fill" role="slider" aria-label="Base brightness" aria-valuemin="0" aria-valuemax="100"><span id="feBaseLevelSlab" class="ds-fill-slab"></span></div>
+                <span id="feBaseLevelPct" class="pct"></span>
+              </span>
+            </div>
             <div id="feSet" class="fxset" aria-label="Effect settings"></div>
             <p id="feUsed" class="pe-used"></p>
             <div class="padd-btns">
