@@ -2609,7 +2609,7 @@ function openEffectEditor(preset) {
 
 function closeEffectEditor() {
   effectEdit = null;
-  endReorder();
+  effectMover.end();
   closeOwnStrips();
   stopEffectStrip();
   $('feName').blur();
@@ -2651,10 +2651,10 @@ function drawEffectEditor() {
     const b = colourChip(c, at >= 0, one ? 'radio' : 'checkbox');
     if (at >= 0 && !one) {
       b.append(el('b', 'fenum', String(at + 1)));
-      holdToReorder(b, at);
+      effectMover.wire(b, at);
     }
     // The click a drag ends with is not a tap (also when it reaches a chip the drop has already replaced).
-    b.addEventListener('click', () => { if (performance.now() >= reorder.quietUntil) toggleEffectColour(c); });
+    b.addEventListener('click', () => { if (!effectMover.quiet()) toggleEffectColour(c); });
     box.append(b);
   }
   // Full only once a pick has ended: the strip must stay under the finger while it picks the sixth colour.
@@ -2679,115 +2679,146 @@ function drawEffectEditor() {
   effectEditSettings.show(effect, shownState()?.tempo ?? 120);
 }
 
-// ---- Changing the order of an effect's colours: hold a chosen colour, then drag it onto another ----
+// ---- Hold and drag: hold a tile, then drop it on another to give it that place (effect colours, quick looks) ----
 
-/** How long a finger (or the mouse) holds a chosen colour before it lifts, in ms. */
+/** How long a finger (or the mouse) holds a tile before it lifts, in ms. */
 const REORDER_HOLD = 300;
 /** Moving further than this (px) before it lifts is a swipe (the panel scrolls), not a hold. */
 const REORDER_SLOP = 8;
-/** The hold that is under way: which colour (its place in the order), where the pointer is, and what it is over. */
-const reorder = { pointer: null, timer: 0, from: -1, over: -1, x: 0, y: 0, startX: 0, startY: 0, lifted: false, ghost: null, quietUntil: 0, effect: null };
 
-/** A chosen colour, at place `at` in the order, can be held and dragged onto another to take its number. */
-function holdToReorder(b, at) {
-  b.dataset.at = String(at);
-  b.classList.add('movable');
-  if (reorder.lifted && reorder.from === at) b.classList.add('lifted');
-  b.addEventListener('pointerdown', (ev) => {
-    if (ev.button !== 0 || !effectEdit) return;
-    endReorder();
-    reorder.pointer = ev.pointerId;
-    reorder.from = at;
-    // A drop applies only to the effect it was held on: any other change in between ends the hold.
-    reorder.effect = effectEdit.effect;
-    reorder.x = reorder.startX = ev.clientX;
-    reorder.y = reorder.startY = ev.clientY;
-    reorder.timer = setTimeout(liftColour, REORDER_HOLD);
-  });
-  // A long press on a touch screen must not open the page's own menu.
-  b.addEventListener('contextmenu', (ev) => { if (reorder.pointer !== null) ev.preventDefault(); });
-}
+/**
+ * One hold-and-drag over the tiles of `container`. Each tile is wired with `mover.wire(tile, at)`, `at` being its place;
+ * `tileSelector` matches the wired tiles. A hold of REORDER_HOLD lifts the tile (its place dims), a quiet copy
+ * (`ghostClass`) follows the pointer, and the tile under it is outlined. Letting go over another tile calls
+ * `onDrop(from, over, token)`. A touch that moves further than REORDER_SLOP before the lift is a swipe, not a hold.
+ *
+ * `state()` says whether moving is allowed now: it returns a token (anything truthy) or a falsy value. The token
+ * is what `state()` gave when the hold began, so `onDrop` can tell whether what was held is still there.
+ * `mover.end()` ends a hold (call it when the tiles are replaced); `mover.quiet()` is true for a moment after a drop,
+ * so the click that ends a drag is not taken for a tap.
+ */
+function holdToMove({ container, tileSelector, ghostClass, state, onDrop }) {
+  const m = { pointer: null, timer: 0, from: -1, over: -1, x: 0, y: 0, startX: 0, startY: 0, lifted: false, ghost: null, quietUntil: 0, token: null };
+  const tiles = () => container.querySelectorAll(tileSelector);
 
-function liftColour() {
-  reorder.timer = 0;
-  const chip = $('feColours').querySelector(`.fecol[data-at="${reorder.from}"]`);
-  if (!effectEdit || !chip) return endReorder();
-  reorder.lifted = true;
-  chip.classList.add('lifted');
-  // A quiet copy follows the finger.
-  const r = chip.getBoundingClientRect();
-  const ghost = chip.cloneNode(true);
-  ghost.className = 'fecol on fe-ghost';
-  ghost.removeAttribute('data-at');
-  ghost.setAttribute('aria-hidden', 'true');
-  ghost.style.width = `${r.width}px`;
-  ghost.style.height = `${r.height}px`;
-  ghost.dataset.dx = String(reorder.startX - r.left);
-  ghost.dataset.dy = String(reorder.startY - r.top);
-  document.body.append(ghost);
-  reorder.ghost = ghost;
-  followReorder();
-}
-
-/** Moves the copy to the pointer and marks the chosen colour under it (the only places it can go). */
-function followReorder() {
-  const { ghost } = reorder;
-  if (!ghost) return;
-  ghost.style.left = `${reorder.x - Number(ghost.dataset.dx)}px`;
-  // A little above the finger, so the outline of the colour under it still shows.
-  ghost.style.top = `${reorder.y - Number(ghost.dataset.dy) - 10}px`;
-  const under = document.elementFromPoint(reorder.x, reorder.y)?.closest('#feColours .fecol.movable');
-  reorder.over = under ? Number(under.dataset.at) : -1;
-  for (const b of $('feColours').querySelectorAll('.fecol.movable')) {
-    b.classList.toggle('drop', Number(b.dataset.at) === reorder.over && reorder.over !== reorder.from);
+  function end() {
+    clearTimeout(m.timer);
+    m.timer = 0;
+    m.pointer = null;
+    m.lifted = false;
+    m.token = null;
+    m.from = m.over = -1;
+    m.ghost?.remove();
+    m.ghost = null;
+    for (const b of container.querySelectorAll('.lifted, .drop')) b.classList.remove('lifted', 'drop');
   }
+
+  function lift() {
+    m.timer = 0;
+    const tile = container.querySelector(`${tileSelector}[data-at="${m.from}"]`);
+    if (!state() || !tile) return end();
+    m.lifted = true;
+    tile.classList.add('lifted');
+    // A quiet copy follows the finger.
+    const r = tile.getBoundingClientRect();
+    const ghost = tile.cloneNode(true);
+    ghost.className = ghostClass;
+    ghost.removeAttribute('data-at');
+    ghost.removeAttribute('data-id');
+    ghost.setAttribute('aria-hidden', 'true');
+    ghost.style.width = `${r.width}px`;
+    ghost.style.height = `${r.height}px`;
+    ghost.dataset.dx = String(m.startX - r.left);
+    ghost.dataset.dy = String(m.startY - r.top);
+    document.body.append(ghost);
+    m.ghost = ghost;
+    follow();
+  }
+
+  /** Moves the copy to the pointer and outlines the tile under it (the only places it can go). */
+  function follow() {
+    const { ghost } = m;
+    if (!ghost) return;
+    ghost.style.left = `${m.x - Number(ghost.dataset.dx)}px`;
+    // A little above the finger, so the outline of the tile under it still shows.
+    ghost.style.top = `${m.y - Number(ghost.dataset.dy) - 10}px`;
+    const under = document.elementFromPoint(m.x, m.y)?.closest(tileSelector);
+    m.over = under && container.contains(under) ? Number(under.dataset.at) : -1;
+    for (const b of tiles()) b.classList.toggle('drop', Number(b.dataset.at) === m.over && m.over !== m.from);
+  }
+
+  function drop() {
+    const { from, over, token } = m;
+    const moved = m.lifted;
+    end();
+    if (!moved) return;
+    // The click that follows the lift is not a tap on the tile.
+    m.quietUntil = performance.now() + 400;
+    if (over < 0 || over === from) return;
+    onDrop(from, over, token);
+  }
+
+  window.addEventListener('pointermove', (ev) => {
+    if (ev.pointerId !== m.pointer) return;
+    m.x = ev.clientX;
+    m.y = ev.clientY;
+    if (m.lifted) follow();
+    else if (Math.hypot(ev.clientX - m.startX, ev.clientY - m.startY) > REORDER_SLOP) end();
+  });
+  window.addEventListener('pointerup', (ev) => { if (ev.pointerId === m.pointer) drop(); });
+  window.addEventListener('pointercancel', (ev) => { if (ev.pointerId === m.pointer) end(); });
+  // While a tile is lifted the finger moves it, not the panel.
+  container.addEventListener('touchmove', (ev) => { if (m.lifted) ev.preventDefault(); }, { passive: false });
+  container.addEventListener('click', (ev) => {
+    if (performance.now() >= m.quietUntil) return;
+    ev.stopPropagation();
+    ev.preventDefault();
+  }, true);
+
+  return {
+    end,
+    quiet: () => performance.now() < m.quietUntil,
+    /** Makes `b`, the tile at place `at`, something to hold. */
+    wire(b, at) {
+      b.dataset.at = String(at);
+      b.classList.add('movable');
+      if (m.lifted && m.from === at) b.classList.add('lifted');
+      b.addEventListener('pointerdown', (ev) => {
+        if (ev.button !== 0) return;
+        const token = state();
+        if (!token) return;
+        end();
+        m.pointer = ev.pointerId;
+        m.from = at;
+        // A drop applies only to what it was held on: the caller compares the token.
+        m.token = token;
+        m.x = m.startX = ev.clientX;
+        m.y = m.startY = ev.clientY;
+        m.timer = setTimeout(lift, REORDER_HOLD);
+      });
+      // A long press on a touch screen must not open the page's own menu.
+      b.addEventListener('contextmenu', (ev) => { if (m.pointer !== null) ev.preventDefault(); });
+    },
+  };
 }
 
-/** Lets go: the held colour takes the number of the one it is dropped on (the others move up or down one). */
-function dropColour() {
-  const { from, over, effect } = reorder;
-  const moved = reorder.lifted;
-  endReorder();
-  if (!moved) return;
-  // The click that follows the lift is not a tap on the colour.
-  reorder.quietUntil = performance.now() + 400;
-  if (!effectEdit || effectEdit.effect !== effect || over === from) return;
-  const n = effect.colours.length;
-  if (ONE_COLOUR.has(effect.effect) || from < 0 || from >= n || over < 0 || over >= n) return;
-  const colours = [...effect.colours];
-  const [colour] = colours.splice(from, 1);
-  colours.splice(over, 0, colour);
-  setEffectEdit({ ...effectEdit.effect, colours });
-}
-
-function endReorder() {
-  clearTimeout(reorder.timer);
-  reorder.timer = 0;
-  reorder.pointer = null;
-  reorder.lifted = false;
-  reorder.effect = null;
-  reorder.from = reorder.over = -1;
-  reorder.ghost?.remove();
-  reorder.ghost = null;
-  for (const b of $('feColours').querySelectorAll('.lifted, .drop')) b.classList.remove('lifted', 'drop');
-}
-
-window.addEventListener('pointermove', (ev) => {
-  if (ev.pointerId !== reorder.pointer) return;
-  reorder.x = ev.clientX;
-  reorder.y = ev.clientY;
-  if (reorder.lifted) followReorder();
-  else if (Math.hypot(ev.clientX - reorder.startX, ev.clientY - reorder.startY) > REORDER_SLOP) endReorder();
+/** An effect's chosen colours, held and dragged onto another to take its number. */
+const effectMover = holdToMove({
+  container: $('feColours'),
+  tileSelector: '.fecol.movable',
+  ghostClass: 'fecol on fe-ghost',
+  // A drop applies only to the effect it was held on: any other change in between ends the hold.
+  state: () => (effectEdit ? effectEdit.effect : null),
+  onDrop(from, over, effect) {
+    if (!effectEdit || effectEdit.effect !== effect) return;
+    const n = effect.colours.length;
+    if (ONE_COLOUR.has(effect.effect) || from < 0 || from >= n || over < 0 || over >= n) return;
+    const colours = [...effect.colours];
+    const [colour] = colours.splice(from, 1);
+    colours.splice(over, 0, colour);
+    setEffectEdit({ ...effectEdit.effect, colours });
+  },
 });
-window.addEventListener('pointerup', (ev) => { if (ev.pointerId === reorder.pointer) dropColour(); });
-window.addEventListener('pointercancel', (ev) => { if (ev.pointerId === reorder.pointer) endReorder(); });
-// While a colour is lifted the finger moves it, not the panel.
-$('feColours').addEventListener('touchmove', (ev) => { if (reorder.lifted) ev.preventDefault(); }, { passive: false });
-$('feColours').addEventListener('click', (ev) => {
-  if (performance.now() >= reorder.quietUntil) return;
-  ev.stopPropagation();
-  ev.preventDefault();
-}, true);
 
 /** One colour to choose in the editor: its swatch and name, on when chosen. */
 function colourChip(c, on, role) {
@@ -2837,7 +2868,7 @@ function closeOwnStrips() {
 function setEffectEdit(next) {
   if (!effectEdit) return;
   // A colour held for a new place belongs to the effect as it was: a change ends the hold.
-  endReorder();
+  effectMover.end();
   effectEdit.effect = next;
   disarmDelete();
   drawEffectEditor();
@@ -3238,7 +3269,7 @@ for (const t of document.querySelectorAll('[data-qt]')) t.addEventListener('clic
 
 function buildQuick() {
   // A rebuild (another tablet changed the show) ends a hold that is under way.
-  endQuickDrag();
+  quickMover.end();
   const grid = $('qGrid');
   grid.replaceChildren();
   const mine = (layout?.quickLooks ?? []).filter((q) => q.tab === quickTab);
@@ -3267,7 +3298,7 @@ function buildQuick() {
       else if (!preview.on) sendStage({ type: 'quickLook', id: q.id });
       else if (preview.item) send({ type: 'itemQuickLook', item: preview.item, look: q.id });
     });
-    if (quickEditing) wireQuickDrag(b, q.id, at);
+    if (quickEditing) quickMover.wire(b, at);
     grid.append(b);
   });
   if (!mine.length) grid.append(el('span', 'qnone', 'None yet.'));
@@ -3291,108 +3322,24 @@ $('qEditBtn').addEventListener('click', () => setQuickEditing(!quickEditing));
 
 // ---- Changing the place of a quick look: hold it, then drag it onto another on the same tab ----
 
-/** The hold that is under way: which quick look (and its place on the tab), where the pointer is and what it is over. */
-const qdrag = { pointer: null, timer: 0, id: null, from: -1, over: -1, x: 0, y: 0, startX: 0, startY: 0, lifted: false, ghost: null, quietUntil: 0 };
-
 /** Edit on: holding a quick look lifts it; letting go over another one gives it that place. A tap still opens it. */
-function wireQuickDrag(b, id, at) {
-  b.addEventListener('pointerdown', (ev) => {
-    if (ev.button !== 0 || !quickEditing) return;
-    endQuickDrag();
-    qdrag.pointer = ev.pointerId;
-    qdrag.id = id;
-    qdrag.from = at;
-    qdrag.x = qdrag.startX = ev.clientX;
-    qdrag.y = qdrag.startY = ev.clientY;
-    qdrag.timer = setTimeout(liftQuick, REORDER_HOLD);
-  });
-  // A long press on a touch screen must not open the page's own menu.
-  b.addEventListener('contextmenu', (ev) => { if (qdrag.pointer !== null) ev.preventDefault(); });
-}
-
-function liftQuick() {
-  qdrag.timer = 0;
-  const tile = $('qGrid').querySelector(`.ql[data-at="${qdrag.from}"]`);
-  if (!quickEditing || !tile) return endQuickDrag();
-  qdrag.lifted = true;
-  tile.classList.add('lifted');
-  // A quiet copy follows the finger.
-  const r = tile.getBoundingClientRect();
-  const ghost = tile.cloneNode(true);
-  ghost.className = 'ql ql-ghost';
-  ghost.removeAttribute('data-at');
-  ghost.removeAttribute('data-id');
-  ghost.setAttribute('aria-hidden', 'true');
-  ghost.style.width = `${r.width}px`;
-  ghost.style.height = `${r.height}px`;
-  ghost.dataset.dx = String(qdrag.startX - r.left);
-  ghost.dataset.dy = String(qdrag.startY - r.top);
-  document.body.append(ghost);
-  qdrag.ghost = ghost;
-  followQuick();
-}
-
-/** Moves the copy to the pointer and marks the quick look under it (the places it can go). */
-function followQuick() {
-  const { ghost } = qdrag;
-  if (!ghost) return;
-  ghost.style.left = `${qdrag.x - Number(ghost.dataset.dx)}px`;
-  // A little above the finger, so the tile under it still shows.
-  ghost.style.top = `${qdrag.y - Number(ghost.dataset.dy) - 10}px`;
-  const under = document.elementFromPoint(qdrag.x, qdrag.y)?.closest('#qGrid .ql[data-at]');
-  qdrag.over = under ? Number(under.dataset.at) : -1;
-  for (const b of $('qGrid').querySelectorAll('.ql[data-at]')) {
-    b.classList.toggle('drop', Number(b.dataset.at) === qdrag.over && qdrag.over !== qdrag.from);
-  }
-}
-
-/** Lets go: one moveQuickLook goes out when it is over another quick look of the tab. */
-function dropQuick() {
-  const { id, from, over } = qdrag;
-  const moved = qdrag.lifted;
-  endQuickDrag();
-  if (!moved) return;
-  // The click that follows the lift is not a tap on the quick look.
-  qdrag.quietUntil = performance.now() + 400;
-  if (over < 0 || over === from) return;
-  send({ type: 'moveQuickLook', look: id, to: over });
-}
-
-function endQuickDrag() {
-  clearTimeout(qdrag.timer);
-  qdrag.timer = 0;
-  qdrag.pointer = null;
-  qdrag.lifted = false;
-  qdrag.id = null;
-  qdrag.from = qdrag.over = -1;
-  qdrag.ghost?.remove();
-  qdrag.ghost = null;
-  for (const b of $('qGrid').querySelectorAll('.lifted, .drop')) b.classList.remove('lifted', 'drop');
-}
-
-window.addEventListener('pointermove', (ev) => {
-  if (ev.pointerId !== qdrag.pointer) return;
-  qdrag.x = ev.clientX;
-  qdrag.y = ev.clientY;
-  if (qdrag.lifted) followQuick();
-  // Moving before it lifts is a swipe (the grid scrolls), not a hold.
-  else if (Math.hypot(ev.clientX - qdrag.startX, ev.clientY - qdrag.startY) > REORDER_SLOP) endQuickDrag();
+const quickMover = holdToMove({
+  container: $('qGrid'),
+  tileSelector: '.ql.movable',
+  ghostClass: 'ql ql-ghost',
+  state: () => (quickEditing ? true : null),
+  onDrop(from, over) {
+    const look = [...$('qGrid').querySelectorAll('.ql.movable')].find((b) => Number(b.dataset.at) === from)?.dataset.id;
+    if (look) send({ type: 'moveQuickLook', look, to: over });
+  },
 });
-window.addEventListener('pointerup', (ev) => { if (ev.pointerId === qdrag.pointer) dropQuick(); });
-window.addEventListener('pointercancel', (ev) => { if (ev.pointerId === qdrag.pointer) endQuickDrag(); });
-// While a quick look is lifted the finger moves it, not the grid.
-$('qGrid').addEventListener('touchmove', (ev) => { if (qdrag.lifted) ev.preventDefault(); }, { passive: false });
-$('qGrid').addEventListener('click', (ev) => {
-  if (performance.now() >= qdrag.quietUntil) return;
-  ev.stopPropagation();
-  ev.preventDefault();
-}, true);
 
 // ---- Quick look sheet: new from the stage, or Edit (covers the details panel, like the colour picker) ----
 
 // `look`: the id of the quick look being edited, or null for a new one. `orig`: what it was when the sheet opened.
-// `stage`: the Update from the stage switch. `armed`: the Delete button was tapped once.
-const qs = { open: false, tab: 'plain', left: new Set(), saved: 'plain', look: null, orig: null, stage: false, armed: 0 };
+// `stage`: the Update from the stage switch; `stageAuto`: the page turned it on (for a new group), not the user.
+// `armed`: the Delete button was tapped once.
+const qs = { open: false, tab: 'plain', left: new Set(), saved: 'plain', look: null, orig: null, stage: false, stageAuto: false, armed: 0 };
 
 /** The layout's quick look being edited, or null. */
 const editedQuick = () => (qs.look ? layout?.quickLooks.find((q) => q.id === qs.look) ?? null : null);
@@ -3406,6 +3353,7 @@ function openSheet(q) {
   qs.tab = q ? q.tab : quickTab;
   qs.left = new Set(q ? lightGroups().map((g) => g.id).filter((id) => !q.groups.includes(id)) : []);
   qs.stage = false;
+  qs.stageAuto = false;
   disarmQuickDelete();
   pendingSave = null;
   $('qsName').value = q ? q.name : '';
@@ -3435,12 +3383,44 @@ function markEditedQuick() {
   for (const b of $('qGrid').querySelectorAll('.ql[data-id]')) b.classList.toggle('editing', quickEditing && qs.open && qs.look === b.dataset.id);
 }
 
-/** The layout changed: a quick look another tablet deleted closes its sheet. */
+/**
+ * The layout changed. A quick look that is gone closes its sheet. One that changed elsewhere (another tablet, Undo)
+ * gives the sheet its new starting values for the fields the user hasn't touched, so Save never puts an old value back.
+ */
 function syncQuickSheet() {
-  if (!qs.open || !qs.look || editedQuick()) return;
-  const own = pendingSave !== null;
-  closeSheet();
-  if (!own) toast('That quick look was removed.');
+  if (!qs.open || !qs.look) return;
+  const q = editedQuick();
+  if (!q) {
+    const own = pendingSave !== null;
+    const deleting = own && qs.saved === null;
+    const tab = qs.saved;
+    closeSheet();
+    if (deleting) toast('Quick look deleted', true);
+    // Our own Save that gave the quick look a copy of its look: the sheet is done, and the tab follows.
+    else if (own && tab) showQuickTab(tab);
+    else if (!own) toast('That quick look was removed.');
+    return;
+  }
+  const o = qs.orig;
+  const sameGroups = (a, b) => a.length === b.length && a.every((id) => b.includes(id));
+  if (q.name === o.name && q.tab === o.tab && sameGroups(q.groups, o.groups)) return;
+  const lights = lightGroups().map((g) => g.id);
+  const nameTouched = $('qsName').value.trim() !== o.name;
+  const tabTouched = qs.tab !== o.tab;
+  const groupsTouched = !sameGroups(lights.filter((id) => qs.left.has(id)), lights.filter((id) => !o.groups.includes(id)));
+  if (!nameTouched) $('qsName').value = q.name;
+  if (!tabTouched) qs.tab = q.tab;
+  if (!groupsTouched) qs.left = new Set(lights.filter((id) => !q.groups.includes(id)));
+  qs.orig = { name: q.name, tab: q.tab, groups: [...q.groups] };
+  dropAutoStage();
+}
+
+/** Update from the stage goes off again when the page turned it on for a new group and no new group is left. */
+function dropAutoStage() {
+  if (qs.stageAuto && !quickGroupsNew().length) {
+    qs.stage = false;
+    qs.stageAuto = false;
+  }
 }
 
 /** The groups the quick look being edited gives that the sheet's group tiles say: it has them, or the stage does. */
@@ -3464,10 +3444,14 @@ function buildSheetGroups() {
       if (qs.left.has(group.id)) {
         qs.left.delete(group.id);
         // A group the quick look doesn't set has no value yet: it takes the stage's, so Update from the stage goes on.
-        if (qs.orig && !qs.orig.groups.includes(group.id)) qs.stage = true;
+        if (qs.orig && !qs.orig.groups.includes(group.id) && !qs.stage) {
+          qs.stage = true;
+          qs.stageAuto = true;
+        }
       } else {
         qs.left.add(group.id);
       }
+      dropAutoStage();
       renderSheet();
     });
     root.append(b);
@@ -3527,6 +3511,8 @@ for (const b of $('qsTab').children) {
 }
 $('qsStage').addEventListener('change', () => {
   qs.stage = $('qsStage').checked;
+  // The user's own choice from here on, whatever the groups do.
+  qs.stageAuto = false;
   renderSheet();
 });
 $('qsCancel').addEventListener('click', closeSheet);
@@ -3545,7 +3531,7 @@ function disarmQuickDelete() {
   $('qsDelete').textContent = 'Delete';
 }
 
-// Delete asks twice, as the running order's does: the first tap turns the button red ("Delete?"), the second deletes.
+// Delete asks twice, as the colour editor's does: the first tap turns the button red ("Delete?"), the second deletes.
 // A tap anywhere else (or a few seconds) takes the first one back.
 $('qsDelete').addEventListener('click', () => {
   if (!qs.look || pendingSave !== null || !layout) return;
@@ -3602,8 +3588,12 @@ $('qsSave').addEventListener('click', () => {
 function finishSaveQuick() {
   const tab = qs.saved;
   closeSheet();
-  if (tab) showQuickTab(tab);
-  else buildQuick();
+  if (tab) {
+    showQuickTab(tab);
+  } else {
+    buildQuick();
+    toast('Quick look deleted', true);
+  }
 }
 
 // ---- Flash: hold a button and the group goes to full white ----
