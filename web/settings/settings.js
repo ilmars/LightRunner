@@ -371,6 +371,7 @@ $('refreshPorts').addEventListener('click', async () => {
 
 // ---- Universes with their own output ----
 
+const MAX_UNIVERSE = 32767;
 const KINDS = [['artnet', 'Art-Net'], ['sacn', 'sACN (E1.31)'], ['enttec', 'ENTTEC USB']];
 
 /** Universes set to "One receiver" for sACN whose address isn't typed yet. */
@@ -392,21 +393,40 @@ function renderRoutes() {
   const s = draft;
   const counts = s.fixturesPerUniverse ?? {};
   const universes = [...new Set([...s.universes, ...s.routes.map((r) => r.universe)])].sort((a, b) => a - b);
-  // With one universe and no routes there is nothing to choose: the output above is it.
-  $('routes').hidden = universes.length < 2 && !s.routes.length;
   $('unsent').textContent = (saved?.unsent ?? []).map((x) => `Universe ${x.universe} is not sent: ${x.reason}.`).join(' ');
   const list = $('routeList');
   list.replaceChildren(...universes.map((u) => routeRow(u, counts[u] ?? 0)));
 }
 
+/** The next universe number nobody uses: one past the highest in the patch or in a route. */
+function nextUniverse() {
+  const used = new Set([...draft.universes, ...draft.routes.map((r) => r.universe)]);
+  const next = Math.max(-1, ...used) + 1;
+  if (next <= MAX_UNIVERSE) return next;
+  for (let u = 0; u <= MAX_UNIVERSE; u++) if (!used.has(u)) return u;
+  return null;
+}
+
+$('addUniverse').addEventListener('click', () => {
+  const u = nextUniverse();
+  if (u === null) return toast(`All universes up to ${MAX_UNIVERSE} are in use.`, true);
+  edit((s) => { s.routes = [...s.routes, { universe: u, output: newRouteOutput() }].sort((a, b) => a.universe - b.universe); });
+  const row = document.querySelector(`#routeList [data-universe="${u}"]`);
+  row?.scrollIntoView({ block: 'nearest' });
+  row?.querySelector('input[type=text]')?.focus();
+});
+
 function routeRow(u, fixtures) {
   const route = routeFor(u);
   const row = el('div', 'node route');
+  row.dataset.universe = String(u);
   const head = el('div', 'route-head');
   const meta = el('div', 'meta');
   meta.append(el('b', null, `Universe ${u}`));
-  meta.append(el('span', null, `${fixtures ? `${fixtures} fixture${fixtures === 1 ? '' : 's'}` : 'No fixtures patched'} · ${route ? 'Own output' : 'Default output'}`));
-  const toggle = el('button', 'ghost small', route ? 'Use default' : 'Use its own output');
+  meta.append(el('span', null, `${fixtures ? `${fixtures} fixture${fixtures === 1 ? '' : 's'}` : 'No fixtures patched yet'} · ${route ? 'Own output' : 'Default output'}`));
+  // A universe nothing is patched on has no output to fall back to: it is only listed because it was added, so it can go.
+  const removable = route && !fixtures;
+  const toggle = el('button', 'ghost small', removable ? 'Remove' : route ? 'Use default' : 'Use its own output');
   toggle.type = 'button';
   toggle.addEventListener('click', () => edit((s) => {
     if (route) s.routes = s.routes.filter((r) => r.universe !== u);
