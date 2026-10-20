@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Light Runner lets volunteers run the lights for a church service from a tablet, after a five-minute briefing. They tap a look (Walk-in, Worship, Sermon…) and the whole room fades smoothly to it. One small server on a computer at the church drives the lights; every tablet, laptop and (later) Stream Deck shows the same live state.
+Light Runner lets volunteers run the lights for a church service from a tablet, after a five-minute briefing. They tap a look (Walk-in, Worship, Sermon…) and the whole room fades smoothly to it. One small server on a computer at the church drives the lights; every tablet, laptop, Stream Deck and APC mini shows the same live state.
 
 It was built for one church's stage and is shared under the MIT license so other churches and small venues can use it too.
 
@@ -71,7 +71,7 @@ node tools/install-show.ts shows/my-show.json   # stop the server first
 
 Groups are named by fixture short names as they appear in Lightkey; fixtures you don't list get a group per model. Needs Python 3.
 
-## Remote control (Companion, Stream Deck)
+## Remote control (Stream Deck, OSC, APC mini)
 
 Light Runner answers simple HTTP requests from the local network, so Bitfocus Companion's Generic HTTP module can trigger it:
 
@@ -82,10 +82,17 @@ Light Runner answers simple HTTP requests from the local network, so Bitfocus Co
 | `POST /api/group/{group}/level/{0-100}` | Set a group's dimmer |
 | `POST /api/master/{0-100}` | Set the Master |
 | `POST /api/fade/{seconds}` or `/api/fade/auto` | Set the fade time |
+| `POST /api/item/{n}`, `/api/next` | Start item n of the running order (counting from 1), or the next one |
+| `POST /api/group/{n}/colour/{k}` | Group n (counting from 1) to its colour k |
+| `POST /api/flash/{n}/on` and `/off`, `/api/flash/all/on` and `/off` | Flash while held (put out by itself after 15 s) |
+| `POST /api/master/up`, `/api/master/down` | Master up or down one step |
 | `POST /api/back-to-look`, `/api/undo`, `/api/safe`, `/api/blackout` | What the buttons do |
 | `POST /api/group/{group}/manual`, `/api/group/{group}/release` | Manual colour (JSON body `{ "colour": "#ff0000", "intensity": 80 }`) and release |
 | `GET /api/state` | Live state: current look, each group's preset and level, fades, DMX status |
 | `GET /api/looks` | Looks and presets with names and colours, for building buttons |
+| `GET /api/companion` | What is on stage, what is next, Master and each group's colour and level, flat, for Companion to poll |
+
+The same actions are also available as OSC messages (Settings > OSC, port 8000) and from an Akai APC mini plugged into the computer. [docs/companion.md](docs/companion.md) has the exact addresses, how to set up a Stream Deck in Companion, and what the APC mini's pads, buttons and faders do.
 
 ## Configuration
 
