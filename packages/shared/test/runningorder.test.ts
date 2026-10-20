@@ -778,3 +778,40 @@ test('moveQuickLook sets the place within its tab and keeps the other tabs as th
   assert.equal(quickTabs(s).length, quickTabs(out).length);
   assert.deepEqual(checkReferences(out), []);
 });
+
+test('editQuickLook treats a field that is already so as no change', () => {
+  const s = quickShow();
+  assert.throws(() => editQuickLook(s, { look: 'walk-in', name: 'Walk-in', tab: 'colours' }), { message: 'nothing to change' });
+  assert.throws(() => editQuickLook(s, { look: 'walk-in', name: '  Walk-in ' }), { message: 'nothing to change' });
+  assert.throws(() => editQuickLook(s, { look: 'walk-in', groups: ['audience', 'back-wall', 'front-wash'] }), { message: 'nothing to change' });
+  // A real change next to an unchanged field is still one.
+  const out = editQuickLook(s, { look: 'walk-in', name: 'Walk-in', tab: 'plain' });
+  assert.deepEqual(out.operator.quickLooks.at(-1), { look: 'walk-in', tab: 'plain' });
+  // Update from the stage is always a change.
+  assert.doesNotThrow(() => editQuickLook(s, { look: 'walk-in', name: 'Walk-in', fromStage: true }, quickStage()));
+});
+
+test('editing a quick look whose look the running order also uses gives the quick look its own copy', () => {
+  const s = quickShow();
+  s.operator.runningOrder.push('walk-in');
+  const song = structuredClone(s.looks.find((l) => l.id === 'walk-in')!);
+  const renamed = editQuickLook(s, { look: 'walk-in', name: 'Welcome' });
+  assert.deepEqual(renamed.looks.find((l) => l.id === 'walk-in'), song, 'the song is untouched');
+  const own = renamed.operator.quickLooks.find((q) => q.look !== 'walk-in' && nameOf(renamed, q.look) === 'Welcome')!;
+  assert.equal(own.tab, 'colours');
+  assert.deepEqual(groupsOf(renamed, own.look), song.groups);
+  assert.equal(renamed.operator.quickLooks.length, s.operator.quickLooks.length);
+  assert.equal(renamed.operator.quickLooks.findIndex((q) => q === own || q.look === own.look), s.operator.quickLooks.findIndex((q) => q.look === 'walk-in'), 'it keeps its place');
+  assert.deepEqual(checkReferences(renamed), []);
+  // Groups and the stage change the copy too; a tab change needs no copy.
+  const left = editQuickLook(s, { look: 'walk-in', groups: ['front-wash'] });
+  assert.deepEqual(groupsOf(left, 'walk-in'), song.groups);
+  assert.ok(!left.operator.quickLooks.some((q) => q.look === 'walk-in'));
+  const tab = editQuickLook(s, { look: 'walk-in', tab: 'effects' });
+  assert.ok(tab.operator.quickLooks.some((q) => q.look === 'walk-in' && q.tab === 'effects'));
+  assert.equal(tab.looks.length, s.looks.length);
+  // Once it has its own look, further edits stay on that copy.
+  const again = editQuickLook(renamed, { look: own.look, name: 'Welcome again' });
+  assert.equal(again.looks.length, renamed.looks.length);
+  assert.equal(nameOf(again, own.look), 'Welcome again');
+});

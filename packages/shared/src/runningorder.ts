@@ -319,6 +319,7 @@ function quickLookIn(show: Show, id: string): QuickLook {
  * set yet needs `fromStage`, because there is no value to give it otherwise. With `fromStage`, the
  * entries of `groups` (the look's own groups when none are named) are replaced with the stage as it is going;
  * a group the stage has nothing for keeps its old entry (a new group needs something on the stage). Smoke groups never count, as in saveQuickLook.
+ * A field that is already so counts as absent; with nothing left to change it is refused. A look the running order uses too is copied first.
  */
 export function editQuickLook(
   show: Show,
@@ -327,7 +328,7 @@ export function editQuickLook(
 ): Show {
   const out = structuredClone(show);
   const quick = quickLookIn(out, input.look);
-  const target = lookIn(out, input.look);
+  let target = lookIn(out, input.look);
   if (input.name === undefined && input.tab === undefined && input.groups === undefined && !input.fromStage) throw new Error('nothing to change');
   const name = input.name === undefined ? undefined : cleanName(input.name);
   const isSmoke = (group: string) => out.groups.find((g) => g.id === group)?.kind === 'smoke';
@@ -335,10 +336,26 @@ export function editQuickLook(
   const had = target.groups.filter((e) => !isSmoke(e.group)).map((e) => e.group);
   const chosen = input.groups === undefined ? had : input.groups.filter((g) => !isSmoke(g));
   if (!chosen.length) throw new Error('pick at least one group');
+  // A field that is already so is not a change (a name or tab the same, the same groups), so no empty Undo step is made.
+  const tabChanged = input.tab !== undefined && input.tab !== quick.tab;
+  const nameChanged = name !== undefined && name !== target.name;
+  const groupsChanged = input.groups !== undefined
+    && !(chosen.length === target.groups.length && target.groups.every((e) => chosen.includes(e.group)));
+  if (!tabChanged && !nameChanged && !groupsChanged && !input.fromStage) throw new Error('nothing to change');
   const added = chosen.filter((g) => !had.includes(g));
   if (added.length && !input.fromStage) throw new Error('turn on Update from the stage to add a group');
   if (input.fromStage && !stage) throw new Error('the stage is needed to update from it');
 
+  // A look the running order also uses (old data, or a merge) would change the song too: the quick look takes its own copy first.
+  if ((nameChanged || groupsChanged || input.fromStage) && (out.operator.runningOrder.includes(target.id) || out.operator.safeLook === target.id)) {
+    const id = addLook(out, target.name, structuredClone(target.groups));
+    const copy = lookIn(out, id);
+    if (target.swatch !== undefined) copy.swatch = target.swatch;
+    if (target.section !== undefined) copy.section = target.section;
+    if (target.tempo !== undefined) copy.tempo = target.tempo;
+    quick.look = id;
+    target = copy;
+  }
   // What the look keeps: its own entries for the chosen groups, in their places.
   let entries = target.groups.filter((e) => chosen.includes(e.group));
   if (input.fromStage) {
@@ -351,10 +368,10 @@ export function editQuickLook(
     entries.push(...fresh.filter((f) => !entries.some((e) => e.group === f.group)));
   }
   if (input.groups !== undefined || input.fromStage) target.groups = entries;
-  if (name !== undefined) target.name = name;
-  if (input.tab !== undefined && input.tab !== quick.tab) {
+  if (nameChanged) target.name = name!;
+  if (tabChanged) {
     out.operator.quickLooks = out.operator.quickLooks.filter((q) => q !== quick);
-    out.operator.quickLooks.push({ ...quick, tab: input.tab });
+    out.operator.quickLooks.push({ ...quick, tab: input.tab! });
   }
   return out;
 }

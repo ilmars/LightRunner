@@ -1311,6 +1311,7 @@ test('Edit, move and delete a quick look reach the show and the layout, one Undo
   assert.equal(await t.send({ type: 'deleteQuickLook', look: 'nope' }), 'that is not a quick look');
   assert.equal(await t.send({ type: 'moveQuickLook', look: 'nope', to: 0 }), 'that is not a quick look');
   assert.equal(await t.send({ type: 'editQuickLook', look: a.id, name: '  ' }), 'a name is needed');
+  assert.equal(await t.send({ type: 'editQuickLook', look: a.id, name: 'Welcome', tab: 'effects' }), 'nothing to change');
   assert.equal(await t.send({ type: 'editQuickLook', look: a.id, groups: ['front-wash', 'pulpit'] }), 'turn on Update from the stage to add a group');
   assert.match((await t.send({ type: 'editQuickLook', look: a.id, tab: 'nope' }))!, /^invalid command/);
   assert.match((await t.send({ type: 'editQuickLook', look: a.id, groups: [] }))!, /^invalid command/);
