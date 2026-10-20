@@ -454,7 +454,9 @@ export class App {
     const usesStage = cmd.type === 'saveItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook';
     // Deleting a colour only looks at the stage to keep a lit colour; it is fine during Blackout.
     const stage = usesStage && draft ? draft.engine.runtime() : usesStage || cmd.type === 'deleteColour' ? await this.stage() : null;
-    if (usesStage && stage?.look === BLACKOUT) throw new Error('Blackout is on. Bring the lights back, then save.');
+    // A draft made during Blackout is still saved: the groups it lit keep their colours, the rest are stored as Off,
+    // which is what its picture shows.
+    if (usesStage && !draft && stage?.look === BLACKOUT) throw new Error('Blackout is on. Bring the lights back, then save.');
     // Nothing below waits until the show is replaced, so no other edit can slip in between.
     const before = this.show;
     let next: Show;

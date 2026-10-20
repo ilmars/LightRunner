@@ -335,3 +335,36 @@ test('a draft picks up the live stage clock, so an effect on stage looks the sam
   // its own clock is a good part of a wave off (about 28 levels on average here).
   assert.ok(diff / live.length < 8, `mean difference ${diff / live.length}`);
 }));
+
+test('Save in Blind works for a draft made during Blackout: lit groups keep their colours, the rest are Off', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const song = t.order()[1]!;
+  assert.equal(await t.send({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'blackout' }), null);
+  await waitFor(() => t.state()?.look === 'blackout', 2000, 'Blackout on stage');
+  const refused = 'Blackout is on. Bring the lights back, then save.';
+  assert.equal(await t.send({ type: 'saveItem', id: song }), refused, 'outside Blind, Save is still refused');
+
+  assert.equal(await t.send({ type: 'blindStart' }), null);
+  assert.equal(await t.send({ type: 'draft', cmd: { type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 } }), null);
+  await waitFor(() => t.draft()?.groups['back-wall'].preset === 'back-amber', 2000, 'the draft to run amber');
+  assert.equal(t.draft().look, 'blackout');
+
+  assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+  const show = savedShow(dir);
+  const look = show.looks.find((l) => l.id === song)!;
+  const nameOf = (id: string) => show.presets.find((p) => p.id === id)?.name;
+  assert.equal(look.groups.find((e) => e.group === 'back-wall')!.preset, 'back-amber');
+  for (const g of ['front-wash', 'audience', 'pulpit']) assert.equal(nameOf(look.groups.find((e) => e.group === g)!.preset), 'Off', g);
+
+  assert.equal(await t.send({ type: 'addSong', after: song }), null);
+  const added = await waitFor(() => t.order()[2] !== undefined && savedLook(dir, t.order()[2]!), 2000, 'the new song');
+  assert.equal(added.groups.find((e) => e.group === 'back-wall')!.preset, 'back-amber');
+  assert.equal(await t.send({ type: 'saveQuickLook', name: 'Amber wall', tab: 'plain', groups: ['back-wall'] }), null);
+  assert.equal(savedShow(dir).looks.find((l) => l.name === 'Amber wall')!.groups[0]!.preset, 'back-amber');
+
+  // The stage stays in Blackout.
+  await sleep(150);
+  assert.equal(t.state().look, 'blackout');
+}));
