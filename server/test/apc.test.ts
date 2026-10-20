@@ -9,6 +9,7 @@ import {
   Pickup, apcAllOff, apcIntro, apcLeds, apcModel, buttonIntent, faderAction, ledChanges, parseApc, pickApcPort, rgbSysex,
   type ApcLayout, type ApcState,
 } from '../src/apc.ts';
+import { ApcDriver } from '../src/apcdriver.ts';
 import { FakeMidi, loadMidi, type MidiPorts } from '../src/midi.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -345,6 +346,52 @@ test('without the MIDI add-on: one plain line in the log, and no ports', async (
   assert.deepEqual(lines, ["APC mini: MIDI support isn't installed"]);
 });
 
+// ---- The real ports' bookkeeping, with a stand-in for the add-on ----
+
+function fakeAddon(opts: { failOutput?: boolean } = {}) {
+  const made: { kind: string; open: boolean; destroyed: boolean }[] = [];
+  const port = (kind: string) => {
+    const state = { kind, open: false, destroyed: false };
+    made.push(state);
+    return {
+      getPortCount: () => 1,
+      getPortName: () => 'APC mini',
+      openPort() {
+        if (kind === 'out' && opts.failOutput) throw new Error('in use');
+        state.open = true;
+      },
+      closePort() { state.open = false; },
+      isPortOpen: () => state.open,
+      destroy() { state.destroyed = true; },
+      ignoreTypes() {},
+      on() {},
+      sendMessage() {},
+    };
+  };
+  return { made, mod: { Input: function () { return port('in'); }, Output: function () { return port('out'); } } };
+}
+
+test('the add-on port objects are destroyed when opening fails and when the port closes', async () => {
+  const failing = fakeAddon({ failOutput: true });
+  const ports = await loadMidi(() => {}, async () => failing.mod);
+  assert.ok(ports);
+  const lister = failing.made.length; // the one kept for listing stays
+  assert.throws(() => ports.open('APC mini'), /in use/);
+  const opened = failing.made.slice(lister);
+  assert.equal(opened.length, 2);
+  assert.ok(opened.every((p) => !p.open && p.destroyed), JSON.stringify(opened));
+
+  const working = fakeAddon();
+  const ok = (await loadMidi(() => {}, async () => working.mod))!;
+  const first = working.made.length;
+  const port = ok.open('APC mini');
+  const mine = working.made.slice(first);
+  assert.ok(mine.every((p) => p.open && !p.destroyed));
+  port.close();
+  port.close();
+  assert.ok(mine.every((p) => !p.open && p.destroyed), JSON.stringify(mine));
+});
+
 // ---- Through the app, with a simulated APC ----
 
 interface Rig {
@@ -354,13 +401,15 @@ interface Rig {
   layout: any;
 }
 
-async function withApc(fn: (rig: Rig) => Promise<void>, opts: { midi?: (log: (m: string) => void) => Promise<MidiPorts | null> } = {}) {
+async function withApc(fn: (rig: Rig) => Promise<void>, opts: { midi?: (log: (m: string) => void) => Promise<MidiPorts | null>; resendPolls?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'light-runner-'));
   const midi = new FakeMidi();
   const lines: string[] = [];
   const app = new App({
     port: 0, host: '127.0.0.1', dataDir: dir, seedPath, webDir: join(root, 'web'), output: { kind: 'none' },
     log: (m) => lines.push(m), midi: opts.midi ?? (async () => midi), apcPollMs: 20, apcHoldMs: 150,
+    // Far off, so tests that count LED messages see only what changed; the resend has its own test.
+    apcResendPolls: opts.resendPolls ?? 1e9,
   });
   try {
     await app.start();
@@ -544,6 +593,43 @@ test('unplugging releases a held Flash and turns the APC off; plugging in again 
   await waitFor(() => second.sent.length >= 80, 1000, 'the full LED set again');
   assert.equal(second.sent.length, 80);
   assert.deepEqual(await apcStatus(app), { midi: true, connected: true, model: 'mk1' });
+}));
+
+test('every few polls the whole LED set is sent again, for a device that was replugged between two polls', () => withApc(async ({ midi }) => {
+  midi.plug('APC mini mk2');
+  const port = await waitFor(() => midi.port, 1000, 'the APC to be opened');
+  await waitFor(() => port.sent.length >= 81, 1000, 'the full LED set');
+  // Nothing on stage changes, yet the whole set comes again (and keeps coming).
+  for (let round = 0; round < 2; round++) {
+    port.sent.length = 0;
+    await waitFor(() => port.sent.length >= 80, 1000, 'the LED set again');
+    assert.ok(port.sent.every((m) => m[0] === 0x90 || m[0] === 0xf0), 'only LED messages');
+  }
+  assert.equal(midi.opened.length, 1);
+}, { resendPolls: 3 }));
+
+test('a fader moved before its group is known still counts as where it was', () => withApc(async ({ app, layout }) => {
+  // Its own simulated ports: the app's driver has none of this APC.
+  const midi = new FakeMidi();
+  midi.plug('APC mini mk2');
+  assert.equal(await app.device({ kind: 'groupLevel', group: 1, value: 0.5 }, 'test'), null);
+  await waitFor(() => app.state!.groups[layout.groups[0].id]!.level === 0.5, 2000, 'group 1 at 50 %');
+  const actions: unknown[] = [];
+  const driver = new ApcDriver(midi, { device: async (a) => { actions.push(a); return null; }, release() {}, log() {} }, { pollMs: 20 });
+  driver.start();
+  try {
+    const port = await waitFor(() => midi.opened.at(-1), 1000, 'the driver to open the APC');
+    // Fader 1 sits at the bottom while the driver has no layout or state yet.
+    port.receive([0xb0, 48, 0]);
+    driver.update(layout, app.state);
+    const level = app.state!.groups[layout.groups[0].id]!.level;
+    assert.equal(level, 0.5);
+    // One move to the top crosses the level: that is a real crossing, so the fader takes over.
+    port.receive([0xb0, 48, 127]);
+    await waitFor(() => actions.length > 0, 1000, 'the fader to take over');
+  } finally {
+    driver.stop();
+  }
 }));
 
 test('stopping the app turns the APC LEDs off and closes the port', async () => {

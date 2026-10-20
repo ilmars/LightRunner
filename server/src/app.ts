@@ -57,6 +57,8 @@ export interface AppOptions {
   /** How often to look for the APC mini (ms; 2 s) and how long its Blackout must be held (ms; 1 s). Tests make them short. */
   apcPollMs?: number;
   apcHoldMs?: number;
+  /** Every this many polls the APC gets its whole LED set again (default 5). Tests set it very high or low. */
+  apcResendPolls?: number;
 }
 
 export type Role = 'operator' | 'programmer';
@@ -325,7 +327,7 @@ export class App {
       device: (action) => this.device(action, 'apc'),
       release: () => this.releaseDevice('apc'),
       log: this.log,
-    }, { pollMs: this.opts.apcPollMs, holdMs: this.opts.apcHoldMs });
+    }, { pollMs: this.opts.apcPollMs, holdMs: this.opts.apcHoldMs, resendPolls: this.opts.apcResendPolls });
     this.apc.update(this.layout, this.latestState);
     this.apc.start();
   }

@@ -25,6 +25,8 @@ export interface ApcStatus {
 /** How often (ms) to look for the APC, and how long (ms) Blackout must be held. */
 const POLL_MS = 2000;
 const HOLD_MS = 1000;
+/** The whole LED set is sent again every this many polls (10 s): a device that was unplugged and plugged back in within one poll has forgotten them. */
+const RESEND_POLLS = 5;
 /** The same refusal (a pad with no song) is logged at most this often (ms). */
 const LOG_EVERY_MS = 60000;
 
@@ -33,6 +35,8 @@ export class ApcDriver {
   private readonly hooks: ApcHooks;
   private readonly pollMs: number;
   private readonly holdMs: number;
+  private readonly resendPolls: number;
+  private polls = 0;
   private port: MidiPort | null = null;
   private name = '';
   private model: ApcModel | null = null;
@@ -53,11 +57,12 @@ export class ApcDriver {
   private problem: string | null = null;
   private readonly logged = new Map<string, number>();
 
-  constructor(ports: MidiPorts, hooks: ApcHooks, opts: { pollMs?: number; holdMs?: number } = {}) {
+  constructor(ports: MidiPorts, hooks: ApcHooks, opts: { pollMs?: number; holdMs?: number; resendPolls?: number } = {}) {
     this.ports = ports;
     this.hooks = hooks;
     this.pollMs = opts.pollMs ?? POLL_MS;
     this.holdMs = opts.holdMs ?? HOLD_MS;
+    this.resendPolls = opts.resendPolls ?? RESEND_POLLS;
   }
 
   get status(): ApcStatus {
@@ -115,7 +120,16 @@ export class ApcDriver {
       return;
     }
     if (this.port) {
-      if (!names.includes(this.name)) this.lost('unplugged');
+      if (!names.includes(this.name)) {
+        this.lost('unplugged');
+        return;
+      }
+      // Unplugged and plugged back in between two polls: the port still looks the same, but the device has
+      // reset its LEDs. Now and then everything is sent again, so the pads recover.
+      if (++this.polls % this.resendPolls === 0) {
+        this.leds = null;
+        this.sendLeds();
+      }
       return;
     }
     const name = pickApcPort(names);
@@ -132,6 +146,7 @@ export class ApcDriver {
     this.name = name;
     this.model = apcModel(name);
     this.leds = null;
+    this.polls = 0;
     this.pickup = new Pickup();
     const turn = ++this.turn;
     port.onMessage((bytes) => {
@@ -188,8 +203,11 @@ export class ApcDriver {
         return;
       case 'fader': {
         const level = this.levelOf(msg.fader);
-        // A fader without a group in this show does nothing.
-        if (level === null) return;
+        // A fader without a group in this show does nothing, but where it is is kept, so a later crossing is real.
+        if (level === null) {
+          this.pickup.place(msg.fader, msg.value);
+          return;
+        }
         const value = this.pickup.move(msg.fader, msg.value, level, performance.now() / 1000);
         if (value !== null) this.sendFader(msg.fader, value);
         return;
