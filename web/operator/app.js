@@ -2441,6 +2441,7 @@ function openEffectEditor(preset) {
 
 function closeEffectEditor() {
   effectEdit = null;
+  endReorder();
   closeOwnStrips();
   stopEffectStrip();
   $('feName').blur();
@@ -2471,7 +2472,7 @@ function drawEffectEditor() {
   }
   const one = ONE_COLOUR.has(effect.effect);
   $('feColLab').textContent = one ? 'Colour' : 'Colours';
-  $('feColNote').textContent = one ? '· tap to choose' : '· tap to add or remove, 1 to 6, in the order they play';
+  $('feColNote').textContent = one ? '· tap to choose' : '· tap to add or remove, hold and drag to change the order, 1 to 6';
   const order = effect.colours.map(colourKey);
   const box = $('feColours');
   box.replaceChildren();
@@ -2480,11 +2481,16 @@ function drawEffectEditor() {
   for (const c of choices) {
     const at = order.indexOf(c.key);
     const b = colourChip(c, at >= 0, one ? 'radio' : 'checkbox');
-    if (at >= 0 && !one) b.append(el('b', 'fenum', String(at + 1)));
-    b.addEventListener('click', () => toggleEffectColour(c));
+    if (at >= 0 && !one) {
+      b.append(el('b', 'fenum', String(at + 1)));
+      holdToReorder(b, at);
+    }
+    // The click a drag ends with is not a tap (also when it reaches a chip the drop has already replaced).
+    b.addEventListener('click', () => { if (performance.now() >= reorder.quietUntil) toggleEffectColour(c); });
     box.append(b);
   }
-  box.append(ownChip('feOwn', 'Pick an own colour for the effect', !one && effect.colours.length >= 6));
+  // Full only once a pick has ended: the strip must stay under the finger while it picks the sixth colour.
+  box.append(ownChip('feOwn', 'Pick an own colour for the effect', !one && effect.colours.length >= 6 && ownPick.place === null));
 
   // The base: None, or one of the same colours, at its brightness.
   const baseKey = effect.base ? colourKey(effect.base.colour) : null;
@@ -2504,6 +2510,111 @@ function drawEffectEditor() {
   if (effect.base && !baseLevel.dragging) showLevel(baseLevel, effect.base.level);
   effectEditSettings.show(effect, shownState()?.tempo ?? 120);
 }
+
+// ---- Changing the order of an effect's colours: hold a chosen colour, then drag it onto another ----
+
+/** How long a finger (or the mouse) holds a chosen colour before it lifts, in ms. */
+const REORDER_HOLD = 300;
+/** Moving further than this (px) before it lifts is a swipe (the panel scrolls), not a hold. */
+const REORDER_SLOP = 8;
+/** The hold that is under way: which colour (its place in the order), where the pointer is, and what it is over. */
+const reorder = { pointer: null, timer: 0, from: -1, over: -1, x: 0, y: 0, startX: 0, startY: 0, lifted: false, ghost: null, quietUntil: 0 };
+
+/** A chosen colour, at place `at` in the order, can be held and dragged onto another to take its number. */
+function holdToReorder(b, at) {
+  b.dataset.at = String(at);
+  b.classList.add('movable');
+  if (reorder.lifted && reorder.from === at) b.classList.add('lifted');
+  b.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0 || !effectEdit) return;
+    endReorder();
+    reorder.pointer = ev.pointerId;
+    reorder.from = at;
+    reorder.x = reorder.startX = ev.clientX;
+    reorder.y = reorder.startY = ev.clientY;
+    reorder.timer = setTimeout(liftColour, REORDER_HOLD);
+  });
+  // A long press on a touch screen must not open the page's own menu.
+  b.addEventListener('contextmenu', (ev) => { if (reorder.pointer !== null) ev.preventDefault(); });
+}
+
+function liftColour() {
+  reorder.timer = 0;
+  const chip = $('feColours').querySelector(`.fecol[data-at="${reorder.from}"]`);
+  if (!effectEdit || !chip) return endReorder();
+  reorder.lifted = true;
+  chip.classList.add('lifted');
+  // A quiet copy follows the finger.
+  const r = chip.getBoundingClientRect();
+  const ghost = chip.cloneNode(true);
+  ghost.className = 'fecol on fe-ghost';
+  ghost.removeAttribute('data-at');
+  ghost.setAttribute('aria-hidden', 'true');
+  ghost.style.width = `${r.width}px`;
+  ghost.style.height = `${r.height}px`;
+  ghost.dataset.dx = String(reorder.startX - r.left);
+  ghost.dataset.dy = String(reorder.startY - r.top);
+  document.body.append(ghost);
+  reorder.ghost = ghost;
+  followReorder();
+}
+
+/** Moves the copy to the pointer and marks the chosen colour under it (the only places it can go). */
+function followReorder() {
+  const { ghost } = reorder;
+  if (!ghost) return;
+  ghost.style.left = `${reorder.x - Number(ghost.dataset.dx)}px`;
+  // A little above the finger, so the outline of the colour under it still shows.
+  ghost.style.top = `${reorder.y - Number(ghost.dataset.dy) - 10}px`;
+  const under = document.elementFromPoint(reorder.x, reorder.y)?.closest('#feColours .fecol.movable');
+  reorder.over = under ? Number(under.dataset.at) : -1;
+  for (const b of $('feColours').querySelectorAll('.fecol.movable')) {
+    b.classList.toggle('drop', Number(b.dataset.at) === reorder.over && reorder.over !== reorder.from);
+  }
+}
+
+/** Lets go: the held colour takes the number of the one it is dropped on (the others move up or down one). */
+function dropColour() {
+  const { from, over } = reorder;
+  const moved = reorder.lifted;
+  endReorder();
+  if (!moved) return;
+  // The click that follows the lift is not a tap on the colour.
+  reorder.quietUntil = performance.now() + 400;
+  if (!effectEdit || over < 0 || over === from) return;
+  const colours = [...effectEdit.effect.colours];
+  const [colour] = colours.splice(from, 1);
+  colours.splice(over, 0, colour);
+  setEffectEdit({ ...effectEdit.effect, colours });
+}
+
+function endReorder() {
+  clearTimeout(reorder.timer);
+  reorder.timer = 0;
+  reorder.pointer = null;
+  reorder.lifted = false;
+  reorder.from = reorder.over = -1;
+  reorder.ghost?.remove();
+  reorder.ghost = null;
+  for (const b of $('feColours').querySelectorAll('.lifted, .drop')) b.classList.remove('lifted', 'drop');
+}
+
+window.addEventListener('pointermove', (ev) => {
+  if (ev.pointerId !== reorder.pointer) return;
+  reorder.x = ev.clientX;
+  reorder.y = ev.clientY;
+  if (reorder.lifted) followReorder();
+  else if (Math.hypot(ev.clientX - reorder.startX, ev.clientY - reorder.startY) > REORDER_SLOP) endReorder();
+});
+window.addEventListener('pointerup', (ev) => { if (ev.pointerId === reorder.pointer) dropColour(); });
+window.addEventListener('pointercancel', (ev) => { if (ev.pointerId === reorder.pointer) endReorder(); });
+// While a colour is lifted the finger moves it, not the panel.
+$('feColours').addEventListener('touchmove', (ev) => { if (reorder.lifted) ev.preventDefault(); }, { passive: false });
+$('feColours').addEventListener('click', (ev) => {
+  if (performance.now() >= reorder.quietUntil) return;
+  ev.stopPropagation();
+  ev.preventDefault();
+}, true);
 
 /** One colour to choose in the editor: its swatch and name, on when chosen. */
 function colourChip(c, on, role) {
@@ -2620,28 +2731,31 @@ function setEffectBase(colour) {
  * base); it follows the finger, and the strip closes when the finger lifts. Own colours join the
  * effect only, never the group's list.
  */
+/**
+ * The own colour pick under way: where the colour goes (its place in the colours, the end or the
+ * only one; or the base), null when none; and the own colour it added, replaced as the finger moves.
+ */
+const ownPick = { place: null, made: null };
 {
-  // Where the colour being picked goes: its place in the colours (the end, or the only one), or the base.
-  let place = null;
-  // The own colour this pick added to the choices, replaced as the finger moves.
-  let made = null;
   const own = (stripId, put) => attachStrip($(stripId), $(`${stripId}H`), ownWhiteOnly, (hex, last) => {
+    const { place } = ownPick;
     if (!effectEdit || place === null) return;
     const { choices, effect } = effectEdit;
     // A colour the effect already has elsewhere in its list is passed over: the list never holds one twice.
     const key = colourKey({ hex });
     const taken = stripId === 'feOwn' && effect.colours.some((c, i) => i !== place && colourKey(c) === key);
     if (!taken) {
+      const { made } = ownPick;
       if (made && choices.includes(made)) choices.splice(choices.indexOf(made), 1);
       const count = choices.length;
       const choice = addOwnChoice(choices, { hex });
-      made = choices.length > count ? choice : null;
+      ownPick.made = choices.length > count ? choice : null;
       put(choice.colour, place);
       disarmDelete();
     }
     if (last) {
       if (taken && place >= effect.colours.length) toast('That colour is in the effect already', true);
-      place = null;
+      ownPick.place = null;
       closeOwnStrips();
     }
     if (!taken || last) {
@@ -2649,14 +2763,14 @@ function setEffectBase(colour) {
       effectStripDrag(last ? 'end' : 'move');
     }
   }, () => {
-    place = null;
-    made = null;
+    ownPick.place = null;
+    ownPick.made = null;
     if (!effectEdit) return;
     const { effect } = effectEdit;
     const at = ONE_COLOUR.has(effect.effect) ? 0 : effect.colours.length;
     // ＋ Own colour is unavailable then; this only guards a strip left open.
     if (stripId === 'feOwn' && at >= 6) return;
-    place = at;
+    ownPick.place = at;
   });
   own('feOwn', (colour, at) => {
     const colours = [...effectEdit.effect.colours];
