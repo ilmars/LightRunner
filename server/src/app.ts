@@ -732,7 +732,9 @@ export class App {
     }
     this.watchNode();
     await this.syncOsc();
-    this.layout = this.layout ? operatorLayout(this.show, this.layout.fixtures.map((f) => f.id)) : null;
+    // The fixtures come from the new show, in its order (as the engine takes them): a show with other
+    // fixtures (an import) must not be drawn from the old ones, which would leave the stage view empty.
+    this.layout = this.layout ? operatorLayout(this.show, this.show.fixtures.map((f) => f.id)) : null;
     this.broadcast(JSON.stringify({ type: 'layout', layout: this.layout }));
     this.apc?.update(this.layout, this.latestState);
   }
