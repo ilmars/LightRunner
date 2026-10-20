@@ -4,7 +4,7 @@
 
 import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, liveEffectId, livePresetId, parseLiveEffect, parseLivePreset } from './protocol.ts';
 import { effectKey, isEffectPreset, resolveColour } from './schema.ts';
-import type { EffectLayer, Layer, Look, LookEntry, Preset, QuickTab, Show } from './schema.ts';
+import type { EffectLayer, Layer, Look, LookEntry, Preset, QuickLook, QuickTab, Show } from './schema.ts';
 
 /** Where the stage is going: preset ids (possibly live ones) and level targets, as in RuntimeState. */
 export interface Stage {
@@ -305,6 +305,80 @@ export function saveQuickLook(
   lookIn(out, id).groups = entriesFor(out, stage, input.groups);
   out.operator.quickLooks.push({ look: id, tab: input.tab });
   return { show: out, id };
+}
+
+function quickLookIn(show: Show, id: string): QuickLook {
+  const found = show.operator.quickLooks.find((q) => q.look === id);
+  if (!found) throw new Error('that is not a quick look');
+  return found;
+}
+
+/**
+ * Changes a quick look: its name, its tab (it goes last in the new one), the groups it sets and/or
+ * what it gives them. A group left out of `groups` is dropped from the look. A group the look doesn't
+ * set yet needs `fromStage`, because there is no value to give it otherwise. With `fromStage`, the
+ * entries of `groups` (the look's own groups when none are named) are replaced with the stage as it is going;
+ * a group the stage has nothing for keeps its old entry. Smoke groups never count, as in saveQuickLook.
+ */
+export function editQuickLook(
+  show: Show,
+  input: { look: string; name?: string; tab?: QuickTab; groups?: string[]; fromStage?: boolean },
+  stage?: Stage,
+): Show {
+  const out = structuredClone(show);
+  const quick = quickLookIn(out, input.look);
+  const target = lookIn(out, input.look);
+  if (input.name === undefined && input.tab === undefined && input.groups === undefined && !input.fromStage) throw new Error('nothing to change');
+  const name = input.name === undefined ? undefined : cleanName(input.name);
+  const isSmoke = (group: string) => out.groups.find((g) => g.id === group)?.kind === 'smoke';
+
+  const had = target.groups.filter((e) => !isSmoke(e.group)).map((e) => e.group);
+  const chosen = input.groups === undefined ? had : input.groups.filter((g) => !isSmoke(g));
+  if (!chosen.length) throw new Error('pick at least one group');
+  const added = chosen.filter((g) => !had.includes(g));
+  if (added.length && !input.fromStage) throw new Error('turn on Update from the stage to add a group');
+  if (input.fromStage && !stage) throw new Error('the stage is needed to update from it');
+
+  // What the look keeps: its own entries for the chosen groups, in their places.
+  let entries = target.groups.filter((e) => chosen.includes(e.group));
+  if (input.fromStage) {
+    const fresh = entriesFor(out, stage!, chosen);
+    entries = entries.map((e) => fresh.find((f) => f.group === e.group) ?? e);
+    entries.push(...fresh.filter((f) => !entries.some((e) => e.group === f.group)));
+    if (!entries.length) throw new Error('pick at least one group');
+  }
+  if (input.groups !== undefined || input.fromStage) target.groups = entries;
+  if (name !== undefined) target.name = name;
+  if (input.tab !== undefined && input.tab !== quick.tab) {
+    out.operator.quickLooks = out.operator.quickLooks.filter((q) => q !== quick);
+    out.operator.quickLooks.push({ ...quick, tab: input.tab });
+  }
+  return out;
+}
+
+/** Removes a quick look, and its look too unless the running order uses it. */
+export function deleteQuickLook(show: Show, id: string): Show {
+  const out = structuredClone(show);
+  quickLookIn(out, id);
+  out.operator.quickLooks = out.operator.quickLooks.filter((q) => q.look !== id);
+  if (!out.operator.runningOrder.includes(id) && out.operator.safeLook !== id) {
+    out.looks = out.looks.filter((l) => l.id !== id);
+    out.operator.looks = out.operator.looks.filter((x) => x !== id);
+  }
+  return out;
+}
+
+/** Moves a quick look to place `to` (0 is first) among those on its tab; the other tabs keep their order. */
+export function moveQuickLook(show: Show, id: string, to: number): Show {
+  const out = structuredClone(show);
+  const quick = quickLookIn(out, id);
+  const slots: number[] = [];
+  out.operator.quickLooks.forEach((q, k) => { if (q.tab === quick.tab) slots.push(k); });
+  const rest = out.operator.quickLooks.filter((q) => q.tab === quick.tab && q !== quick);
+  rest.splice(Math.min(Math.max(Math.round(to), 0), rest.length), 0, quick);
+  // The tab's own places in the list take the new order; every other tab stays where it is.
+  slots.forEach((slot, k) => { out.operator.quickLooks[slot] = rest[k]!; });
+  return out;
 }
 
 /** One group's change in a running-order item: a preset, an Any colour (with extras) or an effect, and/or a level. */
