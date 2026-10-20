@@ -22,6 +22,8 @@ interface MidiInput {
   openPort(port: number): void;
   closePort(): void;
   isPortOpen(): boolean;
+  /** Frees the native port object; it can't be used after. */
+  destroy(): void;
   ignoreTypes(sysex: boolean, timing: boolean, activeSensing: boolean): void;
   on(event: 'message', fn: (deltaTime: number, message: number[]) => void): void;
 }
@@ -31,6 +33,7 @@ interface MidiOutput {
   openPort(port: number): void;
   closePort(): void;
   isPortOpen(): boolean;
+  destroy(): void;
   sendMessage(message: number[]): void;
 }
 interface MidiModule {
@@ -73,18 +76,33 @@ function realPorts(mod: MidiModule, lister: MidiInput, log: (msg: string) => voi
   return {
     list: () => names(lister),
     open(name) {
+      // The native port objects made here are destroyed again when opening fails and when the port closes.
       const input = new mod.Input();
-      const at = names(input).indexOf(name);
-      if (at < 0) throw new Error(`${name} is not there`);
-      // SysEx in: the mk2's answer to its introduction says where the faders are.
-      input.ignoreTypes(false, true, true);
+      let output: MidiOutput | null = null;
+      const free = () => {
+        for (const p of [input, output]) {
+          try {
+            if (p?.isPortOpen()) p.closePort();
+          } catch {
+            // already gone
+          }
+          try {
+            p?.destroy();
+          } catch {
+            // already gone
+          }
+        }
+      };
       let handler: ((bytes: number[]) => void) | null = null;
-      input.on('message', (_dt, message) => handler?.(message));
-      input.openPort(at);
-      // The output with the same name, or with the same device in its name (Windows: "MIDIOUT2 (...)").
-      // If it can't be opened, the input is closed again: on Windows another try couldn't open it while held.
-      let output: MidiOutput;
       try {
+        const at = names(input).indexOf(name);
+        if (at < 0) throw new Error(`${name} is not there`);
+        // SysEx in: the mk2's answer to its introduction says where the faders are.
+        input.ignoreTypes(false, true, true);
+        input.on('message', (_dt, message) => handler?.(message));
+        input.openPort(at);
+        // The output with the same name, or with the same device in its name (Windows: "MIDIOUT2 (...)").
+        // If it can't be opened, the input is closed again: on Windows another try couldn't open it while held.
         output = new mod.Output();
         const outs = names(output);
         let to = outs.indexOf(name);
@@ -92,20 +110,23 @@ function realPorts(mod: MidiModule, lister: MidiInput, log: (msg: string) => voi
         if (to >= 0) output.openPort(to);
         else log(`MIDI: no output found for "${name}", so its lights can't be set`);
       } catch (err) {
-        input.closePort();
+        free();
         throw err;
       }
+      const out = output;
+      let freed = false;
       return {
         send(bytes) {
-          if (output.isPortOpen()) output.sendMessage(bytes);
+          if (!freed && out.isPortOpen()) out.sendMessage(bytes);
         },
         onMessage(fn) {
           handler = fn;
         },
         close() {
           handler = null;
-          if (input.isPortOpen()) input.closePort();
-          if (output.isPortOpen()) output.closePort();
+          if (freed) return;
+          freed = true;
+          free();
         },
       };
     },
