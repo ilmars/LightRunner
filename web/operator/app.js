@@ -52,7 +52,11 @@ let pendingColour = null;
 // Blind: this tablet works on a draft of the stage that the server keeps for it; Go sends it.
 // `state` stays the live stage; `blind.state` is the draft's (same shape), `blind.visual` its picture.
 // `session` counts the times Blind went on or off, so a drag that started before never lands in the other one.
-const blind = { on: false, session: 0, state: null, visual: null, startRef: null, lateStart: null, goRef: null };
+// `startRef` is the ref of the blindStart that began this Blind (it stays after the answer, to tell this Blind's answers
+// from older ones); `starting` is true until that answer comes.
+const blind = { on: false, session: 0, state: null, visual: null, startRef: null, starting: false, goRef: null };
+/** The server's answer to a draft command when it has no draft for this tablet. */
+const BLIND_OFF = 'Blind is off.';
 
 /** The stage the page is working on: the draft while Blind is on, else the live stage. */
 const shownState = () => (blind.on ? blind.state ?? state : state);
@@ -102,6 +106,12 @@ function connect() {
       if (!blind.on) return;
       blind.state = msg.state;
       render();
+    } else if (msg.type === 'draftEnded') {
+      // The server met a problem in this tablet's draft and dropped it; the lights were not changed.
+      // While a start is on its way this is about an older draft: the start's own answer says how it went.
+      if (!blind.on || blind.starting) return;
+      setBlind(false, false);
+      toast(msg.reason);
     } else if (msg.type === 'draftVisual') {
       if (!blind.on) return;
       blind.visual = Uint8Array.from(atob(msg.data), (c) => c.charCodeAt(0));
@@ -666,12 +676,13 @@ function setBlind(on, tell = true) {
     const r = send({ type: 'blindStart' });
     if (r === null) return;
     blind.startRef = r;
+    blind.starting = true;
     readPictureLabel();
   } else {
+    // Off before the server made the draft is fine too: a start still on its way then makes none.
     if (tell && connected) send({ type: 'blindEnd' });
-    // Off before the server made the draft: it may make it after the End, so end it again then.
-    blind.lateStart = tell ? blind.startRef : null;
     blind.startRef = null;
+    blind.starting = false;
   }
   blind.on = on;
   blind.session++;
@@ -697,18 +708,18 @@ $('goBtn').addEventListener('click', () => {
   $('goBtn').disabled = blind.goRef !== null;
 });
 
-/** The server's answer to Blind's start or Go. */
+/** The server's answer to Blind's start or Go, or "Blind is off." to a draft command. */
 function blindResult(msg) {
-  if (msg.ref === null) return;
-  if (msg.ref === blind.lateStart) {
-    blind.lateStart = null;
-    if (!msg.error && !blind.on && connected) send({ type: 'blindEnd' });
-  }
+  if (msg.ref === null || !blind.on) return;
   if (msg.ref === blind.startRef) {
-    blind.startRef = null;
-    // No draft was made (the stage didn't answer, say): Blind goes off again; the toast says why.
-    if (msg.error) setBlind(false, false);
+    blind.starting = false;
+    // No draft was made (the stage didn't answer, too many tablets in Blind, a problem): Blind goes off
+    // again; the toast says why.
+    if (msg.error) return setBlind(false, false);
   }
+  // The server has no draft for this tablet (it ended it): Blind is off here too. Not while the start is on
+  // its way: a draft command that reaches the server before the draft is made is refused the same way.
+  if (msg.error === BLIND_OFF && !blind.starting && msg.ref > blind.startRef) return setBlind(false, false);
   if (msg.ref === blind.goRef) {
     blind.goRef = null;
     $('goBtn').disabled = false;
