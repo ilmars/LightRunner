@@ -197,6 +197,26 @@ test('a show imported without a running order gets one in the layout', async () 
   }
 });
 
+test('a show with other fixtures gets them on the stage view', async () => {
+  const dir = tempDir();
+  const app = makeApp(dir);
+  try {
+    await app.start();
+    const show = (await api(app, 'GET', '/api/show')).body;
+    // Another show: the same rig under new fixture ids, and one fixture fewer.
+    const renamed = (id: string) => `new-${id}`;
+    show.fixtures = show.fixtures.slice(1).map((f: any) => ({ ...f, id: renamed(f.id) }));
+    const kept = new Set(show.fixtures.map((f: any) => f.id));
+    show.groups = show.groups.map((g: any) => ({ ...g, fixtures: g.fixtures.map(renamed).filter((id: string) => kept.has(id)) }));
+    assert.equal((await api(app, 'PUT', '/api/show', show)).status, 200);
+    const { body: layout } = await api(app, 'GET', '/api/layout');
+    assert.deepEqual(layout.fixtures.map((f: any) => f.id), show.fixtures.map((f: any) => f.id));
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a restart restores the last look, master and group presets', async () => {
   const dir = tempDir();
   try {
