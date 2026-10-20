@@ -826,33 +826,45 @@ function currentTempo() {
   return shownTempo();
 }
 
-function sendTempo(bpm) {
-  if (!preview.on) sendStage({ type: 'tempo', bpm });
-  else if (preview.item) send({ type: 'itemTempo', item: preview.item, bpm });
+/** Where a tempo change goes, taken when the finger touches: the stage (or the draft in Blind), or the song in Preview. */
+const tempoTarget = () => ({ stage: stageTarget(), inPreview: preview.on, item: preview.item });
+
+/**
+ * Sends a tempo to where `target` says. A held button that started live, in Blind or in Preview
+ * never carries on somewhere else: after Blind or Preview went on or off, the rest is dropped.
+ */
+function sendTempo(bpm, target = tempoTarget()) {
+  if (target.inPreview) {
+    if (preview.on && target.item && preview.item === target.item) send({ type: 'itemTempo', item: target.item, bpm });
+  } else if (!preview.on) {
+    sendStage({ type: 'tempo', bpm }, target.stage);
+  }
 }
 
 // A held button sends at most 4 a second (every change is an Undo step), and the last one when let go.
 let tempoSentAt = 0;
 let tempoUnsent = null;
-function setTempo(bpm, throttle = false) {
+let tempoUnsentTarget = null;
+function setTempo(bpm, throttle = false, target = tempoTarget()) {
   const v = clampTempo(bpm);
   tempoLocal = v;
   tempoLocalAt = performance.now();
   $('tempoValue').textContent = String(v);
   if (throttle && tempoLocalAt - tempoSentAt < 250) {
     tempoUnsent = v;
+    tempoUnsentTarget = target;
     return;
   }
   tempoSentAt = tempoLocalAt;
   tempoUnsent = null;
-  sendTempo(v);
+  sendTempo(v, target);
 }
 function flushTempo() {
   if (tempoUnsent === null) return;
   const v = tempoUnsent;
   tempoUnsent = null;
   tempoSentAt = performance.now();
-  sendTempo(v);
+  sendTempo(v, tempoUnsentTarget);
 }
 
 for (const b of tempoMenu.querySelectorAll('button')) {
@@ -872,10 +884,12 @@ for (const b of tempoMenu.querySelectorAll('button')) {
   };
   b.addEventListener('pointerdown', (ev) => {
     if (ev.button || b.disabled) return;
-    b.setPointerCapture?.(ev.pointerId);
-    setTempo(currentTempo() + by);
+    try { b.setPointerCapture?.(ev.pointerId); } catch { /* pointer already gone */ }
+    // The whole hold goes where it started.
+    const target = tempoTarget();
+    setTempo(currentTempo() + by, false, target);
     delay = setTimeout(() => {
-      repeat = setInterval(() => setTempo(currentTempo() + by, true), 80);
+      repeat = setInterval(() => setTempo(currentTempo() + by, true, target), 80);
     }, 400);
   });
   b.addEventListener('pointerup', stop);
@@ -898,7 +912,8 @@ function tapTempo() {
   btn.classList.add('hit');
   setTimeout(() => btn.classList.remove('hit'), 120);
   if (tapTimes.length < 2) return;
-  setTempo((60000 * (tapTimes.length - 1)) / (t - tapTimes[0]));
+  // Each tap is one send, going where the page works at the moment of the tap.
+  setTempo((60000 * (tapTimes.length - 1)) / (t - tapTimes[0]), false, tempoTarget());
 }
 $('tapBtn').addEventListener('pointerdown', (ev) => {
   if (!ev.button) tapTempo();
