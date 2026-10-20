@@ -1113,13 +1113,14 @@ const NEUTRAL = '#5a5f69';
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
 /**
- * The colour of a plain Any colour pick (no white, amber or UV) a group runs, or null. "Add to
- * colours" keeps only plain colours for now; a pick with extras stays a live colour.
+ * The Any colour pick a group runs, as "Add to colours" keeps it: `{ hex, white, amber, uv, display }`
+ * (display: how it looks, white, amber and UV mixed in), or null.
  * `s` is the group's live status; the server reads Any colour picks for the page (`s.live`).
  */
 function liveColour(s) {
   const live = s?.live;
-  return live && !live.white && !live.amber && !live.uv ? live.colour : null;
+  if (!live) return null;
+  return { hex: live.colour, white: live.white ?? 0, amber: live.amber ?? 0, uv: live.uv ?? 0, display: live.display ?? live.colour };
 }
 
 /**
@@ -1472,6 +1473,13 @@ function buildPickerGrid() {
     });
     grid.append(b);
   }
+  if (picker.edit) {
+    const add = el('button', 'pc newfx', '＋ New colour');
+    add.dataset.newColour = '1';
+    add.classList.toggle('editing', !!newColour);
+    add.addEventListener('click', openNewColour);
+    grid.append(add);
+  }
   $('pTitle').textContent = row.group.name;
   $('pAnyLab').textContent = row.group.whiteOnly ? 'Any white, warm to cool' : 'Any colour';
   $('pAny').className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'}`;
@@ -1547,24 +1555,30 @@ function buildExtras(group) {
   extraRows = [];
   for (const x of EXTRAS) {
     if (!group.extras?.[x.key]) continue;
-    const slab = el('span', 'ds-fill-slab');
-    const dim = el('div', 'ds-fill');
-    dim.setAttribute('role', 'slider');
-    dim.setAttribute('aria-label', `${group.name} ${x.label}`);
-    dim.setAttribute('aria-valuemin', '0');
-    dim.setAttribute('aria-valuemax', '100');
-    dim.style.setProperty('--c', x.tint);
-    dim.append(slab);
-    const pct = el('span', 'pct');
-    const cell = el('div', 'xcell');
-    cell.append(el('span', 'lab2', x.label), pct, dim);
-    box.append(cell);
-    const row = { key: x.key, dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
+    const row = extraSlider(box, x, `${group.name} ${x.label}`);
     extraRows.push(row);
-    showLevel(row, 0);
     wireExtra(row);
   }
   box.hidden = extraRows.length === 0;
+}
+
+/** One White, Amber or UV slider in `box`, at 0: `{ key, dim, slab, pct, value, dragging, holdUntil }`. */
+function extraSlider(box, x, label) {
+  const slab = el('span', 'ds-fill-slab');
+  const dim = el('div', 'ds-fill');
+  dim.setAttribute('role', 'slider');
+  dim.setAttribute('aria-label', label);
+  dim.setAttribute('aria-valuemin', '0');
+  dim.setAttribute('aria-valuemax', '100');
+  dim.style.setProperty('--c', x.tint);
+  dim.append(slab);
+  const pct = el('span', 'pct');
+  const cell = el('div', 'xcell');
+  cell.append(el('span', 'lab2', x.label), pct, dim);
+  box.append(cell);
+  const row = { key: x.key, dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
+  showLevel(row, 0);
+  return row;
 }
 
 /** The levels the sliders show; extras the group has no slider for are 0. */
@@ -1667,7 +1681,7 @@ function renderPicker() {
 
 // ---- Keep a strip colour: "＋ Add to colours" ----
 
-/** The colour the picker's group runs live from the strip, or null. */
+/** The colour the picker's group runs live from the strip (with its White, Amber and UV), or null. */
 function liveOfPicker() {
   const row = pickerRow();
   return row ? liveColour(shownState()?.groups?.[row.group.id]) : null;
@@ -1676,14 +1690,20 @@ function liveOfPicker() {
 /** Shows the pill while the group runs a strip colour that isn't a swatch yet; keeps the form in step. */
 function renderAddColour() {
   const row = pickerRow();
-  const hex = liveOfPicker();
-  const listed = !!hex && row.group.presets.some((p) => p.swatch?.toLowerCase() === hex);
+  if (row) $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
+  // ＋ New colour has its own colour: the stage has nothing to do with it.
+  if (newColour) {
+    $('pAddOpen').hidden = true;
+    return;
+  }
+  const pick = liveOfPicker();
+  // Listed: the group's list has this very light (its colour, White, Amber and UV).
+  const listed = !!pick && row.group.presets.some((p) => !p.effect && p.light && colourKey(p.light) === colourKey(pick));
   const open = !$('pAdd').hidden;
   // The form follows the colour: it goes when the group no longer runs a new strip colour.
-  if (open && (!hex || listed)) $('pAdd').hidden = true;
-  $('pAddOpen').hidden = !hex || listed || !$('pAdd').hidden || picker.edit;
-  if (hex) $('paSw').style.background = hex;
-  if (row) $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
+  if (open && (!pick || listed)) $('pAdd').hidden = true;
+  $('pAddOpen').hidden = !pick || listed || !$('pAdd').hidden || picker.edit;
+  if (pick) $('paSw').style.background = shown(pick.display) ?? pick.display;
 }
 
 function openAddColour() {
@@ -1700,8 +1720,90 @@ function closeAddColour() {
   pendingColour = null;
   $('pAdd').hidden = true;
   $('paName').blur();
+  closeNewColour();
   if (picker.group) renderAddColour();
 }
+
+// ---- ＋ New colour (Edit mode): a colour for the list, picked on the form's own strip ----
+
+/** The New colour form while it is open: `{ hex }`, hex null until a colour is picked. Picking never touches the stage. */
+let newColour = null;
+// Its White, Amber and UV sliders (for groups with those channels), shaped as showLevel wants.
+let newExtraRows = [];
+
+function openNewColour() {
+  const row = pickerRow();
+  if (!row || !picker.edit) return;
+  closeEditor();
+  pendingColour = null;
+  newColour = { hex: null };
+  $('paName').value = '';
+  $('paAll').checked = false;
+  $('paSw').style.background = 'transparent';
+  const strip = $('paStrip');
+  strip.className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'} pa-strip`;
+  strip.hidden = false;
+  $('paH').hidden = true;
+  buildNewExtras(row.group);
+  $('paAddBtn').textContent = 'Save';
+  $('paAddBtn').disabled = true;
+  $('pAdd').hidden = false;
+  renderAddColour();
+  for (const b of $('pGrid').children) b.classList.toggle('editing', !!b.dataset.newColour);
+  $('pAdd').scrollIntoView({ block: 'nearest' });
+}
+
+/** Back to the Add to colours form (closed); nothing to do when New colour isn't open. */
+function closeNewColour() {
+  if (!newColour) return;
+  newColour = null;
+  $('pAdd').hidden = true;
+  $('paStrip').hidden = true;
+  $('paExtras').hidden = true;
+  $('paExtras').replaceChildren();
+  newExtraRows = [];
+  $('paAddBtn').textContent = 'Add';
+  $('paAddBtn').disabled = pendingColour !== null;
+  for (const b of $('pGrid').children) if (b.dataset.newColour) b.classList.remove('editing');
+}
+
+/** White, Amber and UV sliders for the new colour, as Any colour has them; they change only the form. */
+function buildNewExtras(group) {
+  const box = $('paExtras');
+  box.replaceChildren();
+  newExtraRows = [];
+  for (const x of EXTRAS) {
+    if (!group.extras?.[x.key]) continue;
+    const row = extraSlider(box, x, `New colour ${x.label}`);
+    newExtraRows.push(row);
+    let startX = 0, startV = 0;
+    row.dim.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      row.dragging = true;
+      try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+      row.dim.classList.add('ds-dragging');
+      startX = ev.clientX;
+      startV = row.value;
+    });
+    row.dim.addEventListener('pointermove', (ev) => {
+      if (row.dragging) showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
+    });
+    const end = () => {
+      row.dragging = false;
+      row.dim.classList.remove('ds-dragging');
+    };
+    row.dim.addEventListener('pointerup', end);
+    row.dim.addEventListener('pointercancel', end);
+  }
+  box.hidden = newExtraRows.length === 0;
+}
+
+attachStrip($('paStrip'), $('paH'), () => (newColour ? pickerRow()?.group.whiteOnly ?? null : null), (hex) => {
+  if (!newColour) return;
+  newColour.hex = hex;
+  $('paSw').style.background = shown(hex) ?? hex;
+  $('paAddBtn').disabled = pendingColour !== null;
+});
 
 $('pAddOpen').addEventListener('click', openAddColour);
 $('paCancel').addEventListener('click', closeAddColour);
@@ -1712,13 +1814,22 @@ $('paName').addEventListener('keydown', (ev) => {
 });
 // A plain tap. The form closes when the server says yes; on an error it stays to fix.
 $('paAddBtn').addEventListener('click', () => {
-  const hex = liveOfPicker();
   if (pendingColour !== null || !picker.group) return;
-  if (!hex) {
+  if (newColour) {
+    if (!newColour.hex) return;
+    const levels = { white: 0, amber: 0, uv: 0 };
+    for (const r of newExtraRows) levels[r.key] = Math.round(r.value * 100) / 100;
+    pendingColour = send({ type: 'addColour', group: picker.group, colour: newColour.hex, ...levels, name: $('paName').value, allGroups: $('paAll').checked });
+    $('paAddBtn').disabled = pendingColour !== null;
+    return;
+  }
+  const pick = liveOfPicker();
+  if (!pick) {
     closeAddColour();
     return;
   }
-  pendingColour = send({ type: 'addColour', group: picker.group, colour: hex, name: $('paName').value, allGroups: $('paAll').checked });
+  const { hex, white, amber, uv } = pick;
+  pendingColour = send({ type: 'addColour', group: picker.group, colour: hex, white, amber, uv, name: $('paName').value, allGroups: $('paAll').checked });
   $('paAddBtn').disabled = pendingColour !== null;
 });
 
@@ -2175,6 +2286,7 @@ function markFade() {
 function openEditor(preset) {
   const row = pickerRow();
   if (!row) return;
+  closeNewColour();
   const fade = preset.fade ?? 0;
   // Off has a level of 0 and no colour to dim: only a lit plain colour gets the slider.
   const level = preset.canRecolour === false ? null : preset.level ?? null;
@@ -2199,6 +2311,7 @@ function openEditor(preset) {
 }
 
 function closeEditor(keepPending = false) {
+  closeNewColour();
   colourEdit = null;
   if (!keepPending) pendingEdit = null;
   disarmDelete();
