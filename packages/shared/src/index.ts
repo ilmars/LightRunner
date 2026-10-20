@@ -6,3 +6,4 @@ export * from './merge.ts';
 export * from './runningorder.ts';
 export * from './routing.ts';
 export * from './presets.ts';
+export * from './devices.ts';

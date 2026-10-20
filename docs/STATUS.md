@@ -18,21 +18,22 @@ Last updated: 20 Oct 2026. Update this file whenever a feature lands or a priori
 | Patch page | Lightkey-style DMX map per universe (drag to re-address, overlaps striped red); fixture table; add many fixtures at once; groups (order, members); stage plan (drag); Identify (flash white 3 s) | Programmer tab 1–2 |
 | Fixture database | Open Fixture Library: search, browse by manufacturer, add a fixture's DMX mode as a type; whole database downloadable for offline use (645 fixtures), with "Check for updates" listing new/changed/removed before installing; import an OFL fixture file | Programmer tab 1 |
 | Settings page | Output, frame rate, gamma, operator manual permission, PIN, backups, export, and "Compare with a file" (show file or Lightkey project: tick which changes to take). Basic lights is not chosen here any more: it is set by Save on the operator page, and a show that loses it gets an empty one back | Programmer tab 6–7 |
-| HTTP API | Looks, presets, manual, release, back to look, Basic lights (`POST /api/safe` starts it), Blackout, master, speed, group level, undo, fade time, state, looks list; local network only | 4 (HTTP part) |
+| HTTP API | Looks, presets, manual, release, back to look, Basic lights (`POST /api/safe` starts it), Blackout, master, speed, group level, undo, fade time, state, looks list; start item N, Next, group colour N, Flash on/off (released by itself after 15 s) and Master up/down by position; `GET /api/companion` for Companion's feedback; local network only | 4 (HTTP part) |
+| Devices | Stream Deck through Companion's Generic HTTP connection, OSC input and the Akai APC mini, all through the same commands as the iPad (design: [devices](superpowers/specs/2026-10-20-devices-design.md); guide: [companion.md](companion.md)). **Companion:** the HTTP routes above and `GET /api/companion`, a flat status to poll. **OSC:** addresses under `/lightrunner`, off until switched on in Settings (port 8000, input only). **APC mini:** faders are group levels and Master (with pickup, so a light never jumps), pads are the running order and each group's colours, buttons are Flash, Next, Back to, Undo, Basic lights and Blackout (1 s hold); mk2 pads show real colours, the older model green and yellow; the MIDI add-on (`@julusian/midi`) is optional and Settings shows whether the APC is connected. **Not yet tried on the real hardware.** | 4 (Companion, OSC, MIDI) |
 | Tools | Lightkey importer, jump check (no fixture steps >5% per frame over hours of random changes), timing probe | — |
 
-Tests: 342 (`npm test`): 341 pass, 1 is skipped (the Lightkey project test, needs `LIGHTKEY_PROJECT`).
+Tests: 427 (`npm test`): 426 pass, 1 is skipped (the Lightkey project test, needs `LIGHTKEY_PROJECT`).
 
 ## Not built yet (in rough priority order)
 
 1. **Run as a service on the church Mac** (launchd, start at boot, restart on crash, sleep off). Today it only runs while someone starts it.
 2. **Test on the real iPad**: add to home screen, Auto-Lock Never (Wake Lock needs HTTPS), check sizes in the dark room, short volunteer trial.
-3. **Companion feedback, OSC and MIDI (APC mini)**: the HTTP API exists; OSC and MIDI do not.
-4. **Spec Phase 2b**: layered effects (several effects on one group, with blend modes) and a fuller effect library and editor. **Lightkey effect import**: bring the church's Lightkey effects across with the importer, once the project file can be looked at.
-5. **Programmer niceties from the spec**: channel test view, manual tab with raw values, stage photo background, operator layout editor.
+3. **Spec Phase 2b**: layered effects (several effects on one group, with blend modes) and a fuller effect library and editor. **Lightkey effect import**: bring the church's Lightkey effects across with the importer, once the project file can be looked at.
+4. **Programmer niceties from the spec**: channel test view, manual tab with raw values, stage photo background, operator layout editor.
 
 ## Known issues
 
+- APC mini and Companion not yet tried on real hardware. For the APC: the older model's MIDI numbers come from community mappings, and the mk2's colour message follows Akai's protocol document but hasn't been tried on a real mk2. What to look for is in [companion.md](companion.md). OSC has only been tried against a simulated sender.
 - Frame timing: about one frame in a few minutes is up to 3.4 ms late (spec: ±3 ms). Not visible, but the spec's 1-hour timing test would fail on it.
 - The stage view on the operator page keeps showing the last frame while the tablet is offline (the red banner does show).
 - "Compare with a file" with the Lightkey project lists P5 as new and ticked; untick it (P5 is not used).
@@ -58,4 +59,4 @@ Tests: 342 (`npm test`): 341 pass, 1 is skipped (the Lightkey project test, need
 ## Open questions
 
 - Who besides the lighting lead gets the programmer PIN? (No PIN is set yet.)
-- Should ProPresenter or the sound desk trigger looks over OSC?
+- Should ProPresenter or the sound desk trigger looks over OSC? (OSC input is built; nothing sends to it yet.)

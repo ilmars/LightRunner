@@ -1,6 +1,6 @@
 # APC mini, Stream Deck (Companion) and OSC: design
 
-Date: 20 Oct 2026. Status: agreed with Ilmārs (proposal approved as written), not built yet. The owner has an Akai APC mini (model to be confirmed: the older one or the mk2) and a Stream Deck run by Bitfocus Companion. He tests the hardware later; it is built and tested here against simulated devices.
+Date: 20 Oct 2026. Status: agreed with Ilmārs (proposal approved as written); built, not yet tried on the real hardware. The owner has an Akai APC mini (model to be confirmed: the older one or the mk2) and a Stream Deck run by Bitfocus Companion. He tests the hardware later; it is built and tested here against simulated devices.
 
 ## What the devices do
 
@@ -17,7 +17,7 @@ Each pad column sits above its fader, so a column is a light group (the operator
 | Top 2 pad rows (16 pads) | Running order (Basic lights, Song 1, …). On stage: bright; next: dim; others: low |
 | Lower 6 pad rows | Colours: column N = group N's first 6 colours (the colour list, effects not included). Tap to run; running colour bright, others dim |
 | Buttons under the pads (8) | Flash group N (hold) |
-| Buttons on the right (8, top to bottom) | Next · Back to · Undo · Basic lights · Flash all (hold) · Blackout (hold 1 s; tap while blacked out brings the lights back like the iPad's Blackout) · (spare) · (spare) |
+| Buttons on the right (8, top to bottom) | Next · Back to · Undo · Basic lights · Flash all (hold) · Blackout (hold 1 s; it does not toggle: as on the iPad, the lights come back with a song, Basic lights or Next) · (spare) · (spare) |
 
 - **mk2 vs older model** *(my call)*: found from the MIDI port name. The mk2's pads show each colour's real colour (RGB); the older model shows state with its green/red/yellow LEDs (on stage/running: green; next: yellow; available: dim/blinking as the hardware allows).
 - **Pickup faders** *(my call)*: a fader only takes over once it passes the group's (or Master's) current level, so moving it never makes a light jump.

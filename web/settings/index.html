@@ -113,11 +113,12 @@
         <span class="hint" id="universeHint"></span>
       </div>
 
-      <div class="routes" id="routes" hidden>
+      <div class="routes" id="routes">
         <h3>Universes</h3>
-        <p class="hint">Only needed when different universes go to different boxes. Every universe uses the output above unless you give it its own.</p>
+        <p class="hint">Each universe goes to the default output above unless you give it its own.</p>
         <p class="warn" id="unsent"></p>
         <div id="routeList" class="route-list"></div>
+        <button id="addUniverse" class="ghost add-universe" type="button">＋ Add a universe</button>
       </div>
     </section>
 
@@ -129,6 +130,28 @@
         <span class="switch-label">Operators may use manual control</span>
       </label>
       <p class="hint">Basic lights is set from the operator page: start it, set the stage, then hold Save.</p>
+    </section>
+
+    <section class="card" id="oscCard">
+      <h2>OSC</h2>
+      <label class="switch">
+        <input id="oscEnabled" type="checkbox">
+        <span class="track"><span class="knob"></span></span>
+        <span class="switch-label">Let other programs control the lights</span>
+      </label>
+      <p class="hint">Let other programs (like ProPresenter) control the lights over the network. They send messages such as /lightrunner/next or /lightrunner/group/2/level 0.5 to this computer.</p>
+      <div class="field narrow" id="oscPortField">
+        <label for="oscPort">Port</label>
+        <input id="oscPort" type="number" min="1024" max="65535" step="1">
+        <span class="hint">8000 unless the other program needs another.</span>
+      </div>
+      <p class="warn" id="oscProblem"></p>
+    </section>
+
+    <section class="card" id="apcCard">
+      <h2>APC mini</h2>
+      <p id="apcStatus">APC mini: not connected</p>
+      <p class="hint">Plug an Akai APC mini into this computer and it is found within a few seconds. Faders 1–8 dim the groups and fader 9 is Master. The top two rows of pads start the songs, the rows below pick each group's colours.</p>
     </section>
 
     <section class="card">

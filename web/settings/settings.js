@@ -171,6 +171,12 @@ function render() {
 
   $('manualForOperators').checked = s.manualForOperators;
 
+  $('oscEnabled').checked = s.osc.enabled;
+  $('oscPort').value = String(s.osc.port);
+  $('oscPortField').hidden = !s.osc.enabled;
+  $('oscProblem').textContent = s.osc.enabled ? s.oscProblem ?? '' : '';
+  renderApc(s.apc);
+
   $('frameRate').value = String(s.frameRate);
   $('gamma').value = String(s.gamma);
   $('showName').value = s.showName;
@@ -196,12 +202,21 @@ function renderStatus(status, enabled, problem) {
   $('outputProblem').textContent = enabled && problem ? problem : '';
 }
 
-// Keep the status pill live.
+/** Whether an APC mini is plugged in, and which model. */
+function renderApc(apc) {
+  $('apcStatus').textContent =
+    !apc?.midi ? "APC mini: MIDI support isn't installed on this computer" :
+    apc.connected ? `APC mini: connected (${apc.model === 'mk2' ? 'mk2' : 'older model'})` :
+    'APC mini: not connected';
+}
+
+// Keep the status pill and the APC mini line live.
 setInterval(async () => {
   if ($('main').hidden) return;
   try {
     const state = await (await fetch('/api/state')).json();
     if (state && saved) renderStatus(state.output, saved.outputEnabled, state.outputProblem);
+    renderApc(await (await fetch('/api/apc')).json());
   } catch {
     // offline; try again
   }
@@ -211,7 +226,7 @@ setInterval(async () => {
 
 function changedFields() {
   const out = {};
-  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators'];
+  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators', 'osc'];
   for (const k of keys) if (JSON.stringify(draft[k]) !== JSON.stringify(saved[k])) out[k] = draft[k];
   if (draft.universe !== undefined && draft.universe !== saved.universes[0]) out.universe = draft.universe;
   return out;
@@ -245,6 +260,8 @@ $('sacnPriority').addEventListener('input', (e) => { draft.output.priority = Num
 $('enttecPort').addEventListener('change', (e) => { draft.output.port = e.target.value; markDirty(); });
 $('universe').addEventListener('input', (e) => { draft.universe = Number(e.target.value); markDirty(); });
 $('manualForOperators').addEventListener('change', (e) => { draft.manualForOperators = e.target.checked; markDirty(); });
+$('oscEnabled').addEventListener('change', (e) => edit((s) => { s.osc.enabled = e.target.checked; }));
+$('oscPort').addEventListener('input', (e) => { draft.osc.port = Number(e.target.value); markDirty(); });
 $('frameRate').addEventListener('change', (e) => { draft.frameRate = Number(e.target.value); markDirty(); });
 $('gamma').addEventListener('input', (e) => { draft.gamma = Number(e.target.value); markDirty(); });
 $('showName').addEventListener('input', (e) => { draft.showName = e.target.value; markDirty(); });
@@ -354,6 +371,7 @@ $('refreshPorts').addEventListener('click', async () => {
 
 // ---- Universes with their own output ----
 
+const MAX_UNIVERSE = 32767;
 const KINDS = [['artnet', 'Art-Net'], ['sacn', 'sACN (E1.31)'], ['enttec', 'ENTTEC USB']];
 
 /** Universes set to "One receiver" for sACN whose address isn't typed yet. */
@@ -375,21 +393,40 @@ function renderRoutes() {
   const s = draft;
   const counts = s.fixturesPerUniverse ?? {};
   const universes = [...new Set([...s.universes, ...s.routes.map((r) => r.universe)])].sort((a, b) => a - b);
-  // With one universe and no routes there is nothing to choose: the output above is it.
-  $('routes').hidden = universes.length < 2 && !s.routes.length;
   $('unsent').textContent = (saved?.unsent ?? []).map((x) => `Universe ${x.universe} is not sent: ${x.reason}.`).join(' ');
   const list = $('routeList');
   list.replaceChildren(...universes.map((u) => routeRow(u, counts[u] ?? 0)));
 }
 
+/** The next universe number nobody uses: one past the highest in the patch or in a route. */
+function nextUniverse() {
+  const used = new Set([...draft.universes, ...draft.routes.map((r) => r.universe)]);
+  const next = Math.max(-1, ...used) + 1;
+  if (next <= MAX_UNIVERSE) return next;
+  for (let u = 0; u <= MAX_UNIVERSE; u++) if (!used.has(u)) return u;
+  return null;
+}
+
+$('addUniverse').addEventListener('click', () => {
+  const u = nextUniverse();
+  if (u === null) return toast(`All universes up to ${MAX_UNIVERSE} are in use.`, true);
+  edit((s) => { s.routes = [...s.routes, { universe: u, output: newRouteOutput() }].sort((a, b) => a.universe - b.universe); });
+  const row = document.querySelector(`#routeList [data-universe="${u}"]`);
+  row?.scrollIntoView({ block: 'nearest' });
+  row?.querySelector('input[type=text]')?.focus();
+});
+
 function routeRow(u, fixtures) {
   const route = routeFor(u);
   const row = el('div', 'node route');
+  row.dataset.universe = String(u);
   const head = el('div', 'route-head');
   const meta = el('div', 'meta');
   meta.append(el('b', null, `Universe ${u}`));
-  meta.append(el('span', null, `${fixtures ? `${fixtures} fixture${fixtures === 1 ? '' : 's'}` : 'No fixtures patched'} · ${route ? 'Own output' : 'Default output'}`));
-  const toggle = el('button', 'ghost small', route ? 'Use default' : 'Use its own output');
+  meta.append(el('span', null, `${fixtures ? `${fixtures} fixture${fixtures === 1 ? '' : 's'}` : 'No fixtures patched yet'} · ${route ? 'Own output' : 'Default output'}`));
+  // A universe nothing is patched on has no output to fall back to: it is only listed because it was added, so it can go.
+  const removable = route && !fixtures;
+  const toggle = el('button', 'ghost small', removable ? 'Remove' : route ? 'Use default' : 'Use its own output');
   toggle.type = 'button';
   toggle.addEventListener('click', () => edit((s) => {
     if (route) s.routes = s.routes.filter((r) => r.universe !== u);

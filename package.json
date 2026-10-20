@@ -25,6 +25,7 @@
     "zod": "^4.1.0"
   },
   "optionalDependencies": {
+    "@julusian/midi": "^3.8.1",
     "serialport": "^13.0.0"
   },
   "devDependencies": {
