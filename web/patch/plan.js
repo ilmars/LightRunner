@@ -1,69 +1,144 @@
-// Stage plan geometry for the Patch page: no DOM, so it can be tested.
-// A fixture's x and y are its middle; w and h are its size as fractions of the plan's width and height
-// (no size draws a dot). `aspect` is the plan's width over its height, to keep lengths the same on screen.
+// Stage plan editing for the Patch page: shapes, turning and resizing. No DOM, so it can be tested.
+// A fixture's x and y are its middle, as fractions of the plan. What each shape keeps (see web/shared/stage.js):
+// a bar its length (w), thickness (h) and angle; a beam its angle and reach; an outline its width (w) and height (h).
+// Lengths along an angle are measured in the plan's proportions, as a fraction of its width.
+
+import { BEAM_REACH, PLAN_ASPECT, barAxis } from '../shared/stage.js';
 
 /** A new bar: a fifth of the plan wide, and thin. */
 export const BAR_LENGTH = 0.2;
 export const BAR_THICKNESS = 0.03;
-/** A bar can't be made shorter or thinner than this. */
+/** A new outline: a box about the size of a drum riser. */
+export const OUTLINE_W = 0.12;
+export const OUTLINE_H = 0.25;
+/** Nothing can be made shorter or thinner than this. */
 export const MIN_LENGTH = 0.02;
 export const MIN_THICKNESS = 0.01;
+const MIN_REACH = 0.03;
+/** The turning and aiming handles snap to this many degrees unless turned freely (Shift). */
+const STEP = 15;
 
 const round = (v) => Math.round(v * 1000) / 1000;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const deg = (r) => (r * 180) / Math.PI;
+/** An angle kept between -180 and 180. */
+const wrap = (a) => {
+  const w = ((((a + 180) % 360) + 360) % 360) - 180;
+  return w === -180 && a > 0 ? 180 : w;
+};
+const snap = (a, free) => wrap(free ? Math.round(a) : Math.round(a / STEP) * STEP);
+/** The direction from the fixture's middle to `p`, in the plan's proportions: [angle, distance]. */
+const towards = (f, p) => {
+  const dx = p.x - f.x, dy = (p.y - f.y) / PLAN_ASPECT;
+  return [deg(Math.atan2(dy, dx)), Math.hypot(dx, dy)];
+};
 
-/** 'dot', 'across' or 'upright' (a bar is upright when it is longer from top to bottom on screen). */
-export function shapeOf(f, aspect) {
-  if (!f.w && !f.h) return 'dot';
-  return (f.w ?? 0) * aspect >= (f.h ?? 0) ? 'across' : 'upright';
+/** How the fixture is drawn: a stored shape, else a cloud in a smoke group, a bar when it has a size, or a dot. */
+export function shapeOf(f, inSmoke = false) {
+  if (f.shape) return f.shape;
+  if (inSmoke) return 'smoke';
+  return f.w || f.h ? 'bar' : 'dot';
 }
 
-/** Make a fixture a dot or a bar; turning a bar keeps its length and thickness on screen. */
-export function setShape(f, shape, aspect) {
-  const was = shapeOf(f, aspect);
+const drop = (f, ...keys) => { for (const k of keys) delete f[k]; };
+
+/** Give a fixture another shape, stored, with a starting size; a bar that stays a bar keeps its size. */
+export function setShape(f, shape, inSmoke = false) {
+  const was = shapeOf(f, inSmoke);
+  f.shape = shape;
   if (shape === was) return;
-  if (shape === 'dot') {
-    delete f.w;
-    delete f.h;
-    return;
-  }
-  // Length and thickness as fractions of the plan's width.
-  let length = BAR_LENGTH, thickness = BAR_THICKNESS / aspect;
-  if (was === 'across') [length, thickness] = [f.w ?? BAR_LENGTH, (f.h || BAR_THICKNESS) / aspect];
-  if (was === 'upright') [length, thickness] = [(f.h ?? 0) / aspect, f.w || BAR_THICKNESS / aspect];
-  if (shape === 'across') {
-    f.w = round(clamp(length, MIN_LENGTH, 1));
-    f.h = round(clamp(thickness * aspect, MIN_THICKNESS, 1));
+  if (shape === 'bar') {
+    Object.assign(f, { w: BAR_LENGTH, h: BAR_THICKNESS, angle: 0 });
+    drop(f, 'reach');
+  } else if (shape === 'beam') {
+    Object.assign(f, { angle: -90, reach: BEAM_REACH });
+    drop(f, 'w', 'h');
+  } else if (shape === 'outline') {
+    Object.assign(f, { w: OUTLINE_W, h: OUTLINE_H });
+    drop(f, 'angle', 'reach');
+    // Near an edge it moves just enough to fit on the plan.
+    f.x = round(clamp(f.x, OUTLINE_W / 2, 1 - OUTLINE_W / 2));
+    f.y = round(clamp(f.y, OUTLINE_H / 2, 1 - OUTLINE_H / 2));
   } else {
-    f.w = round(clamp(thickness, MIN_THICKNESS, 1));
-    f.h = round(clamp(length * aspect, MIN_LENGTH, 1));
+    drop(f, 'w', 'h', 'angle', 'reach');
   }
 }
 
-/** Drag one end of a bar ('start' is the left or top end) to `p`; the other end stays put. */
-export function resizeEnd(f, end, p, aspect) {
-  const across = shapeOf(f, aspect) === 'across';
-  const [pos, size] = across ? ['x', 'w'] : ['y', 'h'];
-  const at = across ? p.x : p.y;
-  // At least twice as long as it is thick, so it never turns into the other shape.
-  const shortest = Math.max(MIN_LENGTH, 2 * (across ? (f.h ?? 0) / aspect : (f.w ?? 0) * aspect));
-  const half = (f[size] ?? 0) / 2;
-  let a = f[pos] - half, b = f[pos] + half;
-  if (end === 'start') a = clamp(at, 0, Math.max(0, b - shortest));
-  else b = clamp(at, Math.min(1, a + shortest), 1);
-  f[pos] = round((a + b) / 2);
-  f[size] = round(b - a);
+/** Store a bar the way angles need it (an upright bar from before angles gets angle 90); returns its axis. */
+function asTurned(f) {
+  const axis = barAxis(f);
+  f.w = round(clamp(axis.length, MIN_LENGTH, 1));
+  f.h = round(clamp(axis.thickness, MIN_THICKNESS, 1));
+  f.angle = axis.angle;
+  return { length: f.w, thickness: f.h, angle: f.angle };
+}
+
+/** Turn a bar to `angle` degrees about its middle (Across is 0, Upright 90). */
+export function setBarAngle(f, angle) {
+  asTurned(f);
+  f.angle = wrap(angle);
+}
+
+/** The turning handle, past the bar's end, dragged to `p`: the end points at it. */
+export function turnBar(f, p, free) {
+  setBarAngle(f, snap(towards(f, p)[0], free));
+}
+
+/** How far from `from` along `dir` (plan proportions) before leaving the plan. */
+function roomAlong(from, dir) {
+  let room = Infinity;
+  const limits = [[from.x, dir.x, 1], [from.y, dir.y, 1 / PLAN_ASPECT]];
+  for (const [at, d, size] of limits) {
+    if (d > 1e-9) room = Math.min(room, (size - at) / d);
+    else if (d < -1e-9) room = Math.min(room, -at / d);
+  }
+  return Math.max(0, room);
+}
+
+/** Drag one end of a bar ('start' is the left or top end at 0° or 90°) to `p`; the other end stays put. */
+export function resizeEnd(f, end, p) {
+  const { length, thickness, angle } = asTurned(f);
+  const r = (angle * Math.PI) / 180;
+  const dir = { x: Math.cos(r), y: Math.sin(r) };
+  // The end that stays, and the way to the end that moves, in plan proportions.
+  const sign = end === 'end' ? 1 : -1;
+  const middle = { x: f.x, y: f.y / PLAN_ASPECT };
+  const fixed = { x: middle.x - (sign * dir.x * length) / 2, y: middle.y - (sign * dir.y * length) / 2 };
+  const way = { x: sign * dir.x, y: sign * dir.y };
+  const at = (p.x - fixed.x) * way.x + (p.y / PLAN_ASPECT - fixed.y) * way.y;
+  // At least twice as long as it is thick, so it stays a bar.
+  const shortest = Math.max(MIN_LENGTH, (2 * thickness) / PLAN_ASPECT);
+  const next = clamp(at, shortest, Math.max(shortest, roomAlong(fixed, way)));
+  f.x = round(fixed.x + (way.x * next) / 2);
+  f.y = round((fixed.y + (way.y * next) / 2) * PLAN_ASPECT);
+  f.w = round(next);
 }
 
 /** Drag the side handle to `p`: the bar gets thicker or thinner, evenly about its middle, up to half its length. */
-export function resizeThickness(f, p, aspect) {
-  if (shapeOf(f, aspect) === 'across') f.h = round(clamp(2 * Math.abs(p.y - f.y), MIN_THICKNESS, Math.max(MIN_THICKNESS, ((f.w ?? 0) * aspect) / 2)));
-  else f.w = round(clamp(2 * Math.abs(p.x - f.x), MIN_THICKNESS, Math.max(MIN_THICKNESS, (f.h ?? 0) / aspect / 2)));
+export function resizeThickness(f, p) {
+  const { length, angle } = asTurned(f);
+  const r = (angle * Math.PI) / 180;
+  const dx = p.x - f.x, dy = (p.y - f.y) / PLAN_ASPECT;
+  const across = Math.abs(dx * Math.sin(r) - dy * Math.cos(r));
+  f.h = round(clamp(2 * across * PLAN_ASPECT, MIN_THICKNESS, Math.max(MIN_THICKNESS, (length * PLAN_ASPECT) / 2)));
+}
+
+/** The beam's tip dragged to `p`: it points there and reaches that far. */
+export function aimBeam(f, p, free) {
+  const [angle, distance] = towards(f, p);
+  f.angle = snap(angle, free);
+  f.reach = round(clamp(distance, MIN_REACH, 1));
+}
+
+/** The outline's corner dragged to `p`: its width and height, evenly about its middle. */
+export function resizeOutline(f, p) {
+  f.w = round(clamp(2 * Math.abs(p.x - f.x), MIN_LENGTH, 1));
+  f.h = round(clamp(2 * Math.abs(p.y - f.y), MIN_LENGTH, 1));
 }
 
 /** Where `count` new fixtures go: a row from `spot` to the right, moved or squeezed to stay on the plan. */
 export function placeRow(spot, count, shape) {
-  const bar = shape === 'across';
+  const bar = shape === 'bar';
   const margin = bar ? BAR_LENGTH / 2 : 0.03;
   const lo = margin, hi = 1 - margin;
   let step = bar ? BAR_LENGTH + 0.02 : 0.08;

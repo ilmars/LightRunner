@@ -100,16 +100,23 @@
     <section class="card">
       <div class="card-head">
         <h2>Stage plan</h2>
-        <span class="hint">Drag fixtures to where they hang; click one to change its shape or size, or an empty spot to add one. The back of the stage is at the top.</span>
+        <span class="hint">Drag fixtures to where they hang; click one to change its shape, size or angle, or an empty spot to add one. The back of the stage is at the top.</span>
       </div>
       <div id="stage" class="stage-plan" aria-label="Stage plan"></div>
       <div id="planTools" class="plan-tools" hidden>
         <span id="planName" class="plan-name"></span>
         <div id="planShape" class="ds-seg" role="radiogroup" aria-label="Shape">
           <button type="button" role="radio" data-shape="dot">Dot</button>
-          <button type="button" role="radio" data-shape="across">Across</button>
-          <button type="button" role="radio" data-shape="upright">Upright</button>
+          <button type="button" role="radio" data-shape="beam">Beam</button>
+          <button type="button" role="radio" data-shape="bar">Bar</button>
+          <button type="button" role="radio" data-shape="outline">Outline</button>
+          <button type="button" role="radio" data-shape="smoke">Smoke</button>
         </div>
+        <span id="planTurn" class="plan-turn" hidden>
+          <span id="planAngle" class="plan-angle"></span>
+          <button type="button" class="ghost small" data-angle="0">Across</button>
+          <button type="button" class="ghost small" data-angle="90">Upright</button>
+        </span>
         <span id="planToolsHint" class="hint"></span>
       </div>
       <form id="planAdd" class="add plan-sheet" hidden>

@@ -1,7 +1,8 @@
 // Patch page: fixtures, groups and the stage plan. Edits a copy of the show
 // and saves it whole; the server checks it and keeps a backup of the old one.
 
-import { placeRow, resizeEnd, resizeThickness, setShape, shapeOf } from './plan.js';
+import { aimBeam, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setShape, shapeOf, turnBar } from './plan.js';
+import { PLAN_ASPECT, barAxis, beamCone } from '../shared/stage.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -349,7 +350,7 @@ function addFixtures(p, prefix, count, universe, start, spot = null) {
   const existing = show.fixtures.map((f) => f.name.match(new RegExp(`^${escaped} (\\d+)$`))).filter(Boolean).map((m) => Number(m[1]));
   const plain = show.fixtures.some((f) => f.name === prefix);
   let n = existing.length ? Math.max(...existing) + 1 : plain ? 2 : 1;
-  const shape = (p.segments ?? 1) > 1 ? 'across' : 'dot';
+  const shape = (p.segments ?? 1) > 1 ? 'bar' : 'dot';
   const spots = spot ? placeRow(spot, count, shape) : null;
   let first = null;
   for (let k = 0; k < count; k++) {
@@ -361,7 +362,7 @@ function addFixtures(p, prefix, count, universe, start, spot = null) {
       x: spots ? spots[k].x : count === 1 ? 0.5 : Math.round((0.1 + (0.8 * k) / (count - 1)) * 1000) / 1000,
       y: spots ? spots[k].y : 0.5,
     };
-    setShape(f, shape, planAspect());
+    if (shape === 'bar') setShape(f, 'bar');
     show.fixtures.push(f);
     first ??= f;
   }
@@ -822,28 +823,22 @@ $('newGroupForm').addEventListener('submit', (ev) => {
 /** Where "Add fixture here" was asked for, as fractions of the plan; null when not shown. */
 let planSpot = null;
 
-/** The plan's width over its height, to keep a bar's length the same when it is turned. */
-function planAspect() {
-  const r = $('stage').getBoundingClientRect();
-  return r.width && r.height ? r.width / r.height : 2.4;
-}
-
 /** A pointer position as fractions of the plan, kept on it. */
 function planPoint(e, rect) {
   const clamp01 = (v) => Math.min(1, Math.max(0, v));
   return { x: clamp01((e.clientX - rect.left) / rect.width), y: clamp01((e.clientY - rect.top) / rect.height) };
 }
 
-function placeItem(item, f) {
-  item.style.left = `${f.x * 100}%`;
-  item.style.top = `${f.y * 100}%`;
-  if (f.w || f.h) {
-    item.style.width = `max(10px, ${(f.w ?? 0) * 100}%)`;
-    item.style.height = `max(6px, ${(f.h ?? 0) * 100}%)`;
-  }
+const inSmokeGroup = (f) => show.groups.some((g) => g.kind === 'smoke' && g.fixtures.includes(f.id));
+const pct = (v) => `${v * 100}%`;
+
+/** A resize cursor that follows a handle's direction on screen (degrees, 0 = across). */
+function resizeCursor(angle) {
+  const a = ((Math.round(angle / 45) % 4) + 4) % 4;
+  return ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'][a];
 }
 
-/** Follow a pointer from `ev` until it lets go: `move` gets each position on the plan, `done` whether it moved. */
+/** Follow a pointer from `ev` until it lets go: `move` gets each position on the plan and the event, `done` whether it moved. */
 function followPointer(ev, target, move, done) {
   ev.preventDefault();
   ev.stopPropagation();
@@ -855,7 +850,7 @@ function followPointer(ev, target, move, done) {
     // A click that shifts a pixel or two is still a click.
     if (!moved && Math.hypot(e.clientX - x0, e.clientY - y0) < 4) return;
     moved = true;
-    move(planPoint(e, rect));
+    move(planPoint(e, rect), e);
   };
   const onUp = () => {
     target.removeEventListener('pointermove', onMove);
@@ -868,79 +863,144 @@ function followPointer(ev, target, move, done) {
   target.addEventListener('pointercancel', onUp);
 }
 
+/** A handle that follows the pointer; `move` changes the fixture, then the fixture is drawn again where it is. */
+function handle(cls, title, cursor, f, move) {
+  const h = el('div', `plan-handle ${cls}`);
+  h.title = title;
+  if (cursor) h.style.cursor = cursor;
+  h.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0) return;
+    followPointer(ev, h, (p, e) => {
+      move(p, e);
+      placeFixture(f);
+    }, (moved) => { if (moved) changed(); });
+  });
+  return h;
+}
+
+/** The elements drawn for each fixture, so a drag can move them without drawing the whole plan again. */
+const planParts = new Map();
+
+/** Put a fixture's elements where it is now: its mark, its label, and a beam's cone and tip. */
+function placeFixture(f) {
+  const parts = planParts.get(f.id);
+  if (!parts) return;
+  const { body, tag, cone, tip, shape } = parts;
+  body.style.left = pct(f.x);
+  body.style.top = pct(f.y);
+  // How far the mark reaches below its middle, as a fraction of the plan's height, for the label.
+  let below = 0;
+  if (shape === 'bar') {
+    const { length, thickness, angle } = barAxis(f);
+    body.style.width = `max(10px, ${pct(length)})`;
+    body.style.height = `max(6px, ${pct(thickness)})`;
+    body.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
+    const r = (angle * Math.PI) / 180;
+    below = Math.abs(Math.sin(r)) * (length / 2) * PLAN_ASPECT + Math.abs(Math.cos(r)) * (thickness / 2);
+  } else if (shape === 'outline') {
+    body.style.width = pct(f.w ?? 0.1);
+    body.style.height = pct(f.h ?? 0.1);
+    below = (f.h ?? 0.1) / 2;
+  }
+  tag.style.left = pct(f.x);
+  tag.style.top = shape === 'bar' || shape === 'outline' ? `calc(${pct(f.y + below)} + 3px)` : `calc(${pct(f.y)} + 13px)`;
+  if (cone) {
+    const c = beamCone(f);
+    cone.setAttribute('points', [c.lamp, c.left, c.right].map((p) => `${p.x * 100},${p.y * 100}`).join(' '));
+    if (tip) {
+      tip.style.left = pct(c.tip.x);
+      tip.style.top = pct(c.tip.y);
+    }
+  }
+}
+
+/** A small cloud, for a smoke or haze machine. */
+const CLOUD = '<svg viewBox="0 0 28 18" width="28" height="18" aria-hidden="true"><path d="M7 17a6 6 0 0 1-.7-11.96A7.5 7.5 0 0 1 20.4 4.3 6.4 6.4 0 1 1 21.5 17Z"/></svg>';
+
 function renderStage() {
   const root = $('stage');
   root.replaceChildren();
-  const aspect = planAspect();
+  planParts.clear();
+  // Beams' cones go underneath everything, in one drawing the size of the plan (its units are percent).
+  const cones = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  cones.setAttribute('class', 'plan-cones');
+  cones.setAttribute('viewBox', '0 0 100 100');
+  cones.setAttribute('preserveAspectRatio', 'none');
+  root.append(cones);
   for (const f of show.fixtures) {
-    const shape = shapeOf(f, aspect);
+    const shape = shapeOf(f, inSmokeGroup(f));
     const selected = f.id === selectedId;
-    const item = el('div', ['plan-item', shape !== 'dot' && `bar ${shape}`, selected && 'sel'].filter(Boolean).join(' '));
-    placeItem(item, f);
+    const body = el('div', ['plan-item', shape, selected && 'sel'].filter(Boolean).join(' '));
+    if (shape === 'smoke') body.innerHTML = CLOUD;
+    else body.append(el('div', 'shape'));
+    body.title = f.name;
     // Long names ("B6 SonicPulse LED Bar 10") show their short code on the plan; hover shows all.
     const first = f.name.split(' ')[0];
-    const tag = /^[A-Za-z]{1,3}\d{1,3}$/.test(first) ? first : f.name.length > 12 ? `${f.name.slice(0, 11)}…` : f.name;
-    item.append(el('div', 'shape'), el('span', 'tag', tag));
-    item.title = f.name;
-    item.addEventListener('pointerdown', (ev) => {
+    const tag = el('span', 'plan-tag', /^[A-Za-z]{1,3}\d{1,3}$/.test(first) ? first : f.name.length > 12 ? `${f.name.slice(0, 11)}…` : f.name);
+    const parts = { body, tag, shape, cone: null, tip: null };
+    if (shape === 'beam') {
+      parts.cone = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      parts.cone.setAttribute('class', selected ? 'plan-cone sel' : 'plan-cone');
+      cones.append(parts.cone);
+    }
+    planParts.set(f.id, parts);
+    body.addEventListener('pointerdown', (ev) => {
       if (ev.button !== 0) return;
       // The fixture keeps where it was grabbed under the pointer, so a bar doesn't jump to centre on it.
       const grab = planPoint(ev, root.getBoundingClientRect());
       const dx = f.x - grab.x, dy = f.y - grab.y;
-      item.classList.add('dragging');
-      followPointer(ev, item, (p) => {
+      body.classList.add('dragging');
+      followPointer(ev, body, (p) => {
         f.x = Math.round(Math.min(1, Math.max(0, p.x + dx)) * 1000) / 1000;
         f.y = Math.round(Math.min(1, Math.max(0, p.y + dy)) * 1000) / 1000;
-        placeItem(item, f);
+        placeFixture(f);
       }, (moved) => {
-        item.classList.remove('dragging');
+        body.classList.remove('dragging');
         selectFixture(f.id, false);
         if (moved) changed();
       });
     });
-    if (selected && shape !== 'dot') {
-      // Handles: one at each end for the length, one on a long side for the thickness.
-      for (const kind of ['start', 'end', 'thick']) {
-        const handle = el('div', `plan-handle ${kind}`);
-        handle.title = kind === 'thick' ? 'Drag to make it thicker or thinner' : 'Drag to make it longer or shorter';
-        handle.addEventListener('pointerdown', (ev) => {
-          if (ev.button !== 0) return;
-          item.classList.add('dragging');
-          followPointer(ev, handle, (p) => {
-            if (kind === 'thick') resizeThickness(f, p, aspect);
-            else resizeEnd(f, kind, p, aspect);
-            placeItem(item, f);
-          }, (moved) => {
-            item.classList.remove('dragging');
-            if (moved) changed();
-          });
-        });
-        item.append(handle);
-      }
+    if (selected && shape === 'bar') {
+      // One handle at each end for the length, one on a long side for the thickness, and one past the end to turn it.
+      const angle = barAxis(f).angle;
+      body.append(
+        handle('start', 'Drag to make it longer or shorter', resizeCursor(angle), f, (p) => resizeEnd(f, 'start', p)),
+        handle('end', 'Drag to make it longer or shorter', resizeCursor(angle), f, (p) => resizeEnd(f, 'end', p)),
+        handle('thick', 'Drag to make it thicker or thinner', resizeCursor(angle + 90), f, (p) => resizeThickness(f, p)),
+        handle('turn', 'Drag to turn it (hold Shift to turn freely)', 'grab', f, (p, e) => turnBar(f, p, e.shiftKey)),
+      );
     }
-    root.append(item);
+    if (selected && shape === 'outline') {
+      body.append(handle('corner', 'Drag to change its size', 'nwse-resize', f, (p) => resizeOutline(f, p)));
+    }
+    if (selected && shape === 'beam') {
+      parts.tip = handle('tip', 'Drag to aim it and set how far it reaches (hold Shift to aim freely)', 'grab', f, (p, e) => aimBeam(f, p, e.shiftKey));
+      root.append(parts.tip);
+    }
+    root.append(body, tag);
+    placeFixture(f);
   }
   if (planSpot) {
     const add = el('button', 'plan-add', '+ Add fixture here');
     add.type = 'button';
-    add.style.left = `${planSpot.x * 100}%`;
-    add.style.top = `${planSpot.y * 100}%`;
+    add.style.left = pct(planSpot.x);
+    add.style.top = pct(planSpot.y);
     add.addEventListener('pointerdown', (ev) => ev.stopPropagation());
     add.addEventListener('click', openPlanAdd);
     root.append(add);
   }
-  renderPlanTools(aspect);
+  renderPlanTools();
 }
 
 // A click on an empty spot clears the selection and offers to add a fixture there.
 $('stage').addEventListener('pointerdown', (ev) => {
-  if (ev.target !== $('stage') || ev.button !== 0) return;
+  if (ev.button !== 0 || !(ev.target === $('stage') || ev.target.closest('.plan-cones'))) return;
   const spot = planPoint(ev, $('stage').getBoundingClientRect());
   followPointer(ev, $('stage'), () => {}, (moved) => {
     if (moved) return;
     planSpot = { x: Math.round(spot.x * 1000) / 1000, y: Math.round(spot.y * 1000) / 1000 };
     if (!$('planAdd').hidden) {
-      // The sheet is open: it now adds at the new spot.
+      // The form is open: it now adds at the new spot.
       renderStage();
       return;
     }
@@ -948,22 +1008,41 @@ $('stage').addEventListener('pointerdown', (ev) => {
   });
 });
 
+const SHAPE_HINTS = {
+  dot: '',
+  beam: 'Drag the round handle at the tip to aim it and set how far it reaches.',
+  bar: 'Drag the handles to change its length and thickness, or the one past its end to turn it.',
+  outline: 'For a strip round something. Drag the corner handle to change its size.',
+  smoke: 'For a smoke or haze machine.',
+};
+
 /** The shape row under the plan, for the selected fixture. */
-function renderPlanTools(aspect) {
+function renderPlanTools() {
   const f = show.fixtures.find((x) => x.id === selectedId);
   $('planTools').hidden = !f;
   if (!f) return;
-  const shape = shapeOf(f, aspect);
+  const shape = shapeOf(f, inSmokeGroup(f));
   $('planName').textContent = f.name;
   for (const b of $('planShape').children) b.setAttribute('aria-checked', String(b.dataset.shape === shape));
-  $('planToolsHint').textContent = shape === 'dot' ? '' : 'Drag the handles to change its length and thickness.';
+  const angle = shape === 'bar' ? Math.round(barAxis(f).angle) : null;
+  $('planTurn').hidden = shape !== 'bar';
+  $('planAngle').textContent = angle === null ? '' : `${angle}°`;
+  $('planToolsHint').textContent = SHAPE_HINTS[shape];
 }
 
 $('planShape').addEventListener('click', (ev) => {
   const b = ev.target.closest('button[data-shape]');
   const f = show.fixtures.find((x) => x.id === selectedId);
   if (!b || !f) return;
-  setShape(f, b.dataset.shape, planAspect());
+  setShape(f, b.dataset.shape, inSmokeGroup(f));
+  changed();
+});
+
+$('planTurn').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-angle]');
+  const f = show.fixtures.find((x) => x.id === selectedId);
+  if (!b || !f) return;
+  setBarAngle(f, Number(b.dataset.angle));
   changed();
 });
 

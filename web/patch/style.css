@@ -84,10 +84,25 @@ table.patch { width: 100%; min-width: 940px; border-collapse: collapse; font-siz
 }
 .plan-item .shape { background: #aab3c6; border: 1px solid rgba(8, 12, 22, 0.8); border-radius: 50%; width: 18px; height: 18px; }
 .plan-item.bar .shape { border-radius: 3px; width: 100%; height: 100%; }
-.plan-item .tag { position: absolute; top: 100%; margin-top: 3px; font-size: 11px; color: var(--dim); white-space: nowrap; pointer-events: none; }
+/* An outline: a strip round something, drawn as its edge only. */
+.plan-item.outline .shape {
+  box-sizing: border-box; width: 100%; height: 100%; border-radius: 6px;
+  background: transparent; border: 3px solid #aab3c6; box-shadow: 0 0 0 1px rgba(8, 12, 22, 0.8);
+}
+.plan-item.smoke svg { display: block; fill: #aab3c6; opacity: 0.55; }
 .plan-item.dragging { cursor: grabbing; z-index: 2; }
 .plan-item.dragging .shape, .plan-item.sel .shape { outline: 2px solid var(--accent); outline-offset: 1px; }
+.plan-item.sel.smoke { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 .plan-item.sel { z-index: 1; }
+/* The label under each mark; it never turns with a bar. */
+.plan-tag {
+  position: absolute; transform: translateX(-50%); font-size: 11px; color: var(--dim);
+  white-space: nowrap; pointer-events: none;
+}
+/* Beams' cones: faint, under everything, and never in the way of a click. */
+.plan-cones { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.plan-cone { fill: rgba(170, 179, 198, 0.08); stroke: rgba(170, 179, 198, 0.3); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.plan-cone.sel { stroke: rgba(98, 155, 240, 0.6); }
 
 /* Handles on the selected bar: a small dot, with a larger area around it that takes the pointer. */
 .plan-handle {
@@ -98,12 +113,15 @@ table.patch { width: 100%; min-width: 940px; border-collapse: collapse; font-siz
   content: ''; width: 9px; height: 9px; border-radius: 50%;
   background: var(--ds-surface-hi); box-shadow: 0 0 0 1.5px var(--accent);
 }
-.plan-item.across .plan-handle.start { left: 0; top: 50%; cursor: ew-resize; }
-.plan-item.across .plan-handle.end { left: 100%; top: 50%; cursor: ew-resize; }
-.plan-item.across .plan-handle.thick { left: 50%; top: 0; cursor: ns-resize; }
-.plan-item.upright .plan-handle.start { left: 50%; top: 0; cursor: ns-resize; }
-.plan-item.upright .plan-handle.end { left: 50%; top: 100%; cursor: ns-resize; }
-.plan-item.upright .plan-handle.thick { left: 100%; top: 50%; cursor: ew-resize; }
+/* On a bar these turn with it: ends, one long side, and the turning handle just past the end (a ring). */
+.plan-handle.start { left: 0; top: 50%; }
+.plan-handle.end { left: 100%; top: 50%; }
+.plan-handle.thick { left: 50%; top: 0; }
+.plan-handle.turn { left: calc(100% + 22px); top: 50%; }
+.plan-handle.turn::after { background: transparent; width: 11px; height: 11px; }
+.plan-handle.corner { left: 100%; top: 100%; }
+/* A beam's tip sits on the plan itself, at the end of its cone. */
+.plan-handle.tip { z-index: 2; }
 
 /* "+ Add fixture here" at the clicked spot: a quiet pill. */
 .plan-add {
@@ -118,7 +136,13 @@ table.patch { width: 100%; min-width: 940px; border-collapse: collapse; font-siz
 .plan-tools { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
 .plan-tools[hidden] { display: none; }
 .plan-name { font-size: 14px; font-weight: 500; min-width: 120px; }
-.plan-tools .ds-seg > button { min-height: 34px; font-size: 14px; }
+.plan-tools .ds-seg > button { min-height: 34px; font-size: 14px; padding: 0 12px; }
+.plan-turn { display: inline-flex; align-items: center; gap: 2px; }
+/* Across and Upright: quiet text buttons. */
+.plan-turn button { background: transparent; box-shadow: none; color: var(--dim); font-weight: 400; }
+.plan-turn button:hover { background: rgba(148, 170, 210, 0.08); color: var(--text); }
+.plan-turn[hidden] { display: none; }
+.plan-angle { font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: right; }
 
 /* "Add fixtures here": under the plan, like the Add fixtures form, so the spot stays in view. */
 .plan-sheet { margin-top: 14px; }
