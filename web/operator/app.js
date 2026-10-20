@@ -1786,7 +1786,9 @@ function buildNewExtras(group) {
       startV = row.value;
     });
     row.dim.addEventListener('pointermove', (ev) => {
-      if (row.dragging) showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
+      if (!row.dragging) return;
+      showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
+      showNewSwatch();
     });
     const end = () => {
       row.dragging = false;
@@ -1801,9 +1803,39 @@ function buildNewExtras(group) {
 attachStrip($('paStrip'), $('paH'), () => (newColour ? pickerRow()?.group.whiteOnly ?? null : null), (hex) => {
   if (!newColour) return;
   newColour.hex = hex;
-  $('paSw').style.background = shown(hex) ?? hex;
+  showNewSwatch();
   $('paAddBtn').disabled = pendingColour !== null;
 });
+
+/** The new colour's White, Amber and UV, as its sliders show them (0 where the group has no slider). */
+function newLevels() {
+  const levels = { white: 0, amber: 0, uv: 0 };
+  for (const r of newExtraRows) levels[r.key] = Math.round(r.value * 100) / 100;
+  return levels;
+}
+
+/** The form's swatch: the picked colour with its White, Amber and UV mixed in, as the saved swatch will look. */
+function showNewSwatch() {
+  if (!newColour?.hex) return;
+  const look = mixedColour(newColour.hex, newLevels());
+  $('paSw').style.background = shown(look) ?? look;
+}
+
+/**
+ * A #rrggbb colour with White, Amber and UV mixed in, the way the server makes swatches:
+ * the same sums as displayColour() in packages/shared/src/protocol.ts (keep the two alike).
+ */
+function mixedColour(hex, { white = 0, amber = 0, uv = 0 }) {
+  if (!white && !amber && !uv) return hex.toLowerCase();
+  const n = parseInt(hex.slice(1), 16);
+  const rgb = [
+    ((n >> 16) & 255) / 255 + white + amber + 0.25 * uv,
+    ((n >> 8) & 255) / 255 + white + (0xbf / 255) * amber,
+    (n & 255) / 255 + white + 0.4 * uv,
+  ];
+  const scale = 1 / Math.max(1, ...rgb);
+  return `#${rgb.map((c) => Math.round(c * scale * 255).toString(16).padStart(2, '0')).join('')}`;
+}
 
 $('pAddOpen').addEventListener('click', openAddColour);
 $('paCancel').addEventListener('click', closeAddColour);
@@ -1817,9 +1849,7 @@ $('paAddBtn').addEventListener('click', () => {
   if (pendingColour !== null || !picker.group) return;
   if (newColour) {
     if (!newColour.hex) return;
-    const levels = { white: 0, amber: 0, uv: 0 };
-    for (const r of newExtraRows) levels[r.key] = Math.round(r.value * 100) / 100;
-    pendingColour = send({ type: 'addColour', group: picker.group, colour: newColour.hex, ...levels, name: $('paName').value, allGroups: $('paAll').checked });
+    pendingColour = send({ type: 'addColour', group: picker.group, colour: newColour.hex, ...newLevels(), name: $('paName').value, allGroups: $('paAll').checked });
     $('paAddBtn').disabled = pendingColour !== null;
     return;
   }
@@ -3067,13 +3097,12 @@ function followEffectStripClock() {
 }
 
 /**
- * The tempo and speed dial the page shows: the draft's in Blind, the selected song's tempo in
- * Preview, else the stage's. The strip runs at these.
+ * The tempo and speed dial the page shows: the draft's in Blind, else the stage's. The strip runs
+ * at these. (The effect editor is hidden in Preview.)
  */
 function stripClock() {
   const shown = shownState();
-  const tempo = preview.on ? previewItem()?.tempo ?? 120 : shown?.tempo ?? 120;
-  return { tempo, speed: shown?.speed ?? 1 };
+  return { tempo: shown?.tempo ?? 120, speed: shown?.speed ?? 1 };
 }
 
 async function loadEffectStrip() {
