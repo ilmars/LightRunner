@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { EffectLayer, findProfile, parseShow, type Preset, type Show } from '../../shared/src/index.ts';
 import { Engine } from '../src/index.ts';
-import { compileEffect, cyclesPerSecond, rateChecks, renderEffect, safeRate, type CompiledEffect } from '../src/effects.ts';
+import { SafeRates, compileEffect, cyclesPerSecond, rateChecks, renderEffect, safeRate, type CompiledEffect } from '../src/effects.ts';
 import { dark, type Light } from '../src/light.ts';
 import { planChannels, visibleLevel } from '../src/output.ts';
 import { FRAME, beyondOwnMotion, lightOf, segmentsOf } from './helpers.ts';
@@ -644,6 +644,26 @@ test('a show edit only works out the safe rate of new or changed effects', () =>
   const before = rateChecks.count;
   e.setShow(show, 4);
   assert.equal(rateChecks.count - before, 200);
+});
+
+test('a new base colour or base brightness never measures an effect again: only having a base can change its safe rate', () => {
+  const rates = new SafeRates();
+  const kinds = EffectLayer.shape.effect.options;
+  const compile = (base?: { colour: { hex: string }; level: number }) =>
+    kinds.map((effect) => compileEffect(EffectLayer.parse({ kind: 'effect', effect, colours: [RED, DIM, WHITE], speed: { beats: 1 }, base }), new Map(), rates));
+  const start = rateChecks.count;
+  const plain = compile();
+  const over = compile({ colour: BLUE, level: 0.5 });
+  assert.equal(rateChecks.count - start, 2 * kinds.length);
+  // Another base colour and level: nothing is measured, and each rate is what measuring it afresh gives.
+  const other = compile({ colour: { hex: '#ffb46b' }, level: 0.1 });
+  assert.equal(rateChecks.count - start, 2 * kinds.length);
+  other.forEach((f, k) => {
+    const fresh = compileEffect(EffectLayer.parse({ kind: 'effect', effect: kinds[k]!, colours: [RED, DIM, WHITE], speed: { beats: 1 }, base: { colour: { hex: '#ffb46b' }, level: 0.1 } }), new Map());
+    assert.equal(f.maxRate, fresh.maxRate, kinds[k]);
+    assert.equal(f.maxRate, over[k]!.maxRate, kinds[k]);
+    if (kinds[k] !== 'sparkle') assert.equal(f.maxRate, plain[k]!.maxRate, kinds[k]);
+  });
 });
 
 test('an effect edited while it runs fades to the new settings and keeps its place', () => {

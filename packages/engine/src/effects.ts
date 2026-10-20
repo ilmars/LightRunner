@@ -56,7 +56,7 @@ export const rateChecks = { count: 0 };
 
 /**
  * Safe rates already worked out, by what the rate depends on: the effect's settings
- * and looked-up colours (not its speed). Measuring an effect takes up to a few tenths of a
+ * and looked-up colours, and whether it has a base (not its speed, nor the base's colour or level). Measuring an effect takes up to a few tenths of a
  * millisecond, and the DMX worker compiles every preset on each show edit, so an
  * edit only measures new or changed effects. prune() keeps only the rates asked
  * for since the last prune, so the store never holds more than one show's (and
@@ -69,7 +69,8 @@ export class SafeRates {
   rate(fx: CompiledEffect): number {
     const light = (c: Light) => [c.r, c.g, c.b, c.w, c.a, c.u, c.i];
     const key = JSON.stringify([
-      fx.effect, fx.colours.map(light), fx.direction, fx.waves, fx.size, fx.edge, fx.intensity, fx.base && light(fx.base),
+      // Only whether there is a base matters (sparkle sparks from dark over one); its colour and level never do.
+      fx.effect, fx.colours.map(light), fx.direction, fx.waves, fx.size, fx.edge, fx.intensity, fx.base !== null,
     ]);
     let rate = this.used.get(key) ?? this.kept.get(key);
     if (rate === undefined) rate = fastestRate(fx);
