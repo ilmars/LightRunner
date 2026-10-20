@@ -4,7 +4,7 @@ How to run Light Runner from a Stream Deck (through Bitfocus Companion), an Akai
 
 None of this has been tried on the real hardware yet. Each page below says what to look for when you try it.
 
-Positions count from 1, the way you read them: "song 3" is the third item in the running order (Basic lights counts, if it is in the list), "group 2" is the second light group on the operator page (smoke machines are left out), "colour 4" is the fourth colour in that group's colour list (effects are not counted).
+Positions count from 1, the way you read them: "item 3" is the third item in the running order. Item 1 is always Basic lights, so item 2 is the first song and item 3 the second song. "group 2" is the second light group on the operator page (smoke machines are left out), "colour 4" is the fourth colour in that group's colour list (effects are not counted).
 
 ## Stream Deck through Companion
 
@@ -26,10 +26,11 @@ For every button, add an action from the connection and pick **POST**. Put the p
 
 | Button | URL (POST) |
 | --- | --- |
-| Start song 3 | `/api/item/3` |
+| Start item 3 (the second song) | `/api/item/3` |
+| Start the first song (item 2) | `/api/item/2` |
 | Next | `/api/next` |
 | Back to (the item on stage) | `/api/back-to-look` |
-| Basic lights | `/api/safe` |
+| Basic lights (also item 1) | `/api/safe` |
 | Blackout | `/api/blackout` |
 | Undo | `/api/undo` |
 | Flash group 2: on press | `/api/flash/2/on` |
@@ -47,7 +48,7 @@ Notes:
 - **Flash** needs two actions on one button: the "on" one under the button's **press** actions and the "off" one under its **release** actions. If a release is ever lost (a cable pulled, Companion restarted), Light Runner puts the Flash out by itself after 15 seconds.
 - **Blackout** from a button happens at once, there is no hold. The iPad and the APC mini want a 1 second hold so it can't be hit by accident. On a Stream Deck, put the Blackout action under the button's **long press** (an action that only runs after the button has been held for a time; Companion calls this a press-and-hold group, with a hold time you set to 1000 ms). Blackout does not toggle: the lights come back when you start a song, Basic lights or Next.
 - **Levels** are whole numbers from 0 to 100 (percent). Group and Master numbers outside that give an error.
-- A button that has nothing behind it (song 9 when the list has 8, a colour the group doesn't have) answers with a plain-words error, such as "There is no song 9.", and Companion shows the connection in an error colour until the next button that works. Nothing else happens.
+- A button that has nothing behind it (item 9 when the list has 8 items, a colour the group doesn't have) answers with a plain-words error, such as "There is no song 9." (the message says "song" whichever item you asked for), and Companion shows the connection in an error colour until the next button that works. Nothing else happens.
 - For Flash, the group can also be named by its id instead of its position. Positions are easier.
 
 Light Runner answers `{"ok":true}` when it did what was asked.
@@ -119,7 +120,7 @@ Lists count from 0 in expressions, so group 2 is `[1]`. Newer Companion versions
 Colours for a button come from **feedbacks**: add Companion's feedback that checks an expression or a variable's value (its name differs a little between versions; look for "Check expression" or "Check variable value") and give it a background colour. Examples:
 
 - **Blackout button red while blacked out:** the expression `$(custom:lr)['blackout']`, and a red background. Keep the red dark: nothing bright enough to light the operator's face.
-- **Song 2's button bright while it is on stage:** the expression `$(custom:lr)['items'][1]['onStage']`.
+- **The first song's button bright while it is on stage:** the expression `$(custom:lr)['items'][1]['onStage']` (item 2; `items[0]` is Basic lights).
 - **Flash button lit while something flashes:** `$(custom:lr)['flashing']`.
 
 If an expression gives an error in your Companion version, use Companion's `jsonpath` function instead: `jsonpath($(custom:lr), '$.lookName')`. Another way that works everywhere is one trigger action per value, "Custom Variable: Set with expression", which stores one small piece into its own variable (for example `lookName`) that buttons can show with plain `$(custom:lookName)`.
@@ -173,7 +174,7 @@ Every address starts with `/lightrunner`. Capital letters don't matter.
 
 | Address | Does |
 | --- | --- |
-| `/lightrunner/item 3` | Start item 3 in the running order (a whole number) |
+| `/lightrunner/item 3` | Start item 3 in the running order (a whole number; item 1 is Basic lights, item 2 the first song) |
 | `/lightrunner/next` | Next |
 | `/lightrunner/back` | Back to |
 | `/lightrunner/undo` | Undo |
