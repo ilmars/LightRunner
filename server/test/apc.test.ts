@@ -176,6 +176,52 @@ test('pickup: a level changed from elsewhere re-arms it; its own levels arriving
   assert.equal(p.move(1, 0.3, 0.225, 9.1), 0.3);
 });
 
+test('pickup: a look that sets a level the fader swept past a moment ago is still a change from elsewhere', () => {
+  const p = new Pickup();
+  // Fader 1 caught at 20 % and swept up to 90 %, the state giving each level back.
+  let t = 0;
+  assert.equal(p.move(1, 25 / 127, 0.2, t), 25 / 127);
+  for (let v = 26; v <= 114; v++) {
+    t += 0.005;
+    const sent = p.move(1, v / 127, (v - 1) / 127, t);
+    assert.equal(sent, v / 127);
+    p.level(1, v / 127, t);
+  }
+  // Half a second later a look sets group 1 to 50 %: inside the range just swept.
+  p.level(1, 0.5, t + 0.5);
+  // A one-step nudge of the fader must not make the light jump to 89 %.
+  assert.equal(p.move(1, 113 / 127, 0.5, t + 0.6), null);
+  assert.equal(p.move(1, 80 / 127, 0.5, t + 0.7), null);
+  // Down past 50 %: it takes over again.
+  assert.equal(p.move(1, 60 / 127, 0.5, t + 0.8), 60 / 127);
+});
+
+test('pickup: its own levels coming back late, a few at a time, keep it following', () => {
+  const p = new Pickup();
+  assert.equal(p.move(1, 0.5, 0.5, 0), 0.5);
+  assert.equal(p.move(1, 0.6, 0.5, 0.01), 0.6);
+  assert.equal(p.move(1, 0.7, 0.5, 0.02), 0.7);
+  assert.equal(p.move(1, 0.8, 0.5, 0.03), 0.8);
+  // Some of them never come back on their own (only the newest of a quick run is sent).
+  p.level(1, 0.6, 0.05);
+  p.level(1, 0.8, 0.06);
+  assert.equal(p.move(1, 0.82, 0.8, 0.07), 0.82);
+  // After 0.8 came back, 0.6 is done: a later 60 % is a change from elsewhere.
+  p.level(1, 0.82, 0.08);
+  p.level(1, 0.6, 0.09);
+  assert.equal(p.move(1, 0.83, 0.6, 0.1), null);
+});
+
+test('pickup: a new look makes every fader wait again', () => {
+  const p = new Pickup();
+  assert.equal(p.move(1, 0.5, 0.5, 0), 0.5);
+  assert.equal(p.move(9, 1, 1, 0), 1);
+  p.rearm();
+  assert.equal(p.move(1, 0.9, 0.3, 1), null);
+  assert.equal(p.move(9, 0.95, 0.8, 1), null);
+  assert.equal(p.move(9, 0.81, 0.8, 1.1), 0.81);
+});
+
 test('pickup: positions the APC reports (mk2 introduction) count as where the fader was', () => {
   const p = new Pickup();
   p.place(1, 0.1);
@@ -530,6 +576,20 @@ test('without the MIDI add-on the app runs as before', () => withApc(async ({ ap
   assert.deepEqual(settings.apc, { midi: false, connected: false, model: null });
   assert.ok(app.state);
 }, { midi: (log) => loadMidi(log, async () => { throw new Error('missing'); }) }));
+
+test('an App given no MIDI ports never looks for an APC (tests and tools stay away from a real one)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'light-runner-'));
+  const lines: string[] = [];
+  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath, webDir: join(root, 'web'), output: { kind: 'none' }, log: (m) => lines.push(m) });
+  try {
+    await app.start();
+    assert.deepEqual(await apcStatus(app), { midi: false, connected: false, model: null });
+    assert.equal(lines.filter((l) => l.startsWith('APC mini')).length, 0, lines.join('\n'));
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 // ---- The device Flash on/off race (from Task 1's review) ----
 

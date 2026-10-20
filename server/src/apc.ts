@@ -127,11 +127,13 @@ export function faderAction(fader: number, value: number): DeviceAction {
 const NEAR = 0.02;
 /** How long (s) a level a fader sent may take to come back in the state. */
 const SENT_KEPT = 2;
+/** The state gives back a sent level exactly (both are kept to 4 places). */
+const SAME = 0.00005;
 
 /**
  * A fader only takes over once it reaches the level it controls (passes it, or comes within 2 %), so moving
  * it never makes a light jump. It then follows until the level is changed from elsewhere (a look, the iPad)
- * by more than 2 %, and then waits for the fader to reach it again. Times are in seconds.
+ * by more than 2 %, or another look starts, and then waits for the fader to reach it again. Times are in seconds.
  */
 export class Pickup {
   private readonly faders = new Map<number, { caught: boolean; pos: number | null; sent: { value: number; at: number }[] }>();
@@ -164,14 +166,32 @@ export class Pickup {
     return value;
   }
 
-  /** The level the fader controls, from the live state. A level it didn't send itself lets go of it. */
+  /**
+   * The level the fader controls, from the live state. A level it didn't send itself lets go of it. Its own
+   * levels come back in the order it sent them, so one coming back means the ones sent before it are done:
+   * a look that later sets a level the fader passed on its way is still a change from elsewhere.
+   */
   level(n: number, level: number, now: number): void {
     const f = this.faders.get(n);
     if (!f?.caught) return;
     f.sent = f.sent.filter((s) => now - s.at <= SENT_KEPT);
-    const close = (v: number) => Math.abs(v - level) <= NEAR;
-    if ((f.pos !== null && close(f.pos)) || f.sent.some((s) => close(s.value))) return;
+    const echo = f.sent.findIndex((s) => Math.abs(s.value - level) < SAME);
+    if (echo >= 0) {
+      f.sent = f.sent.slice(echo + 1);
+      return;
+    }
+    // Within 2 % of where the fader is (a small change from elsewhere): it keeps following.
+    if (f.pos !== null && Math.abs(f.pos - level) <= NEAR) return;
     f.caught = false;
+    f.sent = [];
+  }
+
+  /** Another look started: every fader waits to reach its level again. */
+  rearm(): void {
+    for (const f of this.faders.values()) {
+      f.caught = false;
+      f.sent = [];
+    }
   }
 }
 

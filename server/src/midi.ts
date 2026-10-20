@@ -60,7 +60,7 @@ export async function loadMidi(log: (msg: string) => void, load: () => Promise<u
     log("APC mini: MIDI support isn't installed");
     return null;
   }
-  return realPorts(mod, lister);
+  return realPorts(mod, lister, log);
 }
 
 function names(port: MidiInput | MidiOutput): string[] {
@@ -69,7 +69,7 @@ function names(port: MidiInput | MidiOutput): string[] {
   return out;
 }
 
-function realPorts(mod: MidiModule, lister: MidiInput): MidiPorts {
+function realPorts(mod: MidiModule, lister: MidiInput, log: (msg: string) => void): MidiPorts {
   return {
     list: () => names(lister),
     open(name) {
@@ -82,11 +82,19 @@ function realPorts(mod: MidiModule, lister: MidiInput): MidiPorts {
       input.on('message', (_dt, message) => handler?.(message));
       input.openPort(at);
       // The output with the same name, or with the same device in its name (Windows: "MIDIOUT2 (...)").
-      const output = new mod.Output();
-      const outs = names(output);
-      let to = outs.indexOf(name);
-      if (to < 0) to = outs.findIndex((n) => n.includes(name) || name.includes(n));
-      if (to >= 0) output.openPort(to);
+      // If it can't be opened, the input is closed again: on Windows another try couldn't open it while held.
+      let output: MidiOutput;
+      try {
+        output = new mod.Output();
+        const outs = names(output);
+        let to = outs.indexOf(name);
+        if (to < 0) to = outs.findIndex((n) => n.includes(name) || name.includes(n));
+        if (to >= 0) output.openPort(to);
+        else log(`MIDI: no output found for "${name}", so its lights can't be set`);
+      } catch (err) {
+        input.closePort();
+        throw err;
+      }
       return {
         send(bytes) {
           if (output.isPortOpen()) output.sendMessage(bytes);

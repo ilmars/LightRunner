@@ -26,7 +26,7 @@ import { NodeWatch } from './nodewatch.ts';
 import { OflClient } from './ofl.ts';
 import { listenOsc, type OscServer } from './osc.ts';
 import { ApcDriver, type ApcStatus } from './apcdriver.ts';
-import { loadMidi, type MidiPorts } from './midi.ts';
+import type { MidiPorts } from './midi.ts';
 import { operatorLayout, type OperatorLayout } from './layout.ts';
 import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from './messages.ts';
 import { isLocalAddress } from './net.ts';
@@ -49,7 +49,10 @@ export interface AppOptions {
   heartbeatMs?: number;
   /** How long a Flash held by a device (APC, OSC, HTTP) may last before it is put out (ms); 15 s. Tests make it short. */
   deviceFlashMs?: number;
-  /** Opens the computer's MIDI ports, for the APC mini; tests pass simulated ones. Default: the MIDI add-on, when installed. */
+  /**
+   * Opens the computer's MIDI ports, for the APC mini: main.ts passes `loadMidi` (the MIDI add-on, when installed),
+   * tests pass simulated ones. Without it there is no APC, so tests and tools never touch a real one.
+   */
   midi?: (log: (msg: string) => void) => Promise<MidiPorts | null>;
   /** How often to look for the APC mini (ms; 2 s) and how long its Blackout must be held (ms; 1 s). Tests make them short. */
   apcPollMs?: number;
@@ -313,9 +316,10 @@ export class App {
 
   // ---- APC mini ----
 
-  /** Start looking for an APC mini, if the MIDI add-on is there (it logs one line when it isn't). */
+  /** Start looking for an APC mini, when MIDI ports were given and are there (`loadMidi` logs one line when they aren't). */
   private async startApc(): Promise<void> {
-    const ports = await (this.opts.midi ?? loadMidi)(this.log);
+    if (!this.opts.midi) return;
+    const ports = await this.opts.midi(this.log);
     if (!ports || this.stopping) return;
     this.apc = new ApcDriver(ports, {
       device: (action) => this.device(action, 'apc'),

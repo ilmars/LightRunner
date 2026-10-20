@@ -90,9 +90,12 @@ export class ApcDriver {
 
   /** The layout or the live stage changed: LEDs and fader pickup follow. */
   update(layout: OperatorLayout | null, state: LiveState | null): void {
+    const before = this.state;
     this.layout = layout;
     this.state = state;
     if (!layout || !state) return;
+    // A new look sets its own levels: no fader follows on until it reaches them again.
+    if (before && (before.look !== state.look || before.lastLook !== state.lastLook)) this.pickup.rearm();
     const now = performance.now() / 1000;
     for (let f = 1; f <= 9; f++) {
       const level = this.levelOf(f);
@@ -132,7 +135,13 @@ export class ApcDriver {
     this.pickup = new Pickup();
     const turn = ++this.turn;
     port.onMessage((bytes) => {
-      if (turn === this.turn) this.input(bytes);
+      if (turn !== this.turn) return;
+      // A message from the add-on's callback: a mistake here must never stop the server.
+      try {
+        this.input(bytes);
+      } catch (err) {
+        this.hooks.log(`APC mini: could not handle a message (${(err as Error)?.message ?? String(err)})`);
+      }
     });
     this.hooks.log(`APC mini: connected (${this.model === 'mk2' ? 'mk2' : 'older model'}), port "${name}"`);
     this.send(apcIntro(this.model!));

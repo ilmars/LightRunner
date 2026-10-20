@@ -6,6 +6,7 @@
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { App } from './app.ts';
+import { loadMidi } from './midi.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -15,6 +16,8 @@ const app = new App({
   seedPath: resolve(root, 'server/seed/demo-show.json'),
   webDir: resolve(root, 'web'),
   output: process.env.LIGHT_RUNNER_OUTPUT === 'none' ? { kind: 'none' } : undefined,
+  // The APC mini, when the MIDI add-on is installed.
+  midi: loadMidi,
 });
 
 let stopping = false;
