@@ -1935,13 +1935,60 @@ function setEditMode(on) {
   renderPicker();
 }
 
+/** The fades the editor offers, in seconds. A colour with another fade gets one more button, selected. */
+const COLOUR_FADES = [0, 1, 2, 3, 5, 10];
+const fadeText = (s) => (s === 0 ? 'Instant' : `${s} s`);
+const MIN_LEVEL = 0.05;
+/** The Brightness slider of the colour editor, in the shape `showLevel` wants. */
+const peLevel = { dim: $('peLevel'), slab: $('peLevelSlab'), pct: $('peLevelPct'), value: 1, dragging: false };
+
+/** Shows the brightness the editor holds (5–100 %). */
+function showEditLevel(v) {
+  showLevel(peLevel, Math.max(MIN_LEVEL, v));
+  if (colourEdit) colourEdit.level = peLevel.value;
+}
+
+/** The Fade buttons: the usual ones, and the colour's own fade too when it isn't one of them. */
+function buildFadeChoices(current) {
+  const box = $('peFade');
+  const values = COLOUR_FADES.includes(current) ? COLOUR_FADES : [...COLOUR_FADES, current].sort((a, b) => a - b);
+  box.replaceChildren(...values.map((v) => {
+    const b = el('button', null, fadeText(v));
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    b.dataset.fade = String(v);
+    b.addEventListener('click', () => {
+      if (!colourEdit) return;
+      colourEdit.fade = v;
+      markFade();
+      disarmDelete();
+    });
+    return b;
+  }));
+  markFade();
+}
+
+function markFade() {
+  for (const b of $('peFade').children) {
+    const on = colourEdit !== null && Number(b.dataset.fade) === colourEdit.fade;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  }
+}
+
 function openEditor(preset) {
   const row = pickerRow();
   if (!row) return;
-  colourEdit = { id: preset.id, name: preset.name, colour: null, swatch: preset.swatch ?? NEUTRAL };
+  const fade = preset.fade ?? 0;
+  // Off has a level of 0 and no colour to dim: only a lit plain colour gets the slider.
+  const level = preset.canRecolour === false ? null : preset.level ?? null;
+  colourEdit = { id: preset.id, name: preset.name, colour: null, swatch: preset.swatch ?? NEUTRAL, level, startLevel: level, fade, startFade: fade };
   pendingEdit = null;
   disarmDelete();
   $('peName').value = preset.name;
+  if (colourEdit.level !== null) showEditLevel(colourEdit.level);
+  buildFadeChoices(fade);
+  $('peShared').checked = false;
   $('peStrip').className = `strip2 pe-strip ${row.group.whiteOnly ? 'cct' : 'hue'}`;
   $('peStrip').setAttribute('aria-label', row.group.whiteOnly ? 'Change the colour: warm to cool' : 'Change the colour');
   $('peH').hidden = true;
@@ -1981,11 +2028,20 @@ function renderEditor() {
   const others = layout.groups.filter((g) => g.id !== picker.group).flatMap((g) => g.presets.filter((x) => x.name === p.name));
   $('peSameWrap').hidden = !others.length;
   if (!others.length) $('peSame').checked = false;
-  // With the switch on, the change reaches every same-named colour, so list where any of them is used.
+  // A colour that points to a shared one can change that one instead, for every colour that points to it.
+  const shared = p.shared ?? null;
+  $('peSharedWrap').hidden = !shared;
+  if (!shared) $('peShared').checked = false;
+  if (shared) $('peSharedText').textContent = `Change it everywhere — shared colour, used by ${shared.groups} ${shared.groups === 1 ? 'group' : 'groups'}`;
+  // With a switch on, the change reaches more colours, so list where any of them is used.
+  // "Change it everywhere" only reaches the shared set with a new colour (brightness and fade stay per colour).
   const affected = $('peSame').checked ? [p, ...others] : [p];
-  $('peUsed').textContent = usedText(affected);
+  const used = shared && $('peShared').checked && colourEdit.colour ? [{ usedBy: shared.usedBy }, ...affected] : affected;
+  $('peUsed').textContent = usedText(used);
   // An Off colour can be renamed but has no colour to change.
   $('peStrip').hidden = p.canRecolour === false;
+  // Brightness: only where it can change (not Off, an effect or a colour of several layers).
+  $('peLevelRow').hidden = colourEdit.level === null;
 }
 
 function disarmDelete() {
@@ -2005,11 +2061,41 @@ $('peName').addEventListener('keydown', (ev) => {
 });
 $('peName').addEventListener('input', disarmDelete);
 $('peSame').addEventListener('change', renderEditor);
+$('peShared').addEventListener('change', renderEditor);
+
+// Brightness: moves relative to where the finger starts, like the other sliders. Only the editor's pending value moves; Save sends it.
+{
+  let startX = 0, startV = 0;
+  const dim = peLevel.dim;
+  dim.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    if (!colourEdit || colourEdit.level === null) return;
+    peLevel.dragging = true;
+    try { dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    dim.classList.add('ds-dragging');
+    startX = ev.clientX;
+    startV = peLevel.value;
+  });
+  dim.addEventListener('pointermove', (ev) => {
+    if (!peLevel.dragging) return;
+    showEditLevel(startV + (ev.clientX - startX) / dim.clientWidth);
+    disarmDelete();
+  });
+  const end = () => {
+    peLevel.dragging = false;
+    dim.classList.remove('ds-dragging');
+  };
+  dim.addEventListener('pointerup', end);
+  dim.addEventListener('pointercancel', end);
+}
 attachStrip($('peStrip'), $('peH'), () => (pickerRow() ? pickerRow().group.whiteOnly : null), (hex) => {
   if (!colourEdit) return;
+  const first = !colourEdit.colour;
   colourEdit.colour = hex;
   $('peSw').style.background = hex;
   disarmDelete();
+  // A new colour can widen "Used in" (with "Change it everywhere" on).
+  if (first) renderEditor();
 });
 
 // A plain tap. Only what changed is sent; the editor closes when the server says yes.
@@ -2019,7 +2105,13 @@ $('peSave').addEventListener('click', () => {
   const cmd = { type: 'editColour', preset: colourEdit.id, sameName: $('peSame').checked && !$('peSameWrap').hidden };
   if (name.trim() !== colourEdit.name) cmd.name = name;
   if (colourEdit.colour && !$('peStrip').hidden) cmd.colour = colourEdit.colour;
-  if (cmd.name === undefined && cmd.colour === undefined) {
+  if (colourEdit.level !== null && Math.abs(colourEdit.level - colourEdit.startLevel) >= 0.005) {
+    cmd.level = Math.min(1, Math.max(MIN_LEVEL, Math.round(colourEdit.level * 100) / 100));
+  }
+  if (colourEdit.fade !== colourEdit.startFade) cmd.fade = colourEdit.fade;
+  // "Change it everywhere" only means something with a new colour.
+  if (cmd.colour !== undefined && $('peShared').checked && !$('peSharedWrap').hidden) cmd.shared = true;
+  if (cmd.name === undefined && cmd.colour === undefined && cmd.level === undefined && cmd.fade === undefined) {
     closeEditor();
     return;
   }

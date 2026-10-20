@@ -721,6 +721,37 @@ test('a colour edited while it is lit fades to the new colour with its own fade,
   assert.ok(maxStep(e2, 1.025, 8) < 0.05);
 });
 
+test('a palette edit while colours that point to it are lit fades them all', () => {
+  const shared = (hex: string): Show => {
+    const show = demoShow();
+    // Two groups point to the same palette entry.
+    show.presets.find((p) => p.id === 'aud-warm')!.layers = [{ kind: 'static', colour: { palette: 'warm-whites', index: 0 }, intensity: 1 }];
+    show.palettes.find((p) => p.id === 'warm-whites')!.colours[0]!.hex = hex;
+    return show;
+  };
+  const e = new Engine(shared('#ffb874'));
+  e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-warm', fade: 0 }, 0);
+  e.apply({ type: 'groupPreset', group: 'front-wash', preset: 'front-warm', fade: 0 }, 0);
+  e.frame(1);
+  const audience = lightOf(e, 'aud-1');
+  const front = lightOf(e, 'front-1');
+  e.setShow(shared('#0040ff'), 1);
+  const at = (t: number) => { e.frame(t); return [lightOf(e, 'aud-1'), lightOf(e, 'front-1')]; };
+  const [a0, f0] = at(1.025);
+  assert.ok(close(a0.r, audience.r, 0.02) && close(a0.b, audience.b, 0.02), 'no jump in the audience');
+  assert.ok(close(f0.r, front.r, 0.02) && close(f0.b, front.b, 0.02), 'no jump in the front wash');
+  const [a1, f1] = at(3);
+  assert.ok(a1.r < audience.r - 0.05 && f1.r < front.r - 0.05, 'both are on their way to the new colour');
+  const [a2, f2] = at(6);
+  assert.ok(a2.r < 0.01 && a2.b > 0.9 && f2.r < 0.01 && f2.b > 0.7, `both settled on the new colour (${a2.b}, ${f2.b})`);
+  const e2 = new Engine(shared('#ffb874'));
+  e2.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-warm', fade: 0 }, 0);
+  e2.apply({ type: 'groupPreset', group: 'front-wash', preset: 'front-warm', fade: 0 }, 0);
+  e2.frame(1);
+  e2.setShow(shared('#0040ff'), 1);
+  assert.ok(maxStep(e2, 1.025, 8) < 0.05);
+});
+
 test('a show edit that leaves a lit colour alone does not start a fade', () => {
   const e = new Engine(demoShow());
   e.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-blue', fade: 0 }, 0);

@@ -137,7 +137,28 @@
               <input id="peName" class="qs-name" type="text" maxlength="40" placeholder="Name" aria-label="Name" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
             </div>
             <div id="peStrip" class="strip2 hue pe-strip" aria-label="Change the colour"><span id="peH" class="strip-handle" hidden></span></div>
+            <!-- Brightness (hidden for Off, effects and colours with more than one layer) and the colour's own fade. Built on in app.js. -->
+            <div class="fxset pe-set" aria-label="Brightness and fade">
+              <div id="peLevelRow" class="fxrow">
+                <span class="fxitem fxsize">
+                  <span class="lab2">Brightness</span>
+                  <div id="peLevel" class="ds-fill" role="slider" aria-label="Brightness" aria-valuemin="5" aria-valuemax="100"><span id="peLevelSlab" class="ds-fill-slab"></span></div>
+                  <span id="peLevelPct" class="pct"></span>
+                </span>
+              </div>
+              <div class="fxrow">
+                <span class="fxitem">
+                  <span class="lab2">Fade</span>
+                  <div id="peFade" class="ds-seg" role="radiogroup" aria-label="Fade into this colour"></div>
+                </span>
+              </div>
+            </div>
             <p id="peUsed" class="pe-used"></p>
+            <label id="peSharedWrap" class="pswitch" hidden>
+              <input id="peShared" type="checkbox" role="switch">
+              <span class="track"><span class="knob"></span></span>
+              <span id="peSharedText">Change it everywhere</span>
+            </label>
             <label id="peSameWrap" class="pswitch" hidden>
               <input id="peSame" type="checkbox" role="switch">
               <span class="track"><span class="knob"></span></span>

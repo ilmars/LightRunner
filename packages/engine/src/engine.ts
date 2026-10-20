@@ -4,9 +4,9 @@
 
 import {
   BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, LiveEffectLayer, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, displayColour, effectKey, findProfile,
-  liveEffectId, livePresetId, parseLiveEffect, parseLivePreset,
+  liveEffectId, livePresetId, parseLiveEffect, parseLivePreset, resolveColour,
   type StageCommand, type EffectLayer, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
-  type GroupStatus, type Palette, type Preset, type RuntimeState, type Show,
+  type GroupStatus, type Layer, type Palette, type Preset, type RuntimeState, type Show,
 } from '../../shared/src/index.ts';
 import { SafeRates } from './effects.ts';
 import { Crossfade, Ramp } from './fade.ts';
@@ -215,6 +215,14 @@ function sameLight(a: CompiledPreset, b: CompiledPreset): boolean {
   const x = p.light, y = q.light;
   const near = (p: number, q: number) => Math.abs(p - q) < 1e-9;
   return near(x.r, y.r) && near(x.g, y.g) && near(x.b, y.b) && near(x.w, y.w) && near(x.a, y.a) && near(x.u, y.u) && near(x.i, y.i);
+}
+
+/** A preset's layers with palette colours looked up, so two layers compare by the light they make. */
+function resolvedLayers(layers: Layer[], palettes: Palette[]): Layer[] {
+  const byId = new Map(palettes.map((p) => [p.id, p]));
+  return layers.map((l) => (l.kind === 'static'
+    ? { ...l, colour: resolveColour(l.colour, byId) }
+    : { ...l, colours: l.colours.map((c) => resolveColour(c, byId)) }));
 }
 
 /** True when the group runs (or is fading into) a preset with an effect in it, as Save sees it (isEffectPreset). */
@@ -438,7 +446,8 @@ export class Engine {
     const is = this.show.presets.find((p) => p.id === key);
     const fresh = this.presets.get(key);
     if (!was || !is || !fresh || was.layers.length !== 1 || is.layers.length !== 1) return null;
-    if (JSON.stringify(was.layers) === JSON.stringify(is.layers)) return null;
+    // Compared with palette colours looked up, so a palette edit that moves a lit colour fades like any other edit.
+    if (JSON.stringify(resolvedLayers(was.layers, before.palettes)) === JSON.stringify(resolvedLayers(is.layers, this.show.palettes))) return null;
     if (!group.presets.rekey(key, `${key}~${now}`, running)) return null;
     return { preset: fresh, was: running };
   }

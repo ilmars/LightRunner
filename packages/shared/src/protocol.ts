@@ -80,8 +80,14 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('itemQuickLook'), item: id, look: id }),
   /** Keep an Any colour pick: add it to a group's colour list, or to every group of its kind. */
   z.object({ type: z.literal('addColour'), group: id, colour: hex, name: z.string(), allGroups: z.boolean() }),
-  /** Change the name and/or colour of a colour in a group's list; `sameName` also changes the same-named ones of other groups. */
-  z.object({ type: z.literal('editColour'), preset: id, name: z.string().optional(), colour: hex.optional(), sameName: z.boolean() }),
+  /**
+   * Change the name, colour, brightness (`level`) and/or fade of a colour in a group's list; `sameName` also changes the
+   * same-named ones of other groups. `shared`: a new colour changes the palette entry the colour points to, for every colour that uses it.
+   */
+  z.object({
+    type: z.literal('editColour'), preset: id, name: z.string().optional(), colour: hex.optional(),
+    level: unit.min(0.05).optional(), fade, shared: z.boolean().optional(), sameName: z.boolean(),
+  }),
   /** Remove a colour (or an effect) from a group's list (refused while a look uses it). */
   z.object({ type: z.literal('deleteColour'), preset: id }),
   /** A new effect in a group's effects list; an empty name becomes "Effect N". */

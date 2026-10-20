@@ -494,7 +494,7 @@ function routeFields(u, out) {
 // ---- Import with comparison ----
 
 let comparison = null; // { token, items }
-const KIND_TITLES = { profile: 'Fixture types', fixture: 'Fixtures', group: 'Groups', preset: 'Presets', look: 'Looks' };
+const KIND_TITLES = { profile: 'Fixture types', fixture: 'Fixtures', group: 'Groups', palette: 'Shared colours', preset: 'Presets', look: 'Looks' };
 const CHANGE_LABEL = { added: 'New', changed: 'Changed', removed: 'Removed' };
 
 $('importFile').addEventListener('change', async (e) => {

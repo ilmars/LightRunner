@@ -432,6 +432,9 @@ body.preview #pAdd { display: none; }
 .fxedit .padd-btns { justify-self: end; }
 .padd-btns [hidden] { display: none; }
 .fxedit .fxset { padding-top: 4px; border-top: 0; }
+/* The colour editor's Brightness and Fade: the same quiet rows as an effect's settings, under the colour strip. */
+.pedit .pe-set { grid-column: 1 / -1; padding-top: 4px; border-top: 0; }
+.pe-set .fxrow[hidden] { display: none; }
 .fe-kind { flex-wrap: wrap; justify-self: start; }
 .fe-kind > button { min-height: 44px; }
 /* The group's colours to choose from: a tapped one shows its place in the order. */

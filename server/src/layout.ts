@@ -1,6 +1,6 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { SAFE_LIGHT, canRecolour, findProfile, groupIsWhiteOnly, groupSegments, presetUsers, resolveColour } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, canRecolour, findProfile, groupIsWhiteOnly, groupSegments, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour } from '../../packages/shared/src/index.ts';
 import type { ChannelRole, GroupKind, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 
@@ -53,6 +53,15 @@ export interface OperatorPreset {
   usedBy: string[];
   /** False for Off and multi-layer presets, which the editor can rename but not recolour. */
   canRecolour: boolean;
+  /** The brightness of a plain colour (its layer's intensity, 0 to 1); null for an effect or a preset of several layers. */
+  level: number | null;
+  /** The preset's own fade time in seconds. */
+  fade: number;
+  /**
+   * When the colour points to a palette entry: how many groups have a colour pointing to it, and the running-order
+   * items and quick looks that use any of them (what a shared colour change reaches); null otherwise.
+   */
+  shared: { groups: number; usedBy: string[] } | null;
   /**
    * The preset as an Any colour pick would make it: its top layer's colour,
    * white, amber and UV, scaled by the layer's intensity (null if it has no layers, or is an effect).
@@ -145,6 +154,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
         .map((p) => ({
           id: p.id, name: p.name, swatch: p.swatch ?? null,
           usedBy: presetUsers(show, p.id), canRecolour: canRecolour(p), light: presetLight(p, palettes),
+          level: presetLevel(p), fade: p.fade, shared: sharedReach(show, p),
           effect: presetEffect(p, palettes),
         }));
       const any = (roles: ChannelRole[]) => g.fixtures.some((f) => hasRole(f, roles));
@@ -172,6 +182,22 @@ function presetLight(preset: Preset, palettes: ReadonlyMap<string, Palette>): Op
   const top = preset.layers[preset.layers.length - 1];
   if (!top || top.kind !== 'static') return null;
   return liveLight(resolveColour(top.colour, palettes), top.intensity);
+}
+
+/** The brightness of a preset's only layer when it is a plain colour; null otherwise. */
+function presetLevel(preset: Preset): number | null {
+  const only = preset.layers.length === 1 ? preset.layers[0]! : undefined;
+  return only?.kind === 'static' ? only.intensity : null;
+}
+
+/** What changing the palette entry of a colour reaches: the groups with a colour pointing to it, and the looks that use those colours. */
+function sharedReach(show: Show, preset: Preset): OperatorPreset['shared'] {
+  const entry = paletteEntryOf(preset);
+  if (!entry) return null;
+  const users = presetsUsingPaletteEntry(show, entry.palette, entry.index);
+  const usedBy: string[] = [];
+  for (const u of users) for (const name of presetUsers(show, u.id)) if (!usedBy.includes(name)) usedBy.push(name);
+  return { groups: new Set(users.map((u) => u.group)).size, usedBy };
 }
 
 /** A preset's effect (its top layer), with its colours looked up; null for a plain colour. */

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { applyPicks, diffShows, EffectLayer, parseShow, type Show } from '../src/index.ts';
+import { applyPicks, diffShows, displayColour, editColour, EffectLayer, parseShow, type Show } from '../src/index.ts';
 
 const rig = (): Show => parseShow(JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8')));
 
@@ -124,4 +124,66 @@ test('a changed effect is described as an effect change', () => {
   incoming.presets.push({ id: 'bg-wave', name: 'Wave', group: 'background', fade: 3, layers: [layer(3)] });
   const item = diffShows(current, incoming).find((i) => i.id === 'bg-wave');
   assert.deepEqual(item?.details, ['effect changed']);
+});
+
+const ZILS = ['key-lights-zils', 'background-zils', 'drum-cage-zils', 'b8-side-bar-zils'];
+const swatch = (s: Show, id: string) => s.presets.find((p) => p.id === id)!.swatch;
+/** The rig after "Change it everywhere" made Zils (shared colour 8) a deeper blue. */
+const deeperBlue = () => editColour(rig(), { preset: 'key-lights-zils', colour: '#103a7c', shared: true, sameName: false }).show;
+
+test('a changed shared colour is listed on its own, and taking it brings the swatches along', () => {
+  const current = deeperBlue();
+  const items = diffShows(current, rig());
+  // One item: the shared colour. The Zils colours only differ by the swatch that follows it.
+  assert.deepEqual(items, [{ kind: 'palette', id: 'lightkey', change: 'changed', name: 'Lightkey colours', details: ['colour 8 (Zils) #103a7c → #0000ff'] }]);
+  const merged = applyPicks(current, rig(), [{ kind: 'palette', id: 'lightkey', change: 'changed' }]);
+  assert.equal(merged.palettes.find((p) => p.id === 'lightkey')!.colours[7]!.hex, '#0000ff');
+  for (const id of ZILS) assert.equal(swatch(merged, id), '#0000ff', id);
+  assert.deepEqual(diffShows(merged, rig()), []);
+  // Patch scope (a Lightkey project) leaves shared colours out.
+  assert.deepEqual(diffShows(current, rig(), 'patch'), []);
+});
+
+test("a taken preset's swatch agrees with the shared colour it points to here", () => {
+  const current = deeperBlue();
+  const incoming = rig();
+  incoming.presets.find((p) => p.id === 'background-zils')!.fade = 5;
+  const item = diffShows(current, incoming).find((i) => i.kind === 'preset' && i.id === 'background-zils');
+  assert.deepEqual(item?.details, ['fade 3 s → 5 s']);
+  // Taking only the preset keeps this show's deeper blue, and its button shows it.
+  const merged = applyPicks(current, incoming, [{ kind: 'preset', id: 'background-zils', change: 'changed' }]);
+  assert.equal(merged.presets.find((p) => p.id === 'background-zils')!.fade, 5);
+  assert.equal(merged.palettes.find((p) => p.id === 'lightkey')!.colours[7]!.hex, '#103a7c');
+  assert.equal(swatch(merged, 'background-zils'), '#103a7c');
+  // Taking both gives the file's blue everywhere.
+  const both = applyPicks(current, incoming, [
+    { kind: 'preset', id: 'background-zils', change: 'changed' },
+    { kind: 'palette', id: 'lightkey', change: 'changed' },
+  ]);
+  for (const id of ZILS) assert.equal(swatch(both, id), '#0000ff', id);
+});
+
+test('a swatch that does not follow its colour is still listed', () => {
+  const incoming = rig();
+  incoming.presets.find((p) => p.id === 'key-lights-zils')!.swatch = '#123456';
+  const item = diffShows(rig(), incoming).find((i) => i.id === 'key-lights-zils');
+  assert.deepEqual(item?.details, ['button colour #0000ff → #123456']);
+});
+
+test('new shared colours are offered, and a preset pointing to them needs them ticked too', () => {
+  const current = rig();
+  const incoming = rig();
+  incoming.palettes.push({ id: 'extra', name: 'Extra colours', colours: [{ hex: '#ff00ff', white: 0.2 }] });
+  incoming.presets.push({ id: 'key-lights-roze', name: 'Rozā', group: 'key-lights', fade: 3, swatch: '#ff00ff', layers: [{ kind: 'static', colour: { palette: 'extra', index: 0 }, intensity: 1 }] });
+  incoming.palettes.find((p) => p.id === 'lightkey')!.colours[1]!.white = 0.5;
+  const items = diffShows(current, incoming);
+  assert.deepEqual(items.find((i) => i.id === 'extra'), { kind: 'palette', id: 'extra', change: 'added', name: 'Extra colours', details: [] });
+  assert.match(items.find((i) => i.id === 'lightkey')!.details[0]!, /^colour 2 \(.+\) white, amber or UV changed$/);
+  assert.throws(() => applyPicks(current, incoming, [{ kind: 'preset', id: 'key-lights-roze', change: 'added' }]), /unknown palette "extra"/);
+  const merged = applyPicks(current, incoming, [
+    { kind: 'preset', id: 'key-lights-roze', change: 'added' },
+    { kind: 'palette', id: 'extra', change: 'added' },
+  ]);
+  // The swatch is worked out from the shared colour (its white mixed in), as the colour editor does.
+  assert.equal(swatch(merged, 'key-lights-roze'), displayColour('#ff00ff', { white: 0.2 }));
 });
