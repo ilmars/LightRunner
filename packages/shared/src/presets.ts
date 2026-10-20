@@ -84,6 +84,8 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
   const wanted = JSON.stringify([colour, extras.white ?? 0, extras.amber ?? 0, extras.uv ?? 0, 1]);
   // The swatch shows the white, amber and UV in it, as a saved Any colour pick's does.
   const swatch = Object.keys(extras).length ? displayColour(colour, extras) : colour;
+  // A black colour is a light only with White, Amber or UV in it.
+  if (colour === '#000000' && !Object.keys(extras).length) throw new Error('that colour has no light: pick a colour, or add White, Amber or UV');
   // One name for the whole set, numbered after the highest "Colour N" in any of the groups.
   const name = input.name.trim() ? cleanName(input.name) : nextName(out.presets.filter((p) => targets.includes(p.group)));
   const ids: string[] = [];
@@ -238,8 +240,18 @@ export function swatchOf(show: Show, p: Preset): string | null {
   return displayColour(light.hex, light);
 }
 
+/**
+ * Off: one plain layer with no light in it, at 0 % or with no colour and no White, Amber or UV.
+ * A black colour with White, Amber or UV (an amber-only colour, say) is a lit colour like any other.
+ */
+export const isOff = (p: Preset) => {
+  if (p.layers.length !== 1 || p.layers[0]!.kind !== 'static') return false;
+  const layer = p.layers[0]!;
+  if (layer.intensity === 0) return true;
+  const c = layer.colour;
+  return 'hex' in c && /^#0{6}$/.test(c.hex) && !c.white && !c.amber && !c.uv;
+};
 /** One plain, lit layer: the only kind of colour the editor can recolour (never an effect). */
-export const isOff = (p: Preset) => p.layers.length === 1 && p.layers[0]!.kind === 'static' && p.layers[0]!.intensity === 0;
 export const canRecolour = (p: Preset) => p.layers.length === 1 && p.layers[0]!.kind === 'static' && !isOff(p);
 
 /**
@@ -388,7 +400,9 @@ function readyColours(show: Show, groupId: string, palettes: ReadonlyMap<string,
     if (colours.length === 3) break;
     if (p.group !== groupId || p.custom || !canRecolour(p)) continue;
     const layer = p.layers[0] as StaticLayer;
-    if (layer.intensity <= 0 || isWhitish(resolveColour(layer.colour, palettes))) continue;
+    // A colour of White, Amber or UV only (a black hex) is judged by how it looks.
+    const c = resolveColour(layer.colour, palettes);
+    if (layer.intensity <= 0 || isWhitish({ hex: displayColour(c.hex, c) })) continue;
     colours.push(structuredClone(layer.colour));
   }
   return colours;

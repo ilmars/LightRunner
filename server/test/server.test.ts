@@ -574,6 +574,12 @@ test("Add to colours keeps an Any colour pick's white, amber and UV, and the gro
   assert.equal(await t.send({ type: 'undo' }), null);
   await waitFor(() => t.state()?.groups['back-wall'].preset === 'live:back-wall:#ff8800:w35:a100', 2000, 'the live colour again');
   assert.match((await t.send({ type: 'addColour', group: 'back-wall', colour: '#ff8800', name: 'x', allGroups: false, amber: 2 }))!, /^invalid command/);
+  // Amber alone: a black colour with amber in it is a normal, lit colour in the layout.
+  assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: '#000000', name: 'Only amber', allGroups: false, amber: 1 }), null);
+  const amber = presetsOf(t.layout(), 'back-wall').find((p) => p.name === 'Only amber') as any;
+  assert.equal(amber.swatch, '#ffbf00');
+  assert.equal(amber.canRecolour, true);
+  assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: '#000000', name: 'Dark', allGroups: false }), 'that colour has no light: pick a colour, or add White, Amber or UV');
 }));
 
 test('Add to colours: names, every group, duplicates, Blackout and the PIN', () => withApp(async (app, dir) => {

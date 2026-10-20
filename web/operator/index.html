@@ -179,6 +179,11 @@
               <input id="paName" class="qs-name" type="text" maxlength="40" placeholder="e.g. Deep blue" aria-label="Name" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
             </div>
             <!-- ＋ New colour (Edit mode): the colour is picked here, never on stage; White, Amber and UV for groups that have them. -->
+            <div id="paStripRow" class="pa-row" hidden>
+              <p class="lab2">Colour</p>
+              <!-- Only once a colour is picked: takes it off again (White, Amber or UV alone). -->
+              <button id="paNoColour" class="ghost pill-add" hidden>No colour</button>
+            </div>
             <div id="paStrip" class="strip2 hue pa-strip" aria-label="Pick the colour" hidden><span id="paH" class="strip-handle" hidden></span></div>
             <div id="paExtras" class="pextras pa-extras" hidden></div>
             <label class="pswitch">

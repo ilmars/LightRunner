@@ -77,10 +77,15 @@ function builtInPreset(show: Show, group: string, made: { name: string; swatch: 
   return id;
 }
 
-/** The #rrggbb of an effect's first colour (palette colours looked up), for its swatch. */
+/**
+ * The #rrggbb of an effect's first colour (palette colours looked up), for its swatch: with its
+ * White, Amber and UV mixed in as a colour's swatch has them, so an amber-only colour shows amber.
+ */
 export function effectSwatch(show: Show, effect: EffectLayer): string {
   const first = effect.colours[0];
-  return first ? resolveColour(first, new Map(show.palettes.map((p) => [p.id, p]))).hex.toLowerCase() : '#ffffff';
+  if (!first) return '#ffffff';
+  const c = resolveColour(first, new Map(show.palettes.map((p) => [p.id, p])));
+  return displayColour(c.hex, c);
 }
 
 /**

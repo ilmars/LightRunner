@@ -370,7 +370,9 @@ body.preview #pAdd { display: none; }
 .padd-sw { flex: none; width: 28px; height: 28px; border-radius: 8px; opacity: 0.8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
 .padd-btns { display: flex; align-items: center; gap: 8px; }
 /* ＋ New colour: its own strip and White, Amber and UV sliders across the form. */
-.pa-strip, .pa-extras { grid-column: 1 / -1; }
+.pa-strip, .pa-extras, .pa-row { grid-column: 1 / -1; }
+.pa-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; }
+.pa-row[hidden] { display: none; }
 .pa-strip { margin: 4px 0; }
 .pa-strip[hidden] { display: none; }
 /* A switch in the picker's quiet style: faint track, blue tint when on. */

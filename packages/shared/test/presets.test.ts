@@ -52,6 +52,28 @@ test('a colour with white, amber or UV is added with them, kept to whole percent
   parseShow(JSON.parse(JSON.stringify(all.show)));
 });
 
+test('a colour of Amber alone (black with amber) is a lit colour, not Off; black with nothing in it is refused', () => {
+  const before = rig();
+  const { show, ids } = addColour(before, { group: 'key-lights', colour: '#000000', name: 'Amber', allGroups: false, amber: 1 });
+  const made = show.presets.find((p) => p.id === ids[0])!;
+  assert.deepEqual(made.layers, [{ kind: 'static', colour: { hex: '#000000', amber: 1 }, intensity: 1 }]);
+  assert.equal(made.swatch, '#ffbf00');
+  assert.equal(isOff(made), false);
+  assert.equal(canRecolour(made), true);
+  // The editor treats it as a normal colour: a brightness and a new hue are fine.
+  const dimmer = editColour(show, { preset: made.id, level: 0.5, sameName: false }).show;
+  assert.equal((dimmer.presets.find((p) => p.id === made.id)!.layers[0] as StaticLayer).intensity, 0.5);
+  const red = editColour(show, { preset: made.id, colour: '#ff0000', sameName: false }).show;
+  assert.deepEqual((red.presets.find((p) => p.id === made.id)!.layers[0] as StaticLayer).colour, { hex: '#ff0000', amber: 1 });
+  // An effect with it first shows amber, not black.
+  const fxShow = addEffect(show, { group: 'key-lights', name: 'Amber wave', effect: EffectLayer.parse({ kind: 'effect', effect: 'wave', colours: [{ hex: '#000000', amber: 1 }], speed: { beats: 4 } }) });
+  assert.equal(fxShow.show.presets.find((p) => p.id === fxShow.id)!.swatch, '#ffbf00');
+  // Black with no White, Amber or UV has no light: that is Off, and is not added as a colour.
+  assert.throws(() => addColour(before, { group: 'key-lights', colour: '#000000', name: 'x', allGroups: false }), /has no light/);
+  assert.equal(isOff({ id: 'x', name: 'x', group: 'key-lights', fade: 3, layers: [{ kind: 'static', colour: { hex: '#000000' }, intensity: 1 }] }), true);
+  assert.equal(isOff({ id: 'x', name: 'x', group: 'key-lights', fade: 3, layers: [{ kind: 'static', colour: { hex: '#000000', uv: 0.2 }, intensity: 1 }] }), false);
+});
+
 test('an empty name becomes Colour N with the next free number in the group', () => {
   let s = rig();
   const added: string[] = [];

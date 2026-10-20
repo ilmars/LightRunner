@@ -1190,7 +1190,8 @@ const hasLine = (group) => (group?.segments ?? 1) > 1 || (layout?.members?.[grou
 
 /** An effect's colours side by side, whites drawn as whites; `loop` ends on the first colour again, for a swatch that moves. */
 function effectGradient(effect, loop = false) {
-  const colours = effect.colours.map((c) => shown(c.hex));
+  // White, Amber and UV mixed in, as the colours' swatches have them (an amber-only colour is amber, not black).
+  const colours = effect.colours.map((c) => shown(mixedColour(c.hex, c)));
   if (colours.length === 1) return colours[0];
   return `linear-gradient(90deg, ${(loop ? [...colours, colours[0]] : colours).join(', ')})`;
 }
@@ -1739,14 +1740,14 @@ function openNewColour() {
   newColour = { hex: null };
   $('paName').value = '';
   $('paAll').checked = false;
-  $('paSw').style.background = 'transparent';
   const strip = $('paStrip');
   strip.className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'} pa-strip`;
   strip.hidden = false;
+  $('paStripRow').hidden = false;
   $('paH').hidden = true;
   buildNewExtras(row.group);
   $('paAddBtn').textContent = 'Save';
-  $('paAddBtn').disabled = true;
+  showNewSwatch();
   $('pAdd').hidden = false;
   renderAddColour();
   for (const b of $('pGrid').children) b.classList.toggle('editing', !!b.dataset.newColour);
@@ -1759,6 +1760,7 @@ function closeNewColour() {
   newColour = null;
   $('pAdd').hidden = true;
   $('paStrip').hidden = true;
+  $('paStripRow').hidden = true;
   $('paExtras').hidden = true;
   $('paExtras').replaceChildren();
   newExtraRows = [];
@@ -1804,8 +1806,21 @@ attachStrip($('paStrip'), $('paH'), () => (newColour ? pickerRow()?.group.whiteO
   if (!newColour) return;
   newColour.hex = hex;
   showNewSwatch();
-  $('paAddBtn').disabled = pendingColour !== null;
 });
+
+// No colour: the picked colour comes off again, so the new colour can be White, Amber or UV alone.
+$('paNoColour').addEventListener('click', () => {
+  if (!newColour) return;
+  newColour.hex = null;
+  $('paH').hidden = true;
+  showNewSwatch();
+});
+
+/** Something to add: a colour picked on the strip, or White, Amber or UV above 0 (an amber-only colour, say). */
+function newColourReady() {
+  const levels = newLevels();
+  return !!newColour && (!!newColour.hex || levels.white > 0 || levels.amber > 0 || levels.uv > 0);
+}
 
 /** The new colour's White, Amber and UV, as its sliders show them (0 where the group has no slider). */
 function newLevels() {
@@ -1814,11 +1829,17 @@ function newLevels() {
   return levels;
 }
 
-/** The form's swatch: the picked colour with its White, Amber and UV mixed in, as the saved swatch will look. */
+/**
+ * The form's swatch: the picked colour (none is black) with its White, Amber and UV mixed in, as the
+ * saved swatch will look; empty while there is nothing to add. Keeps Save and No colour in step too.
+ */
 function showNewSwatch() {
-  if (!newColour?.hex) return;
-  const look = mixedColour(newColour.hex, newLevels());
-  $('paSw').style.background = shown(look) ?? look;
+  if (!newColour) return;
+  const ready = newColourReady();
+  const look = mixedColour(newColour.hex ?? '#000000', newLevels());
+  $('paSw').style.background = ready ? shown(look) ?? look : 'transparent';
+  $('paNoColour').hidden = !newColour.hex;
+  $('paAddBtn').disabled = pendingColour !== null || !ready;
 }
 
 /**
@@ -1848,8 +1869,9 @@ $('paName').addEventListener('keydown', (ev) => {
 $('paAddBtn').addEventListener('click', () => {
   if (pendingColour !== null || !picker.group) return;
   if (newColour) {
-    if (!newColour.hex) return;
-    pendingColour = send({ type: 'addColour', group: picker.group, colour: newColour.hex, ...newLevels(), name: $('paName').value, allGroups: $('paAll').checked });
+    if (!newColourReady()) return;
+    // No colour picked: the light is its White, Amber or UV alone, on a black colour.
+    pendingColour = send({ type: 'addColour', group: picker.group, colour: newColour.hex ?? '#000000', ...newLevels(), name: $('paName').value, allGroups: $('paAll').checked });
     $('paAddBtn').disabled = pendingColour !== null;
     return;
   }
