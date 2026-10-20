@@ -214,6 +214,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* ---- Quick looks: header with tabs, then 6 columns by 2 rows (scrolls when a tab holds more) ---- */
 .quick-looks { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px 12px; }
 .qhead { display: flex; align-items: center; justify-content: space-between; flex: none; padding-left: 4px; }
+.qright { display: flex; align-items: center; gap: 8px; }
 .qtabs {
   display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; flex: none;
   border-radius: var(--ds-r-tile); background: rgba(148, 170, 210, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
@@ -237,6 +238,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ql .qstrip i { flex: 1; }
 .ql.newq { grid-column: span 2; justify-content: center; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-muted); font-size: 14px; }
 .ql.newq:active { background: var(--ds-elevated); }
+/* Edit on: a tap opens the quick look in the sheet; a small pencil says so. Hold and drag changes its place. */
+.ql.editable::after { content: "✎"; position: absolute; top: 6px; right: 8px; font-size: 13px; line-height: 1; color: var(--ds-muted-on); opacity: 0.8; }
+.ql.editable .qname { padding-right: 14px; }
+.ql.editing { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.ql.lifted { opacity: 0.4; }
+.ql.drop { box-shadow: inset 0 0 0 2px var(--ds-edge-on); background: var(--ds-tile-fill-on); }
+/* The quiet copy that follows the finger. */
+.ql.ql-ghost { position: fixed; z-index: 30; margin: 0; pointer-events: none; background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on), 0 16px 32px -12px rgba(0, 0, 0, 0.7); }
+.ql.ql-ghost::after { content: none; }
 .qnone { grid-column: span 4; align-self: center; padding: 0 6px; color: var(--ds-muted); font-size: 15px; }
 
 /* ---- Details: the item on stage, then one zone per group (name, colour, level, then the fill slider) ---- */
@@ -419,6 +429,10 @@ body.preview #pAdd { display: none; }
 .gpick button.off .gn { color: var(--dim); font-weight: 500; }
 .gpick button.off .gs i { display: none; }
 .done:disabled { opacity: 0.5; }
+/* Edit: the switch and its quiet note under the groups. */
+.qs-stage { flex: none; display: flex; flex-direction: column; gap: 0; }
+.qs-stage[hidden] { display: none; }
+.qs-stage .lab-note { margin: -4px 0 0 60px; font-size: var(--ds-fs-label); color: var(--ds-muted); }
 .soon { margin: 0; padding: 24px 4px; color: var(--dim); font-size: 15px; }
 
 /* ---- Effects tab: the group's effects, then the running effect's settings ---- */
@@ -476,8 +490,8 @@ body.preview #pAdd { display: none; }
 .fecol.add { justify-content: center; padding: 0 8px; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-muted); }
 .fecol.add.open { box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-muted-on); }
 .fecol.add:disabled { opacity: 0.4; cursor: default; }
-/* Changing the order: a held colour lifts (its place dims), a quiet copy follows the finger, and the colour under it is outlined. */
-.fecol.movable { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+/* Hold and drag (effect colours, quick looks): a tile that can be held does not select or open a menu. A held colour lifts (its place dims), a quiet copy follows the finger, and the colour under it is outlined. */
+.movable { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .fecol.lifted { opacity: 0.45; }
 .fecol.drop { box-shadow: inset 0 0 0 1px var(--ds-accent); }
 .fe-ghost { position: fixed; z-index: 50; margin: 0; pointer-events: none; opacity: 0.85; box-shadow: var(--ds-shadow-raise); }
@@ -603,7 +617,7 @@ body.preview #pAdd { display: none; }
   body[data-tab="groups"] #quickLooks, body[data-tab="looks"] #details { display: none; }
 
   /* A remote doesn't change the prepared show. */
-  #editBtn, #orderFoot, #saveBtn, #pEditBtn, #pAddOpen, #pAdd, #pEdit, #fxEdit, .ql.newq { display: none !important; }
+  #editBtn, #qEditBtn, #orderFoot, #saveBtn, #pEditBtn, #pAddOpen, #pAdd, #pEdit, #fxEdit, .ql.newq { display: none !important; }
   /* Effects can be picked here, but their settings stay on the iPad. */
   #fxSet { display: none !important; }
 

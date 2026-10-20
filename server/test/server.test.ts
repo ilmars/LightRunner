@@ -1296,3 +1296,78 @@ test('a WebSocket message that is valid JSON but not an object is ignored, and t
   assert.equal(await t.send({ type: 'master', value: 0.5 }), null);
   assert.equal((await api(app, 'GET', '/api/state')).status, 200);
 }));
+
+test('Edit, move and delete a quick look reach the show and the layout, one Undo step each', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const quicks = () => t.layout().quickLooks as { id: string; name: string; tab: string; groups: string[] }[];
+  const start = structuredClone(quicks());
+  const [a, b] = start as [typeof start[0], typeof start[0]];
+  assert.deepEqual(a.groups, ['front-wash', 'back-wall', 'audience'], 'the layout lists the groups a quick look sets');
+  const saved = () => parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8')));
+  const find = (id: string) => quicks().find((q) => q.id === id);
+
+  assert.equal(await t.send({ type: 'editQuickLook', look: a.id, name: ' Welcome ', tab: 'effects' }), null);
+  assert.equal(find(a.id)?.name, 'Welcome');
+  assert.equal(find(a.id)?.tab, 'effects');
+  assert.equal(saved().looks.find((l) => l.id === a.id)!.name, 'Welcome');
+  assert.deepEqual(saved().operator.quickLooks.at(-1), { look: a.id, tab: 'effects' });
+
+  assert.equal(await t.send({ type: 'editQuickLook', look: b.id, groups: ['front-wash', 'audience'] }), null);
+  assert.deepEqual(find(b.id)?.groups, ['front-wash', 'audience']);
+  assert.deepEqual(savedLook(dir, b.id)!.groups.map((e) => e.group), ['front-wash', 'audience']);
+
+  assert.equal(await t.send({ type: 'moveQuickLook', look: b.id, to: 2 }), null);
+  const colours = () => quicks().filter((q) => q.tab === 'colours').map((q) => q.id);
+  assert.equal(colours().indexOf(b.id), 2);
+  assert.equal(saved().operator.quickLooks.filter((q) => q.tab === 'colours').map((q) => q.look).indexOf(b.id), 2);
+
+  assert.equal(await t.send({ type: 'deleteQuickLook', look: b.id }), null);
+  assert.equal(find(b.id), undefined);
+  assert.equal(savedLook(dir, b.id), undefined);
+
+  // Refused edits leave the show and the Undo list alone.
+  assert.equal(await t.send({ type: 'editQuickLook', look: t.order()[1], name: 'x' }), 'that is not a quick look');
+  assert.equal(await t.send({ type: 'deleteQuickLook', look: 'nope' }), 'that is not a quick look');
+  assert.equal(await t.send({ type: 'moveQuickLook', look: 'nope', to: 0 }), 'that is not a quick look');
+  assert.equal(await t.send({ type: 'editQuickLook', look: a.id, name: '  ' }), 'a name is needed');
+  assert.equal(await t.send({ type: 'editQuickLook', look: a.id, name: 'Welcome', tab: 'effects' }), 'nothing to change');
+  assert.equal(await t.send({ type: 'editQuickLook', look: a.id, groups: ['front-wash', 'pulpit'] }), 'turn on Update from the stage to add a group');
+  assert.match((await t.send({ type: 'editQuickLook', look: a.id, tab: 'nope' }))!, /^invalid command/);
+  assert.match((await t.send({ type: 'editQuickLook', look: a.id, groups: [] }))!, /^invalid command/);
+  assert.match((await t.send({ type: 'moveQuickLook', look: a.id, to: 1.5 }))!, /^invalid command/);
+
+  // Four steps, taken back one at a time, newest first.
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.deepEqual(find(b.id)?.groups, ['front-wash', 'audience']);
+  assert.equal(savedLook(dir, b.id)!.name, b.name);
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.equal(colours().indexOf(b.id), 0);
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.deepEqual(find(b.id)?.groups, b.groups);
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.deepEqual(quicks(), start);
+}));
+
+test('Update from the stage stores the stage, refuses during Blackout, and a rename still works then', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const quick = t.layout().quickLooks[0];
+  assert.equal(await t.send({ type: 'look', id: t.order()[1], fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupLevel', group: 'audience', value: 0.3 }), null);
+  await waitFor(() => t.state()?.groups['audience']?.level === 0.3, 2000, 'the audience level');
+  // A group the quick look does not set is added only with the stage.
+  assert.equal(await t.send({ type: 'editQuickLook', look: quick.id, groups: ['front-wash', 'back-wall'] }), null);
+  assert.equal(await t.send({ type: 'editQuickLook', look: quick.id, groups: ['front-wash', 'back-wall', 'audience'] }), 'turn on Update from the stage to add a group');
+  assert.equal(await t.send({ type: 'editQuickLook', look: quick.id, groups: ['front-wash', 'back-wall', 'audience'], fromStage: true }), null);
+  const entries = savedLook(dir, quick.id)!.groups;
+  assert.equal(entries.find((e) => e.group === 'back-wall')!.preset, 'back-amber');
+  assert.equal(entries.find((e) => e.group === 'audience')!.level, 0.3);
+  assert.deepEqual(entries.map((e) => e.group).sort(), ['audience', 'back-wall', 'front-wash']);
+
+  assert.equal(await t.send({ type: 'blackout' }), null);
+  await waitFor(() => t.state()?.look === 'blackout', 2000, 'Blackout on stage');
+  assert.equal(await t.send({ type: 'editQuickLook', look: quick.id, fromStage: true }), 'Blackout is on. Bring the lights back, then save.');
+  assert.equal(await t.send({ type: 'editQuickLook', look: quick.id, name: 'Quiet' }), null);
+}));

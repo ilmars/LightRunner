@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { addSong, ensureRunningOrder, parseShow, saveItem, saveQuickLook, type Show, type Stage } from '../src/index.ts';
+import { addSong, editQuickLook, ensureRunningOrder, parseShow, saveItem, saveQuickLook, type Show, type Stage } from '../src/index.ts';
 
 const raw = (path: string) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
 
@@ -60,4 +60,18 @@ test('Save stage as quick look leaves smoke groups out, and needs a light group'
   const { show: out, id } = saveQuickLook(show, { name: 'Key', tab: 'plain', groups: ['key-lights', 'haze'] }, stage(show));
   assert.deepEqual(out.looks.find((l) => l.id === id)!.groups.map((e) => e.group), ['key-lights']);
   assert.throws(() => saveQuickLook(show, { name: 'Haze', tab: 'plain', groups: ['haze'] }, stage(show)), /pick at least one group/);
+});
+
+test('Editing a quick look ignores smoke groups', () => {
+  const show = withHaze();
+  const { show: made, id } = saveQuickLook(show, { name: 'Key', tab: 'plain', groups: ['key-lights'] }, stage(show));
+  assert.throws(() => editQuickLook(made, { look: id, groups: ['haze'] }), /pick at least one group/);
+  // Adding Haze with the stage adds nothing: the look still sets only the key lights.
+  const out = editQuickLook(made, { look: id, groups: ['key-lights', 'haze'], fromStage: true }, stage(show));
+  assert.deepEqual(out.looks.find((l) => l.id === id)!.groups.map((e) => e.group), ['key-lights']);
+  // And an older quick look that lists Haze loses it when its groups are chosen.
+  const old = structuredClone(made);
+  old.looks.find((l) => l.id === id)!.groups.push({ group: 'haze', preset: 'haze-on' });
+  const fixed = editQuickLook(old, { look: id, groups: ['key-lights', 'haze'], fromStage: true }, stage(show));
+  assert.deepEqual(fixed.looks.find((l) => l.id === id)!.groups.map((e) => e.group), ['key-lights']);
 });

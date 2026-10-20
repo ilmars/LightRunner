@@ -84,8 +84,8 @@ export interface OperatorLayout {
   looks: OperatorLook[];
   /** The looks of the service, in order. The first is usually Basic lights. */
   runningOrder: OperatorLook[];
-  /** Looks kept close at hand for the Quick looks tabs. */
-  quickLooks: (OperatorLook & { tab: QuickTab })[];
+  /** Looks kept close at hand for the Quick looks tabs: with the tab, and the ids of the (light) groups each one sets. */
+  quickLooks: (OperatorLook & { tab: QuickTab; groups: string[] })[];
   /** Id of the safe look (Basic lights), or null when the show has none. */
   basicLights: string | null;
   groups: OperatorGroup[];
@@ -142,7 +142,9 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     show: show.name,
     looks: lookIds.flatMap(describe),
     runningOrder: show.operator.runningOrder.flatMap(describe),
-    quickLooks: show.operator.quickLooks.flatMap((q) => describe(q.look).map((l) => ({ ...l, tab: q.tab }))),
+    quickLooks: show.operator.quickLooks.flatMap((q) => describe(q.look).map((l) => ({
+      ...l, tab: q.tab, groups: groupIds.filter((gid, k) => !smoke.has(gid) && l.entries[k] !== null),
+    }))),
     basicLights: show.operator.safeLook ?? null,
     basicLight: liveLight(SAFE_LIGHT, SAFE_LIGHT.intensity),
     basicSwatch: SAFE_LIGHT.hex,

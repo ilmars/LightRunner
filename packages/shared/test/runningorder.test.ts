@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  addSong, applyPicks, applyQuickLookToItem, setItemGroup, checkReferences, cleanName, deleteItem, ensureBasicLights, ensureRunningOrder, livePresetId, moveItem,
+  addSong, applyPicks, applyQuickLookToItem, setItemGroup, checkReferences, cleanName, deleteItem, deleteQuickLook, editQuickLook, ensureBasicLights, ensureRunningOrder, livePresetId, moveItem, moveQuickLook,
   parseLivePreset, parseShow, renameItem, saveItem, saveQuickLook, setItemTempo, BLACKOUT_PRESET, EffectLayer, SAFE_LIGHT, SAFE_PRESET,
   liveEffectId, parseLiveEffect, type Show, type Stage, type StaticLayer,
 } from '../src/index.ts';
@@ -643,4 +643,175 @@ test('setItemTempo changes the tempo of a song and nothing else', () => {
   assert.throws(() => setItemTempo(show, 'walk-in', 100), { message: 'only running-order items can be changed here' });
   assert.throws(() => setItemTempo(show, song, 39), { message: 'the tempo is 40 to 240 beats per minute' });
   assert.throws(() => setItemTempo(show, song, 241), { message: 'the tempo is 40 to 240 beats per minute' });
+});
+
+// ---- Editing quick looks ----
+
+/** The demo show with its running order; its quick looks are walk-in, worship, word, response and prayer (all Colours). */
+const quickShow = () => ensureRunningOrder(demo());
+const quickTabs = (s: Show) => s.operator.quickLooks.map((q) => `${q.look}/${q.tab}`);
+const groupsOf = (s: Show, id: string) => s.looks.find((l) => l.id === id)!.groups;
+const quickStage = (): Stage => ({
+  groups: { 'front-wash': 'front-bright', 'back-wall': livePresetId('back-wall', '#ff0000'), audience: 'aud-blue' },
+  levels: { 'front-wash': 0.7, 'back-wall': 0.4, audience: 1 },
+});
+
+test('editQuickLook renames, moves to another tab (last there) and changes nothing else', () => {
+  const s = quickShow();
+  const before = structuredClone(s);
+  const out = editQuickLook(s, { look: 'walk-in', name: '  Welcome  ', tab: 'effects' });
+  assert.equal(nameOf(out, 'walk-in'), 'Welcome');
+  assert.deepEqual(out.operator.quickLooks.at(-1), { look: 'walk-in', tab: 'effects' });
+  assert.deepEqual(groupsOf(out, 'walk-in'), groupsOf(s, 'walk-in'));
+  assert.deepEqual(out.operator.quickLooks.slice(0, 4).map((q) => q.look), ['worship', 'word', 'response', 'prayer']);
+  assert.deepEqual(s, before, 'the input show is not changed');
+  assert.deepEqual(checkReferences(out), []);
+  // A name alone keeps the place.
+  assert.deepEqual(editQuickLook(s, { look: 'word', name: 'Reading' }).operator.quickLooks.map((q) => q.look), s.operator.quickLooks.map((q) => q.look));
+  assert.throws(() => editQuickLook(s, { look: 'walk-in', name: '  ' }), { message: 'a name is needed' });
+  assert.throws(() => editQuickLook(s, { look: 'walk-in' }), { message: 'nothing to change' });
+});
+
+test('editQuickLook refuses a look that is not a quick look', () => {
+  const s = quickShow();
+  const song = s.operator.runningOrder[1]!;
+  assert.throws(() => editQuickLook(s, { look: song, name: 'x' }), { message: 'that is not a quick look' });
+  assert.throws(() => editQuickLook(s, { look: 'nope', name: 'x' }), { message: 'that is not a quick look' });
+  assert.throws(() => deleteQuickLook(s, song), { message: 'that is not a quick look' });
+  assert.throws(() => moveQuickLook(s, song, 0), { message: 'that is not a quick look' });
+});
+
+test('editQuickLook leaves a group out, and needs at least one left', () => {
+  const s = quickShow();
+  const out = editQuickLook(s, { look: 'walk-in', groups: ['front-wash', 'audience'] });
+  assert.deepEqual(groupsOf(out, 'walk-in'), groupsOf(s, 'walk-in').filter((e) => e.group !== 'back-wall'));
+  assert.deepEqual(checkReferences(out), []);
+  assert.throws(() => editQuickLook(s, { look: 'walk-in', groups: [] }), { message: 'pick at least one group' });
+});
+
+test('editQuickLook adds a group only with the stage, and takes it from the stage', () => {
+  const s = quickShow();
+  const two = editQuickLook(s, { look: 'walk-in', groups: ['front-wash'] });
+  assert.throws(() => editQuickLook(two, { look: 'walk-in', groups: ['front-wash', 'audience'] }, quickStage()), { message: 'turn on Update from the stage to add a group' });
+  const out = editQuickLook(two, { look: 'walk-in', groups: ['front-wash', 'audience'], fromStage: true }, quickStage());
+  assert.deepEqual(groupsOf(out, 'walk-in'), [
+    { group: 'front-wash', preset: 'front-bright', level: 0.7 },
+    { group: 'audience', preset: 'aud-blue', level: 1 },
+  ]);
+  assert.throws(() => editQuickLook(two, { look: 'walk-in', fromStage: true }), { message: 'the stage is needed to update from it' });
+});
+
+test('editQuickLook with the stage replaces the entries of the chosen groups only', () => {
+  const s = quickShow();
+  const out = editQuickLook(s, { look: 'walk-in', groups: ['front-wash', 'back-wall'], fromStage: true }, quickStage());
+  const [front, wall] = groupsOf(out, 'walk-in');
+  assert.deepEqual(front, { group: 'front-wash', preset: 'front-bright', level: 0.7 });
+  // The Any colour became a hidden custom preset; its level comes along.
+  assert.equal(wall!.group, 'back-wall');
+  assert.equal(wall!.level, 0.4);
+  const made = out.presets.find((p) => p.id === wall!.preset)!;
+  assert.equal(made.custom, true);
+  assert.deepEqual(made.layers, [{ kind: 'static', colour: { hex: '#ff0000' }, intensity: 1 }]);
+  // The group that was left out is gone; the quick look has only the two.
+  assert.equal(groupsOf(out, 'walk-in').length, 2);
+  assert.deepEqual(checkReferences(out), []);
+  // With no groups named it replaces every group the look has, and an effect keeps its settings.
+  const fx = liveEffectId('back-wall', 1);
+  const all = editQuickLook(s, { look: 'walk-in', fromStage: true }, { ...quickStage(), groups: { ...quickStage().groups, 'back-wall': fx }, effects: { [fx]: wave() } });
+  assert.deepEqual(groupsOf(all, 'walk-in').map((e) => e.group), ['front-wash', 'back-wall', 'audience']);
+  const effect = all.presets.find((p) => p.id === groupsOf(all, 'walk-in')[1]!.preset)!;
+  assert.deepEqual(effect.layers, [wave()]);
+  assert.deepEqual(checkReferences(all), []);
+  // The other quick looks are untouched.
+  assert.deepEqual(groupsOf(out, 'worship'), groupsOf(s, 'worship'));
+});
+
+test('editQuickLook with the stage keeps the old entry of a group the stage has nothing for', () => {
+  const s = quickShow();
+  const out = editQuickLook(s, { look: 'walk-in', fromStage: true }, { groups: { 'front-wash': 'front-bright' }, levels: {} });
+  assert.deepEqual(groupsOf(out, 'walk-in'), [
+    { group: 'front-wash', preset: 'front-bright', level: 1 },
+    ...groupsOf(s, 'walk-in').slice(1),
+  ]);
+});
+
+test('editQuickLook refuses a new group the stage has nothing for', () => {
+  const s = quickShow();
+  const two = editQuickLook(s, { look: 'walk-in', groups: ['front-wash'] });
+  const stage: Stage = { groups: { 'front-wash': 'front-bright', audience: null }, levels: {} };
+  assert.throws(() => editQuickLook(two, { look: 'walk-in', groups: ['front-wash', 'audience'], fromStage: true }, stage), { message: 'Audience has nothing on the stage yet' });
+});
+
+test('deleteQuickLook removes it from the quick looks, and the look unless the running order uses it', () => {
+  const s = quickShow();
+  const out = deleteQuickLook(s, 'walk-in');
+  assert.ok(!out.operator.quickLooks.some((q) => q.look === 'walk-in'));
+  assert.ok(!out.looks.some((l) => l.id === 'walk-in'));
+  assert.deepEqual(checkReferences(out), []);
+  assert.ok(s.looks.some((l) => l.id === 'walk-in'), 'the input show is not changed');
+
+  const used = structuredClone(s);
+  used.operator.runningOrder.push('walk-in');
+  const kept = deleteQuickLook(used, 'walk-in');
+  assert.ok(!kept.operator.quickLooks.some((q) => q.look === 'walk-in'));
+  assert.ok(kept.looks.some((l) => l.id === 'walk-in'));
+  assert.deepEqual(checkReferences(kept), []);
+});
+
+test('moveQuickLook sets the place within its tab and keeps the other tabs as they were', () => {
+  let s = quickShow();
+  s = editQuickLook(s, { look: 'response', tab: 'plain' });
+  s = editQuickLook(s, { look: 'word', tab: 'effects' });
+  s = editQuickLook(s, { look: 'prayer', tab: 'effects' });
+  const inTab = (x: Show, tab: string) => x.operator.quickLooks.filter((q) => q.tab === tab).map((q) => q.look);
+  assert.deepEqual(inTab(s, 'colours'), ['walk-in', 'worship']);
+  assert.deepEqual(inTab(s, 'effects'), ['word', 'prayer']);
+
+  const out = moveQuickLook(s, 'worship', 0);
+  assert.deepEqual(inTab(out, 'colours'), ['worship', 'walk-in']);
+  assert.deepEqual(inTab(out, 'plain'), inTab(s, 'plain'));
+  assert.deepEqual(inTab(out, 'effects'), inTab(s, 'effects'));
+  assert.deepEqual(inTab(moveQuickLook(s, 'word', 1), 'effects'), ['prayer', 'word']);
+  // Past the end is the end, and before the start is the start.
+  assert.deepEqual(inTab(moveQuickLook(s, 'walk-in', 99), 'colours'), ['worship', 'walk-in']);
+  assert.deepEqual(inTab(moveQuickLook(s, 'worship', -3), 'colours'), ['worship', 'walk-in']);
+  assert.equal(quickTabs(s).length, quickTabs(out).length);
+  assert.deepEqual(checkReferences(out), []);
+});
+
+test('editQuickLook treats a field that is already so as no change', () => {
+  const s = quickShow();
+  assert.throws(() => editQuickLook(s, { look: 'walk-in', name: 'Walk-in', tab: 'colours' }), { message: 'nothing to change' });
+  assert.throws(() => editQuickLook(s, { look: 'walk-in', name: '  Walk-in ' }), { message: 'nothing to change' });
+  assert.throws(() => editQuickLook(s, { look: 'walk-in', groups: ['audience', 'back-wall', 'front-wash'] }), { message: 'nothing to change' });
+  // A real change next to an unchanged field is still one.
+  const out = editQuickLook(s, { look: 'walk-in', name: 'Walk-in', tab: 'plain' });
+  assert.deepEqual(out.operator.quickLooks.at(-1), { look: 'walk-in', tab: 'plain' });
+  // Update from the stage is always a change.
+  assert.doesNotThrow(() => editQuickLook(s, { look: 'walk-in', name: 'Walk-in', fromStage: true }, quickStage()));
+});
+
+test('editing a quick look whose look the running order also uses gives the quick look its own copy', () => {
+  const s = quickShow();
+  s.operator.runningOrder.push('walk-in');
+  const song = structuredClone(s.looks.find((l) => l.id === 'walk-in')!);
+  const renamed = editQuickLook(s, { look: 'walk-in', name: 'Welcome' });
+  assert.deepEqual(renamed.looks.find((l) => l.id === 'walk-in'), song, 'the song is untouched');
+  const own = renamed.operator.quickLooks.find((q) => q.look !== 'walk-in' && nameOf(renamed, q.look) === 'Welcome')!;
+  assert.equal(own.tab, 'colours');
+  assert.deepEqual(groupsOf(renamed, own.look), song.groups);
+  assert.equal(renamed.operator.quickLooks.length, s.operator.quickLooks.length);
+  assert.equal(renamed.operator.quickLooks.findIndex((q) => q === own || q.look === own.look), s.operator.quickLooks.findIndex((q) => q.look === 'walk-in'), 'it keeps its place');
+  assert.deepEqual(checkReferences(renamed), []);
+  // Groups and the stage change the copy too; a tab change needs no copy.
+  const left = editQuickLook(s, { look: 'walk-in', groups: ['front-wash'] });
+  assert.deepEqual(groupsOf(left, 'walk-in'), song.groups);
+  assert.ok(!left.operator.quickLooks.some((q) => q.look === 'walk-in'));
+  const tab = editQuickLook(s, { look: 'walk-in', tab: 'effects' });
+  assert.ok(tab.operator.quickLooks.some((q) => q.look === 'walk-in' && q.tab === 'effects'));
+  assert.equal(tab.looks.length, s.looks.length);
+  // Once it has its own look, further edits stay on that copy.
+  const again = editQuickLook(renamed, { look: own.look, name: 'Welcome again' });
+  assert.equal(again.looks.length, renamed.looks.length);
+  assert.equal(nameOf(again, own.look), 'Welcome again');
 });

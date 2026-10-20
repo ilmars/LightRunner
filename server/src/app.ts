@@ -14,7 +14,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
   BUILT_IN_PROFILES, Command, OscSettings, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
-  applyQuickLookToItem, isBlindCommand, isEffectPreset, isShowEdit, moveItem, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,
+  applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,
   type OflFixture, type Pick, type Scope,
   BLACKOUT, LiveEffectLayer, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type RuntimeState, type Show, type ShowEdit, type StageCommand,
 } from '../../packages/shared/src/index.ts';
@@ -616,10 +616,10 @@ export class App {
 
   /**
    * Operator edits to the running order and quick looks. Throws with a plain message when refused.
-   * `draft`: the tablet is in Blind, so Save, Add song and Save as quick look store its draft instead of the stage.
+   * `draft`: the tablet is in Blind, so Save, Add song and Save as quick look (and a quick look's Update from the stage) store its draft instead of the stage.
    */
   private async editShow(cmd: ShowEdit, draft?: BlindSession): Promise<void> {
-    const usesStage = cmd.type === 'saveItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook';
+    const usesStage = cmd.type === 'saveItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook' || (cmd.type === 'editQuickLook' && !!cmd.fromStage);
     // Deleting a colour only looks at the stage to keep a lit colour; it is fine during Blackout.
     const stage = usesStage && draft ? draft.engine.runtime() : usesStage || cmd.type === 'deleteColour' ? await this.stage() : null;
     // A draft made during Blackout is still saved: the groups it lit keep their colours, the rest are stored as Off,
@@ -639,6 +639,10 @@ export class App {
       case 'deleteItem': next = deleteItem(before, cmd.id); break;
       case 'moveItem': next = moveItem(before, cmd.id, cmd.to); break;
       case 'saveQuickLook': next = saveQuickLook(before, { name: cmd.name, tab: cmd.tab, groups: cmd.groups }, stage!).show; break;
+      // Rename, tab, groups, delete and move never look at the stage, so they are fine during Blackout; only Update from the stage does.
+      case 'editQuickLook': next = editQuickLook(before, cmd, usesStage ? stage! : undefined); break;
+      case 'deleteQuickLook': next = deleteQuickLook(before, cmd.look); break;
+      case 'moveQuickLook': next = moveQuickLook(before, cmd.look, cmd.to); break;
       // Preview edits never look at the stage, so they are fine during Blackout.
       case 'itemGroup': next = setItemGroup(before, cmd.item, cmd); break;
       case 'itemTempo': next = setItemTempo(before, cmd.item, cmd.bpm); break;

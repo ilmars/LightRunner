@@ -96,10 +96,13 @@
     <section id="quickLooks" class="block quick-looks" aria-label="Quick looks">
       <div class="qhead">
       <span class="sec-title">Quick looks</span>
-      <div class="qtabs" role="tablist" aria-label="Quick look tabs">
-        <button class="tab on" data-qt="plain" role="tab" aria-selected="true">Plain</button>
-        <button class="tab" data-qt="colours" role="tab" aria-selected="false">Colours</button>
-        <button class="tab" data-qt="effects" role="tab" aria-selected="false">Effects</button>
+      <div class="qright">
+        <div class="qtabs" role="tablist" aria-label="Quick look tabs">
+          <button class="tab on" data-qt="plain" role="tab" aria-selected="true">Plain</button>
+          <button class="tab" data-qt="colours" role="tab" aria-selected="false">Colours</button>
+          <button class="tab" data-qt="effects" role="tab" aria-selected="false">Effects</button>
+        </div>
+        <button id="qEditBtn" class="ebtn" aria-pressed="false">Edit</button>
       </div>
       </div>
       <div id="qGrid" class="qgrid"></div>
@@ -240,7 +243,8 @@
       </div>
       <div id="qSheet" class="picker qsheet" hidden>
         <div class="phead">
-          <h2>New quick look from the stage</h2>
+          <h2 id="qsTitle">New quick look from the stage</h2>
+          <button id="qsDelete" class="ghost danger" hidden>Delete</button>
           <button id="qsCancel" class="ghost">Cancel</button>
           <button id="qsSave" class="done">Save</button>
         </div>
@@ -252,8 +256,17 @@
           <button data-t="colours" role="radio">Colours</button>
           <button data-t="effects" role="radio">Effects</button>
         </div>
-        <p class="lab2">Groups it sets <span class="lab-note">· tap a group to leave it out; left-out groups keep what they have</span></p>
+        <p class="lab2">Groups it sets <span id="qsGroupsNote" class="lab-note">· tap a group to leave it out; left-out groups keep what they have</span></p>
         <div id="qsGroups" class="gpick"></div>
+        <!-- Edit only: replace what the quick look gives its groups with the stage as it is now (the draft, in Blind). -->
+        <div id="qsStageRow" class="qs-stage" hidden>
+          <label class="pswitch">
+            <input id="qsStage" type="checkbox" role="switch">
+            <span class="track"><span class="knob"></span></span>
+            <span>Update from the stage</span>
+          </label>
+          <p id="qsStageNote" class="lab-note"></p>
+        </div>
       </div>
     </section>
   </main>
