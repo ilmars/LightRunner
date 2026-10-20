@@ -2094,8 +2094,14 @@ const fxStrip = {
   // The tempo and speed the frames were made at, as "tempo|speed", to ask again when they change.
   clock: null,
   start: 0,
+  // When the last ask went (performance.now()), for the Size drag's one ask per FX_STRIP_WAIT.
+  askedAt: -Infinity,
+  // The last ask got no answer: the strip is dark and asks again on the next state.
+  failed: false,
+  // The frame on the canvas now (-1: dark), so it is only drawn again when that changes; null: draw next time.
+  drawn: null,
 };
-/** A change is shown this long after the last one (a Size drag sends many). */
+/** A change is shown this long after the last one; a Size drag asks at most this often. */
 const FX_STRIP_WAIT = 250;
 /** The gap between two fixtures, so bars read as bars. */
 const FX_STRIP_GAP = 6;
@@ -2487,7 +2493,8 @@ const effectEditSettings = effectControls($('feSet'), (effect, how) => {
   effectEdit.effect = effect;
   disarmDelete();
   if (how !== 'move') drawEffectEditor();
-  effectStripSoon();
+  if (how === 'move' || how === 'end') effectStripDrag(how);
+  else effectStripSoon();
 });
 
 $('feCancel').addEventListener('click', () => closeEditor());
@@ -2555,7 +2562,6 @@ function startEffectStrip(group) {
   stopEffectStrip();
   fxStrip.group = group;
   fxStrip.start = performance.now();
-  drawEffectStrip(0);
   loadEffectStrip();
   fxStrip.raf = requestAnimationFrame(playEffectStrip);
 }
@@ -2569,6 +2575,8 @@ function stopEffectStrip() {
   fxStrip.frames = null;
   fxStrip.count = 0;
   fxStrip.clock = null;
+  fxStrip.failed = false;
+  fxStrip.drawn = null;
 }
 
 /** Shows the edited effect a moment after the last change. */
@@ -2581,9 +2589,36 @@ function effectStripSoon() {
   }, FX_STRIP_WAIT);
 }
 
-/** The tempo or speed changed on stage: ask again, so the strip keeps the stage's time. */
+/**
+ * During a Size drag: at most one ask per FX_STRIP_WAIT, so the strip follows the finger, and one
+ * more when the finger lifts. The ask takes the effect as it is when it goes.
+ */
+function effectStripDrag(how) {
+  if (!effectEdit) return;
+  if (how === 'end') {
+    clearTimeout(fxStrip.timer);
+    fxStrip.timer = 0;
+    loadEffectStrip();
+    return;
+  }
+  if (fxStrip.timer) return;
+  const wait = fxStrip.askedAt + FX_STRIP_WAIT - performance.now();
+  if (wait <= 0) loadEffectStrip();
+  else fxStrip.timer = setTimeout(() => {
+    fxStrip.timer = 0;
+    loadEffectStrip();
+  }, wait);
+}
+
+/** On each state: ask again after a failed ask, or when the tempo or speed changed on stage, so the strip keeps the stage's time. */
 function followEffectStripClock() {
-  if (!effectEdit || !state || fxStrip.clock === null || fxStrip.timer) return;
+  if (!effectEdit || !state || fxStrip.timer) return;
+  if (fxStrip.failed) {
+    fxStrip.failed = false;
+    effectStripSoon();
+    return;
+  }
+  if (fxStrip.clock === null) return;
   const clock = `${state.tempo}|${state.speed}`;
   if (clock === fxStrip.clock) return;
   fxStrip.clock = clock;
@@ -2593,6 +2628,7 @@ function followEffectStripClock() {
 async function loadEffectStrip() {
   if (!effectEdit || !fxStrip.group) return;
   const seq = ++fxStrip.seq;
+  fxStrip.askedAt = performance.now();
   let answer = null;
   try {
     const res = await fetch('/api/effect-preview', {
@@ -2602,9 +2638,18 @@ async function loadEffectStrip() {
     });
     if (res.ok) answer = await res.json();
   } catch {
-    // Offline: the strip keeps what it shows until the next change.
+    // Offline or restarting: handled below like a refusal.
   }
-  if (seq !== fxStrip.seq || !effectEdit || !answer) return;
+  if (seq !== fxStrip.seq || !effectEdit) return;
+  fxStrip.drawn = null;
+  if (!answer) {
+    // Never the previous effect as if it were this one: dark, and the next state asks again.
+    fxStrip.frames = null;
+    fxStrip.count = 0;
+    fxStrip.failed = true;
+    return;
+  }
+  fxStrip.failed = false;
   fxStrip.frames = Uint8Array.from(atob(answer.frames), (c) => c.charCodeAt(0));
   fxStrip.count = answer.count;
   fxStrip.fps = answer.fps;
@@ -2613,18 +2658,24 @@ async function loadEffectStrip() {
   fxStrip.clock = `${answer.tempo}|${answer.speed}`;
 }
 
+/** Draws only when the frame to show changes (about 20 times a second), not at the display's rate. */
 function playEffectStrip(now) {
   if (!effectEdit) return;
-  const frame = fxStrip.count ? Math.floor(((now - fxStrip.start) / 1000) * fxStrip.fps) % fxStrip.count : 0;
-  drawEffectStrip(frame);
+  const frame = !fxStrip.frames ? -1 : fxStrip.count ? Math.floor(((now - fxStrip.start) / 1000) * fxStrip.fps) % fxStrip.count : 0;
+  if (frame !== fxStrip.drawn && drawEffectStrip(frame)) fxStrip.drawn = frame;
   fxStrip.raf = requestAnimationFrame(playEffectStrip);
 }
 
-/** One frame: a rounded cell run per fixture, one cell per segment, whites drawn as the stage picture draws them. */
+window.addEventListener('resize', () => { fxStrip.drawn = null; });
+
+/**
+ * One frame (-1: dark): a rounded cell run per fixture, one cell per segment, whites drawn as the
+ * stage picture draws them. False when the strip isn't on screen to draw.
+ */
 function drawEffectStrip(frame) {
   const c = fxStrip.canvas;
   const w = c.clientWidth, h = c.clientHeight;
-  if (!w || !h) return;
+  if (!w || !h) return false;
   const dpr = window.devicePixelRatio || 1;
   if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
     c.width = Math.round(w * dpr);
@@ -2634,11 +2685,11 @@ function drawEffectStrip(frame) {
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, w, h);
   const { frames, segments, fixtures } = fxStrip;
-  if (!frames || !segments) return;
+  if (!frames || !segments || frame < 0) return true;
   const pad = 5;
   const gaps = FX_STRIP_GAP * Math.max(0, fixtures.length - 1);
   const cellW = (w - 2 * pad - gaps) / segments, cellH = h - 2 * pad;
-  if (cellW <= 0 || cellH <= 0) return;
+  if (cellW <= 0 || cellH <= 0) return true;
   const base = frame * segments * 3;
   g.globalAlpha = FX_STRIP_ALPHA;
   let k = 0, x = pad;
@@ -2656,6 +2707,7 @@ function drawEffectStrip(frame) {
     x += cells * cellW + FX_STRIP_GAP;
   }
   g.globalAlpha = 1;
+  return true;
 }
 
 // ---- Quick looks: tabs and grid ----

@@ -1397,8 +1397,9 @@ export class App {
         const body = EffectPreviewBody.safeParse(await readJson(req));
         if (!body.success) throw new HttpError(400, `not an effect: ${body.error.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ')}`);
         const tempo = this.latestState?.tempo ?? 120, speed = this.latestState?.speed ?? 1;
+        if (!this.show.groups.some((g) => g.id === body.data.group)) throw new HttpError(404, `unknown group "${body.data.group}"`);
         const out = effectFrames(this.show, body.data.group, body.data.effect, { bpm: tempo, speed });
-        if (typeof out === 'string') throw new HttpError(out.startsWith('unknown') ? 404 : 400, out);
+        if (typeof out === 'string') throw new HttpError(400, out);
         const { frames, ...rest } = out;
         return json(res, 200, { ...rest, tempo, speed, frames: Buffer.from(frames.buffer, frames.byteOffset, frames.byteLength).toString('base64') });
       }
