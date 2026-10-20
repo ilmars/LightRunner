@@ -170,7 +170,8 @@ function fastestSafeRate(fx: CompiledEffect): number {
   switch (fx.effect) {
     case 'colourFade': return measuredRate(fx, n);
     case 'wave':
-      if (n === 1) return deep(first) && (fx.edge === 'soft' || (fx.size > 0 && fx.size < 1)) ? perCycle(2) : Infinity;
+      // One colour: a bump (soft) or a block (hard) passes each segment once a cycle, unless it is never or always lit.
+      if (n === 1) return deep(first) && fx.size > 0 && fx.size < 1 ? perCycle(2) : Infinity;
       return measuredRate(fx, 1);
     // Chase and fill light each cycle in the next colour: with soft edges a dimmer colour
     // is counted later in its (at most half-cycle) fade, so allow half a cycle for that.
@@ -276,6 +277,24 @@ function blend(out: Light, a: Light, b: Light, t: number): Light {
   return out;
 }
 
+/**
+ * A one-colour soft wave at its place v (in waves; the peak where v is whole): a bump whose
+ * half-brightness width is `size` of a wave, with raised-cosine edges `min(size, 1 − size)` wide, so
+ * it is smooth at both ends and continuous everywhere. A small size is a narrow bump, dark between
+ * bumps; a large one is full in the middle; size 1 is always lit. Size 0.5 is the 0.5 + 0.5·cos(2πv)
+ * of before, worked out the same way so a wave of that size looks exactly as it always did.
+ */
+function softBump(v: number, size: number): number {
+  if (size === 0.5) return 0.5 + 0.5 * Math.cos(2 * Math.PI * v);
+  // Distance from the nearest peak, 0..0.5 of a wave.
+  const d = Math.abs(frac(v + 0.5) - 0.5);
+  const edge = Math.min(size, 1 - size);
+  const from = size / 2 - edge / 2;
+  if (d <= from) return 1;
+  if (d >= size / 2 + edge / 2) return 0;
+  return 0.5 + 0.5 * Math.cos((Math.PI * (d - from)) / edge);
+}
+
 /** `colour` at `level` of its own brightness. */
 function lit(out: Light, colour: Light, level: number): Light {
   copy(out, colour);
@@ -349,7 +368,7 @@ function renderAnimation(out: Light, fx: CompiledEffect, ctx: Pick<LayerContext,
     case 'wave': {
       const v = phase - fx.waves * xw;
       if (n === 1) {
-        const level = soft ? 0.5 + 0.5 * Math.cos(2 * Math.PI * v) : frac(v) < fx.size ? 1 : 0;
+        const level = soft ? softBump(v, fx.size) : frac(v) < fx.size ? 1 : 0;
         lit(out, first, level);
       } else {
         const u = frac(v) * n;

@@ -1788,7 +1788,7 @@ const SPEED_SECONDS = [2, 5, 10, 30, 60];
 const DIRECTIONS = [['ltr', 'Left to right'], ['rtl', 'Right to left'], ['centreOut', 'Centre out'], ['outsideIn', 'Outside in']];
 /**
  * The settings that change what each kind of effect does (the others are left out), and what
- * its size is called. A wave uses its size only with one colour and hard edges.
+ * its size is called. A wave uses its size only with one colour (soft or hard edges).
  */
 const EFFECT_USES = {
   colourFade: {},
@@ -1802,7 +1802,7 @@ const EFFECT_USES = {
 };
 function effectUses(effect) {
   const uses = EFFECT_USES[effect.effect] ?? { direction: true, waves: true, size: 'Size' };
-  if (effect.effect === 'wave' && effect.colours.length === 1 && effect.edge === 'hard') return { ...uses, size: 'Size' };
+  if (effect.effect === 'wave' && effect.colours.length === 1) return { ...uses, size: 'Size' };
   return uses;
 }
 

@@ -257,7 +257,10 @@ test('without a base every effect renders exactly as before (one-colour sparkle 
       for (const direction of ['ltr', 'rtl', 'centreOut'] as const) {
         for (const colours of [[RED], [RED, BLUE, DIM], [WARM, RED]]) {
           if (effect === 'sparkle' && colours.length > 1) continue;
-          const f = fx({ effect, colours, edge, direction, waves: 2, size: 0.3, intensity: 0.8 });
+          // The old engine ignored Size for a soft one-colour wave, so these render at 0.5 (the size every one of
+          // them had): the old engine gave exactly what it gave at 0.3, and this checksum stays the one recorded then.
+          const size = effect === 'wave' && edge === 'soft' && colours.length === 1 ? 0.5 : 0.3;
+          const f = fx({ effect, colours, edge, direction, waves: 2, size, intensity: 0.8 });
           eat(f.maxRate);
           for (const count of [7, 32]) {
             for (let p = 0; p < 40; p++) {
@@ -320,6 +323,57 @@ test('breathe, meteor, fill and yo-yo do what their names say', () => {
   assert.equal(lit(0.5).at(-1), 31);
   assert.equal(lit(1)[0], 0);
   assert.ok(lit(0.25).length >= 7 && lit(0.25).length <= 9, `${lit(0.25)}`);
+});
+
+// ---- A one-colour soft wave with a size ----
+
+/** A one-colour soft wave's level at `phase` (one segment, so the wave's place v is the phase). */
+const softWave = (size: number) => {
+  const f = fx({ effect: 'wave', edge: 'soft', size });
+  return (v: number) => at(f, 0, 1, v).i;
+};
+
+test('a soft one-colour wave at size 0.5 is the old 0.5 + 0.5·cos(2πv), peak in the same place', () => {
+  const level = softWave(0.5);
+  for (let n = -400; n <= 400; n++) {
+    const v = n * 0.01237;
+    assert.ok(Math.abs(level(v) - (0.5 + 0.5 * Math.cos(2 * Math.PI * v))) < 1e-12, `v ${v}: ${level(v)}`);
+  }
+  // Size is half-brightness width: at 0.5 the wave is at half a quarter wave from its peak.
+  assert.equal(level(0), 1);
+  assert.ok(Math.abs(level(0.25) - 0.5) < 1e-12 && Math.abs(level(-0.25) - 0.5) < 1e-12);
+});
+
+test('a smaller soft one-colour wave is a narrow bump, dark between bumps; a larger one is lit wider with a full middle', () => {
+  const small = softWave(0.2);
+  assert.equal(small(0), 1, 'lit at the peak');
+  assert.equal(small(3), 1, 'every wave');
+  assert.ok(Math.abs(small(0.1) - 0.5) < 1e-12 && Math.abs(small(-0.1) - 0.5) < 1e-12, 'half bright at size ÷ 2 from the peak');
+  for (const v of [0.2, 0.3, 0.5, 0.7, 0.8, 2.45]) assert.equal(small(v), 0, `dark at ${v}`);
+  for (let n = 1; n < 100; n++) assert.ok(small(0.2 * n / 100) < small(0.2 * (n - 1) / 100), 'falls away from the peak');
+  const wide = softWave(0.8);
+  for (const v of [0, 0.1, 0.25, 0.3, -0.3]) assert.ok(Math.abs(wide(v) - 1) < 1e-12, `full at ${v}`);
+  assert.ok(Math.abs(wide(0.4) - 0.5) < 1e-12, 'half bright at size ÷ 2');
+  assert.ok(wide(0.5) < 1e-12, 'dark only at the far side');
+  // Size 1 is lit all the time.
+  for (let n = 0; n < 50; n++) assert.equal(softWave(1)(n / 50), 1);
+});
+
+test("a soft one-colour wave of any size is continuous, also across the wave's wrap, with smooth ends", () => {
+  for (const size of [0.05, 0.2, 0.37, 0.5, 0.63, 0.8, 0.95]) {
+    const level = softWave(size);
+    for (const wrap of [0, 1, -2, 7]) {
+      assert.ok(Math.abs(level(wrap - 1e-9) - level(wrap + 1e-9)) < 1e-6, `size ${size} at the peak ${wrap}`);
+      assert.ok(Math.abs(level(wrap + 0.5 - 1e-9) - level(wrap + 0.5 + 1e-9)) < 1e-6, `size ${size} at the far side ${wrap}`);
+    }
+    // No step anywhere: at 4000 samples a wave, the most a ramp of size × 1 wave moves is under 1 %.
+    let worst = 0;
+    for (let n = 1; n <= 8000; n++) worst = Math.max(worst, Math.abs(level(n / 4000) - level((n - 1) / 4000)));
+    assert.ok(worst < 0.01, `size ${size}: stepped ${worst}`);
+    // Smooth ends: flat at the peak and where it reaches dark (or full).
+    const h = 1e-4;
+    assert.ok(Math.abs(level(h) - level(0)) < 1e-5, `size ${size}: flat at the peak`);
+  }
 });
 
 test('intensity scales the result', () => {
@@ -664,6 +718,22 @@ test('a new base colour or base brightness never measures an effect again: only 
     assert.equal(f.maxRate, over[k]!.maxRate, kinds[k]);
     if (kinds[k] !== 'sparkle') assert.equal(f.maxRate, plain[k]!.maxRate, kinds[k]);
   });
+});
+
+test('fading between a soft one-colour wave of the old shape and a narrow one never jumps', () => {
+  const show = effectsShow(
+    effectPreset('bg-wide', BG, { effect: 'wave', edge: 'soft', speed: { beats: 2 }, waves: 2 }),
+    effectPreset('bg-narrow', BG, { effect: 'wave', edge: 'soft', speed: { beats: 2 }, waves: 2, size: 0.15, base: { colour: { hex: '#ffb46b' }, level: 0.5 } }),
+  );
+  const e = new Engine(show, 0);
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-wide', fade: 0 }, 0);
+  for (let t = 0; t <= 1; t += FRAME) e.frame(t);
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-narrow', fade: 2 }, 1 + FRAME);
+  const into = beyondOwnMotion(e, 1 + FRAME, 4);
+  assert.ok(into.worst <= 0.05, `to the narrow wave: ${into.worst}`);
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-wide', fade: 2 }, 4 + FRAME);
+  const back = beyondOwnMotion(e, 4 + FRAME, 7);
+  assert.ok(back.worst <= 0.05, `back: ${back.worst}`);
 });
 
 test('an effect edited while it runs fades to the new settings and keeps its place', () => {
