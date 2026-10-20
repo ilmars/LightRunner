@@ -87,7 +87,11 @@ const DEVICE_MASTER_MS = 300;
 const flashKey = (source: string, group: string) => JSON.stringify([source, group]);
 
 /** What the effect editor sends for its moving strip: the group and the effect as it is being edited. */
-const EffectPreviewBody = z.object({ group: z.string().min(1).max(64), effect: LiveEffectLayer });
+// The tempo and speed dial the page shows (a Blind draft's, say); the stage's when left out. Limits as the tempo and speed commands.
+const EffectPreviewBody = z.object({
+  group: z.string().min(1).max(64), effect: LiveEffectLayer,
+  tempo: z.number().min(40).max(240).optional(), speed: z.number().min(0.5).max(2).optional(),
+});
 
 class HttpError extends Error {
   readonly status: number;
@@ -1392,11 +1396,12 @@ export class App {
         return json(res, 200, { visual: Array.from(settledVisual(this.show, parts[1])) });
       }
       case 'POST /effect-preview': {
-        // The effect editor's moving strip: the effect as it is being edited, on the group's line, at the live
-        // tempo and speed. Rendered here with the pure engine; nothing goes to the lights.
+        // The effect editor's moving strip: the effect as it is being edited, on the group's line, at the tempo
+        // and speed the page shows (the stage's when it sends none). Rendered here with the pure engine; nothing
+        // goes to the lights.
         const body = EffectPreviewBody.safeParse(await readJson(req));
         if (!body.success) throw new HttpError(400, `not an effect: ${body.error.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ')}`);
-        const tempo = this.latestState?.tempo ?? 120, speed = this.latestState?.speed ?? 1;
+        const tempo = body.data.tempo ?? this.latestState?.tempo ?? 120, speed = body.data.speed ?? this.latestState?.speed ?? 1;
         if (!this.show.groups.some((g) => g.id === body.data.group)) throw new HttpError(404, `unknown group "${body.data.group}"`);
         const out = effectFrames(this.show, body.data.group, body.data.effect, { bpm: tempo, speed });
         if (typeof out === 'string') throw new HttpError(400, out);

@@ -2518,7 +2518,7 @@ const REORDER_HOLD = 300;
 /** Moving further than this (px) before it lifts is a swipe (the panel scrolls), not a hold. */
 const REORDER_SLOP = 8;
 /** The hold that is under way: which colour (its place in the order), where the pointer is, and what it is over. */
-const reorder = { pointer: null, timer: 0, from: -1, over: -1, x: 0, y: 0, startX: 0, startY: 0, lifted: false, ghost: null, quietUntil: 0 };
+const reorder = { pointer: null, timer: 0, from: -1, over: -1, x: 0, y: 0, startX: 0, startY: 0, lifted: false, ghost: null, quietUntil: 0, effect: null };
 
 /** A chosen colour, at place `at` in the order, can be held and dragged onto another to take its number. */
 function holdToReorder(b, at) {
@@ -2530,6 +2530,8 @@ function holdToReorder(b, at) {
     endReorder();
     reorder.pointer = ev.pointerId;
     reorder.from = at;
+    // A drop applies only to the effect it was held on: any other change in between ends the hold.
+    reorder.effect = effectEdit.effect;
     reorder.x = reorder.startX = ev.clientX;
     reorder.y = reorder.startY = ev.clientY;
     reorder.timer = setTimeout(liftColour, REORDER_HOLD);
@@ -2575,14 +2577,16 @@ function followReorder() {
 
 /** Lets go: the held colour takes the number of the one it is dropped on (the others move up or down one). */
 function dropColour() {
-  const { from, over } = reorder;
+  const { from, over, effect } = reorder;
   const moved = reorder.lifted;
   endReorder();
   if (!moved) return;
   // The click that follows the lift is not a tap on the colour.
   reorder.quietUntil = performance.now() + 400;
-  if (!effectEdit || over < 0 || over === from) return;
-  const colours = [...effectEdit.effect.colours];
+  if (!effectEdit || effectEdit.effect !== effect || over === from) return;
+  const n = effect.colours.length;
+  if (ONE_COLOUR.has(effect.effect) || from < 0 || from >= n || over < 0 || over >= n) return;
+  const colours = [...effect.colours];
   const [colour] = colours.splice(from, 1);
   colours.splice(over, 0, colour);
   setEffectEdit({ ...effectEdit.effect, colours });
@@ -2593,6 +2597,7 @@ function endReorder() {
   reorder.timer = 0;
   reorder.pointer = null;
   reorder.lifted = false;
+  reorder.effect = null;
   reorder.from = reorder.over = -1;
   reorder.ghost?.remove();
   reorder.ghost = null;
@@ -2663,6 +2668,8 @@ function closeOwnStrips() {
 
 function setEffectEdit(next) {
   if (!effectEdit) return;
+  // A colour held for a new place belongs to the effect as it was: a change ends the hold.
+  endReorder();
   effectEdit.effect = next;
   disarmDelete();
   drawEffectEditor();
@@ -2939,34 +2946,49 @@ function followEffectStripClock() {
     return;
   }
   if (fxStrip.clock === null) return;
-  const clock = `${state.tempo}|${state.speed}`;
+  const { tempo, speed } = stripClock();
+  const clock = `${tempo}|${speed}`;
   if (clock === fxStrip.clock) return;
   fxStrip.clock = clock;
   effectStripSoon();
+}
+
+/**
+ * The tempo and speed dial the page shows: the draft's in Blind, the selected song's tempo in
+ * Preview, else the stage's. The strip runs at these.
+ */
+function stripClock() {
+  const shown = shownState();
+  const tempo = preview.on ? previewItem()?.tempo ?? 120 : shown?.tempo ?? 120;
+  return { tempo, speed: shown?.speed ?? 1 };
 }
 
 async function loadEffectStrip() {
   if (!effectEdit || !fxStrip.group) return;
   const seq = ++fxStrip.seq;
   fxStrip.askedAt = performance.now();
-  let answer = null;
+  let answer = null, refused = false;
   try {
     const res = await fetch('/api/effect-preview', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ group: fxStrip.group, effect: liveLayer(effectEdit.effect) }),
+      body: JSON.stringify({ group: fxStrip.group, effect: liveLayer(effectEdit.effect), ...stripClock() }),
     });
     if (res.ok) answer = await res.json();
+    // A 4xx is the server saying no to this effect: asking again changes nothing until the effect does.
+    else refused = res.status >= 400 && res.status < 500;
   } catch {
-    // Offline or restarting: handled below like a refusal.
+    // Offline or restarting: dark, and asked again (below).
   }
   if (seq !== fxStrip.seq || !effectEdit) return;
   fxStrip.drawn = null;
   if (!answer) {
-    // Never the previous effect as if it were this one: dark, and the next state asks again.
+    // Never the previous effect as if it were this one: dark. After a network error or a server error
+    // the next state asks again; after a refusal the strip waits for the next change to the effect.
     fxStrip.frames = null;
     fxStrip.count = 0;
-    fxStrip.failed = true;
+    fxStrip.failed = !refused;
+    if (refused) fxStrip.clock = null;
     return;
   }
   fxStrip.failed = false;

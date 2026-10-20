@@ -1217,6 +1217,16 @@ test('the effect editor gets an effect as moving frames for a group, at the live
   await sleep(60);
   assert.equal(t.state().groups['back-wall'].preset, before, 'nothing goes on stage');
 
+  // The page sends the tempo and speed it shows (a Blind draft's, say): those, not the stage's.
+  const draft = await api(app, 'POST', '/api/effect-preview', { group: 'back-wall', effect: liveWave(), tempo: 120, speed: 2 });
+  assert.equal(draft.status, 200);
+  assert.deepEqual([draft.body.tempo, draft.body.speed, draft.body.rate], [120, 2, 1]);
+  assert.equal(t.state().tempo, 60, 'the stage keeps its tempo');
+  for (const bad of [{ tempo: 39 }, { tempo: 241 }, { speed: 0.4 }, { speed: 2.5 }, { tempo: '90' }]) {
+    const res = await api(app, 'POST', '/api/effect-preview', { group: 'back-wall', effect: liveWave(), ...bad });
+    assert.equal(res.status, 400, JSON.stringify(bad));
+  }
+
   // Plain words for a group that can't run one, and 400 for a body that isn't an effect.
   const show = (await api(app, 'GET', '/api/show')).body;
   show.groups.find((g: any) => g.id === 'pulpit').kind = 'smoke';
