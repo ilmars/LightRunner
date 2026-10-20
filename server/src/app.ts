@@ -25,6 +25,8 @@ import { discoverArtNet } from './discovery.ts';
 import { NodeWatch } from './nodewatch.ts';
 import { OflClient } from './ofl.ts';
 import { listenOsc, type OscServer } from './osc.ts';
+import { ApcDriver, type ApcStatus } from './apcdriver.ts';
+import { loadMidi, type MidiPorts } from './midi.ts';
 import { operatorLayout, type OperatorLayout } from './layout.ts';
 import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from './messages.ts';
 import { isLocalAddress } from './net.ts';
@@ -47,6 +49,11 @@ export interface AppOptions {
   heartbeatMs?: number;
   /** How long a Flash held by a device (APC, OSC, HTTP) may last before it is put out (ms); 15 s. Tests make it short. */
   deviceFlashMs?: number;
+  /** Opens the computer's MIDI ports, for the APC mini; tests pass simulated ones. Default: the MIDI add-on, when installed. */
+  midi?: (log: (msg: string) => void) => Promise<MidiPorts | null>;
+  /** How often to look for the APC mini (ms; 2 s) and how long its Blackout must be held (ms; 1 s). Tests make them short. */
+  apcPollMs?: number;
+  apcHoldMs?: number;
 }
 
 export type Role = 'operator' | 'programmer';
@@ -121,6 +128,8 @@ export class App {
   private oscProblem: string | null = null;
   /** Starts and stops of the OSC listener, one after another. */
   private oscBusy: Promise<void> = Promise.resolve();
+  /** Runs the APC mini; null when the MIDI add-on isn't installed. */
+  private apc: ApcDriver | null = null;
   /** The last Master a device sent, for steps pressed faster than the state arrives. */
   private deviceMaster: { value: number; at: number } | null = null;
   /** The time limit on each device Flash, by source and group. */
@@ -209,10 +218,14 @@ export class App {
     await new Promise<void>((resolve) => this.server!.listen(this.opts.port, this.opts.host ?? '0.0.0.0', resolve));
     this.log(`Light Runner on http://localhost:${this.port}/`);
     await this.syncOsc();
+    await this.startApc();
   }
 
   async stop(): Promise<void> {
     this.stopping = true;
+    // The APC mini's LEDs go out and its port closes.
+    this.apc?.stop();
+    this.apc = null;
     this.nodeWatch.stop();
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.blind.clear();
@@ -257,6 +270,7 @@ export class App {
     const merged: LiveState = { ...state, canUndo, output, outputProblem: problem, outputProblemKind: kind };
     this.latestState = merged;
     this.broadcast(JSON.stringify({ type: 'state', state: merged }));
+    this.apc?.update(this.layout, merged);
   }
 
   /** Watch every Art-Net node the show sends to (the default output's and each route's). */
@@ -297,6 +311,25 @@ export class App {
     }
   }
 
+  // ---- APC mini ----
+
+  /** Start looking for an APC mini, if the MIDI add-on is there (it logs one line when it isn't). */
+  private async startApc(): Promise<void> {
+    const ports = await (this.opts.midi ?? loadMidi)(this.log);
+    if (!ports || this.stopping) return;
+    this.apc = new ApcDriver(ports, {
+      device: (action) => this.device(action, 'apc'),
+      release: () => this.releaseDevice('apc'),
+      log: this.log,
+    }, { pollMs: this.opts.apcPollMs, holdMs: this.opts.apcHoldMs });
+    this.apc.update(this.layout, this.latestState);
+    this.apc.start();
+  }
+
+  private apcStatus(): ApcStatus {
+    return this.apc?.status ?? { midi: false, connected: false, model: null };
+  }
+
   // ---- Engine worker ----
 
   private startWorker(): void {
@@ -328,6 +361,7 @@ export class App {
       case 'ready':
         this.layout = operatorLayout(this.show, msg.fixtures);
         this.broadcast(JSON.stringify({ type: 'layout', layout: this.layout }));
+        this.apc?.update(this.layout, this.latestState);
         markReady();
         break;
       case 'result':
@@ -687,6 +721,7 @@ export class App {
     await this.syncOsc();
     this.layout = this.layout ? operatorLayout(this.show, this.layout.fixtures.map((f) => f.id)) : null;
     this.broadcast(JSON.stringify({ type: 'layout', layout: this.layout }));
+    this.apc?.update(this.layout, this.latestState);
   }
 
   // ---- WebSocket ----
@@ -785,8 +820,11 @@ export class App {
       const free = this.freeOfFlash(cmd.groups);
       return free.length ? this.command({ ...cmd, groups: free }, 'operator') : null;
     }
+    // A Flash is held before it is sent: a quick tap's "off" can arrive while the "on" is on its way, and
+    // must find it held (or the late "on" would leave a hold behind). Taken back if the "on" fails.
+    const added = cmd.type === 'flash' ? this.holdDeviceFlash(source, cmd.groups, true) : [];
     const error = await this.command(cmd, 'operator');
-    if (!error && cmd.type === 'flash') this.holdDeviceFlash(source, cmd.groups, true);
+    if (error && added.length) this.holdDeviceFlash(source, added, false);
     return error;
   }
 
@@ -798,9 +836,11 @@ export class App {
     if (held?.size) this.releaseFlash(held);
   }
 
-  private holdDeviceFlash(source: string, groups: string[], on: boolean): void {
+  /** Holds (or lets go of) a device's Flash on these groups. Returns the groups it newly holds. */
+  private holdDeviceFlash(source: string, groups: string[], on: boolean): string[] {
     let held = this.deviceFlashes.get(source);
     if (!held) this.deviceFlashes.set(source, (held = new Set()));
+    const added: string[] = [];
     // The engine leaves smoke out of a Flash of several groups (only a Puff runs it), so it isn't held then.
     const several = groups.length > 1;
     for (const g of groups) {
@@ -810,6 +850,7 @@ export class App {
         this.clearFlashTimer(source, g);
       } else if (!held.has(g)) {
         held.add(g);
+        added.push(g);
         const timer = setTimeout(() => {
           this.deviceFlashTimers.delete(flashKey(source, g));
           this.deviceFlashes.get(source)?.delete(g);
@@ -819,6 +860,7 @@ export class App {
         this.deviceFlashTimers.set(flashKey(source, g), timer);
       }
     }
+    return added;
   }
 
   private clearFlashTimer(source: string, group: string): void {
@@ -963,6 +1005,7 @@ export class App {
       pinSet: Boolean(s.pinHash),
       osc: { enabled: s.osc?.enabled ?? false, port: s.osc?.port ?? 8000 },
       oscProblem: this.oscProblem,
+      apc: this.apcStatus(),
     };
   }
 
@@ -1325,6 +1368,8 @@ export class App {
         return json(res, 200, this.companion());
       case 'GET /state':
         return json(res, 200, this.latestState);
+      case 'GET /apc':
+        return json(res, 200, this.apcStatus());
       case 'GET /looks':
         return json(res, 200, {
           looks: this.show.looks.map((l) => ({ id: l.id, name: l.name, colour: l.swatch ?? null, section: l.section ?? null })),

@@ -175,6 +175,7 @@ function render() {
   $('oscPort').value = String(s.osc.port);
   $('oscPortField').hidden = !s.osc.enabled;
   $('oscProblem').textContent = s.osc.enabled ? s.oscProblem ?? '' : '';
+  renderApc(s.apc);
 
   $('frameRate').value = String(s.frameRate);
   $('gamma').value = String(s.gamma);
@@ -201,12 +202,21 @@ function renderStatus(status, enabled, problem) {
   $('outputProblem').textContent = enabled && problem ? problem : '';
 }
 
-// Keep the status pill live.
+/** Whether an APC mini is plugged in, and which model. */
+function renderApc(apc) {
+  $('apcStatus').textContent =
+    !apc?.midi ? "APC mini: MIDI support isn't installed on this computer" :
+    apc.connected ? `APC mini: connected (${apc.model === 'mk2' ? 'mk2' : 'older model'})` :
+    'APC mini: not connected';
+}
+
+// Keep the status pill and the APC mini line live.
 setInterval(async () => {
   if ($('main').hidden) return;
   try {
     const state = await (await fetch('/api/state')).json();
     if (state && saved) renderStatus(state.output, saved.outputEnabled, state.outputProblem);
+    renderApc(await (await fetch('/api/apc')).json());
   } catch {
     // offline; try again
   }
