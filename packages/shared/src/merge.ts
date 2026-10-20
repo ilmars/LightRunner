@@ -2,7 +2,7 @@
 // and merging only the changes someone picked. Items are matched by id.
 
 import { presetsUsingPaletteEntry, swatchOf } from './presets.ts';
-import { isEffectPreset, parseShow, type ColourSpec, type Fixture, type Group, type Look, type Palette, type Preset, type Profile, type Show } from './schema.ts';
+import { isEffectPreset, layerColours, parseShow, type ColourSpec, type Fixture, type Group, type Look, type Palette, type Preset, type Profile, type Show } from './schema.ts';
 
 /** `palette`: the shared colours (from Lightkey) that colours in every group can point to. */
 export type ItemKind = 'profile' | 'fixture' | 'group' | 'palette' | 'preset' | 'look';
@@ -202,7 +202,7 @@ export function applyPicks(current: Show, incoming: Show, picks: Pick[]): Show {
   for (const p of out.presets) {
     const layer = p.layers.length === 1 ? p.layers[0]! : undefined;
     if (!layer) continue;
-    const specs = layer.kind === 'static' ? [layer.colour] : layer.colours;
+    const specs = layerColours(layer);
     if (!specs.some(points)) continue;
     if (presets.has(p.id) || specs.some((c) => 'palette' in c && palettes.has(c.palette))) p.swatch = swatchOf(out, p) ?? p.swatch;
   }

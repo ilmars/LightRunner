@@ -527,7 +527,7 @@ test('show edits are open to operators without the PIN', () => withApp(async (ap
   assert.equal((await api(app, 'GET', '/api/settings')).status, 401);
 }));
 
-const presetsOf = (layout: any, group: string) => layout.groups.find((g: any) => g.id === group).presets as { id: string; name: string; swatch: string }[];
+const presetsOf = (layout: any, group: string) => layout.groups.find((g: any) => g.id === group).presets as { id: string; name: string; swatch: string; light?: { hex: string; white: number; amber: number; uv: number } }[];
 const savedPresets = (dir: string) => parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).presets;
 
 test('Add to colours lists a live colour, the group adopts it, and Undo takes it back', () => withApp(async (app, dir) => {
@@ -553,6 +553,33 @@ test('Add to colours lists a live colour, the group adopts it, and Undo takes it
   await waitFor(() => t.state()?.groups['back-wall'].preset === 'live:back-wall:#12ab34', 2000, 'the group to carry on as the live colour');
   // Saving still works afterwards: no group names a preset that is gone.
   assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+}));
+
+test("Add to colours keeps an Any colour pick's white, amber and UV, and the group then runs the new colour", () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  assert.equal(await t.send({ type: 'groupColour', group: 'back-wall', colour: '#ff8800', white: 0.35, amber: 1, fade: 0 }), null);
+  await waitFor(() => t.state()?.groups['back-wall'].preset === 'live:back-wall:#ff8800:w35:a100', 2000, 'the live colour to run');
+  const live = t.state().groups['back-wall'].live;
+  assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: live.colour, name: 'Warm glow', allGroups: false, white: live.white, amber: live.amber, uv: live.uv }), null);
+  const added = presetsOf(t.layout(), 'back-wall').find((p) => p.name === 'Warm glow')!;
+  assert.ok(added, 'the layout lists it');
+  assert.deepEqual(added.light, { hex: '#ff8800', white: 0.35, amber: 1, uv: 0 });
+  // Not "Custom" any more: the group runs the new colour under its own id.
+  await waitFor(() => t.state()?.groups['back-wall'].preset === added.id, 2000, 'the group to run the new preset');
+  assert.equal(t.state().groups['back-wall'].live, null);
+  const saved = savedPresets(dir).find((p) => p.id === added.id)!;
+  assert.deepEqual(saved.layers, [{ kind: 'static', colour: { hex: '#ff8800', white: 0.35, amber: 1 }, intensity: 1 }]);
+  // Undo: the group carries on as the same live colour, extras and all.
+  assert.equal(await t.send({ type: 'undo' }), null);
+  await waitFor(() => t.state()?.groups['back-wall'].preset === 'live:back-wall:#ff8800:w35:a100', 2000, 'the live colour again');
+  assert.match((await t.send({ type: 'addColour', group: 'back-wall', colour: '#ff8800', name: 'x', allGroups: false, amber: 2 }))!, /^invalid command/);
+  // Amber alone: a black colour with amber in it is a normal, lit colour in the layout.
+  assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: '#000000', name: 'Only amber', allGroups: false, amber: 1 }), null);
+  const amber = presetsOf(t.layout(), 'back-wall').find((p) => p.name === 'Only amber') as any;
+  assert.equal(amber.swatch, '#ffbf00');
+  assert.equal(amber.canRecolour, true);
+  assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: '#000000', name: 'Dark', allGroups: false }), 'that colour has no light: pick a colour, or add White, Amber or UV');
 }));
 
 test('Add to colours: names, every group, duplicates, Blackout and the PIN', () => withApp(async (app, dir) => {
@@ -1156,6 +1183,31 @@ test('the effects list: add, edit, rename and delete over the wire, and the layo
   assert.equal(await t.send({ type: 'itemGroup', item: song, group: 'back-wall', effect: liveWave(), preset: 'back-amber' }), 'pick a colour, a preset or an effect, not more than one');
 }));
 
+test('an effect over a base colour, with its own colours, goes through Save and comes back in the layout as it was', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const base = { colour: { hex: '#ffb46b', white: 0.4 }, level: 0.5 };
+  // An own colour (in no group's list) and a base.
+  const effect = liveWave({ effect: 'chase', colours: [{ hex: '#12ab34' }, { hex: '#a1b2c3' }], base });
+  assert.equal(await t.send({ type: 'addEffect', group: 'back-wall', name: 'Over warm', effect }), null);
+  const added = await waitFor(() => t.layout().groups.find((g: any) => g.id === 'back-wall').presets.find((p: any) => p.name === 'Over warm'), 2000, 'the new effect');
+  assert.deepEqual(added.effect, effect);
+  assert.deepEqual(parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).presets.find((p) => p.id === added.id)!.layers, [effect]);
+  // The base can go again.
+  assert.equal(await t.send({ type: 'editEffect', preset: added.id, effect: { ...effect, base: undefined } }), null);
+  await waitFor(() => t.layout().groups.find((g: any) => g.id === 'back-wall').presets.find((p: any) => p.id === added.id).effect.base === undefined, 2000, 'the edit');
+  // A base that points to a shared colour comes to the page as a plain colour.
+  const show = (await api(app, 'GET', '/api/show')).body;
+  const palette = show.palettes[0];
+  show.presets.push({ id: 'bw-over', name: 'Over', group: 'back-wall', fade: 3, layers: [{ ...liveWave(), base: { colour: { palette: palette.id, index: 0 }, level: 0.25 } }] });
+  assert.equal((await api(app, 'PUT', '/api/show', show)).status, 200);
+  const over = await waitFor(() => t.layout().groups.find((g: any) => g.id === 'back-wall').presets.find((p: any) => p.id === 'bw-over'), 2000, 'the palette effect');
+  assert.deepEqual(over.effect.base, { colour: palette.colours[0], level: 0.25 });
+  // The editor's strip takes a base; a palette base over the wire is refused.
+  assert.equal((await api(app, 'POST', '/api/effect-preview', { group: 'back-wall', effect })).status, 200);
+  assert.equal((await api(app, 'POST', '/api/effect-preview', { group: 'back-wall', effect: { ...effect, base: { colour: { palette: 'x', index: 0 }, level: 0.5 } } })).status, 400);
+}));
+
 test('smoke machines refuse effects', () => withApp(async (app) => {
   const show = (await api(app, 'GET', '/api/show')).body;
   show.groups.find((g: any) => g.id === 'pulpit').kind = 'smoke';
@@ -1166,6 +1218,55 @@ test('smoke machines refuse effects', () => withApp(async (app) => {
   assert.equal(await t.send({ type: 'addEffect', group: 'pulpit', name: 'x', effect: liveWave() }), "smoke machines can't run effects");
   // Effect colours are plain hex over the wire.
   assert.match(await t.send({ type: 'groupEffect', group: 'back-wall', effect: liveWave({ colours: [{ palette: 'x', index: 0 }] }) }) ?? '', /^invalid command/);
+}));
+
+test('the effect editor gets an effect as moving frames for a group, at the live tempo, without touching the stage', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  assert.equal(await t.send({ type: 'tempo', bpm: 60 }), null);
+  await waitFor(() => t.state()?.tempo === 60, 2000, 'the tempo');
+  const before = t.state().groups['back-wall'].preset;
+
+  const ok = await api(app, 'POST', '/api/effect-preview', { group: 'back-wall', effect: liveWave() });
+  assert.equal(ok.status, 200);
+  const { fps, count, segments, fixtures, rate, tempo, speed, frames } = ok.body;
+  assert.deepEqual(fixtures, [1, 1, 1, 1, 1, 1]);
+  assert.equal(segments, 6);
+  assert.equal(tempo, 60);
+  assert.equal(speed, 1);
+  // 4 beats at 60 bpm: a quarter of a cycle a second, so two cycles make the 8 s loop.
+  assert.equal(rate, 0.25);
+  assert.equal(count, 160);
+  assert.ok(Math.abs(fps - 20) < 1e-9);
+  const bytes = Buffer.from(frames, 'base64');
+  assert.equal(bytes.length, count * segments * 3);
+  assert.ok(bytes.some((b) => b > 0), 'the wave is lit');
+  await sleep(60);
+  assert.equal(t.state().groups['back-wall'].preset, before, 'nothing goes on stage');
+
+  // The page sends the tempo and speed it shows (a Blind draft's, say): those, not the stage's.
+  const draft = await api(app, 'POST', '/api/effect-preview', { group: 'back-wall', effect: liveWave(), tempo: 120, speed: 2 });
+  assert.equal(draft.status, 200);
+  assert.deepEqual([draft.body.tempo, draft.body.speed, draft.body.rate], [120, 2, 1]);
+  assert.equal(t.state().tempo, 60, 'the stage keeps its tempo');
+  for (const bad of [{ tempo: 39 }, { tempo: 241 }, { speed: 0.4 }, { speed: 2.5 }, { tempo: '90' }]) {
+    const res = await api(app, 'POST', '/api/effect-preview', { group: 'back-wall', effect: liveWave(), ...bad });
+    assert.equal(res.status, 400, JSON.stringify(bad));
+  }
+
+  // Plain words for a group that can't run one, and 400 for a body that isn't an effect.
+  const show = (await api(app, 'GET', '/api/show')).body;
+  show.groups.find((g: any) => g.id === 'pulpit').kind = 'smoke';
+  assert.equal((await api(app, 'PUT', '/api/show', show)).status, 200);
+  const smoke = await api(app, 'POST', '/api/effect-preview', { group: 'pulpit', effect: liveWave() });
+  assert.deepEqual([smoke.status, smoke.body.error], [400, "smoke machines can't run effects"]);
+  const unknown = await api(app, 'POST', '/api/effect-preview', { group: 'nope', effect: liveWave() });
+  assert.deepEqual([unknown.status, unknown.body.error], [404, 'unknown group "nope"']);
+  for (const body of [{}, { group: 'back-wall' }, { group: 'back-wall', effect: liveWave({ effect: 'spin' }) }, { group: 'back-wall', effect: liveWave({ colours: [{ palette: 'x', index: 0 }] }) }]) {
+    const bad = await api(app, 'POST', '/api/effect-preview', body);
+    assert.equal(bad.status, 400, JSON.stringify(body));
+    assert.equal(typeof bad.body.error, 'string');
+  }
 }));
 
 test('a WebSocket message that is valid JSON but not an object is ignored, and the server keeps serving', () => withApp(async (app) => {

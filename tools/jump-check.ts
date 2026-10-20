@@ -11,7 +11,7 @@
 // those are not judged.
 //
 // The show gets a few effect presets for every light group (every kind, soft and hard
-// edges, beats and seconds), half of the looks' entries run one, and each look has a
+// edges, beats and seconds, a third over a base colour), half of the looks' entries run one, and each look has a
 // tempo between 60 and 200.
 // Fades are at least 1 s, the spec's shortest (Safe and Blackout): a full
 // 0–100% fade shorter than 0.75 s cannot stay under 5% per frame at 40 fps.
@@ -21,7 +21,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { EffectKind, EffectLayer, parseShow, type StageCommand } from '../packages/shared/src/index.ts';
+import { EffectKind, EffectLayer, parseShow, type ColourSpec, type StageCommand } from '../packages/shared/src/index.ts';
 import { Engine } from '../packages/engine/src/index.ts';
 
 const { values } = parseArgs({
@@ -71,6 +71,8 @@ for (const group of show.groups) {
       size: rand(),
       edge: rand() < 0.5 ? 'soft' : 'hard',
       intensity: rand() < 0.7 ? 1 : rand(),
+      // A third run over a base colour.
+      base: rand() < 0.33 ? { colour: { hex: hex() }, level: rand() } : undefined,
     });
     show.presets.push({ id: `${group.id}-effect-${n}`, name: `Effect ${n + 1}`, group: group.id, fade: 1 + rand() * 4, layers: [layer] });
   }
@@ -112,7 +114,11 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
     // A live effect from the Effects tab; a third are later sends of a slider drag, which carry the pattern on.
     const base = pick(show.presets.filter((p) => p.layers[0]!.kind === 'effect'));
     const layer = base.layers[0] as EffectLayer;
-    const effect = { ...layer, colours: layer.colours.map((c) => ('hex' in c ? c : { hex: hex() })), size: rand() };
+    const plain = (c: ColourSpec) => ('hex' in c ? c : { hex: hex() });
+    // Half keep the preset's base; the others get a new one or none.
+    const under = rand() < 0.5 ? layer.base && { colour: plain(layer.base.colour), level: layer.base.level }
+      : rand() < 0.5 ? { colour: { hex: hex() }, level: rand() } : undefined;
+    const effect = { ...layer, colours: layer.colours.map(plain), size: rand(), base: under };
     const cmd = { type: 'groupEffect' as const, group: base.group, effect };
     if (rand() < 0.33) return { cmd: { ...cmd, fade: 0.2, continues: true }, fast: true };
     return { cmd, fast: false };

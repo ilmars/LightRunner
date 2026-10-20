@@ -533,6 +533,20 @@ test('Save turns a live effect into a hidden "Custom effect" preset, and keeps t
   assert.throws(() => saveItem(show, song, { groups: { 'back-wall': other }, levels: {}, effects: { [other]: wave() } }), { message: `preset "${other}" belongs to another group` });
 });
 
+test("Save and setItemGroup keep a live effect's base colour", () => {
+  const { show, song } = withSong();
+  const over = { ...wave(), base: { colour: { hex: '#ffb46b' }, level: 0.5 } };
+  const id = liveEffectId('back-wall', 3);
+  const saved = saveItem(show, song, { groups: { 'back-wall': id }, levels: {}, effects: { [id]: over } });
+  const made = saved.presets.find((p) => p.id === entryOf(saved, song, 'back-wall')!.preset)!;
+  assert.deepEqual(made.layers, [over]);
+  const set = setItemGroup(show, song, { group: 'back-wall', effect: over });
+  assert.deepEqual(set.presets.find((p) => p.id === entryOf(set, song, 'back-wall')!.preset)!.layers, [over]);
+  // The same effect without its base is another one.
+  const again = saveItem(saved, song, { groups: { 'back-wall': id }, levels: {}, effects: { [id]: wave() } });
+  assert.notEqual(entryOf(again, song, 'back-wall')!.preset, made.id);
+});
+
 test('Add song takes the stage tempo too', () => {
   const { show, song } = withSong();
   const { show: out, id } = addSong(show, song, { groups: {}, levels: {}, tempo: 150 });

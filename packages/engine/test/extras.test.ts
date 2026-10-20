@@ -2,7 +2,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BUILT_IN_PROFILES, type ChannelRole, type Fixture, type Profile } from '../../shared/src/index.ts';
+import { readFileSync } from 'node:fs';
+import { BUILT_IN_PROFILES, findProfile, parseShow, type ChannelRole, type Fixture, type Profile } from '../../shared/src/index.ts';
 import { Engine, dark, fromHex, mix, type Light } from '../src/index.ts';
 import { kelvinOf, planChannels, visualOf, writeFixture } from '../src/output.ts';
 import { FRAME, close, demoShow, lightOf } from './helpers.ts';
@@ -251,4 +252,21 @@ test('a lit colour with amber that the show no longer has carries on live with i
   assert.deepEqual(Array.from(e.frame(1.025).universes.get(0)!), before);
   assert.equal(e.liveState(1.025, 'ok').groups.audience.preset, 'live:audience:#ff0000:a50:u20');
   assert.deepEqual(e.liveState(1.025, 'ok').groups.audience.live, { colour: '#ff0000', white: 0, amber: 0.5, uv: 0.2, display: '#ff3e0d' });
+});
+
+test("a colour of Amber alone (a black hex with amber 1) lights the SixBar's amber channels at full, and nothing else", () => {
+  const show = parseShow(JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8')));
+  show.presets.push({ id: 'key-amber', name: 'Amber', group: 'key-lights', fade: 3, layers: [{ kind: 'static', colour: { hex: '#000000', amber: 1 }, intensity: 1 }] });
+  const e = new Engine(show, 0);
+  assert.equal(e.apply({ type: 'groupPreset', group: 'key-lights', preset: 'key-amber', fade: 0 }, 0), null);
+  e.frame(0);
+  const frame = e.frame(FRAME);
+  const fixture = show.fixtures.find((f) => f.id === 'b1')!;
+  const profile = findProfile(show, fixture.profile)!;
+  const dmxOf = frame.universes.get(fixture.universe)!;
+  const values = profile.channels.map((c, k) => [c.role, dmxOf[fixture.address - 1 + k]!] as const);
+  const amber = values.filter(([role]) => role === 'amber');
+  assert.ok(amber.length > 0, 'the SixBar has amber channels');
+  for (const [, v] of amber) assert.equal(v, 255);
+  for (const [role, v] of values) if (['red', 'green', 'blue', 'white', 'uv'].includes(role)) assert.equal(v, 0, role);
 });

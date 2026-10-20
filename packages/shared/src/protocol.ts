@@ -11,8 +11,11 @@ const hex = z.string().regex(HEX_COLOUR);
 const unit = z.number().min(0).max(1);
 const fade = z.number().min(0).max(600).optional();
 
-/** An effect as the operator page sends it: every colour a plain colour (never a palette reference). */
-export const LiveEffectLayer = EffectLayer.extend({ colours: z.array(PaletteColour).min(1).max(6) });
+/** An effect as the operator page sends it: every colour a plain colour (never a palette reference), the base's too. */
+export const LiveEffectLayer = EffectLayer.extend({
+  colours: z.array(PaletteColour).min(1).max(6),
+  base: z.object({ colour: PaletteColour, level: unit }).optional(),
+});
 export type LiveEffectLayer = z.infer<typeof LiveEffectLayer>;
 
 const bpm = z.number().min(40).max(240);
@@ -111,7 +114,10 @@ export const Command = z.discriminatedUnion('type', [
   /** Copy a quick look's groups into a running-order item without touching the stage. */
   z.object({ type: z.literal('itemQuickLook'), item: id, look: id }),
   /** Keep an Any colour pick: add it to a group's colour list, or to every group of its kind. */
-  z.object({ type: z.literal('addColour'), group: id, colour: hex, name: z.string(), allGroups: z.boolean() }),
+  z.object({
+    type: z.literal('addColour'), group: id, colour: hex, name: z.string(), allGroups: z.boolean(),
+    white: unit.optional(), amber: unit.optional(), uv: unit.optional(),
+  }),
   /**
    * Change the name, colour, brightness (`level`) and/or fade of a colour in a group's list; `sameName` also changes the
    * same-named ones of other groups. `shared`: a new colour changes the palette entry the colour points to, for every colour that uses it.

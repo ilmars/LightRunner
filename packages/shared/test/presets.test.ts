@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   addColour, addEffect, canRecolour, checkReferences, deleteColour, displayColour, editColour, editEffect, EffectLayer, ensureEffects, ensureRunningOrder, groupIsWhiteOnly,
-  groupSegments, isEffectPreset, isOff, listNames, parseShow, presetUsers, resolveColour,
+  effectKey, groupSegments, isEffectPreset, isOff, listNames, parseShow, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect,
   type Show, type StaticLayer,
 } from '../src/index.ts';
 
@@ -31,6 +31,47 @@ test('a colour is added to one group as a normal preset', () => {
   assert.deepEqual(checkReferences(show), []);
   assert.equal(before.presets.some((p) => p.id === ids[0]), false); // the input is not changed
   parseShow(JSON.parse(JSON.stringify(show))); // still a valid show
+});
+
+test('a colour with white, amber or UV is added with them, kept to whole percent, and the swatch shows them', () => {
+  const before = rig();
+  const { show, ids } = addColour(before, { group: 'key-lights', colour: '#FF8800', name: 'Warm glow', allGroups: false, white: 0.35, amber: 1, uv: 0 });
+  const made = show.presets.find((p) => p.id === ids[0])!;
+  assert.deepEqual(made.layers, [{ kind: 'static', colour: { hex: '#ff8800', white: 0.35, amber: 1 }, intensity: 1 }]);
+  assert.equal(made.swatch, displayColour('#ff8800', { white: 0.35, amber: 1 }));
+  assert.notEqual(made.swatch, '#ff8800');
+  // The same colour again is refused; the plain colour is another one.
+  assert.throws(() => addColour(show, { group: 'key-lights', colour: '#ff8800', name: 'x', allGroups: false, white: 0.351, amber: 1 }), { message: 'that colour is already in the list' });
+  assert.equal(addColour(show, { group: 'key-lights', colour: '#ff8800', name: 'x', allGroups: false }).ids.length, 1);
+  // Levels outside 0..1 are refused.
+  assert.throws(() => addColour(before, { group: 'key-lights', colour: '#ff8800', name: 'x', allGroups: false, amber: 1.5 }), /amber level is between 0 and 100 %/);
+  // Every colour group gets the same light, also one with no amber channel (the engine makes amber from red and green there).
+  const all = addColour(before, { group: 'key-lights', colour: '#ff8800', name: 'Warm glow', allGroups: true, white: 0.35, amber: 1 });
+  assert.deepEqual(all.ids.map((id) => all.show.presets.find((p) => p.id === id)!.group).sort(), [...COLOUR_GROUPS].sort());
+  for (const id of all.ids) assert.deepEqual(all.show.presets.find((p) => p.id === id)!.layers[0], made.layers[0]);
+  parseShow(JSON.parse(JSON.stringify(all.show)));
+});
+
+test('a colour of Amber alone (black with amber) is a lit colour, not Off; black with nothing in it is refused', () => {
+  const before = rig();
+  const { show, ids } = addColour(before, { group: 'key-lights', colour: '#000000', name: 'Amber', allGroups: false, amber: 1 });
+  const made = show.presets.find((p) => p.id === ids[0])!;
+  assert.deepEqual(made.layers, [{ kind: 'static', colour: { hex: '#000000', amber: 1 }, intensity: 1 }]);
+  assert.equal(made.swatch, '#ffbf00');
+  assert.equal(isOff(made), false);
+  assert.equal(canRecolour(made), true);
+  // The editor treats it as a normal colour: a brightness and a new hue are fine.
+  const dimmer = editColour(show, { preset: made.id, level: 0.5, sameName: false }).show;
+  assert.equal((dimmer.presets.find((p) => p.id === made.id)!.layers[0] as StaticLayer).intensity, 0.5);
+  const red = editColour(show, { preset: made.id, colour: '#ff0000', sameName: false }).show;
+  assert.deepEqual((red.presets.find((p) => p.id === made.id)!.layers[0] as StaticLayer).colour, { hex: '#ff0000', amber: 1 });
+  // An effect with it first shows amber, not black.
+  const fxShow = addEffect(show, { group: 'key-lights', name: 'Amber wave', effect: EffectLayer.parse({ kind: 'effect', effect: 'wave', colours: [{ hex: '#000000', amber: 1 }], speed: { beats: 4 } }) });
+  assert.equal(fxShow.show.presets.find((p) => p.id === fxShow.id)!.swatch, '#ffbf00');
+  // Black with no White, Amber or UV has no light: that is Off, and is not added as a colour.
+  assert.throws(() => addColour(before, { group: 'key-lights', colour: '#000000', name: 'x', allGroups: false }), /has no light/);
+  assert.equal(isOff({ id: 'x', name: 'x', group: 'key-lights', fade: 3, layers: [{ kind: 'static', colour: { hex: '#000000' }, intensity: 1 }] }), true);
+  assert.equal(isOff({ id: 'x', name: 'x', group: 'key-lights', fade: 3, layers: [{ kind: 'static', colour: { hex: '#000000', uv: 0.2 }, intensity: 1 }] }), false);
 });
 
 test('an empty name becomes Colour N with the next free number in the group', () => {
@@ -461,6 +502,36 @@ test('an effect\'s settings are edited in place; a colour is not an effect', () 
   const hidden = structuredClone(show);
   preset(hidden, id).custom = true;
   assert.throws(() => editEffect(hidden, { preset: id, effect: hard }), { message: "that effect can't be edited" });
+});
+
+test('an effect keeps its base colour through add, edit and the show file', () => {
+  const s = ready();
+  const base = { colour: { hex: '#ffb46b', white: 0.4 }, level: 0.5 };
+  const { show, id } = addEffect(s, { group: 'background', name: 'Over warm', effect: fx({ effect: 'chase', base }) });
+  assert.deepEqual((preset(show, id).layers[0] as EffectLayer).base, base);
+  assert.equal(preset(show, id).swatch, '#ff0000', 'the swatch is still the first colour');
+  // A new base level alone is a change; taking the base away is too.
+  const dimmer = editEffect(show, { preset: id, effect: fx({ effect: 'chase', base: { ...base, level: 0.2 } }) });
+  assert.equal((preset(dimmer, id).layers[0] as EffectLayer).base!.level, 0.2);
+  const none = editEffect(dimmer, { preset: id, effect: fx({ effect: 'chase' }) });
+  assert.equal((preset(none, id).layers[0] as EffectLayer).base, undefined);
+  assert.throws(() => editEffect(show, { preset: id, effect: fx({ effect: 'chase', base }) }), { message: 'nothing changed' });
+  assert.deepEqual(parseShow(JSON.parse(JSON.stringify(show))).presets.find((p) => p.id === id), preset(show, id));
+  // Two effects that differ only in their base don't run the same.
+  const keys = new Set([fx(), fx({ base }), fx({ base: { ...base, level: 0.2 } }), fx({ base: { ...base, colour: { hex: '#FFB46B', white: 0.4 } } })].map(effectKey));
+  assert.equal(keys.size, 3, 'a hex in any case is the same colour');
+});
+
+test("an effect's base can be a shared palette colour: it counts as using it, and a missing one is a broken reference", () => {
+  const s = rig();
+  const layer = fx({ base: { colour: { palette: 'lightkey', index: 7 }, level: 0.3 } });
+  s.presets.push({ id: 'bg-over', name: 'Over', group: 'background', fade: 3, layers: [layer] });
+  const show = parseShow(s);
+  assert.ok(presetsUsingPaletteEntry(show, 'lightkey', 7).some((p) => p.id === 'bg-over'));
+  const palettes = new Map(show.palettes.map((p) => [p.id, p]));
+  assert.deepEqual(resolveEffect(layer, palettes).base, { colour: resolveColour({ palette: 'lightkey', index: 7 }, palettes), level: 0.3 });
+  s.presets.at(-1)!.layers = [fx({ base: { colour: { palette: 'nope', index: 0 }, level: 0.3 } })];
+  assert.throws(() => parseShow(s), /unknown palette "nope"/);
 });
 
 test('an effect is renamed and deleted like a colour, but never given a colour there', () => {

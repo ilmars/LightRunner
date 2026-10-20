@@ -11,14 +11,14 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 import {
   BUILT_IN_PROFILES, Command, OscSettings, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
   applyQuickLookToItem, isBlindCommand, isEffectPreset, isShowEdit, moveItem, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,
   type OflFixture, type Pick, type Scope,
-  BLACKOUT, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type RuntimeState, type Show, type ShowEdit, type StageCommand,
+  BLACKOUT, LiveEffectLayer, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type RuntimeState, type Show, type ShowEdit, type StageCommand,
 } from '../../packages/shared/src/index.ts';
-import { settledVisual, type StageClock } from '../../packages/engine/src/index.ts';
+import { effectFrames, settledVisual, type StageClock } from '../../packages/engine/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
 import { BLIND_OFF, BLIND_PROBLEM, BlindSession, MAX_DRAFTS, TOO_MANY_DRAFTS } from './blind.ts';
 import { discoverArtNet } from './discovery.ts';
@@ -85,6 +85,13 @@ const TEMPO_RUN_MS = 3000;
 const DEVICE_MASTER_MS = 300;
 /** The key of a device Flash's time limit. */
 const flashKey = (source: string, group: string) => JSON.stringify([source, group]);
+
+/** What the effect editor sends for its moving strip: the group and the effect as it is being edited. */
+// The tempo and speed dial the page shows (a Blind draft's, say); the stage's when left out. Limits as the tempo and speed commands.
+const EffectPreviewBody = z.object({
+  group: z.string().min(1).max(64), effect: LiveEffectLayer,
+  tempo: z.number().min(40).max(240).optional(), speed: z.number().min(0.5).max(2).optional(),
+});
 
 class HttpError extends Error {
   readonly status: number;
@@ -1387,6 +1394,19 @@ export class App {
         // From this.show, so it always shows the latest edit.
         if (!this.show.looks.some((l) => l.id === parts[1])) throw new HttpError(404, `unknown look: ${parts[1]}`);
         return json(res, 200, { visual: Array.from(settledVisual(this.show, parts[1])) });
+      }
+      case 'POST /effect-preview': {
+        // The effect editor's moving strip: the effect as it is being edited, on the group's line, at the tempo
+        // and speed the page shows (the stage's when it sends none). Rendered here with the pure engine; nothing
+        // goes to the lights.
+        const body = EffectPreviewBody.safeParse(await readJson(req));
+        if (!body.success) throw new HttpError(400, `not an effect: ${body.error.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ')}`);
+        const tempo = body.data.tempo ?? this.latestState?.tempo ?? 120, speed = body.data.speed ?? this.latestState?.speed ?? 1;
+        if (!this.show.groups.some((g) => g.id === body.data.group)) throw new HttpError(404, `unknown group "${body.data.group}"`);
+        const out = effectFrames(this.show, body.data.group, body.data.effect, { bpm: tempo, speed });
+        if (typeof out === 'string') throw new HttpError(400, out);
+        const { frames, ...rest } = out;
+        return json(res, 200, { ...rest, tempo, speed, frames: Buffer.from(frames.buffer, frames.byteOffset, frames.byteLength).toString('base64') });
       }
       case 'GET /timing':
         return json(res, 200, await this.timing(url.searchParams.get('reset') === '1'));

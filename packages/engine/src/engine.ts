@@ -4,7 +4,7 @@
 
 import {
   BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, LiveEffectLayer, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, displayColour, effectKey, findProfile,
-  liveEffectId, livePresetId, parseLiveEffect, parseLivePreset, resolveColour,
+  liveEffectId, livePresetId, parseLiveEffect, parseLivePreset, resolveColour, resolveEffect,
   type StageCommand, type EffectLayer, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
   type GroupStatus, type Layer, type Palette, type Preset, type RuntimeState, type Show, type StageState,
 } from '../../shared/src/index.ts';
@@ -222,7 +222,7 @@ function resolvedLayers(layers: Layer[], palettes: Palette[]): Layer[] {
   const byId = new Map(palettes.map((p) => [p.id, p]));
   return layers.map((l) => (l.kind === 'static'
     ? { ...l, colour: resolveColour(l.colour, byId) }
-    : { ...l, colours: l.colours.map((c) => resolveColour(c, byId)) }));
+    : resolveEffect(l, byId)));
 }
 
 /** True when the group runs (or is fading into) a preset with an effect in it, as Save sees it (isEffectPreset). */

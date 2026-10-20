@@ -369,6 +369,12 @@ body.preview #pAdd { display: none; }
 .padd-top .qs-name { flex: 1; min-width: 0; }
 .padd-sw { flex: none; width: 28px; height: 28px; border-radius: 8px; opacity: 0.8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
 .padd-btns { display: flex; align-items: center; gap: 8px; }
+/* ＋ New colour: its own strip and White, Amber and UV sliders across the form. */
+.pa-strip, .pa-extras, .pa-row { grid-column: 1 / -1; }
+.pa-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; }
+.pa-row[hidden] { display: none; }
+.pa-strip { margin: 4px 0; }
+.pa-strip[hidden] { display: none; }
 /* A switch in the picker's quiet style: faint track, blue tint when on. */
 .pswitch { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; color: var(--ds-muted-on); font-size: 15px; cursor: pointer; }
 .pswitch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
@@ -448,6 +454,8 @@ body.preview #pAdd { display: none; }
 .fxedit .padd-btns { justify-self: end; }
 .padd-btns [hidden] { display: none; }
 .fxedit .fxset { padding-top: 4px; border-top: 0; }
+/* The effect moving along the group's lights, on the stage picture's dark ground; app.js draws it mixed down like a swatch. */
+.fe-strip { display: block; width: 100%; height: 32px; margin: 6px 0 2px; border-radius: var(--ds-r-tile); background: #06080c; box-shadow: var(--ds-shadow-inset); }
 /* The colour editor's Brightness and Fade: the same quiet rows as an effect's settings, under the colour strip. */
 .pedit .pe-set { grid-column: 1 / -1; padding-top: 4px; border-top: 0; }
 .pe-set .fxrow[hidden] { display: none; }
@@ -464,6 +472,16 @@ body.preview #pAdd { display: none; }
 .fecol span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fecol.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
 .fecol .fenum { position: absolute; right: 8px; font-size: 13px; font-weight: 400; font-variant-numeric: tabular-nums; color: var(--ds-muted-on); }
+/* ＋ Own colour: a quiet outline like ＋ New effect; unavailable (dimmer still) when an effect has six colours. */
+.fecol.add { justify-content: center; padding: 0 8px; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-muted); }
+.fecol.add.open { box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-muted-on); }
+.fecol.add:disabled { opacity: 0.4; cursor: default; }
+/* Changing the order: a held colour lifts (its place dims), a quiet copy follows the finger, and the colour under it is outlined. */
+.fecol.movable { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.fecol.lifted { opacity: 0.45; }
+.fecol.drop { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.fe-ghost { position: fixed; z-index: 50; margin: 0; pointer-events: none; opacity: 0.85; box-shadow: var(--ds-shadow-raise); }
+.fe-own[hidden], .fe-base-row[hidden] { display: none; }
 
 /* ---- Bottom bar: one control strip; groups divided by faint lines ---- */
 .bottom {

@@ -1113,13 +1113,14 @@ const NEUTRAL = '#5a5f69';
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
 /**
- * The colour of a plain Any colour pick (no white, amber or UV) a group runs, or null. "Add to
- * colours" keeps only plain colours for now; a pick with extras stays a live colour.
+ * The Any colour pick a group runs, as "Add to colours" keeps it: `{ hex, white, amber, uv, display }`
+ * (display: how it looks, white, amber and UV mixed in), or null.
  * `s` is the group's live status; the server reads Any colour picks for the page (`s.live`).
  */
 function liveColour(s) {
   const live = s?.live;
-  return live && !live.white && !live.amber && !live.uv ? live.colour : null;
+  if (!live) return null;
+  return { hex: live.colour, white: live.white ?? 0, amber: live.amber ?? 0, uv: live.uv ?? 0, display: live.display ?? live.colour };
 }
 
 /**
@@ -1189,7 +1190,8 @@ const hasLine = (group) => (group?.segments ?? 1) > 1 || (layout?.members?.[grou
 
 /** An effect's colours side by side, whites drawn as whites; `loop` ends on the first colour again, for a swatch that moves. */
 function effectGradient(effect, loop = false) {
-  const colours = effect.colours.map((c) => shown(c.hex));
+  // White, Amber and UV mixed in, as the colours' swatches have them (an amber-only colour is amber, not black).
+  const colours = effect.colours.map((c) => shown(mixedColour(c.hex, c)));
   if (colours.length === 1) return colours[0];
   return `linear-gradient(90deg, ${(loop ? [...colours, colours[0]] : colours).join(', ')})`;
 }
@@ -1472,6 +1474,13 @@ function buildPickerGrid() {
     });
     grid.append(b);
   }
+  if (picker.edit) {
+    const add = el('button', 'pc newfx', '＋ New colour');
+    add.dataset.newColour = '1';
+    add.classList.toggle('editing', !!newColour);
+    add.addEventListener('click', openNewColour);
+    grid.append(add);
+  }
   $('pTitle').textContent = row.group.name;
   $('pAnyLab').textContent = row.group.whiteOnly ? 'Any white, warm to cool' : 'Any colour';
   $('pAny').className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'}`;
@@ -1547,24 +1556,30 @@ function buildExtras(group) {
   extraRows = [];
   for (const x of EXTRAS) {
     if (!group.extras?.[x.key]) continue;
-    const slab = el('span', 'ds-fill-slab');
-    const dim = el('div', 'ds-fill');
-    dim.setAttribute('role', 'slider');
-    dim.setAttribute('aria-label', `${group.name} ${x.label}`);
-    dim.setAttribute('aria-valuemin', '0');
-    dim.setAttribute('aria-valuemax', '100');
-    dim.style.setProperty('--c', x.tint);
-    dim.append(slab);
-    const pct = el('span', 'pct');
-    const cell = el('div', 'xcell');
-    cell.append(el('span', 'lab2', x.label), pct, dim);
-    box.append(cell);
-    const row = { key: x.key, dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
+    const row = extraSlider(box, x, `${group.name} ${x.label}`);
     extraRows.push(row);
-    showLevel(row, 0);
     wireExtra(row);
   }
   box.hidden = extraRows.length === 0;
+}
+
+/** One White, Amber or UV slider in `box`, at 0: `{ key, dim, slab, pct, value, dragging, holdUntil }`. */
+function extraSlider(box, x, label) {
+  const slab = el('span', 'ds-fill-slab');
+  const dim = el('div', 'ds-fill');
+  dim.setAttribute('role', 'slider');
+  dim.setAttribute('aria-label', label);
+  dim.setAttribute('aria-valuemin', '0');
+  dim.setAttribute('aria-valuemax', '100');
+  dim.style.setProperty('--c', x.tint);
+  dim.append(slab);
+  const pct = el('span', 'pct');
+  const cell = el('div', 'xcell');
+  cell.append(el('span', 'lab2', x.label), pct, dim);
+  box.append(cell);
+  const row = { key: x.key, dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
+  showLevel(row, 0);
+  return row;
 }
 
 /** The levels the sliders show; extras the group has no slider for are 0. */
@@ -1667,7 +1682,7 @@ function renderPicker() {
 
 // ---- Keep a strip colour: "＋ Add to colours" ----
 
-/** The colour the picker's group runs live from the strip, or null. */
+/** The colour the picker's group runs live from the strip (with its White, Amber and UV), or null. */
 function liveOfPicker() {
   const row = pickerRow();
   return row ? liveColour(shownState()?.groups?.[row.group.id]) : null;
@@ -1676,14 +1691,20 @@ function liveOfPicker() {
 /** Shows the pill while the group runs a strip colour that isn't a swatch yet; keeps the form in step. */
 function renderAddColour() {
   const row = pickerRow();
-  const hex = liveOfPicker();
-  const listed = !!hex && row.group.presets.some((p) => p.swatch?.toLowerCase() === hex);
+  if (row) $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
+  // ＋ New colour has its own colour: the stage has nothing to do with it.
+  if (newColour) {
+    $('pAddOpen').hidden = true;
+    return;
+  }
+  const pick = liveOfPicker();
+  // Listed: the group's list has this very light (its colour, White, Amber and UV).
+  const listed = !!pick && row.group.presets.some((p) => !p.effect && p.light && colourKey(p.light) === colourKey(pick));
   const open = !$('pAdd').hidden;
   // The form follows the colour: it goes when the group no longer runs a new strip colour.
-  if (open && (!hex || listed)) $('pAdd').hidden = true;
-  $('pAddOpen').hidden = !hex || listed || !$('pAdd').hidden || picker.edit;
-  if (hex) $('paSw').style.background = hex;
-  if (row) $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
+  if (open && (!pick || listed)) $('pAdd').hidden = true;
+  $('pAddOpen').hidden = !pick || listed || !$('pAdd').hidden || picker.edit;
+  if (pick) $('paSw').style.background = shown(pick.display) ?? pick.display;
 }
 
 function openAddColour() {
@@ -1700,7 +1721,141 @@ function closeAddColour() {
   pendingColour = null;
   $('pAdd').hidden = true;
   $('paName').blur();
+  closeNewColour();
   if (picker.group) renderAddColour();
+}
+
+// ---- ＋ New colour (Edit mode): a colour for the list, picked on the form's own strip ----
+
+/** The New colour form while it is open: `{ hex }`, hex null until a colour is picked. Picking never touches the stage. */
+let newColour = null;
+// Its White, Amber and UV sliders (for groups with those channels), shaped as showLevel wants.
+let newExtraRows = [];
+
+function openNewColour() {
+  const row = pickerRow();
+  if (!row || !picker.edit) return;
+  closeEditor();
+  pendingColour = null;
+  newColour = { hex: null };
+  $('paName').value = '';
+  $('paAll').checked = false;
+  const strip = $('paStrip');
+  strip.className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'} pa-strip`;
+  strip.hidden = false;
+  $('paStripRow').hidden = false;
+  $('paH').hidden = true;
+  buildNewExtras(row.group);
+  $('paAddBtn').textContent = 'Save';
+  showNewSwatch();
+  $('pAdd').hidden = false;
+  renderAddColour();
+  for (const b of $('pGrid').children) b.classList.toggle('editing', !!b.dataset.newColour);
+  $('pAdd').scrollIntoView({ block: 'nearest' });
+}
+
+/** Back to the Add to colours form (closed); nothing to do when New colour isn't open. */
+function closeNewColour() {
+  if (!newColour) return;
+  newColour = null;
+  $('pAdd').hidden = true;
+  $('paStrip').hidden = true;
+  $('paStripRow').hidden = true;
+  $('paExtras').hidden = true;
+  $('paExtras').replaceChildren();
+  newExtraRows = [];
+  $('paAddBtn').textContent = 'Add';
+  $('paAddBtn').disabled = pendingColour !== null;
+  for (const b of $('pGrid').children) if (b.dataset.newColour) b.classList.remove('editing');
+}
+
+/** White, Amber and UV sliders for the new colour, as Any colour has them; they change only the form. */
+function buildNewExtras(group) {
+  const box = $('paExtras');
+  box.replaceChildren();
+  newExtraRows = [];
+  for (const x of EXTRAS) {
+    if (!group.extras?.[x.key]) continue;
+    const row = extraSlider(box, x, `New colour ${x.label}`);
+    newExtraRows.push(row);
+    let startX = 0, startV = 0;
+    row.dim.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      row.dragging = true;
+      try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+      row.dim.classList.add('ds-dragging');
+      startX = ev.clientX;
+      startV = row.value;
+    });
+    row.dim.addEventListener('pointermove', (ev) => {
+      if (!row.dragging) return;
+      showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
+      showNewSwatch();
+    });
+    const end = () => {
+      row.dragging = false;
+      row.dim.classList.remove('ds-dragging');
+    };
+    row.dim.addEventListener('pointerup', end);
+    row.dim.addEventListener('pointercancel', end);
+  }
+  box.hidden = newExtraRows.length === 0;
+}
+
+attachStrip($('paStrip'), $('paH'), () => (newColour ? pickerRow()?.group.whiteOnly ?? null : null), (hex) => {
+  if (!newColour) return;
+  newColour.hex = hex;
+  showNewSwatch();
+});
+
+// No colour: the picked colour comes off again, so the new colour can be White, Amber or UV alone.
+$('paNoColour').addEventListener('click', () => {
+  if (!newColour) return;
+  newColour.hex = null;
+  $('paH').hidden = true;
+  showNewSwatch();
+});
+
+/** Something to add: a colour picked on the strip, or White, Amber or UV above 0 (an amber-only colour, say). */
+function newColourReady() {
+  const levels = newLevels();
+  return !!newColour && (!!newColour.hex || levels.white > 0 || levels.amber > 0 || levels.uv > 0);
+}
+
+/** The new colour's White, Amber and UV, as its sliders show them (0 where the group has no slider). */
+function newLevels() {
+  const levels = { white: 0, amber: 0, uv: 0 };
+  for (const r of newExtraRows) levels[r.key] = Math.round(r.value * 100) / 100;
+  return levels;
+}
+
+/**
+ * The form's swatch: the picked colour (none is black) with its White, Amber and UV mixed in, as the
+ * saved swatch will look; empty while there is nothing to add. Keeps Save and No colour in step too.
+ */
+function showNewSwatch() {
+  if (!newColour) return;
+  const ready = newColourReady();
+  const look = mixedColour(newColour.hex ?? '#000000', newLevels());
+  $('paSw').style.background = ready ? shown(look) ?? look : 'transparent';
+  $('paNoColour').hidden = !newColour.hex;
+  $('paAddBtn').disabled = pendingColour !== null || !ready;
+}
+
+/**
+ * A #rrggbb colour with White, Amber and UV mixed in, the way the server makes swatches:
+ * the same sums as displayColour() in packages/shared/src/protocol.ts (keep the two alike).
+ */
+function mixedColour(hex, { white = 0, amber = 0, uv = 0 }) {
+  if (!white && !amber && !uv) return hex.toLowerCase();
+  const n = parseInt(hex.slice(1), 16);
+  const rgb = [
+    ((n >> 16) & 255) / 255 + white + amber + 0.25 * uv,
+    ((n >> 8) & 255) / 255 + white + (0xbf / 255) * amber,
+    (n & 255) / 255 + white + 0.4 * uv,
+  ];
+  const scale = 1 / Math.max(1, ...rgb);
+  return `#${rgb.map((c) => Math.round(c * scale * 255).toString(16).padStart(2, '0')).join('')}`;
 }
 
 $('pAddOpen').addEventListener('click', openAddColour);
@@ -1712,13 +1867,21 @@ $('paName').addEventListener('keydown', (ev) => {
 });
 // A plain tap. The form closes when the server says yes; on an error it stays to fix.
 $('paAddBtn').addEventListener('click', () => {
-  const hex = liveOfPicker();
   if (pendingColour !== null || !picker.group) return;
-  if (!hex) {
+  if (newColour) {
+    if (!newColourReady()) return;
+    // No colour picked: the light is its White, Amber or UV alone, on a black colour.
+    pendingColour = send({ type: 'addColour', group: picker.group, colour: newColour.hex ?? '#000000', ...newLevels(), name: $('paName').value, allGroups: $('paAll').checked });
+    $('paAddBtn').disabled = pendingColour !== null;
+    return;
+  }
+  const pick = liveOfPicker();
+  if (!pick) {
     closeAddColour();
     return;
   }
-  pendingColour = send({ type: 'addColour', group: picker.group, colour: hex, name: $('paName').value, allGroups: $('paAll').checked });
+  const { hex, white, amber, uv } = pick;
+  pendingColour = send({ type: 'addColour', group: picker.group, colour: hex, white, amber, uv, name: $('paName').value, allGroups: $('paAll').checked });
   $('paAddBtn').disabled = pendingColour !== null;
 });
 
@@ -1788,7 +1951,7 @@ const SPEED_SECONDS = [2, 5, 10, 30, 60];
 const DIRECTIONS = [['ltr', 'Left to right'], ['rtl', 'Right to left'], ['centreOut', 'Centre out'], ['outsideIn', 'Outside in']];
 /**
  * The settings that change what each kind of effect does (the others are left out), and what
- * its size is called. A wave uses its size only with one colour and hard edges.
+ * its size is called. A wave uses its size only with one colour (soft or hard edges).
  */
 const EFFECT_USES = {
   colourFade: {},
@@ -1802,24 +1965,28 @@ const EFFECT_USES = {
 };
 function effectUses(effect) {
   const uses = EFFECT_USES[effect.effect] ?? { direction: true, waves: true, size: 'Size' };
-  if (effect.effect === 'wave' && effect.colours.length === 1 && effect.edge === 'hard') return { ...uses, size: 'Size' };
+  if (effect.effect === 'wave' && effect.colours.length === 1) return { ...uses, size: 'Size' };
   return uses;
 }
 
 /** The choice nearest to v. */
 const nearest = (choices, v) => choices.reduce((best, c) => (Math.abs(c - v) < Math.abs(best - v) ? c : best));
 
-/** An effect as groupEffect takes it: plain colours, every setting, nothing else. */
+/** A colour as an effect takes it: its hex, and White, Amber and UV when it has them. */
+function plainColour(c) {
+  const out = { hex: c.hex };
+  for (const k of ['white', 'amber', 'uv']) if (typeof c[k] === 'number') out[k] = c[k];
+  return out;
+}
+
+/** An effect as groupEffect takes it: plain colours, every setting and the base colour (when it has one), nothing else. */
 function liveLayer(fx) {
   return {
     kind: 'effect', effect: fx.effect,
-    colours: fx.colours.map((c) => {
-      const out = { hex: c.hex };
-      for (const k of ['white', 'amber', 'uv']) if (typeof c[k] === 'number') out[k] = c[k];
-      return out;
-    }),
+    colours: fx.colours.map(plainColour),
     speed: 'beats' in fx.speed ? { beats: fx.speed.beats } : { seconds: fx.speed.seconds },
     direction: fx.direction, waves: fx.waves, size: fx.size, edge: fx.edge, intensity: fx.intensity,
+    ...(fx.base ? { base: { colour: plainColour(fx.base.colour), level: fx.base.level } } : {}),
   };
 }
 
@@ -1827,9 +1994,12 @@ function liveLayer(fx) {
  * The settings of one effect, built into `root`. `show(effect, tempo)` puts an effect in (the
  * caller hides the box when there is none). Every change calls `onChange(effect, how)` with the
  * whole effect: `how` is 'tap' for a choice, and 'start', 'move' and 'end' for a Size drag.
+ * `current()`, when given, is the effect a change starts from (the caller's own, which may have
+ * changed since it was shown here); otherwise the one last shown.
  */
-function effectControls(root, onChange) {
+function effectControls(root, onChange, current = null) {
   let fx = null, tempo = 120;
+  const now = () => (current ? current() : fx);
   const seg = (label) => {
     const box = el('div', 'ds-seg');
     box.setAttribute('role', 'radiogroup');
@@ -1841,7 +2011,7 @@ function effectControls(root, onChange) {
     b.type = 'button';
     b.setAttribute('role', 'radio');
     if (label) b.setAttribute('aria-label', label);
-    b.addEventListener('click', () => { if (fx) pick(); });
+    b.addEventListener('click', () => { if (now()) pick(); });
     box.append(b);
     return b;
   };
@@ -1853,16 +2023,18 @@ function effectControls(root, onChange) {
   };
   /** A tap: the whole effect with `patch`, unless nothing changes. */
   const change = (patch) => {
-    const next = { ...fx, ...patch };
-    if (JSON.stringify(liveLayer(next)) !== JSON.stringify(liveLayer(fx))) onChange(liveLayer(next), 'tap');
+    const from = now();
+    const next = { ...from, ...patch };
+    if (JSON.stringify(liveLayer(next)) !== JSON.stringify(liveLayer(from))) onChange(liveLayer(next), 'tap');
   };
 
   // Speed: one round every 1 … 32 beats of the tempo, or Free: every 2 … 60 seconds.
   const beatsBox = seg('Beats for one round');
   const beatButtons = SPEED_BEATS.map((n) => [n, choice(beatsBox, String(n), `One round every ${n} beat${n === 1 ? '' : 's'}`, () => change({ speed: { beats: n } }))]);
   const freeButton = choice(beatsBox, 'Free', 'Free: in seconds, not with the tempo', () => {
-    if ('seconds' in fx.speed) return;
-    change({ speed: { seconds: nearest(SPEED_SECONDS, (fx.speed.beats * 60) / tempo) } });
+    const { speed } = now();
+    if ('seconds' in speed) return;
+    change({ speed: { seconds: nearest(SPEED_SECONDS, (speed.beats * 60) / tempo) } });
   });
   const secondsBox = seg('Seconds for one round');
   const secondButtons = SPEED_SECONDS.map((n) => [n, choice(secondsBox, `${n} s`, `One round every ${n} seconds`, () => change({ speed: { seconds: n } }))]);
@@ -1883,8 +2055,8 @@ function effectControls(root, onChange) {
   const count = el('b', 'fxcount');
   fewer.setAttribute('aria-label', 'Fewer waves');
   more.setAttribute('aria-label', 'More waves');
-  fewer.addEventListener('click', () => { if (fx && fx.waves > 1) change({ waves: fx.waves - 1 }); });
-  more.addEventListener('click', () => { if (fx && fx.waves < 16) change({ waves: fx.waves + 1 }); });
+  fewer.addEventListener('click', () => { const from = now(); if (from && from.waves > 1) change({ waves: from.waves - 1 }); });
+  more.addEventListener('click', () => { const from = now(); if (from && from.waves < 16) change({ waves: from.waves + 1 }); });
   const waves = item('Waves', fewer, count, more);
 
   // Size: a fill slider, moved relative to where the finger starts (as the dimmers are).
@@ -1902,9 +2074,9 @@ function effectControls(root, onChange) {
   const sized = () => ({ ...base, size: Math.round(slider.value * 100) / 100 });
   dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
-    if (!fx) return;
+    if (!now()) return;
     slider.dragging = true;
-    base = liveLayer(fx);
+    base = liveLayer(now());
     try { dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     dim.classList.add('ds-dragging');
     startX = ev.clientX;
@@ -2081,6 +2253,32 @@ let pendingEditToast = 'Colour saved';
 let pendingEditNext = [];
 /** The effect the editor is open on: { id (null for a new one), name, effect, original, choices }. */
 let effectEdit = null;
+/** The editor's moving strip (see startEffectStrip). */
+const fxStrip = {
+  canvas: $('feStrip'),
+  group: null,
+  // Counts the asks, so an older answer that comes late is dropped.
+  seq: 0,
+  timer: 0,
+  raf: 0,
+  // The last answer: frames (RGB per segment, frame after frame), how many, how fast, and each fixture's segments.
+  frames: null, count: 0, fps: 20, segments: 0, fixtures: [],
+  // The tempo and speed the frames were made at, as "tempo|speed", to ask again when they change.
+  clock: null,
+  start: 0,
+  // When the last ask went (performance.now()), for the Size drag's one ask per FX_STRIP_WAIT.
+  askedAt: -Infinity,
+  // The last ask got no answer: the strip is dark and asks again on the next state.
+  failed: false,
+  // The frame on the canvas now (-1: dark), so it is only drawn again when that changes; null: draw next time.
+  drawn: null,
+};
+/** A change is shown this long after the last one; a Size drag asks at most this often. */
+const FX_STRIP_WAIT = 250;
+/** The gap between two fixtures, so bars read as bars. */
+const FX_STRIP_GAP = 6;
+/** Mixed down like a swatch, so the strip never lights the operator's face. */
+const FX_STRIP_ALPHA = 0.85;
 
 const editedPreset = () => (colourEdit ? pickerRow()?.group.presets.find((p) => p.id === colourEdit.id) : undefined);
 
@@ -2140,6 +2338,7 @@ function markFade() {
 function openEditor(preset) {
   const row = pickerRow();
   if (!row) return;
+  closeNewColour();
   const fade = preset.fade ?? 0;
   // Off has a level of 0 and no colour to dim: only a lit plain colour gets the slider.
   const level = preset.canRecolour === false ? null : preset.level ?? null;
@@ -2164,6 +2363,7 @@ function openEditor(preset) {
 }
 
 function closeEditor(keepPending = false) {
+  closeNewColour();
   colourEdit = null;
   if (!keepPending) pendingEdit = null;
   disarmDelete();
@@ -2327,32 +2527,51 @@ const EFFECT_NAMES = [
 const colourKey = (c) => [c.hex.toLowerCase(), ...['white', 'amber', 'uv'].map((k) => Math.round((c[k] ?? 0) * 1000) / 1000)].join('|');
 
 /** An effect as one string, the colours by their keys, for telling whether the editor changed it. */
-const effectSig = (layer) => JSON.stringify({ ...layer, colours: layer.colours.map(colourKey) });
+const effectSig = (layer) => JSON.stringify({
+  ...layer, colours: layer.colours.map(colourKey), base: layer.base ? [colourKey(layer.base.colour), layer.base.level] : null,
+});
+
+/** Yo-yo and meteor run in one colour: tapping a colour picks it instead of adding it. */
+const ONE_COLOUR = new Set(['yoyo', 'meteor']);
 
 /**
- * The colours the editor offers: the group's own colour list, then any colour the effect already
- * has that is not in the list (a colour picked on the strip, say), so it can be taken out and put back.
+ * The colours the editor offers: the group's own colour list, then the effect's own colours (any
+ * colour it has, or has as its base, that is not in the list), so they can be taken out and put back.
  */
 function effectChoices(group, effect) {
   const choices = [];
-  const seen = new Set();
-  const add = (name, swatch, colour) => {
-    const key = colourKey(colour);
-    if (seen.has(key)) return;
-    seen.add(key);
-    choices.push({ key, name, swatch, colour });
-  };
   for (const p of group.presets) {
     if (p.effect || !p.light) continue;
-    add(p.name, p.swatch ?? NEUTRAL, { hex: p.light.hex, white: p.light.white, amber: p.light.amber, uv: p.light.uv });
+    addChoice(choices, p.name, p.swatch ?? NEUTRAL, { hex: p.light.hex, white: p.light.white, amber: p.light.amber, uv: p.light.uv });
   }
-  for (const c of effect.colours) add('Custom', c.hex, { ...c });
+  for (const c of [...effect.colours, ...(effect.base ? [effect.base.colour] : [])]) addOwnChoice(choices, c);
   return choices;
 }
 
+/** Adds a choice unless one of the same colour is there already; returns the one there. */
+function addChoice(choices, name, swatch, colour) {
+  const key = colourKey(colour);
+  const found = choices.find((c) => c.key === key);
+  if (found) return found;
+  const choice = { key, name, swatch, colour, own: false };
+  choices.push(choice);
+  return choice;
+}
+
+/** An own colour: one the effect has that is in no list of the group's. They are numbered Own 1, Own 2 … to tell them apart. */
+function addOwnChoice(choices, colour) {
+  const count = choices.length;
+  const choice = addChoice(choices, `Own ${choices.filter((c) => c.own).length + 1}`, colour.hex, plainColour(colour));
+  if (choices.length > count) choice.own = true;
+  return choice;
+}
+
+/** The group's Off colour: no light, so as a base it is the same as None. */
+const OFF_KEY = '#000000|0|0|0';
+
 /** A new effect starts as a wave of the group's first two colours (not Off), one round every 4 beats. */
 function newEffectLayer(choices) {
-  const colours = choices.filter((c) => colourKey(c.colour) !== '#000000|0|0|0').slice(0, 2).map((c) => ({ ...c.colour }));
+  const colours = choices.filter((c) => c.key !== OFF_KEY).slice(0, 2).map((c) => ({ ...c.colour }));
   if (!colours.length) colours.push({ hex: '#ffffff' });
   return liveLayer({ effect: 'wave', colours, speed: { beats: 4 }, direction: 'ltr', waves: 1, size: 0.5, edge: 'soft', intensity: 1 });
 }
@@ -2361,9 +2580,13 @@ function newEffectLayer(choices) {
 function openEffectEditor(preset) {
   const row = pickerRow();
   if (!row) return;
-  const choices = effectChoices(row.group, preset ? preset.effect : { colours: [] });
-  const effect = preset ? liveLayer(preset.effect) : newEffectLayer(choices);
-  effectEdit = { id: preset?.id ?? null, name: preset?.name ?? '', effect, original: effectSig(effect), choices };
+  const saved = preset ? liveLayer(preset.effect) : null;
+  // Yo-yo and meteor run in their first colour only (a ready-made one may list more): the editor shows that one,
+  // and Save keeps just it, so `original` is the effect as saved.
+  const opened = saved && ONE_COLOUR.has(saved.effect) ? { ...saved, colours: saved.colours.slice(0, 1) } : saved;
+  const choices = effectChoices(row.group, opened ?? { colours: [] });
+  const effect = opened ?? newEffectLayer(choices);
+  effectEdit = { id: preset?.id ?? null, name: preset?.name ?? '', effect, original: effectSig(saved ?? effect), choices };
   pendingEdit = null;
   pendingEditNext = [];
   disarmDelete();
@@ -2373,7 +2596,9 @@ function openEffectEditor(preset) {
   $('feSave').textContent = preset ? 'Save' : 'Add';
   $('feDelete').hidden = $('feCopy').hidden = $('feUsed').hidden = !preset;
   $('fxEdit').hidden = false;
+  closeOwnStrips();
   drawEffectEditor();
+  startEffectStrip(picker.group);
   renderEffectEditor();
   for (const b of $('fxGrid').children) b.classList.toggle('editing', preset ? b.dataset.preset === preset.id : b.classList.contains('newfx'));
   $('fxEdit').scrollIntoView({ block: 'nearest' });
@@ -2381,6 +2606,9 @@ function openEffectEditor(preset) {
 
 function closeEffectEditor() {
   effectEdit = null;
+  endReorder();
+  closeOwnStrips();
+  stopEffectStrip();
   $('feName').blur();
   $('fxEdit').hidden = true;
   for (const b of $('fxGrid').children) b.classList.remove('editing');
@@ -2388,6 +2616,7 @@ function closeEffectEditor() {
 
 /** Keeps "Used in …" true as the show changes; closes the editor if the effect is gone. */
 function renderEffectEditor() {
+  followEffectStripClock();
   if (!effectEdit || effectEdit.id === null) return;
   const p = pickerRow()?.group.presets.find((x) => x.id === effectEdit.id);
   if (!p?.effect) {
@@ -2406,36 +2635,222 @@ function drawEffectEditor() {
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
+  const one = ONE_COLOUR.has(effect.effect);
+  $('feColLab').textContent = one ? 'Colour' : 'Colours';
+  $('feColNote').textContent = one ? '· tap to choose' : '· tap to add or remove, hold and drag to change the order, 1 to 6';
   const order = effect.colours.map(colourKey);
   const box = $('feColours');
   box.replaceChildren();
+  box.setAttribute('role', one ? 'radiogroup' : 'group');
+  box.setAttribute('aria-label', one ? 'Colour' : 'Colours');
   for (const c of choices) {
     const at = order.indexOf(c.key);
-    const b = el('button', 'fecol');
-    b.type = 'button';
-    b.setAttribute('role', 'checkbox');
-    b.setAttribute('aria-checked', String(at >= 0));
-    const sw = el('i');
-    sw.style.background = shown(c.swatch) ?? NEUTRAL;
-    b.append(sw, el('span', null, c.name));
-    if (at >= 0) b.append(el('b', 'fenum', String(at + 1)));
-    b.classList.toggle('on', at >= 0);
-    b.addEventListener('click', () => toggleEffectColour(c));
+    const b = colourChip(c, at >= 0, one ? 'radio' : 'checkbox');
+    if (at >= 0 && !one) {
+      b.append(el('b', 'fenum', String(at + 1)));
+      holdToReorder(b, at);
+    }
+    // The click a drag ends with is not a tap (also when it reaches a chip the drop has already replaced).
+    b.addEventListener('click', () => { if (performance.now() >= reorder.quietUntil) toggleEffectColour(c); });
     box.append(b);
   }
+  // Full only once a pick has ended: the strip must stay under the finger while it picks the sixth colour.
+  box.append(ownChip('feOwn', 'Pick an own colour for the effect', !one && effect.colours.length >= 6 && ownPick.place === null));
+
+  // The base: None, or one of the same colours, at its brightness.
+  const baseKey = effect.base ? colourKey(effect.base.colour) : null;
+  const bases = $('feBase');
+  bases.replaceChildren();
+  const none = colourChip({ name: 'None', swatch: null }, baseKey === null, 'radio');
+  none.addEventListener('click', () => setEffectBase(null));
+  bases.append(none);
+  for (const c of choices) {
+    if (c.key === OFF_KEY) continue;
+    const b = colourChip(c, c.key === baseKey, 'radio');
+    b.addEventListener('click', () => setEffectBase(c.colour));
+    bases.append(b);
+  }
+  bases.append(ownChip('feBaseOwn', 'Pick an own colour for the base'));
+  $('feBaseRow').hidden = !effect.base;
+  if (effect.base && !baseLevel.dragging) showLevel(baseLevel, effect.base.level);
   effectEditSettings.show(effect, shownState()?.tempo ?? 120);
+}
+
+// ---- Changing the order of an effect's colours: hold a chosen colour, then drag it onto another ----
+
+/** How long a finger (or the mouse) holds a chosen colour before it lifts, in ms. */
+const REORDER_HOLD = 300;
+/** Moving further than this (px) before it lifts is a swipe (the panel scrolls), not a hold. */
+const REORDER_SLOP = 8;
+/** The hold that is under way: which colour (its place in the order), where the pointer is, and what it is over. */
+const reorder = { pointer: null, timer: 0, from: -1, over: -1, x: 0, y: 0, startX: 0, startY: 0, lifted: false, ghost: null, quietUntil: 0, effect: null };
+
+/** A chosen colour, at place `at` in the order, can be held and dragged onto another to take its number. */
+function holdToReorder(b, at) {
+  b.dataset.at = String(at);
+  b.classList.add('movable');
+  if (reorder.lifted && reorder.from === at) b.classList.add('lifted');
+  b.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0 || !effectEdit) return;
+    endReorder();
+    reorder.pointer = ev.pointerId;
+    reorder.from = at;
+    // A drop applies only to the effect it was held on: any other change in between ends the hold.
+    reorder.effect = effectEdit.effect;
+    reorder.x = reorder.startX = ev.clientX;
+    reorder.y = reorder.startY = ev.clientY;
+    reorder.timer = setTimeout(liftColour, REORDER_HOLD);
+  });
+  // A long press on a touch screen must not open the page's own menu.
+  b.addEventListener('contextmenu', (ev) => { if (reorder.pointer !== null) ev.preventDefault(); });
+}
+
+function liftColour() {
+  reorder.timer = 0;
+  const chip = $('feColours').querySelector(`.fecol[data-at="${reorder.from}"]`);
+  if (!effectEdit || !chip) return endReorder();
+  reorder.lifted = true;
+  chip.classList.add('lifted');
+  // A quiet copy follows the finger.
+  const r = chip.getBoundingClientRect();
+  const ghost = chip.cloneNode(true);
+  ghost.className = 'fecol on fe-ghost';
+  ghost.removeAttribute('data-at');
+  ghost.setAttribute('aria-hidden', 'true');
+  ghost.style.width = `${r.width}px`;
+  ghost.style.height = `${r.height}px`;
+  ghost.dataset.dx = String(reorder.startX - r.left);
+  ghost.dataset.dy = String(reorder.startY - r.top);
+  document.body.append(ghost);
+  reorder.ghost = ghost;
+  followReorder();
+}
+
+/** Moves the copy to the pointer and marks the chosen colour under it (the only places it can go). */
+function followReorder() {
+  const { ghost } = reorder;
+  if (!ghost) return;
+  ghost.style.left = `${reorder.x - Number(ghost.dataset.dx)}px`;
+  // A little above the finger, so the outline of the colour under it still shows.
+  ghost.style.top = `${reorder.y - Number(ghost.dataset.dy) - 10}px`;
+  const under = document.elementFromPoint(reorder.x, reorder.y)?.closest('#feColours .fecol.movable');
+  reorder.over = under ? Number(under.dataset.at) : -1;
+  for (const b of $('feColours').querySelectorAll('.fecol.movable')) {
+    b.classList.toggle('drop', Number(b.dataset.at) === reorder.over && reorder.over !== reorder.from);
+  }
+}
+
+/** Lets go: the held colour takes the number of the one it is dropped on (the others move up or down one). */
+function dropColour() {
+  const { from, over, effect } = reorder;
+  const moved = reorder.lifted;
+  endReorder();
+  if (!moved) return;
+  // The click that follows the lift is not a tap on the colour.
+  reorder.quietUntil = performance.now() + 400;
+  if (!effectEdit || effectEdit.effect !== effect || over === from) return;
+  const n = effect.colours.length;
+  if (ONE_COLOUR.has(effect.effect) || from < 0 || from >= n || over < 0 || over >= n) return;
+  const colours = [...effect.colours];
+  const [colour] = colours.splice(from, 1);
+  colours.splice(over, 0, colour);
+  setEffectEdit({ ...effectEdit.effect, colours });
+}
+
+function endReorder() {
+  clearTimeout(reorder.timer);
+  reorder.timer = 0;
+  reorder.pointer = null;
+  reorder.lifted = false;
+  reorder.effect = null;
+  reorder.from = reorder.over = -1;
+  reorder.ghost?.remove();
+  reorder.ghost = null;
+  for (const b of $('feColours').querySelectorAll('.lifted, .drop')) b.classList.remove('lifted', 'drop');
+}
+
+window.addEventListener('pointermove', (ev) => {
+  if (ev.pointerId !== reorder.pointer) return;
+  reorder.x = ev.clientX;
+  reorder.y = ev.clientY;
+  if (reorder.lifted) followReorder();
+  else if (Math.hypot(ev.clientX - reorder.startX, ev.clientY - reorder.startY) > REORDER_SLOP) endReorder();
+});
+window.addEventListener('pointerup', (ev) => { if (ev.pointerId === reorder.pointer) dropColour(); });
+window.addEventListener('pointercancel', (ev) => { if (ev.pointerId === reorder.pointer) endReorder(); });
+// While a colour is lifted the finger moves it, not the panel.
+$('feColours').addEventListener('touchmove', (ev) => { if (reorder.lifted) ev.preventDefault(); }, { passive: false });
+$('feColours').addEventListener('click', (ev) => {
+  if (performance.now() >= reorder.quietUntil) return;
+  ev.stopPropagation();
+  ev.preventDefault();
+}, true);
+
+/** One colour to choose in the editor: its swatch and name, on when chosen. */
+function colourChip(c, on, role) {
+  const b = el('button', 'fecol');
+  b.type = 'button';
+  b.setAttribute('role', role);
+  b.setAttribute('aria-checked', String(on));
+  const sw = el('i');
+  sw.style.background = c.swatch ? shown(c.swatch) ?? NEUTRAL : 'transparent';
+  b.append(sw, el('span', null, c.name));
+  b.classList.toggle('on', on);
+  return b;
+}
+
+/** ＋ Own colour: opens (or closes) the colour strip under its row; `full` when there is no room for another colour. */
+function ownChip(stripId, label, full = false) {
+  if (full) $(stripId).hidden = true;
+  const open = !$(stripId).hidden;
+  const b = el('button', 'fecol add', '＋ Own colour');
+  b.type = 'button';
+  b.disabled = full;
+  b.setAttribute('aria-label', full ? `${label} (an effect has at most six colours)` : label);
+  b.setAttribute('aria-expanded', String(open));
+  b.classList.toggle('open', open);
+  b.addEventListener('click', () => {
+    closeOwnStrips();
+    if (!open) openOwnStrip(stripId);
+    drawEffectEditor();
+  });
+  return b;
+}
+
+/** Which colours the own colour strips hold: hues, or warm to cool for a white-only group. */
+const ownWhiteOnly = () => (pickerRow() ? pickerRow().group.whiteOnly : null);
+
+function openOwnStrip(id) {
+  const strip = $(id);
+  strip.className = `strip2 ${ownWhiteOnly() ? 'cct' : 'hue'} fe-own`;
+  strip.hidden = false;
+  $(`${id}H`).hidden = true;
+}
+
+function closeOwnStrips() {
+  for (const id of ['feOwn', 'feBaseOwn']) $(id).hidden = true;
 }
 
 function setEffectEdit(next) {
   if (!effectEdit) return;
+  // A colour held for a new place belongs to the effect as it was: a change ends the hold.
+  endReorder();
   effectEdit.effect = next;
   disarmDelete();
   drawEffectEditor();
+  effectStripSoon();
 }
 
-/** A tap on a colour adds it at the end of the order, or takes it out. An effect has one to six. */
+/**
+ * A tap on a colour adds it at the end of the order, or takes it out. An effect has one to six.
+ * Yo-yo and meteor have one: a tap picks it instead.
+ */
 function toggleEffectColour(choice) {
   const { effect } = effectEdit;
+  if (ONE_COLOUR.has(effect.effect)) {
+    if (colourKey(effect.colours[0]) !== choice.key) setEffectEdit({ ...effect, colours: [{ ...choice.colour }] });
+    return;
+  }
   const at = effect.colours.map(colourKey).indexOf(choice.key);
   if (at >= 0) {
     if (effect.colours.length === 1) return toast('An effect needs at least one colour', true);
@@ -2452,7 +2867,10 @@ for (const [kind, text] of EFFECT_NAMES) {
   b.dataset.kind = kind;
   b.setAttribute('role', 'radio');
   b.addEventListener('click', () => {
-    if (effectEdit && effectEdit.effect.effect !== kind) setEffectEdit({ ...effectEdit.effect, effect: kind });
+    if (!effectEdit || effectEdit.effect.effect === kind) return;
+    const { colours } = effectEdit.effect;
+    // Yo-yo and meteor run in one colour: they keep the first.
+    setEffectEdit({ ...effectEdit.effect, effect: kind, colours: ONE_COLOUR.has(kind) ? colours.slice(0, 1) : colours });
   });
   $('feKind').append(b);
 }
@@ -2463,7 +2881,113 @@ const effectEditSettings = effectControls($('feSet'), (effect, how) => {
   effectEdit.effect = effect;
   disarmDelete();
   if (how !== 'move') drawEffectEditor();
-});
+  if (how === 'move' || how === 'end') effectStripDrag(how);
+  else effectStripSoon();
+}, () => effectEdit?.effect ?? null);
+
+/** The base colour: a colour (at the brightness it had, or half for a new base), or none. */
+function setEffectBase(colour) {
+  const { effect } = effectEdit;
+  if (!colour) {
+    if (!effect.base) return;
+    const { base, ...rest } = effect;
+    setEffectEdit(rest);
+    return;
+  }
+  if (effect.base && colourKey(effect.base.colour) === colourKey(colour)) return;
+  setEffectEdit({ ...effect, base: { colour: plainColour(colour), level: effect.base?.level ?? 0.5 } });
+}
+
+/**
+ * The own colour strips. A touch adds an own colour at once (to the effect's colours, or as its
+ * base); it follows the finger, and the strip closes when the finger lifts. Own colours join the
+ * effect only, never the group's list.
+ */
+/**
+ * The own colour pick under way: where the colour goes (its place in the colours, the end or the
+ * only one; or the base), null when none; and the own colour it added, replaced as the finger moves.
+ */
+const ownPick = { place: null, made: null };
+{
+  const own = (stripId, put) => attachStrip($(stripId), $(`${stripId}H`), ownWhiteOnly, (hex, last) => {
+    const { place } = ownPick;
+    if (!effectEdit || place === null) return;
+    const { choices, effect } = effectEdit;
+    // A colour the effect already has elsewhere in its list is passed over: the list never holds one twice.
+    const key = colourKey({ hex });
+    const taken = stripId === 'feOwn' && effect.colours.some((c, i) => i !== place && colourKey(c) === key);
+    if (!taken) {
+      const { made } = ownPick;
+      if (made && choices.includes(made)) choices.splice(choices.indexOf(made), 1);
+      const count = choices.length;
+      const choice = addOwnChoice(choices, { hex });
+      ownPick.made = choices.length > count ? choice : null;
+      put(choice.colour, place);
+      disarmDelete();
+    }
+    if (last) {
+      if (taken && place >= effect.colours.length) toast('That colour is in the effect already', true);
+      ownPick.place = null;
+      closeOwnStrips();
+    }
+    if (!taken || last) {
+      drawEffectEditor();
+      effectStripDrag(last ? 'end' : 'move');
+    }
+  }, () => {
+    ownPick.place = null;
+    ownPick.made = null;
+    if (!effectEdit) return;
+    const { effect } = effectEdit;
+    const at = ONE_COLOUR.has(effect.effect) ? 0 : effect.colours.length;
+    // ＋ Own colour is unavailable then; this only guards a strip left open.
+    if (stripId === 'feOwn' && at >= 6) return;
+    ownPick.place = at;
+  });
+  own('feOwn', (colour, at) => {
+    const colours = [...effectEdit.effect.colours];
+    colours[at] = { ...colour };
+    effectEdit.effect = { ...effectEdit.effect, colours };
+  });
+  own('feBaseOwn', (colour) => {
+    effectEdit.effect = { ...effectEdit.effect, base: { colour: { ...colour }, level: effectEdit.effect.base?.level ?? 0.5 } };
+  });
+}
+
+// Base brightness: moves relative to where the finger starts, like Size. Only the edited effect changes; Save keeps it.
+const baseLevel = { dim: $('feBaseLevel'), slab: $('feBaseLevelSlab'), pct: $('feBaseLevelPct'), value: 0.5, dragging: false };
+{
+  let startX = 0, startV = 0;
+  const dim = baseLevel.dim;
+  dim.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    if (!effectEdit?.effect.base) return;
+    baseLevel.dragging = true;
+    try { dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    dim.classList.add('ds-dragging');
+    startX = ev.clientX;
+    startV = baseLevel.value;
+  });
+  dim.addEventListener('pointermove', (ev) => {
+    if (!baseLevel.dragging || !effectEdit?.effect.base) return;
+    showLevel(baseLevel, startV + (ev.clientX - startX) / dim.clientWidth);
+    const level = Math.round(baseLevel.value * 100) / 100;
+    if (level === effectEdit.effect.base.level) return;
+    effectEdit.effect = { ...effectEdit.effect, base: { ...effectEdit.effect.base, level } };
+    disarmDelete();
+    effectStripDrag('move');
+  });
+  const end = () => {
+    if (!baseLevel.dragging) return;
+    baseLevel.dragging = false;
+    dim.classList.remove('ds-dragging');
+    if (!effectEdit) return;
+    drawEffectEditor();
+    effectStripDrag('end');
+  };
+  dim.addEventListener('pointerup', end);
+  dim.addEventListener('pointercancel', end);
+}
 
 $('feCancel').addEventListener('click', () => closeEditor());
 $('feName').addEventListener('keydown', (ev) => {
@@ -2521,6 +3045,176 @@ $('feDelete').addEventListener('click', () => {
   pendingEdit = send({ type: 'deleteColour', preset: effectEdit.id });
   disarmDelete();
 });
+
+// ---- The effect editor's strip: the effect as it is being edited, moving along the group's lights ----
+// The server renders the frames with the engine (light safety, the live tempo and speed); the page only plays them.
+
+/** Opens the strip for a group: dark until the first answer, which is asked for at once. */
+function startEffectStrip(group) {
+  stopEffectStrip();
+  fxStrip.group = group;
+  fxStrip.start = performance.now();
+  loadEffectStrip();
+  fxStrip.raf = requestAnimationFrame(playEffectStrip);
+}
+
+function stopEffectStrip() {
+  fxStrip.seq++;
+  clearTimeout(fxStrip.timer);
+  fxStrip.timer = 0;
+  cancelAnimationFrame(fxStrip.raf);
+  fxStrip.raf = 0;
+  fxStrip.frames = null;
+  fxStrip.count = 0;
+  fxStrip.clock = null;
+  fxStrip.failed = false;
+  fxStrip.drawn = null;
+}
+
+/** Shows the edited effect a moment after the last change. */
+function effectStripSoon() {
+  if (!effectEdit) return;
+  clearTimeout(fxStrip.timer);
+  fxStrip.timer = setTimeout(() => {
+    fxStrip.timer = 0;
+    loadEffectStrip();
+  }, FX_STRIP_WAIT);
+}
+
+/**
+ * During a Size drag: at most one ask per FX_STRIP_WAIT, so the strip follows the finger, and one
+ * more when the finger lifts. The ask takes the effect as it is when it goes.
+ */
+function effectStripDrag(how) {
+  if (!effectEdit) return;
+  if (how === 'end') {
+    clearTimeout(fxStrip.timer);
+    fxStrip.timer = 0;
+    loadEffectStrip();
+    return;
+  }
+  if (fxStrip.timer) return;
+  const wait = fxStrip.askedAt + FX_STRIP_WAIT - performance.now();
+  if (wait <= 0) loadEffectStrip();
+  else fxStrip.timer = setTimeout(() => {
+    fxStrip.timer = 0;
+    loadEffectStrip();
+  }, wait);
+}
+
+/** On each state: ask again after a failed ask, or when the tempo or speed changed on stage, so the strip keeps the stage's time. */
+function followEffectStripClock() {
+  if (!effectEdit || !state || fxStrip.timer) return;
+  if (fxStrip.failed) {
+    fxStrip.failed = false;
+    effectStripSoon();
+    return;
+  }
+  if (fxStrip.clock === null) return;
+  const { tempo, speed } = stripClock();
+  const clock = `${tempo}|${speed}`;
+  if (clock === fxStrip.clock) return;
+  fxStrip.clock = clock;
+  effectStripSoon();
+}
+
+/**
+ * The tempo and speed dial the page shows: the draft's in Blind, else the stage's. The strip runs
+ * at these. (The effect editor is hidden in Preview.)
+ */
+function stripClock() {
+  const shown = shownState();
+  return { tempo: shown?.tempo ?? 120, speed: shown?.speed ?? 1 };
+}
+
+async function loadEffectStrip() {
+  if (!effectEdit || !fxStrip.group) return;
+  const seq = ++fxStrip.seq;
+  fxStrip.askedAt = performance.now();
+  let answer = null, refused = false;
+  try {
+    const res = await fetch('/api/effect-preview', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ group: fxStrip.group, effect: liveLayer(effectEdit.effect), ...stripClock() }),
+    });
+    if (res.ok) answer = await res.json();
+    // A 4xx is the server saying no to this effect: asking again changes nothing until the effect does.
+    else refused = res.status >= 400 && res.status < 500;
+  } catch {
+    // Offline or restarting: dark, and asked again (below).
+  }
+  if (seq !== fxStrip.seq || !effectEdit) return;
+  fxStrip.drawn = null;
+  if (!answer) {
+    // Never the previous effect as if it were this one: dark. After a network error or a server error
+    // the next state asks again; after a refusal the strip waits for the next change to the effect.
+    fxStrip.frames = null;
+    fxStrip.count = 0;
+    fxStrip.failed = !refused;
+    if (refused) fxStrip.clock = null;
+    return;
+  }
+  fxStrip.failed = false;
+  fxStrip.frames = Uint8Array.from(atob(answer.frames), (c) => c.charCodeAt(0));
+  fxStrip.count = answer.count;
+  fxStrip.fps = answer.fps;
+  fxStrip.segments = answer.segments;
+  fxStrip.fixtures = answer.fixtures;
+  fxStrip.clock = `${answer.tempo}|${answer.speed}`;
+}
+
+/** Draws only when the frame to show changes (about 20 times a second), not at the display's rate. */
+function playEffectStrip(now) {
+  if (!effectEdit) return;
+  const frame = !fxStrip.frames ? -1 : fxStrip.count ? Math.floor(((now - fxStrip.start) / 1000) * fxStrip.fps) % fxStrip.count : 0;
+  if (frame !== fxStrip.drawn && drawEffectStrip(frame)) fxStrip.drawn = frame;
+  fxStrip.raf = requestAnimationFrame(playEffectStrip);
+}
+
+window.addEventListener('resize', () => { fxStrip.drawn = null; });
+
+/**
+ * One frame (-1: dark): a rounded cell run per fixture, one cell per segment, whites drawn as the
+ * stage picture draws them. False when the strip isn't on screen to draw.
+ */
+function drawEffectStrip(frame) {
+  const c = fxStrip.canvas;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (!w || !h) return false;
+  const dpr = window.devicePixelRatio || 1;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+    c.width = Math.round(w * dpr);
+    c.height = Math.round(h * dpr);
+  }
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const { frames, segments, fixtures } = fxStrip;
+  if (!frames || !segments || frame < 0) return true;
+  const pad = 5;
+  const gaps = FX_STRIP_GAP * Math.max(0, fixtures.length - 1);
+  const cellW = (w - 2 * pad - gaps) / segments, cellH = h - 2 * pad;
+  if (cellW <= 0 || cellH <= 0) return true;
+  const base = frame * segments * 3;
+  g.globalAlpha = FX_STRIP_ALPHA;
+  let k = 0, x = pad;
+  for (const cells of fixtures) {
+    g.save();
+    g.beginPath();
+    g.roundRect(x, pad, cells * cellW, cellH, 4);
+    g.clip();
+    for (let s = 0; s < cells; s++, k++) {
+      const [R, G, B] = shownRgb(frames[base + k * 3] ?? 0, frames[base + k * 3 + 1] ?? 0, frames[base + k * 3 + 2] ?? 0);
+      g.fillStyle = `rgb(${R},${G},${B})`;
+      g.fillRect(x + s * cellW, pad, cellW + 0.5, cellH);
+    }
+    g.restore();
+    x += cells * cellW + FX_STRIP_GAP;
+  }
+  g.globalAlpha = 1;
+  return true;
+}
 
 // ---- Quick looks: tabs and grid ----
 
