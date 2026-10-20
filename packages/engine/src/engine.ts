@@ -6,7 +6,7 @@ import {
   BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, LiveEffectLayer, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, displayColour, effectKey, findProfile,
   liveEffectId, livePresetId, parseLiveEffect, parseLivePreset, resolveColour,
   type StageCommand, type EffectLayer, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
-  type GroupStatus, type Layer, type Palette, type Preset, type RuntimeState, type Show,
+  type GroupStatus, type Layer, type Palette, type Preset, type RuntimeState, type Show, type StageState,
 } from '../../shared/src/index.ts';
 import { SafeRates } from './effects.ts';
 import { Crossfade, Ramp } from './fade.ts';
@@ -228,6 +228,12 @@ function resolvedLayers(layers: Layer[], palettes: Palette[]): Layer[] {
 /** True when the group runs (or is fading into) a preset with an effect in it, as Save sees it (isEffectPreset). */
 function runsEffect(group: GroupRun): boolean {
   return group.presets.current?.preset.layers.some((l) => l.kind === 'effect') ?? false;
+}
+
+/** The stage's beat and seconds clocks, which every new effect run starts from (see Engine.adoptClock). */
+export interface StageClock {
+  beats: number;
+  seconds: number;
 }
 
 export interface Frame {
@@ -541,7 +547,7 @@ export class Engine {
     }
     // A send that doesn't continue starts a new drag, so it never joins the last one's step.
     if (drag && !cmd.continues) this.lastColourStep = null;
-    if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || drag || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook' || cmd.type === 'tempo') {
+    if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'groupPreset' || drag || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook' || cmd.type === 'tempo' || cmd.type === 'applyStage') {
       // Any other step ends a run of tempo commands.
       if (cmd.type !== 'tempo') this.tempoRunAt = null;
       const before = this.snapshot();
@@ -556,7 +562,7 @@ export class Engine {
         this.tempoRunAt = cmd.type === 'tempo' ? now : null;
       }
       // Only once the Undo step is kept: it may be all that still names the effect the group ran before.
-      if (cmd.type === 'groupEffect') this.pruneLiveEffects();
+      if (cmd.type === 'groupEffect' || cmd.type === 'applyStage') this.pruneLiveEffects();
       return error;
     }
     return this.run(cmd, now);
@@ -711,6 +717,7 @@ export class Engine {
       case 'speed': this.speed.set(cmd.value, now, SMOOTH); return null;
       case 'tempo': this.bpm = cmd.bpm; return null;
       case 'fadeTime': this.fadeTime = cmd.value; return null;
+      case 'applyStage': return this.applyStage(cmd.stage, cmd.fade, now);
       case 'groupLevel': {
         const group = this.groups.get(cmd.group);
         if (!group) return `unknown group "${cmd.group}"`;
@@ -838,6 +845,62 @@ export class Engine {
     if (!look) return null;
     this.applyEntries(look.groups, undefined, now);
     return null;
+  }
+
+  /**
+   * Fade the whole stage to `stage` (Blind's Go): each light group it names to its preset and level,
+   * the tempo, and the current look as if that look had started. On Auto each group fades over its
+   * look entry's fade (the safe look's on Basic lights), else its preset's. A Basic-lights stage puts
+   * the groups it has no preset for on the safe light. Smoke, Master and speed are left alone, and
+   * Blackout's memory is cleared. A group naming a preset it can't run (gone, or another group's) is left as it is
+   * (on Basic lights it gets the safe light). A stage drafted during Blackout applies group by group the same
+   * way (groups still on Blackout's dark go dark), and the stage leaves Blackout with no current look.
+   */
+  private applyStage(stage: StageState, fade: number | undefined, now: number): string | null {
+    const safe = stage.look === SAFE;
+    const lookId = safe ? this.show.operator.safeLook : stage.look;
+    const look = lookId ? this.looks.get(lookId) : undefined;
+    let longest = 0;
+    for (const group of this.groups.values()) {
+      if (group.smoke) continue;
+      const pid = stage.groups[group.id] ?? null;
+      const preset = (pid ? this.stagePreset(pid, group.id, stage.effects) : undefined) ?? (safe ? this.safeTarget(group).preset : undefined);
+      if (!preset) continue;
+      const entry = look?.groups.find((e) => e.group === group.id && e.preset === preset.id);
+      const t = fade ?? this.fadeTime ?? entry?.fade ?? preset.fade;
+      const level = stage.levels[group.id] ?? 1;
+      // Only what changes moves: a group already there keeps its run (an effect carries on) and its fixtures.
+      if (group.presets.currentKey !== preset.id) {
+        this.setPreset(group, preset, t, now, preset.id !== SAFE_ID && preset.id !== BLACKOUT_ID);
+        longest = Math.max(longest, t);
+      }
+      if (group.level.target !== level) {
+        group.level.set(level, now, t * LEVEL_FADE_FACTOR);
+        longest = Math.max(longest, t * LEVEL_FADE_FACTOR);
+      }
+    }
+    this.beforeBlackout = null;
+    if (stage.tempo !== undefined) this.bpm = stage.tempo;
+    if (stage.look && this.looks.has(stage.look)) this.lastLook = stage.look;
+    else if (stage.lastLook) this.lastLook = stage.lastLook;
+    this.setLook(stage.look ?? '', now, longest);
+    // Out of Blackout (whose memory is gone) there is no current look; Next carries on from lastLook.
+    if (!stage.look || stage.look === BLACKOUT) this.look = null;
+    return null;
+  }
+
+  /**
+   * The preset a stage names for a group, as this engine runs it. A live effect is the stage's
+   * own layer, under this engine's id for it (the stage's numbering may clash with this one's).
+   */
+  private stagePreset(pid: string, group: string, effects: StageState['effects']): CompiledPreset | undefined {
+    const fx = parseLiveEffect(pid);
+    let preset: CompiledPreset | undefined;
+    if (fx) {
+      const layer = LiveEffectLayer.safeParse(effects?.[pid]);
+      if (fx.group === group && layer.success) preset = this.presetFor(this.liveEffectFor(group, layer.data), group);
+    } else preset = this.presetFor(pid, group);
+    return preset?.group === group ? preset : undefined;
   }
 
   private setLook(id: string, now: number, dur: number): void {
@@ -1134,6 +1197,22 @@ export class Engine {
 
   fixtureIds(): string[] {
     return this.fixtures.map((f) => f.id);
+  }
+
+  /** The stage's beat and seconds clocks now, for another engine to adopt. */
+  stageClock(): StageClock {
+    return { beats: this.stageBeats, seconds: this.stageSeconds };
+  }
+
+  /**
+   * Run on another engine's stage clocks (or a copy from stageClock()), so effects started here
+   * (by restore too, so adopt first) are in step with the ones that engine starts. A Blind draft
+   * adopts the live stage's clocks.
+   */
+  adoptClock(from: Engine | StageClock): void {
+    const clock = from instanceof Engine ? from.stageClock() : from;
+    this.stageBeats = clock.beats;
+    this.stageSeconds = clock.seconds;
   }
 
   /** The beat phase of the preset a group is running (or fading into), in beats; undefined when it runs none. */

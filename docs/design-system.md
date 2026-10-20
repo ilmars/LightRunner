@@ -96,6 +96,8 @@ The first suggested palette was measured at about 4× the old screen's average b
   - Problems with the lights: an amber strip on the top bar.
   - Send DMX off: an amber pill, **DMX output inactive**, with a faint amber strip on the top bar. Hover or tap the pill for the full explanation.
   - Lights not answering, or another desk is sending: the same amber pill with that short label; the full message on hover or tap.
+  - Preview on: a neutral strip on the top bar (no colour of its own); the Preview switch blue-tinted.
+  - Blind on: a faint violet strip on the top bar (`--blind` in the operator page's styles, 8 % fill, 26 % edge) and the Blind switch in the same violet, so **Go** is the one blue control in the bar: the Save and Done pill (blue tint and edge), 44 px high, never brighter. Go sits after the name, away from the Blind switch (which throws the draft away). In the running order the draft's song is the blue "on stage" tile and the song on the real stage keeps a quiet grey outline. The stage view says "Blind" in small muted text. Blackout, problems and Flash still win over the strip.
 
   Colour is only used where it says something.
 

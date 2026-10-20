@@ -20,6 +20,8 @@
       <span id="nowName" class="now-name">—</span>
       <span id="nowChanged" class="changed" hidden>changed</span>
     </span>
+    <!-- Blind only: sends the draft to the lights. Kept away from the Blind switch, which throws the draft away. -->
+    <button id="goBtn" class="go-btn" type="button" hidden title="Send what Blind has ready to the lights">Go</button>
     <span id="quiet" class="quiet">
       <span id="fading" class="q" hidden>fading<span class="fade-bar"><span id="fadeFill"></span></span><b id="fadeLeft"></b></span>
       <span id="flashNote" class="q flash-note" hidden></span>
@@ -59,6 +61,7 @@
     <span id="smokeNote" class="q" hidden></span>
     <button id="outputNote" class="output-note" type="button" hidden><span class="dot"></span><span id="outputText"></span><span class="info" aria-hidden="true">ⓘ</span></button>
     <span class="clock" id="clock"></span>
+    <button id="blindBtn" class="preview-btn blind-btn" type="button" aria-pressed="false" title="Get the next look ready without changing the lights, then Go">Blind</button>
     <button id="previewBtn" class="preview-btn" type="button" aria-pressed="false" title="Look at and change a song without changing the stage">Preview</button>
     <a class="gear" href="/settings/" aria-label="Settings" title="Settings (PIN)">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.3 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.3-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>

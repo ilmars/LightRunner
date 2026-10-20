@@ -17,13 +17,32 @@ export type LiveEffectLayer = z.infer<typeof LiveEffectLayer>;
 
 const bpm = z.number().min(40).max(240);
 
+/** A preset id as the stage names it: a show preset, an Any colour (`live:`), a live effect (`fx:`) or Safe/Blackout's own. */
+const stagePreset = z.string().min(1).max(256);
+
+/**
+ * A whole stage to send at once (applyStage): the fields of RuntimeState it uses. Master, speed,
+ * fade time and Blackout's memory may be there too (a runtime state has them) and are ignored.
+ */
+export const StageState = z.object({
+  look: z.string().min(1).max(64).nullable(),
+  groups: z.record(id, stagePreset.nullable()),
+  levels: z.record(id, unit),
+  tempo: bpm.optional(),
+  /** The live effects `groups` names. */
+  effects: z.record(stagePreset, EffectLayer).optional(),
+  lastLook: id.nullable().optional(),
+});
+export type StageState = z.infer<typeof StageState>;
+
 export const ManualTarget = z.union([
   z.object({ group: id }),
   z.object({ fixture: id }),
 ]);
 export type ManualTarget = z.infer<typeof ManualTarget>;
 
-export const Command = z.discriminatedUnion('type', [
+/** Commands the engine runs (a Blind draft runs them too). */
+const STAGE_COMMANDS = [
   z.object({ type: z.literal('look'), id, fade }),
   /** Set only the groups a look lists, leaving the current look and the other groups alone. */
   z.object({ type: z.literal('quickLook'), id, fade }),
@@ -58,6 +77,19 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('undo') }),
   /** Fade time for every look and preset change; null = each look's own fade. */
   z.object({ type: z.literal('fadeTime'), value: z.number().min(0).max(600).nullable() }),
+  /**
+   * Fade the whole stage to this one (Blind's Go), as one Undo step: every light group's preset and level, the tempo
+   * and the current look. Smoke is left alone. `fade` defaults to the operator's fade time, then each look's own.
+   */
+  z.object({ type: z.literal('applyStage'), stage: StageState, fade }),
+] as const;
+
+export const StageCommand = z.discriminatedUnion('type', STAGE_COMMANDS);
+/** Commands the engine runs. */
+export type StageCommand = z.infer<typeof StageCommand>;
+
+export const Command = z.discriminatedUnion('type', [
+  ...STAGE_COMMANDS,
   // Edits to the show from the operator page. The server handles these itself; the engine never sees them.
   /** Store the stage (where it is going) in a running-order item. */
   z.object({ type: z.literal('saveItem'), id }),
@@ -94,6 +126,15 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('addEffect'), group: id, name: z.string(), effect: LiveEffectLayer }),
   /** New settings for an effect in a group's list (its name is changed with editColour). */
   z.object({ type: z.literal('editEffect'), preset: id, effect: LiveEffectLayer }),
+  // Blind, from a tablet's WebSocket only: the server keeps that tablet a draft copy of the stage.
+  /** Make a fresh draft of the stage as it is now (again, if one is running). */
+  z.object({ type: z.literal('blindStart') }),
+  /** Throw the draft away. */
+  z.object({ type: z.literal('blindEnd') }),
+  /** Send the whole draft to the lights in one change (one Undo step), and leave Blind. */
+  z.object({ type: z.literal('blindGo') }),
+  /** Run a stage command on the draft instead of the stage. */
+  z.object({ type: z.literal('draft'), cmd: StageCommand }),
 ]);
 export type Command = z.infer<typeof Command>;
 
@@ -103,11 +144,17 @@ const SHOW_EDITS = [
 ] as const;
 /** Commands that change the show rather than the stage. */
 export type ShowEdit = Extract<Command, { type: (typeof SHOW_EDITS)[number] }>;
-/** Commands the engine runs. */
-export type StageCommand = Exclude<Command, ShowEdit>;
 
 export function isShowEdit(cmd: Command): cmd is ShowEdit {
   return (SHOW_EDITS as readonly string[]).includes(cmd.type);
+}
+
+const BLIND_COMMANDS = ['blindStart', 'blindEnd', 'blindGo', 'draft'] as const;
+/** Blind's commands: the server runs them for the tablet that sent them. */
+export type BlindCommand = Extract<Command, { type: (typeof BLIND_COMMANDS)[number] }>;
+
+export function isBlindCommand(cmd: Command): cmd is BlindCommand {
+  return (BLIND_COMMANDS as readonly string[]).includes(cmd.type);
 }
 
 /** Commands that need manual control rights. */

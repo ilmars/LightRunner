@@ -1167,3 +1167,11 @@ test('smoke machines refuse effects', () => withApp(async (app) => {
   // Effect colours are plain hex over the wire.
   assert.match(await t.send({ type: 'groupEffect', group: 'back-wall', effect: liveWave({ colours: [{ palette: 'x', index: 0 }] }) }) ?? '', /^invalid command/);
 }));
+
+test('a WebSocket message that is valid JSON but not an object is ignored, and the server keeps serving', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  for (const frame of ['null', '5', '"x"', 'true', '[]']) t.ws.send(frame);
+  assert.equal(await t.send({ type: 'master', value: 0.5 }), null);
+  assert.equal((await api(app, 'GET', '/api/state')).status, 200);
+}));

@@ -49,6 +49,18 @@ let pendingSave = null;
 // The ref of an Add to colours that the server hasn't answered yet.
 let pendingColour = null;
 
+// Blind: this tablet works on a draft of the stage that the server keeps for it; Go sends it.
+// `state` stays the live stage; `blind.state` is the draft's (same shape), `blind.visual` its picture.
+// `session` counts the times Blind went on or off, so a drag that started before never lands in the other one.
+// `startRef` is the ref of the blindStart that began this Blind (it stays after the answer, to tell this Blind's answers
+// from older ones); `starting` is true until that answer comes.
+const blind = { on: false, session: 0, state: null, visual: null, startRef: null, starting: false, goRef: null };
+/** The server's answer to a draft command when it has no draft for this tablet. */
+const BLIND_OFF = 'Blind is off.';
+
+/** The stage the page is working on: the draft while Blind is on, else the live stage. */
+const shownState = () => (blind.on ? blind.state ?? state : state);
+
 // ---- Connection: reconnect every 2 s and resync on reconnect ----
 
 function connect() {
@@ -89,7 +101,23 @@ function connect() {
       seenLook = msg.state.look;
       state = msg.state;
       render();
+    } else if (msg.type === 'draftState') {
+      // Only while this page is in Blind (one may still be on its way after Blind went off).
+      if (!blind.on) return;
+      blind.state = msg.state;
+      render();
+    } else if (msg.type === 'draftEnded') {
+      // The server met a problem in this tablet's draft and dropped it; the lights were not changed.
+      // While a start is on its way this is about an older draft: the start's own answer says how it went.
+      if (!blind.on || blind.starting) return;
+      setBlind(false, false);
+      toast(msg.reason);
+    } else if (msg.type === 'draftVisual') {
+      if (!blind.on) return;
+      blind.visual = Uint8Array.from(atob(msg.data), (c) => c.charCodeAt(0));
+      drawStage();
     } else if (msg.type === 'result') {
+      blindResult(msg);
       orderResult(msg);
       if (msg.ref !== null && msg.ref === pendingSave) {
         // The answer to the sheet's Save: on an error the sheet stays open to fix it.
@@ -124,6 +152,8 @@ function setConnected(on) {
     moves.clear();
     // After a reconnect Preview is off, as after a reload.
     setPreview(false);
+    // The server dropped the draft with the connection; Blind is off here too.
+    setBlind(false);
   }
   if (!on && pendingEdit !== null) {
     pendingEdit = null;
@@ -153,6 +183,19 @@ function send(cmd) {
   return ref;
 }
 
+/** Where a stage command goes now: the live stage, or this tablet's Blind draft. A drag takes it when the finger touches. */
+const stageTarget = () => ({ blind: blind.on, session: blind.session });
+
+/**
+ * Sends a command for the stage the page is working on: wrapped for the draft while Blind is on.
+ * Master, Flash, Blackout, Next, Fade and smoke never come here; they always go to the real stage.
+ * With a `target` from the start of a drag, a send after Blind went on or off is dropped.
+ */
+function sendStage(cmd, target = stageTarget()) {
+  if (target.blind !== blind.on || target.session !== blind.session) return null;
+  return send(target.blind ? { type: 'draft', cmd } : cmd);
+}
+
 // ---- Groups: lights, and smoke or haze machines ----
 
 /** A smoke or haze machine: a level and a Puff button, no colour, no Flash, never set by a look. */
@@ -174,9 +217,12 @@ function stripBlocks(colours) {
 
 const isBasic = (item) => item.id === layout?.basicLights;
 
-/** Start an item: Basic lights is the show's Safe look; every other item is a look. */
+/** The command that starts an item: Basic lights is the show's Safe look; every other item is a look. */
+const startCommand = (item) => (isBasic(item) ? { type: 'safe' } : { type: 'look', id: item.id });
+
+/** Start an item from the running order (in Blind, in the draft). */
 function start(item) {
-  send(isBasic(item) ? { type: 'safe' } : { type: 'look', id: item.id });
+  sendStage(startCommand(item));
 }
 
 // Editing the running order. While `editing`, rows are fields and handles and
@@ -496,8 +542,11 @@ function finishDrag(cancelled) {
 
 function setEditing(on) {
   if (drag || on === editing) return;
-  // Editing the order and Preview don't mix.
-  if (on) setPreview(false);
+  // Editing the order doesn't mix with Preview or Blind.
+  if (on) {
+    setPreview(false);
+    setBlind(false);
+  }
   // On a tablet a tap on this button doesn't leave the field, so do it here: it sends the rename.
   if (document.activeElement instanceof HTMLElement && $('runningOrder').contains(document.activeElement)) document.activeElement.blur();
   editing = on;
@@ -520,8 +569,12 @@ const preview = { on: false, item: null };
 // What the selected item looks like settled (3 bytes per fixture), or null until the server has answered.
 // While it is null the picture is drawn dark, never as the live stage.
 let previewVisual = null;
-// The "Preview" label's font and colour, read from the page once when Preview turns on.
-let previewLabel = null;
+// The picture's "Preview" or "Blind" label: its font and colour, read from the page when either turns on.
+let pictureLabel = null;
+function readPictureLabel() {
+  const style = getComputedStyle(document.body);
+  pictureLabel = { font: `11px ${style.fontFamily}`, colour: style.getPropertyValue('--ds-muted').trim() || '#8F9AB0' };
+}
 // Counts the asks for a picture, so a slow answer for an earlier choice is dropped.
 let previewSeq = 0;
 
@@ -545,6 +598,8 @@ function setPreview(on) {
       setEditing(false);
       if (editing) return;
     }
+    // Only one of Preview and Blind is on at a time.
+    setBlind(false);
   }
   preview.on = on;
   preview.item = on ? defaultPreviewItem() : null;
@@ -554,8 +609,7 @@ function setPreview(on) {
   $('topBar').classList.toggle('preview', on);
   $('previewBtn').setAttribute('aria-pressed', String(on));
   if (on) {
-    const style = getComputedStyle(document.body);
-    previewLabel = { font: `11px ${style.fontFamily}`, colour: style.getPropertyValue('--ds-muted').trim() || '#8F9AB0' };
+    readPictureLabel();
     // Things that work on other than the selected item: Save stage as quick look, the colour list's Edit and Add to colours.
     closeSheet();
     if (picker.edit) setEditMode(false);
@@ -602,6 +656,78 @@ async function loadPreviewVisual() {
   drawStage();
 }
 
+// ---- Blind: get the next moment ready on a draft of the stage, then Go ----
+// Only this tablet works on its draft; the server keeps it and sends this page its state and picture.
+// Master, Flash, Blackout, Next, Fade and smoke stay on the real stage.
+
+/**
+ * Turns Blind on (a fresh draft of the stage now) or off (the draft is thrown away).
+ * `tell` false: the server has already ended it (after Go, or a refused start).
+ */
+function setBlind(on, tell = true) {
+  if (on === blind.on) return;
+  if (on) {
+    if (!layout || phoneQuery.matches) return;
+    if (editing) {
+      setEditing(false);
+      if (editing) return;
+    }
+    setPreview(false);
+    const r = send({ type: 'blindStart' });
+    if (r === null) return;
+    blind.startRef = r;
+    blind.starting = true;
+    readPictureLabel();
+  } else {
+    // Off before the server made the draft is fine too: a start still on its way then makes none.
+    if (tell && connected) send({ type: 'blindEnd' });
+    blind.startRef = null;
+    blind.starting = false;
+  }
+  blind.on = on;
+  blind.session++;
+  blind.state = null;
+  blind.visual = null;
+  blind.goRef = null;
+  // White, Amber and UV moves belong to what the picker showed before.
+  extrasMoved = false;
+  document.body.classList.toggle('blind', on);
+  $('topBar').classList.toggle('blind', on);
+  $('blindBtn').setAttribute('aria-pressed', String(on));
+  $('goBtn').hidden = !on;
+  $('goBtn').disabled = false;
+  drawStage();
+  render();
+}
+$('blindBtn').addEventListener('click', () => setBlind(!blind.on));
+
+// Go: the whole draft goes to the lights in one change (with the Fade setting); Blind ends when the server says yes.
+$('goBtn').addEventListener('click', () => {
+  if (!blind.on || blind.goRef !== null) return;
+  blind.goRef = send({ type: 'blindGo' });
+  $('goBtn').disabled = blind.goRef !== null;
+});
+
+/** The server's answer to Blind's start or Go, or "Blind is off." to a draft command. */
+function blindResult(msg) {
+  if (msg.ref === null || !blind.on) return;
+  if (msg.ref === blind.startRef) {
+    blind.starting = false;
+    // No draft was made (the stage didn't answer, too many tablets in Blind, a problem): Blind goes off
+    // again; the toast says why.
+    if (msg.error) return setBlind(false, false);
+  }
+  // The server has no draft for this tablet (it ended it): Blind is off here too. Not while the start is on
+  // its way: a draft command that reaches the server before the draft is made is refused the same way.
+  if (msg.error === BLIND_OFF && !blind.starting && msg.ref > blind.startRef) return setBlind(false, false);
+  if (msg.ref === blind.goRef) {
+    blind.goRef = null;
+    $('goBtn').disabled = false;
+    // On an error the draft stays, to try again.
+    if (!msg.error) setBlind(false, false);
+  }
+}
+
 // A tap anywhere else takes back a "Delete" that was waiting for its second tap.
 document.addEventListener('pointerdown', (ev) => {
   if (confirmDelete && !(ev.target instanceof Element && ev.target.closest('.del.sure'))) {
@@ -621,22 +747,26 @@ $('addSong').addEventListener('click', () => {
   if (pendingAdd === null) addWanted = false;
 });
 
-/** Index in the running order of what is on stage, or -1 (Blackout, or a look that isn't in the order). */
-function stageIndex() {
+/**
+ * Index in the running order of what is on stage, or -1 (Blackout, or a look that isn't in the order).
+ * `s`: the stage to look at; by default the one the page works on (the draft in Blind).
+ */
+function stageIndex(s = shownState()) {
   const order = layout?.runningOrder ?? [];
-  if (!state) return -1;
-  if (state.look === 'safe') return order.findIndex(isBasic);
-  return order.findIndex((i) => i.id === state.look);
+  if (!s) return -1;
+  if (s.look === 'safe') return order.findIndex(isBasic);
+  return order.findIndex((i) => i.id === s.look);
 }
 
 /**
  * The item after the one on stage; the first song when nothing is on stage.
  * After Blackout the item before it still counts, so Next carries on the service.
+ * Always the real stage's: Next stays live in Blind.
  */
 function nextItem() {
   const order = layout?.runningOrder ?? [];
   if (!order.length) return null;
-  let k = stageIndex();
+  let k = stageIndex(state);
   if (k < 0 && state?.lastLook) k = order.findIndex((i) => i.id === state.lastLook);
   if (k < 0) return order.find((i) => !isBasic(i)) ?? null;
   return order[k + 1] ?? null;
@@ -646,9 +776,11 @@ $('next').addEventListener('click', () => {
   // Nothing goes on stage while the running order is being edited.
   if (editing) return;
   const item = nextItem();
-  if (item) start(item);
+  // Next always starts on the real stage, Blind or not.
+  if (item) send(startCommand(item));
 });
-$('undo').addEventListener('click', () => send({ type: 'undo' }));
+// In Blind, Undo takes back the draft's last change; otherwise the stage's.
+$('undo').addEventListener('click', () => sendStage({ type: 'undo' }));
 
 // ---- Fade time for every look and preset change; shared by all devices ----
 
@@ -693,8 +825,8 @@ $('tempoCtl').addEventListener('keydown', (ev) => {
   $('tempoButton').focus();
 });
 
-/** What the stage runs, or in Preview what the selected song is saved with. */
-const shownTempo = () => Math.round(preview.on ? previewItem()?.tempo ?? 120 : state?.tempo ?? 120);
+/** What the stage runs (in Blind, the draft), or in Preview what the selected song is saved with. */
+const shownTempo = () => Math.round(preview.on ? previewItem()?.tempo ?? 120 : shownState()?.tempo ?? 120);
 
 // A step shows at once; the server's answer takes over after a moment (so a held button doesn't jump back).
 let tempoLocal = null;
@@ -705,33 +837,45 @@ function currentTempo() {
   return shownTempo();
 }
 
-function sendTempo(bpm) {
-  if (!preview.on) send({ type: 'tempo', bpm });
-  else if (preview.item) send({ type: 'itemTempo', item: preview.item, bpm });
+/** Where a tempo change goes, taken when the finger touches: the stage (or the draft in Blind), or the song in Preview. */
+const tempoTarget = () => ({ stage: stageTarget(), inPreview: preview.on, item: preview.item });
+
+/**
+ * Sends a tempo to where `target` says. A held button that started live, in Blind or in Preview
+ * never carries on somewhere else: after Blind or Preview went on or off, the rest is dropped.
+ */
+function sendTempo(bpm, target = tempoTarget()) {
+  if (target.inPreview) {
+    if (preview.on && target.item && preview.item === target.item) send({ type: 'itemTempo', item: target.item, bpm });
+  } else if (!preview.on) {
+    sendStage({ type: 'tempo', bpm }, target.stage);
+  }
 }
 
 // A held button sends at most 4 a second (every change is an Undo step), and the last one when let go.
 let tempoSentAt = 0;
 let tempoUnsent = null;
-function setTempo(bpm, throttle = false) {
+let tempoUnsentTarget = null;
+function setTempo(bpm, throttle = false, target = tempoTarget()) {
   const v = clampTempo(bpm);
   tempoLocal = v;
   tempoLocalAt = performance.now();
   $('tempoValue').textContent = String(v);
   if (throttle && tempoLocalAt - tempoSentAt < 250) {
     tempoUnsent = v;
+    tempoUnsentTarget = target;
     return;
   }
   tempoSentAt = tempoLocalAt;
   tempoUnsent = null;
-  sendTempo(v);
+  sendTempo(v, target);
 }
 function flushTempo() {
   if (tempoUnsent === null) return;
   const v = tempoUnsent;
   tempoUnsent = null;
   tempoSentAt = performance.now();
-  sendTempo(v);
+  sendTempo(v, tempoUnsentTarget);
 }
 
 for (const b of tempoMenu.querySelectorAll('button')) {
@@ -751,10 +895,12 @@ for (const b of tempoMenu.querySelectorAll('button')) {
   };
   b.addEventListener('pointerdown', (ev) => {
     if (ev.button || b.disabled) return;
-    b.setPointerCapture?.(ev.pointerId);
-    setTempo(currentTempo() + by);
+    try { b.setPointerCapture?.(ev.pointerId); } catch { /* pointer already gone */ }
+    // The whole hold goes where it started.
+    const target = tempoTarget();
+    setTempo(currentTempo() + by, false, target);
     delay = setTimeout(() => {
-      repeat = setInterval(() => setTempo(currentTempo() + by, true), 80);
+      repeat = setInterval(() => setTempo(currentTempo() + by, true, target), 80);
     }, 400);
   });
   b.addEventListener('pointerup', stop);
@@ -777,7 +923,8 @@ function tapTempo() {
   btn.classList.add('hit');
   setTimeout(() => btn.classList.remove('hit'), 120);
   if (tapTimes.length < 2) return;
-  setTempo((60000 * (tapTimes.length - 1)) / (t - tapTimes[0]));
+  // Each tap is one send, going where the page works at the moment of the tap.
+  setTempo((60000 * (tapTimes.length - 1)) / (t - tapTimes[0]), false, tempoTarget());
 }
 $('tapBtn').addEventListener('pointerdown', (ev) => {
   if (!ev.button) tapTempo();
@@ -871,12 +1018,16 @@ function render() {
   }
 
   // Running order: the item on stage is marked, and "changed" while it has live changes.
-  const on = stageIndex();
+  // In Blind these are the draft's, and the item on the real stage keeps a quiet outline.
+  const shownStage = shownState();
+  const on = stageIndex(shownStage);
+  const live = blind.on ? stageIndex(state) : -1;
   orderRows.forEach((row, k) => {
     const active = k === on;
     row.button.classList.toggle('on', active);
+    row.button.classList.toggle('live', k === live);
     row.button.setAttribute('aria-current', active ? 'true' : 'false');
-    row.mark.hidden = !(active && state.lookChanged);
+    row.mark.hidden = !(active && shownStage.lookChanged);
   });
   // Keep what is on stage in view when it changes (and when editing ends).
   const onId = on >= 0 ? layout.runningOrder[on].id : null;
@@ -890,7 +1041,7 @@ function render() {
   orderRows.forEach((row) => row.button.classList.toggle('is-next', !editing && !!next && row.item.id === next.id));
   $('nextName').textContent = next ? next.name : 'End of list';
   $('next').disabled = !next || editing;
-  $('undo').disabled = !state.canUndo;
+  $('undo').disabled = !shownStage.canUndo;
   $('blackout').classList.toggle('on', blackedOut);
   if (!master.dragging) master.set(state.master);
 
@@ -972,13 +1123,13 @@ function liveColour(s) {
 }
 
 /**
- * What the details panel shows for a group. Live: the stage's status (`state.groups`).
+ * What the details panel shows for a group. Live: the stage's status (`state.groups`; in Blind, the draft's).
  * In Preview: the selected item's saved entry, `{ preset, level, live: null, entry }`;
  * `entry` is null when the item doesn't set the group ("not set"). Basic lights' unset
  * groups run the built-in Basic light, at full.
  */
 function groupStatus(group) {
-  if (!preview.on) return state?.groups?.[group.id];
+  if (!preview.on) return shownState()?.groups?.[group.id];
   const item = previewItem();
   const k = layout.groups.findIndex((g) => g.id === group.id);
   const entry = item?.entries?.[k] ?? null;
@@ -1025,7 +1176,7 @@ function runningEffect(group, s) {
 function savedEntry(group, presetId) {
   const k = layout.groups.findIndex((g) => g.id === group.id);
   const looks = [...layout.runningOrder, ...layout.looks, ...layout.quickLooks];
-  const onStage = looks.find((l) => l.id === state?.look);
+  const onStage = looks.find((l) => l.id === shownState()?.look);
   for (const look of onStage ? [onStage, ...looks] : looks) {
     const entry = look.entries?.[k];
     if (entry?.preset === presetId) return entry;
@@ -1164,7 +1315,12 @@ function buildDetails() {
  * dimmer never makes the lights jump (same as Master).
  */
 function wireDimmer(row) {
-  const out = throttle((v) => send({ type: 'groupLevel', group: row.group.id, value: v }));
+  // Smoke always goes to the real stage; a light's level goes where the drag started (the draft in Blind).
+  let target = stageTarget();
+  const out = throttle((v) => {
+    const cmd = { type: 'groupLevel', group: row.group.id, value: v };
+    if (row.smoke) send(cmd); else sendStage(cmd, target);
+  });
   let startX = 0, startV = 0;
   // A Preview drag changes `item` (saved once on release); a live drag changes the stage.
   let inPreview = false, item = null;
@@ -1179,6 +1335,7 @@ function wireDimmer(row) {
     row.dragging = true;
     inPreview = preview.on;
     item = preview.item;
+    target = stageTarget();
     try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     row.dim.classList.add('ds-dragging');
     startX = ev.clientX;
@@ -1208,9 +1365,9 @@ function renderDetails() {
   // In Preview the details are the selected item's, saved straight into it: no Save, no Back.
   const item = preview.on ? null : stageItem();
   if (preview.on) $('dTitle').textContent = previewItem()?.name ?? 'Details';
-  else $('dTitle').textContent = item ? item.name : state.look === 'blackout' ? 'Blackout' : 'Details';
+  else $('dTitle').textContent = item ? item.name : shownState().look === 'blackout' ? 'Blackout' : 'Details';
   // Without an item on stage there is nothing to save into or go back to.
-  $('backBtn').hidden = !item || !state.lookChanged;
+  $('backBtn').hidden = !item || !shownState().lookChanged;
   $('saveBtn').hidden = !item;
   if (item) {
     $('backBtn').textContent = `Back to ${item.name}`;
@@ -1242,7 +1399,7 @@ function renderDetails() {
 }
 
 // Back and Save.
-$('backBtn').addEventListener('click', () => send({ type: 'backToLook' }));
+$('backBtn').addEventListener('click', () => sendStage({ type: 'backToLook' }));
 
 // Save needs a 1 s hold; letting go early does nothing.
 const saveBtn = $('saveBtn');
@@ -1311,7 +1468,7 @@ function buildPickerGrid() {
     b.addEventListener('click', () => {
       if (picker.edit) openEditor(row.group.presets.find((x) => x.id === p.id) ?? p);
       else if (preview.on) sendItemGroup(row.group.id, { preset: p.id });
-      else send({ type: 'groupPreset', group: row.group.id, preset: p.id });
+      else sendStage({ type: 'groupPreset', group: row.group.id, preset: p.id });
     });
     grid.append(b);
   }
@@ -1344,7 +1501,7 @@ function buildEffectGrid(group) {
     b.addEventListener('click', () => {
       if (picker.edit) openEffectEditor(group.presets.find((x) => x.id === p.id) ?? p);
       else if (preview.on) sendItemGroup(group.id, { preset: p.id });
-      else send({ type: 'groupPreset', group: group.id, preset: p.id });
+      else sendStage({ type: 'groupPreset', group: group.id, preset: p.id });
     });
     grid.append(b);
   }
@@ -1422,11 +1579,11 @@ const DRAG_FADE = 0.2;
 
 /**
  * An Any colour send. The first send of a gesture (a tap, or the start of a drag) fades like
- * a swatch and adds an Undo step; the rest continue it, in 0.2 s each.
+ * a swatch and adds an Undo step; the rest continue it, in 0.2 s each. `target`: where the gesture started (stageTarget).
  */
-function sendColour(hex, first, extras) {
+function sendColour(hex, first, extras, target) {
   if (!picker.group) return;
-  send({ type: 'groupColour', group: picker.group, colour: hex, ...extras, ...(first ? {} : { continues: true, fade: DRAG_FADE }) });
+  sendStage({ type: 'groupColour', group: picker.group, colour: hex, ...extras, ...(first ? {} : { continues: true, fade: DRAG_FADE }) }, target);
 }
 
 /** Throttled sends for one finger at a time: `start()` on touch, then `push` while it moves and `end` on release. */
@@ -1444,13 +1601,15 @@ function dragSender(sendOne) {
  * In Preview nothing is sent while the finger moves; on release the item gets the colour with the new levels.
  */
 function wireExtra(row) {
-  const out = dragSender((_v, first) => sendColour(pickerColour, first, extraLevels()));
+  let target = stageTarget();
+  const out = dragSender((_v, first) => sendColour(pickerColour, first, extraLevels(), target));
   let startX = 0, startV = 0, inPreview = false, item = null;
   row.dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
     row.dragging = true;
     inPreview = preview.on;
     item = preview.item;
+    target = stageTarget();
     try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     row.dim.classList.add('ds-dragging');
     startX = ev.clientX;
@@ -1491,7 +1650,7 @@ function renderPicker() {
   // The settings of the effect the group runs (in Preview: the item's), under the list.
   $('fxSet').hidden = !info.effect || previewStill();
   showStill();
-  effectSettings.show(info.effect, preview.on ? previewItem()?.tempo ?? 120 : state?.tempo ?? 120);
+  effectSettings.show(info.effect, preview.on ? previewItem()?.tempo ?? 120 : shownState()?.tempo ?? 120);
   const running = runningLight(row.group, s);
   pickerColour = running.colour;
   // In Preview the item's own Any colour pick is a saved hidden "Custom" preset (not in the colour list):
@@ -1511,7 +1670,7 @@ function renderPicker() {
 /** The colour the picker's group runs live from the strip, or null. */
 function liveOfPicker() {
   const row = pickerRow();
-  return row ? liveColour(state?.groups?.[row.group.id]) : null;
+  return row ? liveColour(shownState()?.groups?.[row.group.id]) : null;
 }
 
 /** Shows the pill while the group runs a strip colour that isn't a swatch yet; keeps the form in step. */
@@ -1817,10 +1976,11 @@ function effectControls(root, onChange) {
  */
 const effectSettings = (() => {
   let target = null;
-  const sendEffect = (group, effect, first) =>
-    send({ type: 'groupEffect', group, effect, ...(first ? {} : { continues: true, fade: DRAG_FADE }) });
-  const out = dragSender((effect, first) => target && sendEffect(target.group, effect, first));
-  const capture = () => ({ group: picker.group, inPreview: preview.on, item: preview.item });
+  // `stage`: where the tap or drag started (stageTarget), so a drag stays on the draft or on the stage.
+  const sendEffect = (group, effect, first, stage) =>
+    sendStage({ type: 'groupEffect', group, effect, ...(first ? {} : { continues: true, fade: DRAG_FADE }) }, stage);
+  const out = dragSender((effect, first) => target && sendEffect(target.group, effect, first, target.stage));
+  const capture = () => ({ group: picker.group, inPreview: preview.on, item: preview.item, stage: stageTarget() });
   const toItem = (t, effect) => {
     if (preview.on && t.item && preview.item === t.item) sendItemGroup(t.group, { effect });
   };
@@ -1829,7 +1989,7 @@ const effectSettings = (() => {
       const t = capture();
       if (!t.group) return;
       if (t.inPreview) toItem(t, effect);
-      else sendEffect(t.group, effect, true);
+      else sendEffect(t.group, effect, true, t.stage);
       return;
     }
     if (how === 'start') {
@@ -1890,8 +2050,8 @@ function attachStrip(strip, handle, whiteOnly, onColour, onStart) {
 // (a preset or Basic light with its own white) the pick is the plain colour.
 // In Preview nothing is sent while the finger moves: the item gets one colour when it lifts.
 (() => {
-  let keep = false, inPreview = false, item = null;
-  const out = dragSender((hex, first) => sendColour(hex, first, keep ? extraLevels() : NO_EXTRAS));
+  let keep = false, inPreview = false, item = null, target = stageTarget();
+  const out = dragSender((hex, first) => sendColour(hex, first, keep ? extraLevels() : NO_EXTRAS, target));
   attachStrip($('pAny'), $('pAnyH'), () => pickerRow()?.group.whiteOnly ?? null,
     (hex, last) => {
       if (!inPreview) {
@@ -1905,6 +2065,7 @@ function attachStrip(strip, handle, whiteOnly, onColour, onStart) {
       keep = pickerLive || extrasMoved;
       inPreview = preview.on;
       item = preview.item;
+      target = stageTarget();
     });
 })();
 
@@ -2262,7 +2423,7 @@ function drawEffectEditor() {
     b.addEventListener('click', () => toggleEffectColour(c));
     box.append(b);
   }
-  effectEditSettings.show(effect, state?.tempo ?? 120);
+  effectEditSettings.show(effect, shownState()?.tempo ?? 120);
 }
 
 function setEffectEdit(next) {
@@ -2394,7 +2555,7 @@ function buildQuick() {
     b.append(strip);
     // In Preview the quick look's groups go into the selected item, not on stage.
     b.addEventListener('click', () => {
-      if (!preview.on) send({ type: 'quickLook', id: q.id });
+      if (!preview.on) sendStage({ type: 'quickLook', id: q.id });
       else if (preview.item) send({ type: 'itemQuickLook', item: preview.item, look: q.id });
     });
     grid.append(b);
@@ -2459,7 +2620,7 @@ function renderSheet() {
   }
   for (const b of $('qsGroups').children) {
     const group = layout.groups.find((g) => g.id === b.dataset.group);
-    const s = group ? groupStatus(group) : state?.groups?.[b.dataset.group];
+    const s = group ? groupStatus(group) : shownState()?.groups?.[b.dataset.group];
     const info = presetInfo(group, s);
     const left = qs.left.has(b.dataset.group);
     b.classList.toggle('off', left);
@@ -2602,7 +2763,8 @@ function drawStage() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   // In Preview the picture is the selected item settled, never the stage: dark until it has come.
-  const shownVisual = preview.on ? previewVisual ?? NO_VISUAL : visual;
+  // In Blind it is the draft, moving like the stage would: dark until its first frame.
+  const shownVisual = preview.on ? previewVisual ?? NO_VISUAL : blind.on ? blind.visual ?? NO_VISUAL : visual;
   const pad = 14, r = Math.max(5, Math.min(9, h / 16));
   let at = 0; // where this fixture's segments start in the visual, counted in segments
   for (const f of layout.fixtures) {
@@ -2665,12 +2827,12 @@ function drawStage() {
     ctx.strokeStyle = '#3a3f48';
     ctx.stroke();
   }
-  if (preview.on && previewLabel) {
+  if ((preview.on || blind.on) && pictureLabel) {
     // So the picture can't be mistaken for the real stage.
-    ctx.font = previewLabel.font;
-    ctx.fillStyle = previewLabel.colour;
+    ctx.font = pictureLabel.font;
+    ctx.fillStyle = pictureLabel.colour;
     ctx.textBaseline = 'top';
-    ctx.fillText('Preview', 10, 8);
+    ctx.fillText(preview.on ? 'Preview' : 'Blind', 10, 8);
   }
 }
 
@@ -2757,8 +2919,9 @@ function applyPhone() {
     // Editing belongs to the iPad: the running order's, and the colour list's (its buttons are hidden here,
     // and in Edit a swatch tap opens the editor instead of setting the colour).
     if (editing) setEditing(false);
-    // No Preview on the phone: it stays a remote for the live stage.
+    // No Preview or Blind on the phone: it stays a remote for the live stage.
     setPreview(false);
+    setBlind(false);
     if (picker.edit) setEditMode(false);
     closeSheet();
   } else {
