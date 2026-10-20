@@ -286,6 +286,9 @@ function blend(out: Light, a: Light, b: Light, t: number): Light {
  */
 function softBump(v: number, size: number): number {
   if (size === 0.5) return 0.5 + 0.5 * Math.cos(2 * Math.PI * v);
+  // No width is dark everywhere (never a lone full frame at the peak); full width is always lit.
+  if (size <= 0) return 0;
+  if (size >= 1) return 1;
   // Distance from the nearest peak, 0..0.5 of a wave.
   const d = Math.abs(frac(v + 0.5) - 0.5);
   const edge = Math.min(size, 1 - size);

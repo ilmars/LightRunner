@@ -359,6 +359,27 @@ test('a smaller soft one-colour wave is a narrow bump, dark between bumps; a lar
   for (let n = 0; n < 50; n++) assert.equal(softWave(1)(n / 50), 1);
 });
 
+test('a one-colour wave at size 0 is dark everywhere, also at whole phases (never a one-frame flash), and at size 1 always lit', () => {
+  for (const edge of ['soft', 'hard'] as const) {
+    const none = fx({ effect: 'wave', edge, size: 0 });
+    const full = fx({ effect: 'wave', edge, size: 1 });
+    for (const count of [1, 7, 32]) {
+      for (let n = -40; n <= 40; n++) {
+        // Whole phases (a segment's peak) and the moments between them.
+        for (const phase of [n, n + 0.25, n + 0.5, n / 7]) {
+          for (let k = 0; k < count; k++) {
+            assert.equal(at(none, k, count, phase).i, 0, `${edge} size 0, segment ${k} of ${count}, phase ${phase}`);
+            assert.equal(at(full, k, count, phase).i, 1, `${edge} size 1, segment ${k} of ${count}, phase ${phase}`);
+          }
+        }
+      }
+    }
+    // Never moving, so never slowed.
+    assert.equal(none.maxRate, Infinity);
+    assert.equal(full.maxRate, Infinity);
+  }
+});
+
 test("a soft one-colour wave of any size is continuous, also across the wave's wrap, with smooth ends", () => {
   for (const size of [0.05, 0.2, 0.37, 0.5, 0.63, 0.8, 0.95]) {
     const level = softWave(size);
@@ -516,7 +537,7 @@ test('light safety holds for every kind, edge, direction and setting at the fast
   for (const effect of EffectLayer.shape.effect.options) {
     for (const edge of ['soft', 'hard'] as const) {
       for (const direction of ['ltr', 'centreOut', 'outsideIn'] as const) {
-        for (const [waves, size] of [[1, 0.5], [3, 0.1], [2, 0.9]] as const) {
+        for (const [waves, size] of [[1, 0.5], [3, 0.1], [2, 0.9], [1, 0], [2, 1]] as const) {
           for (const [colours, base] of [
             ...colourSets.map((c) => [c, undefined] as const),
             // Over a base (once a direction is enough): a dim one, and a bright one in a colour the animation also has.
