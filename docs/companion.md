@@ -133,7 +133,7 @@ Plug the Akai APC mini into the computer that runs Light Runner (USB). Light Run
 
 - "APC mini: connected (mk2)" or "(older model)": working.
 - "APC mini: not connected": plug it in, or try another USB port or cable.
-- "APC mini: MIDI support isn't installed on this computer": the optional MIDI add-on is missing. Run `npm install` in the Light Runner folder on that computer. If the line still says it, note what the install printed and report it.
+- "APC mini: MIDI support isn't installed on this computer": the optional MIDI add-on is missing. Run `npm install` in the Light Runner folder on that computer (on the church Mac, Node is Homebrew's keg-only copy, so use `/opt/homebrew/opt/node@24/bin/npm install`, or put `/opt/homebrew/opt/node@24/bin` on the PATH first). If the line still says it, note what the install printed and report it.
 
 Each pad column sits above its fader, so one column is one light group (the operator page's order; smoke machines are left out).
 
@@ -148,10 +148,10 @@ Each pad column sits above its fader, so one column is one light group (the oper
 
 Things to know:
 
-- **Faders pick up.** A fader only takes over once it reaches the level it controls (it passes it, or gets within 2 %). Until then moving it does nothing, so a light never jumps. After a song starts, or someone changes a level on the iPad, every fader waits again until you move it to the new level.
+- **Faders pick up.** A fader only takes over once it reaches the level it controls (it passes it, or gets within 2 %). Until then moving it does nothing, so a light never jumps. After a song starts, every fader waits again until you move it to its new level. After someone changes a group's level on the iPad (or elsewhere), only that group's fader waits.
 - **Blackout needs a 1 second hold**, the same as on the iPad, and it does not toggle. To get the lights back, start a song, Basic lights or Next.
 - **The APC always works on the real stage.** Blind (a draft on one iPad) doesn't affect it.
-- **If the APC is unplugged while a Flash button is held**, the Flash goes out.
+- **If the APC is unplugged while a Flash button is held**, the Flash goes out. A Flash also goes out by itself after 15 seconds, so a button held down for a long time stops flashing.
 - **The lights on the pads** always show the live stage, including changes made on any iPad.
 - **mk2 and the older model** are told apart by the name the APC gives the computer. The mk2 shows each colour's real colour on its pads. The older model has only green, red and yellow lights: green is on stage or running, yellow is next (and the colours you can pick), dark is every other song.
 
@@ -160,11 +160,12 @@ Things to know:
 1. **Plug it in.** Within a few seconds Settings should say connected and name the model, and the pads should light up. On the mk2 the pads show colours: the top two rows follow the running order, the lower rows show the groups' colours. On the older model they show green and yellow.
 2. **Faders pick up.** Move fader 1 slowly from the bottom: nothing should change until it gets to where group 1 already is; after that the group's level should follow the fader smoothly. Do the same with fader 9 (Master).
 3. **Songs and colours.** Tap a pad in the top rows: that song should start and its pad turns bright. Tap a colour pad in a column: that group changes colour.
-4. **Flash.** Hold a button under a column: that group flashes while it is held and goes out when you let go. Flash all is the fifth button on the right.
+4. **Flash.** Hold a button under a column: that group flashes while it is held and goes out when you let go, or by itself after 15 seconds. Flash all is the fifth button on the right.
 5. **Blackout.** Tap the sixth button on the right: nothing should happen. Hold it for a second: the stage goes dark. Tap Basic lights (the fourth button) to bring the lights back.
 6. **Next, Back to and Undo** (the first three buttons on the right).
+7. **Unplugging.** Hold a Flash button and unplug the APC: the Flash should go out. Then unplug it and plug it back in slowly (wait for Settings to say "not connected" first), and again unplug and plug it back in quickly (under 2 seconds). After each, check that the pads light up again (a quick replug can take up to 10 seconds to show them), and that pads, buttons and faders still work. Report what you saw each time.
 
-What to report: a short note on each of the six, plus the model and how it showed up in Settings. If the pads stay dark while Settings says connected, that is the useful one to report, and say which model it is. Two things have not been checked on real hardware: the older model's note numbers come from published community mappings (they may differ), and the mk2's colour message follows Akai's protocol document but has not been tried on a real mk2. The server's terminal also prints lines that start with "APC mini:" when something goes wrong (copy those into your report).
+What to report: a short note on each of the seven, plus the model and how it showed up in Settings. If the pads stay dark while Settings says connected, that is the useful one to report, and say which model it is. Two things have not been checked on real hardware: the older model's note numbers come from published community mappings (they may differ), and the mk2's colour message follows Akai's protocol document but has not been tried on a real mk2. The server's terminal also prints lines that start with "APC mini:" when something goes wrong (copy those into your report).
 
 ## OSC
 
@@ -192,6 +193,6 @@ Good to know:
 
 - **Levels** (group level and Master) take either a number from 0.0 to 1.0 (a float) or a whole number from 0 to 100 (percent). So `0.5` and `50` both mean half. A whole number `1` means 1 %, not full: send `1.0` or `100` for full. Many OSC apps send floats, which is what you want.
 - **Buttons that send 1 on press and 0 on release** (TouchOSC and similar) work: for Next, Back, Undo, Basic lights, Blackout and Master up and down, a message with the value 0 (or False) is a release and does nothing, so one tap acts once. A message with no value acts too.
-- **Flash** uses the value as on and off: anything above 0 (or True) is on, 0 (or False) is off.
+- **Flash** uses the value as on and off: anything above 0 (or True) is on, 0 (or False) is off. If the "off" message never arrives, Light Runner puts the Flash out by itself after 15 seconds.
 - Messages that aren't understood (a wrong address, a group that isn't there) are ignored and noted in the server's terminal, once a minute for the same address.
 - To check from a computer, any OSC tool that can send one message works (a phone or laptop app, or a short script).
