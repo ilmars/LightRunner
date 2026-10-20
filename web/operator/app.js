@@ -91,6 +91,7 @@ function connect() {
       buildOrder();
       buildDetails();
       buildQuick();
+      syncQuickSheet();
       buildSheetGroups();
       buildFlash();
       // The show changed (maybe this item): ask for its picture again.
@@ -598,6 +599,8 @@ function setPreview(on) {
       setEditing(false);
       if (editing) return;
     }
+    // Quick looks' Edit doesn't mix with Preview either (a tap there would open the sheet, not fill the item).
+    if (quickEditing) setQuickEditing(false);
     // Only one of Preview and Blind is on at a time.
     setBlind(false);
   }
@@ -3219,6 +3222,8 @@ function drawEffectStrip(frame) {
 // ---- Quick looks: tabs and grid ----
 
 let quickTab = 'plain';
+// Edit on: a tap opens the quick look in the sheet instead of applying it, and a hold-and-drag changes its place.
+let quickEditing = false;
 
 function showQuickTab(name) {
   quickTab = name;
@@ -3232,10 +3237,12 @@ function showQuickTab(name) {
 for (const t of document.querySelectorAll('[data-qt]')) t.addEventListener('click', () => showQuickTab(t.dataset.qt));
 
 function buildQuick() {
+  // A rebuild (another tablet changed the show) ends a hold that is under way.
+  endQuickDrag();
   const grid = $('qGrid');
   grid.replaceChildren();
   const mine = (layout?.quickLooks ?? []).filter((q) => q.tab === quickTab);
-  for (const q of mine) {
+  mine.forEach((q, at) => {
     const b = el('button', 'ql');
     b.append(el('span', 'qname', q.name));
     // A thin strip along the bottom: one block per group, the colour this quick look gives it.
@@ -3247,41 +3254,197 @@ function buildQuick() {
       strip.append(block);
     }
     b.append(strip);
-    // In Preview the quick look's groups go into the selected item, not on stage.
+    b.dataset.id = q.id;
+    b.dataset.at = String(at);
+    if (quickEditing) {
+      b.classList.add('editable');
+      b.classList.toggle('editing', qs.open && qs.look === q.id);
+      b.setAttribute('aria-label', `Edit ${q.name}`);
+    }
+    // Edit on: the quick look opens in the sheet. In Preview its groups go into the selected item, not on stage.
     b.addEventListener('click', () => {
-      if (!preview.on) sendStage({ type: 'quickLook', id: q.id });
+      if (quickEditing) openSheet(q);
+      else if (!preview.on) sendStage({ type: 'quickLook', id: q.id });
       else if (preview.item) send({ type: 'itemQuickLook', item: preview.item, look: q.id });
     });
+    if (quickEditing) wireQuickDrag(b, q.id, at);
     grid.append(b);
-  }
+  });
   if (!mine.length) grid.append(el('span', 'qnone', 'None yet.'));
   const add = el('button', 'ql newq', '＋ Save stage as quick look');
-  add.addEventListener('click', openSheet);
+  add.addEventListener('click', () => openSheet());
   grid.append(add);
 }
 
-// ---- New quick look sheet (covers the details panel, like the colour picker) ----
+/** Edit on or off. On, Preview goes off (as for the running order's Edit); Blind can stay on. Off closes the edit sheet. */
+function setQuickEditing(on) {
+  if (on === quickEditing) return;
+  if (on) setPreview(false);
+  quickEditing = on;
+  $('qEditBtn').textContent = on ? 'Done' : 'Edit';
+  $('qEditBtn').classList.toggle('on', on);
+  $('qEditBtn').setAttribute('aria-pressed', String(on));
+  if (!on && qs.look) closeSheet();
+  buildQuick();
+}
+$('qEditBtn').addEventListener('click', () => setQuickEditing(!quickEditing));
 
-const qs = { open: false, tab: 'plain', left: new Set(), saved: 'plain' };
+// ---- Changing the place of a quick look: hold it, then drag it onto another on the same tab ----
 
-function openSheet() {
+/** The hold that is under way: which quick look (and its place on the tab), where the pointer is and what it is over. */
+const qdrag = { pointer: null, timer: 0, id: null, from: -1, over: -1, x: 0, y: 0, startX: 0, startY: 0, lifted: false, ghost: null, quietUntil: 0 };
+
+/** Edit on: holding a quick look lifts it; letting go over another one gives it that place. A tap still opens it. */
+function wireQuickDrag(b, id, at) {
+  b.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0 || !quickEditing) return;
+    endQuickDrag();
+    qdrag.pointer = ev.pointerId;
+    qdrag.id = id;
+    qdrag.from = at;
+    qdrag.x = qdrag.startX = ev.clientX;
+    qdrag.y = qdrag.startY = ev.clientY;
+    qdrag.timer = setTimeout(liftQuick, REORDER_HOLD);
+  });
+  // A long press on a touch screen must not open the page's own menu.
+  b.addEventListener('contextmenu', (ev) => { if (qdrag.pointer !== null) ev.preventDefault(); });
+}
+
+function liftQuick() {
+  qdrag.timer = 0;
+  const tile = $('qGrid').querySelector(`.ql[data-at="${qdrag.from}"]`);
+  if (!quickEditing || !tile) return endQuickDrag();
+  qdrag.lifted = true;
+  tile.classList.add('lifted');
+  // A quiet copy follows the finger.
+  const r = tile.getBoundingClientRect();
+  const ghost = tile.cloneNode(true);
+  ghost.className = 'ql ql-ghost';
+  ghost.removeAttribute('data-at');
+  ghost.removeAttribute('data-id');
+  ghost.setAttribute('aria-hidden', 'true');
+  ghost.style.width = `${r.width}px`;
+  ghost.style.height = `${r.height}px`;
+  ghost.dataset.dx = String(qdrag.startX - r.left);
+  ghost.dataset.dy = String(qdrag.startY - r.top);
+  document.body.append(ghost);
+  qdrag.ghost = ghost;
+  followQuick();
+}
+
+/** Moves the copy to the pointer and marks the quick look under it (the places it can go). */
+function followQuick() {
+  const { ghost } = qdrag;
+  if (!ghost) return;
+  ghost.style.left = `${qdrag.x - Number(ghost.dataset.dx)}px`;
+  // A little above the finger, so the tile under it still shows.
+  ghost.style.top = `${qdrag.y - Number(ghost.dataset.dy) - 10}px`;
+  const under = document.elementFromPoint(qdrag.x, qdrag.y)?.closest('#qGrid .ql[data-at]');
+  qdrag.over = under ? Number(under.dataset.at) : -1;
+  for (const b of $('qGrid').querySelectorAll('.ql[data-at]')) {
+    b.classList.toggle('drop', Number(b.dataset.at) === qdrag.over && qdrag.over !== qdrag.from);
+  }
+}
+
+/** Lets go: one moveQuickLook goes out when it is over another quick look of the tab. */
+function dropQuick() {
+  const { id, from, over } = qdrag;
+  const moved = qdrag.lifted;
+  endQuickDrag();
+  if (!moved) return;
+  // The click that follows the lift is not a tap on the quick look.
+  qdrag.quietUntil = performance.now() + 400;
+  if (over < 0 || over === from) return;
+  send({ type: 'moveQuickLook', look: id, to: over });
+}
+
+function endQuickDrag() {
+  clearTimeout(qdrag.timer);
+  qdrag.timer = 0;
+  qdrag.pointer = null;
+  qdrag.lifted = false;
+  qdrag.id = null;
+  qdrag.from = qdrag.over = -1;
+  qdrag.ghost?.remove();
+  qdrag.ghost = null;
+  for (const b of $('qGrid').querySelectorAll('.lifted, .drop')) b.classList.remove('lifted', 'drop');
+}
+
+window.addEventListener('pointermove', (ev) => {
+  if (ev.pointerId !== qdrag.pointer) return;
+  qdrag.x = ev.clientX;
+  qdrag.y = ev.clientY;
+  if (qdrag.lifted) followQuick();
+  // Moving before it lifts is a swipe (the grid scrolls), not a hold.
+  else if (Math.hypot(ev.clientX - qdrag.startX, ev.clientY - qdrag.startY) > REORDER_SLOP) endQuickDrag();
+});
+window.addEventListener('pointerup', (ev) => { if (ev.pointerId === qdrag.pointer) dropQuick(); });
+window.addEventListener('pointercancel', (ev) => { if (ev.pointerId === qdrag.pointer) endQuickDrag(); });
+// While a quick look is lifted the finger moves it, not the grid.
+$('qGrid').addEventListener('touchmove', (ev) => { if (qdrag.lifted) ev.preventDefault(); }, { passive: false });
+$('qGrid').addEventListener('click', (ev) => {
+  if (performance.now() >= qdrag.quietUntil) return;
+  ev.stopPropagation();
+  ev.preventDefault();
+}, true);
+
+// ---- Quick look sheet: new from the stage, or Edit (covers the details panel, like the colour picker) ----
+
+// `look`: the id of the quick look being edited, or null for a new one. `orig`: what it was when the sheet opened.
+// `stage`: the Update from the stage switch. `armed`: the Delete button was tapped once.
+const qs = { open: false, tab: 'plain', left: new Set(), saved: 'plain', look: null, orig: null, stage: false, armed: 0 };
+
+/** The layout's quick look being edited, or null. */
+const editedQuick = () => (qs.look ? layout?.quickLooks.find((q) => q.id === qs.look) ?? null : null);
+
+/** `q`: a quick look of the layout to edit; none for a new one. */
+function openSheet(q) {
   closePicker();
   qs.open = true;
-  qs.tab = quickTab;
-  qs.left = new Set();
+  qs.look = q?.id ?? null;
+  qs.orig = q ? { name: q.name, tab: q.tab, groups: [...q.groups] } : null;
+  qs.tab = q ? q.tab : quickTab;
+  qs.left = new Set(q ? lightGroups().map((g) => g.id).filter((id) => !q.groups.includes(id)) : []);
+  qs.stage = false;
+  disarmQuickDelete();
   pendingSave = null;
-  $('qsName').value = '';
+  $('qsName').value = q ? q.name : '';
+  $('qsTitle').textContent = q ? 'Edit quick look' : 'New quick look from the stage';
+  $('qsDelete').hidden = !q;
+  $('qsStageRow').hidden = !q;
+  $('qsGroupsNote').textContent = q ? '· tap a group to leave it out or to add it' : '· tap a group to leave it out; left-out groups keep what they have';
   buildSheetGroups();
   $('qSheet').hidden = false;
   renderSheet();
+  markEditedQuick();
 }
 
 function closeSheet() {
   qs.open = false;
+  qs.look = null;
+  qs.orig = null;
   pendingSave = null;
+  disarmQuickDelete();
   $('qSheet').hidden = true;
   $('qsName').blur();
+  markEditedQuick();
 }
+
+/** The tile of the quick look in the sheet gets the accent outline. */
+function markEditedQuick() {
+  for (const b of $('qGrid').querySelectorAll('.ql[data-id]')) b.classList.toggle('editing', quickEditing && qs.open && qs.look === b.dataset.id);
+}
+
+/** The layout changed: a quick look another tablet deleted closes its sheet. */
+function syncQuickSheet() {
+  if (!qs.open || !qs.look || editedQuick()) return;
+  const own = pendingSave !== null;
+  closeSheet();
+  if (!own) toast('That quick look was removed.');
+}
+
+/** The groups the quick look being edited gives that the sheet's group tiles say: it has them, or the stage does. */
+const quickGroupsNew = () => (qs.orig ? lightGroups().map((g) => g.id).filter((id) => !qs.left.has(id) && !qs.orig.groups.includes(id)) : []);
 
 /** One tile per group; tapping one toggles "left out". */
 function buildSheetGroups() {
@@ -3298,7 +3461,13 @@ function buildSheetGroups() {
     line.append(el('i'), el('span'));
     b.append(el('span', 'gn', group.name), line, el('span', 'gl'));
     b.addEventListener('click', () => {
-      if (qs.left.has(group.id)) qs.left.delete(group.id); else qs.left.add(group.id);
+      if (qs.left.has(group.id)) {
+        qs.left.delete(group.id);
+        // A group the quick look doesn't set has no value yet: it takes the stage's, so Update from the stage goes on.
+        if (qs.orig && !qs.orig.groups.includes(group.id)) qs.stage = true;
+      } else {
+        qs.left.add(group.id);
+      }
       renderSheet();
     });
     root.append(b);
@@ -3307,23 +3476,47 @@ function buildSheetGroups() {
 
 function renderSheet() {
   if (!qs.open || !layout) return;
+  const quick = editedQuick();
   for (const b of $('qsTab').children) {
     const on = b.dataset.t === qs.tab;
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
   for (const b of $('qsGroups').children) {
-    const group = layout.groups.find((g) => g.id === b.dataset.group);
-    const s = group ? groupStatus(group) : shownState()?.groups?.[b.dataset.group];
-    const info = presetInfo(group, s);
+    const k = layout.groups.findIndex((g) => g.id === b.dataset.group);
+    const group = layout.groups[k];
     const left = qs.left.has(b.dataset.group);
+    // Editing: what the quick look gives the group, until it is updated from the stage (or the group is new to it).
+    const own = quick && !qs.stage && quick.entries?.[k];
+    let info, level;
+    if (own) {
+      info = presetInfo(group, { preset: own.preset, level: quick.levels?.[k] ?? 1, live: null, entry: own });
+      level = quick.levels?.[k] ?? 1;
+    } else {
+      const s = group ? groupStatus(group) : shownState()?.groups?.[b.dataset.group];
+      info = presetInfo(group, s);
+      level = s?.level ?? 0;
+    }
     b.classList.toggle('off', left);
     b.setAttribute('aria-pressed', String(!left));
     b.querySelector('i').style.background = swatchFill(info);
     b.querySelector('.gs span').textContent = left ? 'left out' : info.name;
-    b.querySelector('.gl').textContent = left ? '' : `${Math.round((s?.level ?? 0) * 100)}%`;
+    b.querySelector('.gl').textContent = left ? '' : `${Math.round(level * 100)}%`;
+  }
+  if (qs.orig) {
+    $('qsStage').checked = qs.stage;
+    const added = quickGroupsNew();
+    const names = added.map((id) => layout.groups.find((g) => g.id === id)?.name ?? id);
+    const from = blind.on ? 'the Blind draft' : 'the stage';
+    const many = names.length > 1;
+    $('qsStageNote').textContent = !names.length
+      ? `Replaces what this quick look gives its groups with what ${from} has now.`
+      : qs.stage
+        ? `On because ${names.join(' and ')} ${many ? 'are' : 'is'} new to this quick look: ${many ? 'they take' : 'it takes'} what ${from} has now.`
+        : `${names.join(' and ')} ${many ? 'need' : 'needs'} a colour from ${from}: turn this on to add ${many ? 'them' : 'it'}.`;
   }
   $('qsSave').disabled = pendingSave !== null;
+  $('qsDelete').disabled = pendingSave !== null;
 }
 
 for (const b of $('qsTab').children) {
@@ -3332,13 +3525,47 @@ for (const b of $('qsTab').children) {
     renderSheet();
   });
 }
+$('qsStage').addEventListener('change', () => {
+  qs.stage = $('qsStage').checked;
+  renderSheet();
+});
 $('qsCancel').addEventListener('click', closeSheet);
 // The keyboard's Done closes the keyboard; nothing else on the page reacts to typing.
 $('qsName').addEventListener('keydown', (ev) => {
   ev.stopPropagation();
   if (ev.key === 'Enter') $('qsName').blur();
 });
-// A plain tap: a new quick look overwrites nothing. The sheet closes when the server says yes.
+$('qsName').addEventListener('input', disarmQuickDelete);
+
+/** The Delete button says "Delete" again. */
+function disarmQuickDelete() {
+  clearTimeout(qs.armed);
+  qs.armed = 0;
+  $('qsDelete').classList.remove('armed');
+  $('qsDelete').textContent = 'Delete';
+}
+
+// Delete asks twice, as the running order's does: the first tap turns the button red ("Delete?"), the second deletes.
+// A tap anywhere else (or a few seconds) takes the first one back.
+$('qsDelete').addEventListener('click', () => {
+  if (!qs.look || pendingSave !== null || !layout) return;
+  if (!qs.armed) {
+    qs.armed = setTimeout(disarmQuickDelete, 4000);
+    $('qsDelete').classList.add('armed');
+    $('qsDelete').textContent = 'Delete?';
+    return;
+  }
+  disarmQuickDelete();
+  qs.saved = null;
+  pendingSave = send({ type: 'deleteQuickLook', look: qs.look });
+  renderSheet();
+});
+document.addEventListener('pointerdown', (ev) => {
+  if (qs.armed && !(ev.target instanceof Element && ev.target.closest('#qsDelete'))) disarmQuickDelete();
+}, true);
+
+// A plain tap on a new quick look overwrites nothing. Editing sends only what changed.
+// The sheet closes when the server says yes.
 $('qsSave').addEventListener('click', () => {
   if (pendingSave !== null || !layout) return;
   const groups = lightGroups().map((g) => g.id).filter((id) => !qs.left.has(id));
@@ -3348,14 +3575,35 @@ $('qsSave').addEventListener('click', () => {
     return;
   }
   qs.saved = qs.tab;
-  pendingSave = send({ type: 'saveQuickLook', name: $('qsName').value, tab: qs.tab, groups });
+  if (qs.look) {
+    const orig = qs.orig;
+    const cmd = { type: 'editQuickLook', look: qs.look };
+    const name = $('qsName').value;
+    if (name.trim() !== orig.name) cmd.name = name;
+    if (qs.tab !== orig.tab) cmd.tab = qs.tab;
+    if (groups.length !== orig.groups.length || groups.some((id) => !orig.groups.includes(id))) cmd.groups = groups;
+    if (qs.stage) cmd.fromStage = true;
+    if (cmd.groups && !qs.stage && quickGroupsNew().length) {
+      toast('turn on Update from the stage to add a group');
+      return;
+    }
+    // Nothing changed: nothing to send.
+    if (Object.keys(cmd).length === 2) {
+      closeSheet();
+      return;
+    }
+    pendingSave = send(cmd);
+  } else {
+    pendingSave = send({ type: 'saveQuickLook', name: $('qsName').value, tab: qs.tab, groups });
+  }
   renderSheet();
 });
 
 function finishSaveQuick() {
   const tab = qs.saved;
   closeSheet();
-  showQuickTab(tab);
+  if (tab) showQuickTab(tab);
+  else buildQuick();
 }
 
 // ---- Flash: hold a button and the group goes to full white ----
@@ -3613,6 +3861,7 @@ function applyPhone() {
     // Editing belongs to the iPad: the running order's, and the colour list's (its buttons are hidden here,
     // and in Edit a swatch tap opens the editor instead of setting the colour).
     if (editing) setEditing(false);
+    if (quickEditing) setQuickEditing(false);
     // No Preview or Blind on the phone: it stays a remote for the live stage.
     setPreview(false);
     setBlind(false);
