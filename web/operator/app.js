@@ -1831,9 +1831,12 @@ function liveLayer(fx) {
  * The settings of one effect, built into `root`. `show(effect, tempo)` puts an effect in (the
  * caller hides the box when there is none). Every change calls `onChange(effect, how)` with the
  * whole effect: `how` is 'tap' for a choice, and 'start', 'move' and 'end' for a Size drag.
+ * `current()`, when given, is the effect a change starts from (the caller's own, which may have
+ * changed since it was shown here); otherwise the one last shown.
  */
-function effectControls(root, onChange) {
+function effectControls(root, onChange, current = null) {
   let fx = null, tempo = 120;
+  const now = () => (current ? current() : fx);
   const seg = (label) => {
     const box = el('div', 'ds-seg');
     box.setAttribute('role', 'radiogroup');
@@ -1845,7 +1848,7 @@ function effectControls(root, onChange) {
     b.type = 'button';
     b.setAttribute('role', 'radio');
     if (label) b.setAttribute('aria-label', label);
-    b.addEventListener('click', () => { if (fx) pick(); });
+    b.addEventListener('click', () => { if (now()) pick(); });
     box.append(b);
     return b;
   };
@@ -1857,16 +1860,18 @@ function effectControls(root, onChange) {
   };
   /** A tap: the whole effect with `patch`, unless nothing changes. */
   const change = (patch) => {
-    const next = { ...fx, ...patch };
-    if (JSON.stringify(liveLayer(next)) !== JSON.stringify(liveLayer(fx))) onChange(liveLayer(next), 'tap');
+    const from = now();
+    const next = { ...from, ...patch };
+    if (JSON.stringify(liveLayer(next)) !== JSON.stringify(liveLayer(from))) onChange(liveLayer(next), 'tap');
   };
 
   // Speed: one round every 1 … 32 beats of the tempo, or Free: every 2 … 60 seconds.
   const beatsBox = seg('Beats for one round');
   const beatButtons = SPEED_BEATS.map((n) => [n, choice(beatsBox, String(n), `One round every ${n} beat${n === 1 ? '' : 's'}`, () => change({ speed: { beats: n } }))]);
   const freeButton = choice(beatsBox, 'Free', 'Free: in seconds, not with the tempo', () => {
-    if ('seconds' in fx.speed) return;
-    change({ speed: { seconds: nearest(SPEED_SECONDS, (fx.speed.beats * 60) / tempo) } });
+    const { speed } = now();
+    if ('seconds' in speed) return;
+    change({ speed: { seconds: nearest(SPEED_SECONDS, (speed.beats * 60) / tempo) } });
   });
   const secondsBox = seg('Seconds for one round');
   const secondButtons = SPEED_SECONDS.map((n) => [n, choice(secondsBox, `${n} s`, `One round every ${n} seconds`, () => change({ speed: { seconds: n } }))]);
@@ -1887,8 +1892,8 @@ function effectControls(root, onChange) {
   const count = el('b', 'fxcount');
   fewer.setAttribute('aria-label', 'Fewer waves');
   more.setAttribute('aria-label', 'More waves');
-  fewer.addEventListener('click', () => { if (fx && fx.waves > 1) change({ waves: fx.waves - 1 }); });
-  more.addEventListener('click', () => { if (fx && fx.waves < 16) change({ waves: fx.waves + 1 }); });
+  fewer.addEventListener('click', () => { const from = now(); if (from && from.waves > 1) change({ waves: from.waves - 1 }); });
+  more.addEventListener('click', () => { const from = now(); if (from && from.waves < 16) change({ waves: from.waves + 1 }); });
   const waves = item('Waves', fewer, count, more);
 
   // Size: a fill slider, moved relative to where the finger starts (as the dimmers are).
@@ -1906,9 +1911,9 @@ function effectControls(root, onChange) {
   const sized = () => ({ ...base, size: Math.round(slider.value * 100) / 100 });
   dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
-    if (!fx) return;
+    if (!now()) return;
     slider.dragging = true;
-    base = liveLayer(fx);
+    base = liveLayer(now());
     try { dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     dim.classList.add('ds-dragging');
     startX = ev.clientX;
@@ -2383,17 +2388,25 @@ function addChoice(choices, name, swatch, colour) {
   const key = colourKey(colour);
   const found = choices.find((c) => c.key === key);
   if (found) return found;
-  const choice = { key, name, swatch, colour };
+  const choice = { key, name, swatch, colour, own: false };
   choices.push(choice);
   return choice;
 }
 
-/** An own colour: one the effect has that is in no list of the group's. */
-const addOwnChoice = (choices, colour) => addChoice(choices, 'Own', colour.hex, plainColour(colour));
+/** An own colour: one the effect has that is in no list of the group's. They are numbered Own 1, Own 2 … to tell them apart. */
+function addOwnChoice(choices, colour) {
+  const count = choices.length;
+  const choice = addChoice(choices, `Own ${choices.filter((c) => c.own).length + 1}`, colour.hex, plainColour(colour));
+  if (choices.length > count) choice.own = true;
+  return choice;
+}
+
+/** The group's Off colour: no light, so as a base it is the same as None. */
+const OFF_KEY = '#000000|0|0|0';
 
 /** A new effect starts as a wave of the group's first two colours (not Off), one round every 4 beats. */
 function newEffectLayer(choices) {
-  const colours = choices.filter((c) => colourKey(c.colour) !== '#000000|0|0|0').slice(0, 2).map((c) => ({ ...c.colour }));
+  const colours = choices.filter((c) => c.key !== OFF_KEY).slice(0, 2).map((c) => ({ ...c.colour }));
   if (!colours.length) colours.push({ hex: '#ffffff' });
   return liveLayer({ effect: 'wave', colours, speed: { beats: 4 }, direction: 'ltr', waves: 1, size: 0.5, edge: 'soft', intensity: 1 });
 }
@@ -2402,9 +2415,13 @@ function newEffectLayer(choices) {
 function openEffectEditor(preset) {
   const row = pickerRow();
   if (!row) return;
-  const choices = effectChoices(row.group, preset ? preset.effect : { colours: [] });
-  const effect = preset ? liveLayer(preset.effect) : newEffectLayer(choices);
-  effectEdit = { id: preset?.id ?? null, name: preset?.name ?? '', effect, original: effectSig(effect), choices };
+  const saved = preset ? liveLayer(preset.effect) : null;
+  // Yo-yo and meteor run in their first colour only (a ready-made one may list more): the editor shows that one,
+  // and Save keeps just it, so `original` is the effect as saved.
+  const opened = saved && ONE_COLOUR.has(saved.effect) ? { ...saved, colours: saved.colours.slice(0, 1) } : saved;
+  const choices = effectChoices(row.group, opened ?? { colours: [] });
+  const effect = opened ?? newEffectLayer(choices);
+  effectEdit = { id: preset?.id ?? null, name: preset?.name ?? '', effect, original: effectSig(saved ?? effect), choices };
   pendingEdit = null;
   pendingEditNext = [];
   disarmDelete();
@@ -2467,7 +2484,7 @@ function drawEffectEditor() {
     b.addEventListener('click', () => toggleEffectColour(c));
     box.append(b);
   }
-  box.append(ownChip('feOwn', 'Pick an own colour for the effect'));
+  box.append(ownChip('feOwn', 'Pick an own colour for the effect', !one && effect.colours.length >= 6));
 
   // The base: None, or one of the same colours, at its brightness.
   const baseKey = effect.base ? colourKey(effect.base.colour) : null;
@@ -2477,6 +2494,7 @@ function drawEffectEditor() {
   none.addEventListener('click', () => setEffectBase(null));
   bases.append(none);
   for (const c of choices) {
+    if (c.key === OFF_KEY) continue;
     const b = colourChip(c, c.key === baseKey, 'radio');
     b.addEventListener('click', () => setEffectBase(c.colour));
     bases.append(b);
@@ -2500,12 +2518,14 @@ function colourChip(c, on, role) {
   return b;
 }
 
-/** ＋ Own colour: opens (or closes) the colour strip under its row. */
-function ownChip(stripId, label) {
+/** ＋ Own colour: opens (or closes) the colour strip under its row; `full` when there is no room for another colour. */
+function ownChip(stripId, label, full = false) {
+  if (full) $(stripId).hidden = true;
   const open = !$(stripId).hidden;
   const b = el('button', 'fecol add', '＋ Own colour');
   b.type = 'button';
-  b.setAttribute('aria-label', label);
+  b.disabled = full;
+  b.setAttribute('aria-label', full ? `${label} (an effect has at most six colours)` : label);
   b.setAttribute('aria-expanded', String(open));
   b.classList.toggle('open', open);
   b.addEventListener('click', () => {
@@ -2580,7 +2600,7 @@ const effectEditSettings = effectControls($('feSet'), (effect, how) => {
   if (how !== 'move') drawEffectEditor();
   if (how === 'move' || how === 'end') effectStripDrag(how);
   else effectStripSoon();
-});
+}, () => effectEdit?.effect ?? null);
 
 /** The base colour: a colour (at the brightness it had, or half for a new base), or none. */
 function setEffectBase(colour) {
@@ -2607,26 +2627,35 @@ function setEffectBase(colour) {
   let made = null;
   const own = (stripId, put) => attachStrip($(stripId), $(`${stripId}H`), ownWhiteOnly, (hex, last) => {
     if (!effectEdit || place === null) return;
-    const { choices } = effectEdit;
-    if (made && choices.includes(made)) choices.splice(choices.indexOf(made), 1);
-    const count = choices.length;
-    const choice = addOwnChoice(choices, { hex });
-    made = choices.length > count ? choice : null;
-    put(choice.colour, place);
-    disarmDelete();
+    const { choices, effect } = effectEdit;
+    // A colour the effect already has elsewhere in its list is passed over: the list never holds one twice.
+    const key = colourKey({ hex });
+    const taken = stripId === 'feOwn' && effect.colours.some((c, i) => i !== place && colourKey(c) === key);
+    if (!taken) {
+      if (made && choices.includes(made)) choices.splice(choices.indexOf(made), 1);
+      const count = choices.length;
+      const choice = addOwnChoice(choices, { hex });
+      made = choices.length > count ? choice : null;
+      put(choice.colour, place);
+      disarmDelete();
+    }
     if (last) {
+      if (taken && place >= effect.colours.length) toast('That colour is in the effect already', true);
       place = null;
       closeOwnStrips();
     }
-    drawEffectEditor();
-    effectStripDrag(last ? 'end' : 'move');
+    if (!taken || last) {
+      drawEffectEditor();
+      effectStripDrag(last ? 'end' : 'move');
+    }
   }, () => {
     place = null;
     made = null;
     if (!effectEdit) return;
     const { effect } = effectEdit;
     const at = ONE_COLOUR.has(effect.effect) ? 0 : effect.colours.length;
-    if (stripId === 'feOwn' && at >= 6) return toast('An effect has at most six colours', true);
+    // ＋ Own colour is unavailable then; this only guards a strip left open.
+    if (stripId === 'feOwn' && at >= 6) return;
     place = at;
   });
   own('feOwn', (colour, at) => {
@@ -2666,7 +2695,9 @@ const baseLevel = { dim: $('feBaseLevel'), slab: $('feBaseLevelSlab'), pct: $('f
     if (!baseLevel.dragging) return;
     baseLevel.dragging = false;
     dim.classList.remove('ds-dragging');
-    if (effectEdit) effectStripDrag('end');
+    if (!effectEdit) return;
+    drawEffectEditor();
+    effectStripDrag('end');
   };
   dim.addEventListener('pointerup', end);
   dim.addEventListener('pointercancel', end);
