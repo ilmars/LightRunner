@@ -448,6 +448,8 @@ body.preview #pAdd { display: none; }
 .fxedit .padd-btns { justify-self: end; }
 .padd-btns [hidden] { display: none; }
 .fxedit .fxset { padding-top: 4px; border-top: 0; }
+/* The effect moving along the group's lights, on the stage picture's dark ground; app.js draws it mixed down like a swatch. */
+.fe-strip { display: block; width: 100%; height: 32px; margin: 6px 0 2px; border-radius: var(--ds-r-tile); background: #06080c; box-shadow: var(--ds-shadow-inset); }
 /* The colour editor's Brightness and Fade: the same quiet rows as an effect's settings, under the colour strip. */
 .pedit .pe-set { grid-column: 1 / -1; padding-top: 4px; border-top: 0; }
 .pe-set .fxrow[hidden] { display: none; }

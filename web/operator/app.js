@@ -2081,6 +2081,26 @@ let pendingEditToast = 'Colour saved';
 let pendingEditNext = [];
 /** The effect the editor is open on: { id (null for a new one), name, effect, original, choices }. */
 let effectEdit = null;
+/** The editor's moving strip (see startEffectStrip). */
+const fxStrip = {
+  canvas: $('feStrip'),
+  group: null,
+  // Counts the asks, so an older answer that comes late is dropped.
+  seq: 0,
+  timer: 0,
+  raf: 0,
+  // The last answer: frames (RGB per segment, frame after frame), how many, how fast, and each fixture's segments.
+  frames: null, count: 0, fps: 20, segments: 0, fixtures: [],
+  // The tempo and speed the frames were made at, as "tempo|speed", to ask again when they change.
+  clock: null,
+  start: 0,
+};
+/** A change is shown this long after the last one (a Size drag sends many). */
+const FX_STRIP_WAIT = 250;
+/** The gap between two fixtures, so bars read as bars. */
+const FX_STRIP_GAP = 6;
+/** Mixed down like a swatch, so the strip never lights the operator's face. */
+const FX_STRIP_ALPHA = 0.85;
 
 const editedPreset = () => (colourEdit ? pickerRow()?.group.presets.find((p) => p.id === colourEdit.id) : undefined);
 
@@ -2374,6 +2394,7 @@ function openEffectEditor(preset) {
   $('feDelete').hidden = $('feCopy').hidden = $('feUsed').hidden = !preset;
   $('fxEdit').hidden = false;
   drawEffectEditor();
+  startEffectStrip(picker.group);
   renderEffectEditor();
   for (const b of $('fxGrid').children) b.classList.toggle('editing', preset ? b.dataset.preset === preset.id : b.classList.contains('newfx'));
   $('fxEdit').scrollIntoView({ block: 'nearest' });
@@ -2381,6 +2402,7 @@ function openEffectEditor(preset) {
 
 function closeEffectEditor() {
   effectEdit = null;
+  stopEffectStrip();
   $('feName').blur();
   $('fxEdit').hidden = true;
   for (const b of $('fxGrid').children) b.classList.remove('editing');
@@ -2388,6 +2410,7 @@ function closeEffectEditor() {
 
 /** Keeps "Used in …" true as the show changes; closes the editor if the effect is gone. */
 function renderEffectEditor() {
+  followEffectStripClock();
   if (!effectEdit || effectEdit.id === null) return;
   const p = pickerRow()?.group.presets.find((x) => x.id === effectEdit.id);
   if (!p?.effect) {
@@ -2431,6 +2454,7 @@ function setEffectEdit(next) {
   effectEdit.effect = next;
   disarmDelete();
   drawEffectEditor();
+  effectStripSoon();
 }
 
 /** A tap on a colour adds it at the end of the order, or takes it out. An effect has one to six. */
@@ -2463,6 +2487,7 @@ const effectEditSettings = effectControls($('feSet'), (effect, how) => {
   effectEdit.effect = effect;
   disarmDelete();
   if (how !== 'move') drawEffectEditor();
+  effectStripSoon();
 });
 
 $('feCancel').addEventListener('click', () => closeEditor());
@@ -2521,6 +2546,117 @@ $('feDelete').addEventListener('click', () => {
   pendingEdit = send({ type: 'deleteColour', preset: effectEdit.id });
   disarmDelete();
 });
+
+// ---- The effect editor's strip: the effect as it is being edited, moving along the group's lights ----
+// The server renders the frames with the engine (light safety, the live tempo and speed); the page only plays them.
+
+/** Opens the strip for a group: dark until the first answer, which is asked for at once. */
+function startEffectStrip(group) {
+  stopEffectStrip();
+  fxStrip.group = group;
+  fxStrip.start = performance.now();
+  drawEffectStrip(0);
+  loadEffectStrip();
+  fxStrip.raf = requestAnimationFrame(playEffectStrip);
+}
+
+function stopEffectStrip() {
+  fxStrip.seq++;
+  clearTimeout(fxStrip.timer);
+  fxStrip.timer = 0;
+  cancelAnimationFrame(fxStrip.raf);
+  fxStrip.raf = 0;
+  fxStrip.frames = null;
+  fxStrip.count = 0;
+  fxStrip.clock = null;
+}
+
+/** Shows the edited effect a moment after the last change. */
+function effectStripSoon() {
+  if (!effectEdit) return;
+  clearTimeout(fxStrip.timer);
+  fxStrip.timer = setTimeout(() => {
+    fxStrip.timer = 0;
+    loadEffectStrip();
+  }, FX_STRIP_WAIT);
+}
+
+/** The tempo or speed changed on stage: ask again, so the strip keeps the stage's time. */
+function followEffectStripClock() {
+  if (!effectEdit || !state || fxStrip.clock === null || fxStrip.timer) return;
+  const clock = `${state.tempo}|${state.speed}`;
+  if (clock === fxStrip.clock) return;
+  fxStrip.clock = clock;
+  effectStripSoon();
+}
+
+async function loadEffectStrip() {
+  if (!effectEdit || !fxStrip.group) return;
+  const seq = ++fxStrip.seq;
+  let answer = null;
+  try {
+    const res = await fetch('/api/effect-preview', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ group: fxStrip.group, effect: liveLayer(effectEdit.effect) }),
+    });
+    if (res.ok) answer = await res.json();
+  } catch {
+    // Offline: the strip keeps what it shows until the next change.
+  }
+  if (seq !== fxStrip.seq || !effectEdit || !answer) return;
+  fxStrip.frames = Uint8Array.from(atob(answer.frames), (c) => c.charCodeAt(0));
+  fxStrip.count = answer.count;
+  fxStrip.fps = answer.fps;
+  fxStrip.segments = answer.segments;
+  fxStrip.fixtures = answer.fixtures;
+  fxStrip.clock = `${answer.tempo}|${answer.speed}`;
+}
+
+function playEffectStrip(now) {
+  if (!effectEdit) return;
+  const frame = fxStrip.count ? Math.floor(((now - fxStrip.start) / 1000) * fxStrip.fps) % fxStrip.count : 0;
+  drawEffectStrip(frame);
+  fxStrip.raf = requestAnimationFrame(playEffectStrip);
+}
+
+/** One frame: a rounded cell run per fixture, one cell per segment, whites drawn as the stage picture draws them. */
+function drawEffectStrip(frame) {
+  const c = fxStrip.canvas;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (!w || !h) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+    c.width = Math.round(w * dpr);
+    c.height = Math.round(h * dpr);
+  }
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const { frames, segments, fixtures } = fxStrip;
+  if (!frames || !segments) return;
+  const pad = 5;
+  const gaps = FX_STRIP_GAP * Math.max(0, fixtures.length - 1);
+  const cellW = (w - 2 * pad - gaps) / segments, cellH = h - 2 * pad;
+  if (cellW <= 0 || cellH <= 0) return;
+  const base = frame * segments * 3;
+  g.globalAlpha = FX_STRIP_ALPHA;
+  let k = 0, x = pad;
+  for (const cells of fixtures) {
+    g.save();
+    g.beginPath();
+    g.roundRect(x, pad, cells * cellW, cellH, 4);
+    g.clip();
+    for (let s = 0; s < cells; s++, k++) {
+      const [R, G, B] = shownRgb(frames[base + k * 3] ?? 0, frames[base + k * 3 + 1] ?? 0, frames[base + k * 3 + 2] ?? 0);
+      g.fillStyle = `rgb(${R},${G},${B})`;
+      g.fillRect(x + s * cellW, pad, cellW + 0.5, cellH);
+    }
+    g.restore();
+    x += cells * cellW + FX_STRIP_GAP;
+  }
+  g.globalAlpha = 1;
+}
 
 // ---- Quick looks: tabs and grid ----
 
