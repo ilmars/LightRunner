@@ -527,7 +527,7 @@ test('show edits are open to operators without the PIN', () => withApp(async (ap
   assert.equal((await api(app, 'GET', '/api/settings')).status, 401);
 }));
 
-const presetsOf = (layout: any, group: string) => layout.groups.find((g: any) => g.id === group).presets as { id: string; name: string; swatch: string }[];
+const presetsOf = (layout: any, group: string) => layout.groups.find((g: any) => g.id === group).presets as { id: string; name: string; swatch: string; light?: { hex: string; white: number; amber: number; uv: number } }[];
 const savedPresets = (dir: string) => parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).presets;
 
 test('Add to colours lists a live colour, the group adopts it, and Undo takes it back', () => withApp(async (app, dir) => {
@@ -553,6 +553,27 @@ test('Add to colours lists a live colour, the group adopts it, and Undo takes it
   await waitFor(() => t.state()?.groups['back-wall'].preset === 'live:back-wall:#12ab34', 2000, 'the group to carry on as the live colour');
   // Saving still works afterwards: no group names a preset that is gone.
   assert.equal(await t.send({ type: 'saveItem', id: song }), null);
+}));
+
+test("Add to colours keeps an Any colour pick's white, amber and UV, and the group then runs the new colour", () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  assert.equal(await t.send({ type: 'groupColour', group: 'back-wall', colour: '#ff8800', white: 0.35, amber: 1, fade: 0 }), null);
+  await waitFor(() => t.state()?.groups['back-wall'].preset === 'live:back-wall:#ff8800:w35:a100', 2000, 'the live colour to run');
+  const live = t.state().groups['back-wall'].live;
+  assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: live.colour, name: 'Warm glow', allGroups: false, white: live.white, amber: live.amber, uv: live.uv }), null);
+  const added = presetsOf(t.layout(), 'back-wall').find((p) => p.name === 'Warm glow')!;
+  assert.ok(added, 'the layout lists it');
+  assert.deepEqual(added.light, { hex: '#ff8800', white: 0.35, amber: 1, uv: 0 });
+  // Not "Custom" any more: the group runs the new colour under its own id.
+  await waitFor(() => t.state()?.groups['back-wall'].preset === added.id, 2000, 'the group to run the new preset');
+  assert.equal(t.state().groups['back-wall'].live, null);
+  const saved = savedPresets(dir).find((p) => p.id === added.id)!;
+  assert.deepEqual(saved.layers, [{ kind: 'static', colour: { hex: '#ff8800', white: 0.35, amber: 1 }, intensity: 1 }]);
+  // Undo: the group carries on as the same live colour, extras and all.
+  assert.equal(await t.send({ type: 'undo' }), null);
+  await waitFor(() => t.state()?.groups['back-wall'].preset === 'live:back-wall:#ff8800:w35:a100', 2000, 'the live colour again');
+  assert.match((await t.send({ type: 'addColour', group: 'back-wall', colour: '#ff8800', name: 'x', allGroups: false, amber: 2 }))!, /^invalid command/);
 }));
 
 test('Add to colours: names, every group, duplicates, Blackout and the PIN', () => withApp(async (app, dir) => {

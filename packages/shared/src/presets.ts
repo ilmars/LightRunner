@@ -25,6 +25,14 @@ export interface AddColour {
   name: string;
   /** Also add it to every other group of the same kind (colour groups, or white-only groups). */
   allGroups: boolean;
+  /**
+   * White, amber and UV levels 0..1 (missing is 0), kept to whole percent as an Any colour pick
+   * keeps them. A group whose fixtures lack a channel shows it as the engine shows any colour
+   * with it: white and amber made from red, green and blue, UV left out.
+   */
+  white?: number;
+  amber?: number;
+  uv?: number;
 }
 
 /** The light (hex, white, amber, UV, intensity) a preset's only layer makes, palette colours looked up; null for anything else (an effect, say). */
@@ -64,8 +72,18 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
     ? out.groups.filter((g) => g.id === input.group || (shown.includes(g.id) && groupIsWhiteOnly(out, g.id) === whiteOnly)).map((g) => g.id)
     : [input.group];
 
-  const layer: StaticLayer = { kind: 'static', colour: { hex: colour }, intensity: 1 };
-  const wanted = JSON.stringify([colour, 0, 0, 0, 1]);
+  const extras: { white?: number; amber?: number; uv?: number } = {};
+  for (const k of ['white', 'amber', 'uv'] as const) {
+    const v = input[k];
+    if (v === undefined) continue;
+    if (!(v >= 0 && v <= 1)) throw new Error(`the ${k === 'uv' ? 'UV' : k} level is between 0 and 100 %`);
+    const level = Math.round(v * 100) / 100;
+    if (level > 0) extras[k] = level;
+  }
+  const layer: StaticLayer = { kind: 'static', colour: { hex: colour, ...extras }, intensity: 1 };
+  const wanted = JSON.stringify([colour, extras.white ?? 0, extras.amber ?? 0, extras.uv ?? 0, 1]);
+  // The swatch shows the white, amber and UV in it, as a saved Any colour pick's does.
+  const swatch = Object.keys(extras).length ? displayColour(colour, extras) : colour;
   // One name for the whole set, numbered after the highest "Colour N" in any of the groups.
   const name = input.name.trim() ? cleanName(input.name) : nextName(out.presets.filter((p) => targets.includes(p.group)));
   const ids: string[] = [];
@@ -73,7 +91,7 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
     const own = out.presets.filter((p) => p.group === group);
     if (own.some((p) => !p.custom && plainLight(out, p) === wanted)) continue;
     const id = uniqueId(`${group} ${name}`, out.presets.map((p) => p.id));
-    out.presets.push({ id, name, group, layers: [structuredClone(layer)], fade: 3, swatch: colour });
+    out.presets.push({ id, name, group, layers: [structuredClone(layer)], fade: 3, swatch });
     ids.push(id);
   }
   if (!ids.length) throw new Error(input.allGroups ? 'every group already has that colour' : 'that colour is already in the list');

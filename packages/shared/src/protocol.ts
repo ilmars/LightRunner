@@ -114,7 +114,10 @@ export const Command = z.discriminatedUnion('type', [
   /** Copy a quick look's groups into a running-order item without touching the stage. */
   z.object({ type: z.literal('itemQuickLook'), item: id, look: id }),
   /** Keep an Any colour pick: add it to a group's colour list, or to every group of its kind. */
-  z.object({ type: z.literal('addColour'), group: id, colour: hex, name: z.string(), allGroups: z.boolean() }),
+  z.object({
+    type: z.literal('addColour'), group: id, colour: hex, name: z.string(), allGroups: z.boolean(),
+    white: unit.optional(), amber: unit.optional(), uv: unit.optional(),
+  }),
   /**
    * Change the name, colour, brightness (`level`) and/or fade of a colour in a group's list; `sameName` also changes the
    * same-named ones of other groups. `shared`: a new colour changes the palette entry the colour points to, for every colour that uses it.

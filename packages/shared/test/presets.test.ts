@@ -33,6 +33,25 @@ test('a colour is added to one group as a normal preset', () => {
   parseShow(JSON.parse(JSON.stringify(show))); // still a valid show
 });
 
+test('a colour with white, amber or UV is added with them, kept to whole percent, and the swatch shows them', () => {
+  const before = rig();
+  const { show, ids } = addColour(before, { group: 'key-lights', colour: '#FF8800', name: 'Warm glow', allGroups: false, white: 0.35, amber: 1, uv: 0 });
+  const made = show.presets.find((p) => p.id === ids[0])!;
+  assert.deepEqual(made.layers, [{ kind: 'static', colour: { hex: '#ff8800', white: 0.35, amber: 1 }, intensity: 1 }]);
+  assert.equal(made.swatch, displayColour('#ff8800', { white: 0.35, amber: 1 }));
+  assert.notEqual(made.swatch, '#ff8800');
+  // The same colour again is refused; the plain colour is another one.
+  assert.throws(() => addColour(show, { group: 'key-lights', colour: '#ff8800', name: 'x', allGroups: false, white: 0.351, amber: 1 }), { message: 'that colour is already in the list' });
+  assert.equal(addColour(show, { group: 'key-lights', colour: '#ff8800', name: 'x', allGroups: false }).ids.length, 1);
+  // Levels outside 0..1 are refused.
+  assert.throws(() => addColour(before, { group: 'key-lights', colour: '#ff8800', name: 'x', allGroups: false, amber: 1.5 }), /amber level is between 0 and 100 %/);
+  // Every colour group gets the same light, also one with no amber channel (the engine makes amber from red and green there).
+  const all = addColour(before, { group: 'key-lights', colour: '#ff8800', name: 'Warm glow', allGroups: true, white: 0.35, amber: 1 });
+  assert.deepEqual(all.ids.map((id) => all.show.presets.find((p) => p.id === id)!.group).sort(), [...COLOUR_GROUPS].sort());
+  for (const id of all.ids) assert.deepEqual(all.show.presets.find((p) => p.id === id)!.layers[0], made.layers[0]);
+  parseShow(JSON.parse(JSON.stringify(all.show)));
+});
+
 test('an empty name becomes Colour N with the next free number in the group', () => {
   let s = rig();
   const added: string[] = [];
