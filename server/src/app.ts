@@ -664,6 +664,8 @@ export class App {
       } catch {
         return;
       }
+      // Valid JSON that isn't an object ("null", a number) is ignored, never thrown on.
+      if (!msg || typeof msg !== 'object') return;
       if (msg.type === 'command') {
         let error: string | null;
         try {
