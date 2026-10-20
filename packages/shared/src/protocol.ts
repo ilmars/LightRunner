@@ -17,6 +17,24 @@ export type LiveEffectLayer = z.infer<typeof LiveEffectLayer>;
 
 const bpm = z.number().min(40).max(240);
 
+/** A preset id as the stage names it: a show preset, an Any colour (`live:`), a live effect (`fx:`) or Safe/Blackout's own. */
+const stagePreset = z.string().min(1).max(256);
+
+/**
+ * A whole stage to send at once (applyStage): the fields of RuntimeState it uses. Master, speed,
+ * fade time and Blackout's memory may be there too (a runtime state has them) and are ignored.
+ */
+export const StageState = z.object({
+  look: z.string().min(1).max(64).nullable(),
+  groups: z.record(id, stagePreset.nullable()),
+  levels: z.record(id, unit),
+  tempo: bpm.optional(),
+  /** The live effects `groups` names. */
+  effects: z.record(stagePreset, EffectLayer).optional(),
+  lastLook: id.nullable().optional(),
+});
+export type StageState = z.infer<typeof StageState>;
+
 export const ManualTarget = z.union([
   z.object({ group: id }),
   z.object({ fixture: id }),
@@ -58,6 +76,11 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('undo') }),
   /** Fade time for every look and preset change; null = each look's own fade. */
   z.object({ type: z.literal('fadeTime'), value: z.number().min(0).max(600).nullable() }),
+  /**
+   * Fade the whole stage to this one (Blind's Go), as one Undo step: every light group's preset and level, the tempo
+   * and the current look. Smoke is left alone. `fade` defaults to the operator's fade time, then each look's own.
+   */
+  z.object({ type: z.literal('applyStage'), stage: StageState, fade }),
   // Edits to the show from the operator page. The server handles these itself; the engine never sees them.
   /** Store the stage (where it is going) in a running-order item. */
   z.object({ type: z.literal('saveItem'), id }),

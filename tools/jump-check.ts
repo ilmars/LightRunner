@@ -1,5 +1,5 @@
 // Runs the engine headless through hours of random look, preset, effect, tempo, manual,
-// Safe, Blackout and Any colour changes (Flash is left out: it snaps by design), tapping mid-fade on purpose, and reports the
+// Safe, Blackout, Any colour and Blind Go changes (Flash is left out: it snaps by design), tapping mid-fade on purpose, and reports the
 // largest jump in how bright any segment of any fixture looks (its brightest written colour
 // channel times its intensity) between two frames, beyond what the effects running there move by themselves.
 //
@@ -89,6 +89,15 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
   if (rand() < 0.05) {
     if (rand() < 0.7) return { cmd: { type: 'tempo', bpm: 60 + Math.round(rand() * 140) }, fast: false };
     return { cmd: { type: 'speed', value: 0.5 + rand() * 1.5 }, fast: false };
+  }
+  // Blind's Go: a draft of the stage, changed by a few random commands, sent back as one change.
+  if (rand() < 0.03) {
+    const draft = new Engine(show, 0);
+    draft.adoptClock(engine);
+    draft.restore(engine.runtime(), 0);
+    for (let k = 1 + Math.floor(rand() * 3); k > 0; k--) draft.apply(randomCommand().cmd, 0);
+    const fade = rand() < 0.3 ? 1 + rand() * 5 : undefined;
+    return { cmd: { type: 'applyStage', stage: draft.runtime(), fade }, fast: false };
   }
   const r = rand();
   if (r < 0.35) {
