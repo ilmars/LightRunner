@@ -484,3 +484,26 @@ test('at most six tablets are in Blind at once', () => withApp(async (app) => {
   assert.equal(await seventh.send({ type: 'blindStart' }), null);
   assert.equal(app.drafts, 6);
 }));
+
+test('Update from the stage in Blind stores the draft, not the stage', () => withApp(async (app, dir) => {
+  const t = await onWorship(app);
+  const quick = t.layout().quickLooks[0];
+  const liveWall = t.state().groups['back-wall'].preset;
+  assert.equal(await t.send({ type: 'blindStart' }), null);
+  assert.equal(await t.send({ type: 'draft', cmd: { type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 } }), null);
+  assert.equal(await t.send({ type: 'draft', cmd: { type: 'groupLevel', group: 'audience', value: 0.3 } }), null);
+  await waitFor(() => t.draft()?.groups['back-wall'].preset === 'back-amber', 2000, 'the draft to run amber');
+  assert.notEqual(liveWall, 'back-amber');
+
+  assert.equal(await t.send({ type: 'editQuickLook', look: quick.id, fromStage: true }), null);
+  const entries = savedLook(dir, quick.id)!.groups;
+  assert.equal(entries.find((e) => e.group === 'back-wall')!.preset, 'back-amber');
+  assert.equal(entries.find((e) => e.group === 'audience')!.level, 0.3);
+  // Rename, move and delete are fine in Blind too, and the stage keeps running what it ran.
+  assert.equal(await t.send({ type: 'editQuickLook', look: quick.id, name: 'Draft look' }), null);
+  assert.equal(await t.send({ type: 'moveQuickLook', look: quick.id, to: 3 }), null);
+  assert.equal(await t.send({ type: 'deleteQuickLook', look: quick.id }), null);
+  assert.equal(savedLook(dir, quick.id), undefined);
+  await sleep(150);
+  assert.equal(t.state().groups['back-wall'].preset, liveWall);
+}));

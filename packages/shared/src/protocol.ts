@@ -104,6 +104,18 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('moveItem'), id, to: z.number().int() }),
   /** A new quick look from the chosen groups of the stage. */
   z.object({ type: z.literal('saveQuickLook'), name: z.string(), tab: QuickTab, groups: z.array(id).min(1).max(64) }),
+  /**
+   * Change a quick look: its name, its tab, the groups it sets (a group left out is dropped; a new one needs `fromStage`),
+   * and/or with `fromStage` replace what it gives its groups with the stage as it is going (the draft in Blind).
+   */
+  z.object({
+    type: z.literal('editQuickLook'), look: id, name: z.string().optional(), tab: QuickTab.optional(),
+    groups: z.array(id).min(1).max(64).optional(), fromStage: z.boolean().optional(),
+  }),
+  /** Remove a quick look (and its look, unless the running order uses it). */
+  z.object({ type: z.literal('deleteQuickLook'), look: id }),
+  /** Move a quick look to place `to` (0 is first) among those on its tab. */
+  z.object({ type: z.literal('moveQuickLook'), look: id, to: z.number().int() }),
   /** Change one group of a running-order item (a preset, an Any colour or an effect, and/or a level) without touching the stage. */
   z.object({
     type: z.literal('itemGroup'), item: id, group: id, preset: id.optional(), colour: hex.optional(),
@@ -145,7 +157,7 @@ export const Command = z.discriminatedUnion('type', [
 export type Command = z.infer<typeof Command>;
 
 const SHOW_EDITS = [
-  'saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'itemGroup', 'itemTempo', 'itemQuickLook',
+  'saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemQuickLook',
   'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect',
 ] as const;
 /** Commands that change the show rather than the stage. */
