@@ -16,7 +16,7 @@ import {
   BUILT_IN_PROFILES, Command, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
   applyQuickLookToItem, isBlindCommand, isEffectPreset, isShowEdit, moveItem, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,
   type OflFixture, type Pick, type Scope,
-  BLACKOUT, type BlindCommand, type LiveState, type RuntimeState, type Show, type ShowEdit, type StageCommand,
+  BLACKOUT, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type RuntimeState, type Show, type ShowEdit, type StageCommand,
 } from '../../packages/shared/src/index.ts';
 import { settledVisual, type StageClock } from '../../packages/engine/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
@@ -44,6 +44,8 @@ export interface AppOptions {
   log?: (msg: string) => void;
   /** How often each tablet is checked (ms); one that misses two checks is dropped. Tests make it short. */
   heartbeatMs?: number;
+  /** How long a Flash held by a device (APC, OSC, HTTP) may last before it is put out (ms); 15 s. Tests make it short. */
+  deviceFlashMs?: number;
 }
 
 export type Role = 'operator' | 'programmer';
@@ -61,8 +63,15 @@ const MIME: Record<string, string> = {
 
 /** Steps the Undo list keeps, as the engine does. */
 const UNDO_KEPT = 20;
+/** A Flash a device holds this long (ms) is put out, in case its "off" never comes. */
+const DEVICE_FLASH_MS = 15000;
 /** Preview tempo edits of one song this close together (ms) are one Undo step. */
 const TEMPO_RUN_MS = 3000;
+
+/** A Master step this soon (ms) after another carries on from it instead of from the state. */
+const DEVICE_MASTER_MS = 300;
+/** The key of a device Flash's time limit. */
+const flashKey = (source: string, group: string) => JSON.stringify([source, group]);
 
 class HttpError extends Error {
   readonly status: number;
@@ -104,6 +113,12 @@ export class App {
   private operatorBackedUp = false;
   /** Groups each tablet is holding a Flash on, so they go out if it disconnects. */
   private readonly flashes = new Map<WebSocket, Set<string>>();
+  /** Groups each device source ('http', 'osc', 'apc') is holding a Flash on, so they go out when it goes away. */
+  private readonly deviceFlashes = new Map<string, Set<string>>();
+  /** The last Master a device sent, for steps pressed faster than the state arrives. */
+  private deviceMaster: { value: number; at: number } | null = null;
+  /** The time limit on each device Flash, by source and group. */
+  private readonly deviceFlashTimers = new Map<string, NodeJS.Timeout>();
   /** Checks each tablet missed in a row; reset when it answers. */
   private readonly missedPongs = new Map<WebSocket, number>();
   private heartbeat: NodeJS.Timeout | null = null;
@@ -197,6 +212,9 @@ export class App {
     this.blindTurn.clear();
     this.blindTimerFits();
     for (const t of this.identifyTimers.values()) clearTimeout(t);
+    for (const t of this.deviceFlashTimers.values()) clearTimeout(t);
+    this.deviceFlashTimers.clear();
+    this.deviceFlashes.clear();
     for (const ws of this.wss?.clients ?? []) ws.terminate();
     this.wss?.close();
     await new Promise<void>((resolve) => (this.server ? this.server.close(() => resolve()) : resolve()));
@@ -639,12 +657,8 @@ export class App {
     this.flashes.set(ws, held);
     let closed = false;
     // A tablet that drops off (closed, asleep, out of Wi-Fi) must not leave its Flash on.
-    // Groups another tablet is still holding stay on.
-    const release = (groups: Iterable<string>) => {
-      const others = [...this.flashes.values()];
-      const free = [...groups].filter((g) => !others.some((set) => set.has(g)));
-      if (free.length && !this.stopping) void this.run({ type: 'flash', groups: free, on: false }, 'operator');
-    };
+    // Groups another tablet or a device is still holding stay on.
+    const release = (groups: Iterable<string>) => this.releaseFlash(groups);
     this.missedPongs.set(ws, 0);
     ws.on('pong', () => this.missedPongs.set(ws, 0));
     ws.on('close', () => {
@@ -694,6 +708,123 @@ export class App {
         if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'result', ref: msg.ref ?? null, error }));
       }
     });
+  }
+
+  /** Put out the Flash on these groups, except those a tablet or a device still holds. */
+  private releaseFlash(groups: Iterable<string>): void {
+    const free = this.freeOfFlash(groups);
+    if (free.length && !this.stopping) void this.run({ type: 'flash', groups: free, on: false }, 'operator');
+  }
+
+  /** The groups no tablet and no device is holding a Flash on. */
+  private freeOfFlash(groups: Iterable<string>): string[] {
+    const holders = [...this.flashes.values(), ...this.deviceFlashes.values()];
+    return [...groups].filter((g) => !holders.some((set) => set.has(g)));
+  }
+
+  // ---- Devices (APC mini, OSC, HTTP for Companion) ----
+
+  /**
+   * Run what a device asked for as the operator would, against the live stage. `source` names the device
+   * ('http', 'osc', 'apc'): a Flash it holds is put out when `releaseDevice(source)` is called, and after 15 s.
+   * Returns a plain-words reason when it can't be done, else null.
+   */
+  async device(action: DeviceAction, source: string): Promise<string | null> {
+    if (!this.layout || !this.latestState) return 'Light Runner is still starting.';
+    // Master up and down pressed faster than the state arrives step from the last Master a device sent.
+    const now = Date.now();
+    const recent = this.deviceMaster && now - this.deviceMaster.at < DEVICE_MASTER_MS ? this.deviceMaster.value : null;
+    const state = recent === null ? this.latestState : { ...this.latestState, master: recent };
+    const cmd = commandFor(action, this.layout, state);
+    if ('error' in cmd) return cmd.error;
+    if (cmd.type === 'master') this.deviceMaster = { value: cmd.value, at: now };
+    if (cmd.type === 'flash' && !cmd.on) {
+      // Letting go puts out only the groups no tablet or other device still holds.
+      this.holdDeviceFlash(source, cmd.groups, false);
+      const free = this.freeOfFlash(cmd.groups);
+      return free.length ? this.command({ ...cmd, groups: free }, 'operator') : null;
+    }
+    const error = await this.command(cmd, 'operator');
+    if (!error && cmd.type === 'flash') this.holdDeviceFlash(source, cmd.groups, true);
+    return error;
+  }
+
+  /** A device went away (unplugged, port closed): its held Flash goes out. */
+  releaseDevice(source: string): void {
+    const held = this.deviceFlashes.get(source);
+    this.deviceFlashes.delete(source);
+    for (const g of held ?? []) this.clearFlashTimer(source, g);
+    if (held?.size) this.releaseFlash(held);
+  }
+
+  private holdDeviceFlash(source: string, groups: string[], on: boolean): void {
+    let held = this.deviceFlashes.get(source);
+    if (!held) this.deviceFlashes.set(source, (held = new Set()));
+    // The engine leaves smoke out of a Flash of several groups (only a Puff runs it), so it isn't held then.
+    const several = groups.length > 1;
+    for (const g of groups) {
+      if (on && several && this.isSmokeGroup(g)) continue;
+      if (!on) {
+        held.delete(g);
+        this.clearFlashTimer(source, g);
+      } else if (!held.has(g)) {
+        held.add(g);
+        const timer = setTimeout(() => {
+          this.deviceFlashTimers.delete(flashKey(source, g));
+          this.deviceFlashes.get(source)?.delete(g);
+          this.releaseFlash([g]);
+        }, this.opts.deviceFlashMs ?? DEVICE_FLASH_MS);
+        timer.unref();
+        this.deviceFlashTimers.set(flashKey(source, g), timer);
+      }
+    }
+  }
+
+  private clearFlashTimer(source: string, group: string): void {
+    const key = flashKey(source, group);
+    clearTimeout(this.deviceFlashTimers.get(key));
+    this.deviceFlashTimers.delete(key);
+  }
+
+  /** What Companion polls: the stage in a flat shape for its variables. */
+  private companion(): unknown {
+    const layout = this.layout;
+    const state = this.latestState;
+    if (!layout || !state) throw new HttpError(503, 'Light Runner is still starting.');
+    const order = layout.runningOrder;
+    const nameOf = (id: string | null) => {
+      if (id === null) return '';
+      if (id === 'blackout') return 'Blackout';
+      if (id === 'safe') return order.find((i) => i.id === layout.basicLights)?.name ?? 'Basic lights';
+      return order.find((i) => i.id === id)?.name ?? layout.looks.find((l) => l.id === id)?.name ?? '';
+    };
+    const next = nextItemId(layout, state);
+    const onStage = stageIndexOf(layout, state);
+    const blackedOut = state.look === BLACKOUT;
+    const colourName = (group: OperatorLayout['groups'][number], preset: string | null | undefined) => {
+      if (preset === null || preset === undefined || preset === '__blackout') return 'Off';
+      if (preset === '__safe') return 'Basic light';
+      return group.presets.find((p) => p.id === preset)?.name ?? 'Custom';
+    };
+    return {
+      look: state.look,
+      lookName: nameOf(state.look),
+      next,
+      nextName: nameOf(next),
+      changed: state.lookChanged,
+      blackout: blackedOut,
+      // Flash does nothing during Blackout, so it isn't reported then (the iPad does the same).
+      flashing: !blackedOut && state.flashing.length > 0,
+      master: Math.round(state.master * 100),
+      tempo: state.tempo,
+      groups: lightGroups(layout).map((g, k) => ({
+        n: k + 1,
+        name: g.name,
+        colour: colourName(g, state.groups[g.id]?.preset),
+        level: Math.round((state.groups[g.id]?.level ?? 0) * 100),
+      })),
+      items: order.map((item, k) => ({ n: k + 1, name: item.name, onStage: k === onStage })),
+    };
   }
 
   private isSmokeGroup(id: string): boolean {
@@ -1124,8 +1255,30 @@ export class App {
       return n / 100;
     };
 
+    // What a device's button does: through `device`, so positions, Next and Flash work as on any device.
+    const device = async (action: DeviceAction) => {
+      const error = await this.device(action, 'http');
+      if (error) throw new HttpError(400, error);
+      json(res, 200, { ok: true });
+    };
+    /** A whole number in the address (a position), or the plain message. */
+    const position = (value: string, message: string) => {
+      if (!/^\d{1,6}$/.test(value)) throw new HttpError(400, message);
+      return Number(value);
+    };
+    /** Flash's group: `all`, a position, or a light group's id. */
+    const flashGroup = (value: string): number | 'all' => {
+      if (value === 'all') return 'all';
+      if (/^\d{1,6}$/.test(value)) return Number(value);
+      const k = this.layout ? lightGroups(this.layout).findIndex((g) => g.id === value) : -1;
+      if (k < 0) throw new HttpError(400, `There is no group ${value}.`);
+      return k + 1;
+    };
+
     let cmd: unknown;
     switch (route) {
+      case 'GET /companion':
+        return json(res, 200, this.companion());
       case 'GET /state':
         return json(res, 200, this.latestState);
       case 'GET /looks':
@@ -1151,14 +1304,29 @@ export class App {
         break;
       }
       case 'POST /group/:/release': cmd = { type: 'release', target: { group: parts[1] } }; break;
-      case 'POST /group/:/level/:': cmd = { type: 'groupLevel', group: parts[1], value: percent(parts[3], 0, 100) }; break;
+      case 'POST /group/:/level/:': {
+        const value = percent(parts[3], 0, 100);
+        // A number is a position among the light groups; anything else is a group id.
+        if (/^\d+$/.test(parts[1])) return device({ kind: 'groupLevel', group: Number(parts[1]), value });
+        cmd = { type: 'groupLevel', group: parts[1], value };
+        break;
+      }
+      case 'POST /group/:/colour/:':
+        return device({ kind: 'groupColour', group: position(parts[1], `There is no group ${parts[1]}.`), colour: position(parts[3], `Group ${parts[1]} has no colour ${parts[3]}.`) });
+      case 'POST /item/:': return device({ kind: 'item', n: position(parts[1], `There is no song ${parts[1]}.`) });
+      case 'POST /next': return device({ kind: 'next' });
+      case 'POST /flash/:/on': return device({ kind: 'flash', group: flashGroup(parts[1]), on: true });
+      case 'POST /flash/:/off': return device({ kind: 'flash', group: flashGroup(parts[1]), on: false });
       case 'POST /release-all': cmd = { type: 'releaseAll' }; break;
       case 'POST /back-to-look': cmd = { type: 'backToLook' }; break;
       case 'POST /safe': cmd = { type: 'safe' }; break;
       case 'POST /blackout': cmd = { type: 'blackout' }; break;
       case 'POST /undo': cmd = { type: 'undo' }; break;
       case 'POST /fade/:': cmd = { type: 'fadeTime', value: parts[1] === 'auto' ? null : Number(parts[1]) }; break;
-      case 'POST /master/:': cmd = { type: 'master', value: percent(parts[1], 0, 100) }; break;
+      case 'POST /master/:':
+        if (parts[1] === 'up' || parts[1] === 'down') return device({ kind: 'masterStep', by: parts[1] === 'up' ? 0.1 : -0.1 });
+        cmd = { type: 'master', value: percent(parts[1], 0, 100) };
+        break;
       case 'POST /speed/:': cmd = { type: 'speed', value: percent(parts[1], 50, 200) }; break;
       default:
         throw new HttpError(404, `no such endpoint: ${req.method} ${url.pathname}`);
@@ -1195,8 +1363,8 @@ function slugKey(text: string): string {
 /** Which path segments are parameters in the API's URL patterns. */
 function isParam(parts: string[], i: number): boolean {
   const [head] = parts;
-  if (head === 'look' || head === 'looks' || head === 'master' || head === 'speed' || head === 'fade') return i === 1;
-  if (head === 'group') return i === 1 || (i === 3 && (parts[2] === 'preset' || parts[2] === 'level'));
+  if (head === 'look' || head === 'looks' || head === 'master' || head === 'speed' || head === 'fade' || head === 'item' || head === 'flash') return i === 1;
+  if (head === 'group') return i === 1 || (i === 3 && (parts[2] === 'preset' || parts[2] === 'level' || parts[2] === 'colour'));
   return false;
 }
 
