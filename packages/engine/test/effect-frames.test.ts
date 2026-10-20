@@ -115,6 +115,27 @@ test('an effect light safety slows matches the engine running it at the same mom
   }
 });
 
+test('the strip shows a base colour under the animation, as the engine lights it', () => {
+  const effect = fx({ effect: 'chase', colours: [{ hex: '#ff0000' }], edge: 'hard', base: { colour: { hex: '#0000ff' }, level: 0.5 } });
+  const r = frames(barsShow(), effect);
+  const plain = frames(barsShow(), fx({ effect: 'chase', colours: [{ hex: '#ff0000' }], edge: 'hard' }));
+  let base = 0, lit = 0;
+  for (let k = 0; k < 16; k++) {
+    const [pr, , pb] = cell(plain, 0, k), [rr, rg, rb] = cell(r, 0, k);
+    if (pr === 0 && pb === 0) {
+      // Dark in the chase: blue at half, never dark.
+      assert.ok(rb > 0 && rr === 0 && rg === 0, `segment ${k}: ${cell(r, 0, k)}`);
+      base++;
+    } else {
+      assert.deepEqual(cell(r, 0, k), cell(plain, 0, k), `segment ${k}`);
+      lit++;
+    }
+  }
+  assert.ok(base > 0 && lit > 0);
+  const f = 9;
+  assertMatchesEngine(r, f, engineAt(barsShow(), effect, 120, f / r.fps).visual, true);
+});
+
 test('the stage tempo and the speed dial set the rate', () => {
   assert.equal(frames(barsShow(), fx(), 60).rate, 0.25);
   assert.equal(frames(barsShow(), fx(), 120, 2).rate, 1);

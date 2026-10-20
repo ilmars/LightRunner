@@ -141,6 +141,40 @@ test('the runtime state keeps the live effects the stage names, also through Bla
   assert.notEqual(h.liveState(2, 'off').groups[G]!.preset, id);
 });
 
+test('a live effect over a base colour is its own live effect, shown in the state and kept through a restart', () => {
+  const base = { colour: { hex: '#ffb46b', white: 0.3 }, level: 0.5 };
+  const e = new Engine(demoShow());
+  e.apply({ type: 'look', id: 'worship', fade: 0 }, 0);
+  e.apply(send(wave(), { fade: 0 }), 1);
+  const plain = e.liveState(1, 'off').groups[G]!.preset;
+  e.apply(send(wave({ base }), { fade: 0 }), 2);
+  const over = e.liveState(2, 'off').groups[G]!;
+  assert.notEqual(over.preset, plain, 'the base makes it another effect');
+  assert.deepEqual(over.effect, wave({ base }));
+  e.apply(send(wave({ base: { ...base, level: 0.2 } }), { fade: 0 }), 3);
+  assert.notEqual(e.liveState(3, 'off').groups[G]!.preset, over.preset, 'so does its level');
+  e.apply(send(wave({ base }), { fade: 0 }), 4);
+  run(e, 4, 6);
+  const f = new Engine(demoShow());
+  f.restore(JSON.parse(JSON.stringify(e.runtime())), 0);
+  run(f, 0, 0);
+  assert.deepEqual(f.liveState(0, 'off').groups[G]!.effect, wave({ base }));
+  // Over-the-wire colours are plain: a palette base is refused.
+  assert.equal(LiveEffectLayer.safeParse({ ...wave(), base: { colour: { palette: 'x', index: 0 }, level: 0.5 } }).success, false);
+});
+
+test('fading between an effect over a base and a plain colour or another effect never jumps', () => {
+  const e = new Engine(demoShow());
+  e.apply({ type: 'look', id: 'worship', fade: 0 }, 0);
+  e.apply(send(wave({ effect: 'chase', edge: 'hard', base: { colour: { hex: '#0000ff' }, level: 0.6 } }), { fade: 3 }), 0);
+  e.frame(0);
+  assert.ok(beyondOwnMotion(e, FRAME, 4).worst <= 0.05, 'into the base effect');
+  e.apply(send(wave({ effect: 'sparkle', colours: [{ hex: '#ff0000' }, { hex: '#00ff00' }] }), { fade: 2 }), 4 + FRAME);
+  assert.ok(beyondOwnMotion(e, 4 + FRAME, 7).worst <= 0.05, 'to another effect');
+  e.apply({ type: 'look', id: 'walk-in', fade: 2 }, 7 + FRAME);
+  assert.ok(beyondOwnMotion(e, 7 + FRAME, 10).worst <= 0.05, 'to a look');
+});
+
 test('a restart while a live effect runs shows the same effect', () => {
   const e = new Engine(demoShow());
   e.apply({ type: 'look', id: 'worship', fade: 0 }, 0);

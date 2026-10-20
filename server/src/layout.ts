@@ -1,6 +1,6 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { SAFE_LIGHT, canRecolour, findProfile, groupIsWhiteOnly, groupSegments, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, canRecolour, findProfile, groupIsWhiteOnly, groupSegments, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect } from '../../packages/shared/src/index.ts';
 import type { ChannelRole, GroupKind, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 
@@ -200,11 +200,11 @@ function sharedReach(show: Show, preset: Preset): OperatorPreset['shared'] {
   return { groups: new Set(users.map((u) => u.group)).size, usedBy };
 }
 
-/** A preset's effect (its top layer), with its colours looked up; null for a plain colour. */
+/** A preset's effect (its top layer), with its colours (and its base's) looked up; null for a plain colour. */
 function presetEffect(preset: Preset, palettes: ReadonlyMap<string, Palette>): LiveEffectLayer | null {
   const top = preset.layers[preset.layers.length - 1];
   if (!top || top.kind !== 'effect') return null;
-  return { ...structuredClone(top), colours: top.colours.map((c) => ({ ...resolveColour(c, palettes) })) };
+  return resolveEffect(top, palettes);
 }
 
 function liveLight(c: PaletteColour, k: number): LiveLight {

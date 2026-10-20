@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   addColour, addEffect, canRecolour, checkReferences, deleteColour, displayColour, editColour, editEffect, EffectLayer, ensureEffects, ensureRunningOrder, groupIsWhiteOnly,
-  groupSegments, isEffectPreset, isOff, listNames, parseShow, presetUsers, resolveColour,
+  effectKey, groupSegments, isEffectPreset, isOff, listNames, parseShow, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect,
   type Show, type StaticLayer,
 } from '../src/index.ts';
 
@@ -461,6 +461,36 @@ test('an effect\'s settings are edited in place; a colour is not an effect', () 
   const hidden = structuredClone(show);
   preset(hidden, id).custom = true;
   assert.throws(() => editEffect(hidden, { preset: id, effect: hard }), { message: "that effect can't be edited" });
+});
+
+test('an effect keeps its base colour through add, edit and the show file', () => {
+  const s = ready();
+  const base = { colour: { hex: '#ffb46b', white: 0.4 }, level: 0.5 };
+  const { show, id } = addEffect(s, { group: 'background', name: 'Over warm', effect: fx({ effect: 'chase', base }) });
+  assert.deepEqual((preset(show, id).layers[0] as EffectLayer).base, base);
+  assert.equal(preset(show, id).swatch, '#ff0000', 'the swatch is still the first colour');
+  // A new base level alone is a change; taking the base away is too.
+  const dimmer = editEffect(show, { preset: id, effect: fx({ effect: 'chase', base: { ...base, level: 0.2 } }) });
+  assert.equal((preset(dimmer, id).layers[0] as EffectLayer).base!.level, 0.2);
+  const none = editEffect(dimmer, { preset: id, effect: fx({ effect: 'chase' }) });
+  assert.equal((preset(none, id).layers[0] as EffectLayer).base, undefined);
+  assert.throws(() => editEffect(show, { preset: id, effect: fx({ effect: 'chase', base }) }), { message: 'nothing changed' });
+  assert.deepEqual(parseShow(JSON.parse(JSON.stringify(show))).presets.find((p) => p.id === id), preset(show, id));
+  // Two effects that differ only in their base don't run the same.
+  const keys = new Set([fx(), fx({ base }), fx({ base: { ...base, level: 0.2 } }), fx({ base: { ...base, colour: { hex: '#FFB46B', white: 0.4 } } })].map(effectKey));
+  assert.equal(keys.size, 3, 'a hex in any case is the same colour');
+});
+
+test("an effect's base can be a shared palette colour: it counts as using it, and a missing one is a broken reference", () => {
+  const s = rig();
+  const layer = fx({ base: { colour: { palette: 'lightkey', index: 7 }, level: 0.3 } });
+  s.presets.push({ id: 'bg-over', name: 'Over', group: 'background', fade: 3, layers: [layer] });
+  const show = parseShow(s);
+  assert.ok(presetsUsingPaletteEntry(show, 'lightkey', 7).some((p) => p.id === 'bg-over'));
+  const palettes = new Map(show.palettes.map((p) => [p.id, p]));
+  assert.deepEqual(resolveEffect(layer, palettes).base, { colour: resolveColour({ palette: 'lightkey', index: 7 }, palettes), level: 0.3 });
+  s.presets.at(-1)!.layers = [fx({ base: { colour: { palette: 'nope', index: 0 }, level: 0.3 } })];
+  assert.throws(() => parseShow(s), /unknown palette "nope"/);
 });
 
 test('an effect is renamed and deleted like a colour, but never given a colour there', () => {

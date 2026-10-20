@@ -1156,6 +1156,31 @@ test('the effects list: add, edit, rename and delete over the wire, and the layo
   assert.equal(await t.send({ type: 'itemGroup', item: song, group: 'back-wall', effect: liveWave(), preset: 'back-amber' }), 'pick a colour, a preset or an effect, not more than one');
 }));
 
+test('an effect over a base colour, with its own colours, goes through Save and comes back in the layout as it was', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const base = { colour: { hex: '#ffb46b', white: 0.4 }, level: 0.5 };
+  // An own colour (in no group's list) and a base.
+  const effect = liveWave({ effect: 'chase', colours: [{ hex: '#12ab34' }, { hex: '#a1b2c3' }], base });
+  assert.equal(await t.send({ type: 'addEffect', group: 'back-wall', name: 'Over warm', effect }), null);
+  const added = await waitFor(() => t.layout().groups.find((g: any) => g.id === 'back-wall').presets.find((p: any) => p.name === 'Over warm'), 2000, 'the new effect');
+  assert.deepEqual(added.effect, effect);
+  assert.deepEqual(parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8'))).presets.find((p) => p.id === added.id)!.layers, [effect]);
+  // The base can go again.
+  assert.equal(await t.send({ type: 'editEffect', preset: added.id, effect: { ...effect, base: undefined } }), null);
+  await waitFor(() => t.layout().groups.find((g: any) => g.id === 'back-wall').presets.find((p: any) => p.id === added.id).effect.base === undefined, 2000, 'the edit');
+  // A base that points to a shared colour comes to the page as a plain colour.
+  const show = (await api(app, 'GET', '/api/show')).body;
+  const palette = show.palettes[0];
+  show.presets.push({ id: 'bw-over', name: 'Over', group: 'back-wall', fade: 3, layers: [{ ...liveWave(), base: { colour: { palette: palette.id, index: 0 }, level: 0.25 } }] });
+  assert.equal((await api(app, 'PUT', '/api/show', show)).status, 200);
+  const over = await waitFor(() => t.layout().groups.find((g: any) => g.id === 'back-wall').presets.find((p: any) => p.id === 'bw-over'), 2000, 'the palette effect');
+  assert.deepEqual(over.effect.base, { colour: palette.colours[0], level: 0.25 });
+  // The editor's strip takes a base; a palette base over the wire is refused.
+  assert.equal((await api(app, 'POST', '/api/effect-preview', { group: 'back-wall', effect })).status, 200);
+  assert.equal((await api(app, 'POST', '/api/effect-preview', { group: 'back-wall', effect: { ...effect, base: { colour: { palette: 'x', index: 0 }, level: 0.5 } } })).status, 400);
+}));
+
 test('smoke machines refuse effects', () => withApp(async (app) => {
   const show = (await api(app, 'GET', '/api/show')).body;
   show.groups.find((g: any) => g.id === 'pulpit').kind = 'smoke';

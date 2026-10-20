@@ -121,7 +121,11 @@ export type EffectKind = z.infer<typeof EffectKind>;
 export const EffectSpeed = z.union([z.object({ beats: z.number().min(0.25).max(64) }), z.object({ seconds: z.number().min(0.25).max(600) })]);
 export type EffectSpeed = z.infer<typeof EffectSpeed>;
 
-/** A moving pattern along the group's line of segments, made from a list of colours. */
+/** A colour under an effect's animation: it shows at `level` where the animation is dark. */
+export const EffectBase = z.object({ colour: ColourSpec, level: unit });
+export type EffectBase = z.infer<typeof EffectBase>;
+
+/** A moving pattern along the group's line of segments, made from a list of colours, perhaps over a base colour. */
 export const EffectLayer = z.object({
   kind: z.literal('effect'),
   effect: EffectKind,
@@ -132,6 +136,8 @@ export const EffectLayer = z.object({
   size: unit.default(0.5),
   edge: z.enum(['soft', 'hard']).default('soft'),
   intensity: unit.default(1),
+  /** A colour under the animation (none when missing). */
+  base: EffectBase.optional(),
 });
 export type EffectLayer = z.infer<typeof EffectLayer>;
 
@@ -152,15 +158,33 @@ export type Preset = z.infer<typeof Preset>;
 
 /**
  * A key that is the same for two effect layers exactly when they run the same: every setting,
- * the colours in order (a hex in any case; a palette colour by reference).
+ * the colours in order and the base (a hex in any case; a palette colour by reference).
  */
 export function effectKey(l: EffectLayer): string {
+  const colour = (c: ColourSpec) => ('palette' in c ? [c.palette, c.index] : [c.hex.toLowerCase(), c.white ?? 0, c.amber ?? 0, c.uv ?? 0]);
   return JSON.stringify([
     l.effect,
-    l.colours.map((c) => ('palette' in c ? [c.palette, c.index] : [c.hex.toLowerCase(), c.white ?? 0, c.amber ?? 0, c.uv ?? 0])),
+    l.colours.map(colour),
     'beats' in l.speed ? ['beats', l.speed.beats] : ['seconds', l.speed.seconds],
     l.direction, l.waves, l.size, l.edge, l.intensity,
+    ...(l.base ? [['base', colour(l.base.colour), l.base.level]] : []),
   ]);
+}
+
+/** An effect layer with every colour looked up (its base's too), as plain colours. */
+export function resolveEffect(l: EffectLayer, palettes: ReadonlyMap<string, Palette>): Omit<EffectLayer, 'colours' | 'base'> & { colours: PaletteColour[]; base?: { colour: PaletteColour; level: number } } {
+  const { base, colours, ...rest } = structuredClone(l);
+  return {
+    ...rest,
+    colours: colours.map((c) => ({ ...resolveColour(c, palettes) })),
+    ...(base ? { base: { colour: { ...resolveColour(base.colour, palettes) }, level: base.level } } : {}),
+  };
+}
+
+/** Every colour a layer uses: its colour, or an effect's colours and its base colour. */
+export function layerColours(l: Layer): ColourSpec[] {
+  if (l.kind === 'static') return [l.colour];
+  return l.base ? [...l.colours, l.base.colour] : l.colours;
 }
 
 /** True when a preset runs an effect (it moves), not a plain colour. */
@@ -306,7 +330,7 @@ export function checkReferences(show: Show): string[] {
   for (const p of show.presets) {
     if (!groups.has(p.group)) problems.push(`preset "${p.id}" belongs to unknown group "${p.group}"`);
     for (const layer of p.layers) {
-      for (const c of layer.kind === 'effect' ? layer.colours : [layer.colour]) {
+      for (const c of layerColours(layer)) {
         if (!('palette' in c)) continue;
         const pal = palettes.get(c.palette);
         if (!pal) problems.push(`preset "${p.id}" uses unknown palette "${c.palette}"`);

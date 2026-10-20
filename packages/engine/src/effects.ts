@@ -19,7 +19,7 @@ const SWING_DEPTH = 0.2;
 const MAX_CHANGES = 6;
 /** Sparkle picks new sparks this many times a cycle. */
 const SPARKLE_SLOTS = 8;
-/** Sparkle's base: the first colour at this brightness. */
+/** Sparkle's base when the effect has no base colour: the first colour at this brightness. */
 const SPARKLE_BASE = 0.4;
 /** Samples per cycle when the safe rate is measured from the effect itself. */
 const SAMPLES = 1024;
@@ -41,6 +41,8 @@ export interface CompiledEffect {
   size: number;
   edge: EffectLayer['edge'];
   intensity: number;
+  /** The base colour at its level, under the animation; null for none. */
+  base: Light | null;
   /**
    * The fastest rate (cycles per second) it may run at: 95 % of the rate at which no
    * segment changes brightness by 20 % or more, one way and then the other, more than
@@ -65,8 +67,9 @@ export class SafeRates {
   private used = new Map<string, number>();
 
   rate(fx: CompiledEffect): number {
+    const light = (c: Light) => [c.r, c.g, c.b, c.w, c.a, c.u, c.i];
     const key = JSON.stringify([
-      fx.effect, fx.colours.map((c) => [c.r, c.g, c.b, c.w, c.a, c.u, c.i]), fx.direction, fx.waves, fx.size, fx.edge, fx.intensity,
+      fx.effect, fx.colours.map(light), fx.direction, fx.waves, fx.size, fx.edge, fx.intensity, fx.base && light(fx.base),
     ]);
     let rate = this.used.get(key) ?? this.kept.get(key);
     if (rate === undefined) rate = fastestRate(fx);
@@ -92,6 +95,12 @@ export function compileEffect(layer: EffectLayer, palettes: ReadonlyMap<string, 
     return fromHex(c.hex, c);
   });
   if (!colours.length) colours.push(fromHex('#ffffff'));
+  let base: Light | null = null;
+  if (layer.base) {
+    const c = resolveColour(layer.base.colour, palettes);
+    base = fromHex(c.hex, c);
+    base.i *= layer.base.level;
+  }
   const fx: CompiledEffect = {
     kind: 'effect',
     effect: layer.effect,
@@ -102,6 +111,7 @@ export function compileEffect(layer: EffectLayer, palettes: ReadonlyMap<string, 
     size: layer.size,
     edge: layer.edge,
     intensity: layer.intensity,
+    base,
     maxRate: Infinity,
   };
   fx.maxRate = rates ? rates.rate(fx) : fastestRate(fx);
@@ -142,11 +152,14 @@ export function safeRate(fx: CompiledEffect, cyclesPerSecond: number): number {
  * - Sparkle changes a segment at most once in each of its 8 slots a cycle: on the
  *   slot's edge (hard) or during its crossfade (soft), so 7 changes take at least
  *   6 slots (hard) or 5 (soft).
+ *
+ * A base colour is left out: the bound is the animation's alone. Over a base, a segment's
+ * brightness is the base's plus (1 − base) of the animation's, so every swing is smaller.
  */
 function fastestSafeRate(fx: CompiledEffect): number {
   const levels = fx.colours.map((c) => c.i * fx.intensity);
   const top = Math.max(...levels), bottom = Math.min(...levels);
-  const first = levels[0]!, last = levels[levels.length - 1]!;
+  const first = levels[0]!;
   const deep = (depth: number) => depth >= SWING_DEPTH - 1e-9;
   const same = levels.every((v) => Math.abs(v - first) < 1e-9);
   const n = levels.length;
@@ -161,9 +174,12 @@ function fastestSafeRate(fx: CompiledEffect): number {
     // Chase and fill light each cycle in the next colour: with soft edges a dimmer colour
     // is counted later in its (at most half-cycle) fade, so allow half a cycle for that.
     case 'chase': return deep(top) ? perCycle(2) - (soft && !same ? 0.5 : 0) : Infinity;
-    case 'sparkle':
-      if (!deep(Math.abs(last - SPARKLE_BASE * first))) return Infinity;
+    case 'sparkle': {
+      // Between sparks: the first colour at 40 %, or dark over the effect's base. A spark is any colour.
+      const between = fx.base ? 0 : SPARKLE_BASE * first;
+      if (!deep(Math.max(top, between) - Math.min(bottom, between))) return Infinity;
       return (fx.edge === 'hard' ? MAX_CHANGES : MAX_CHANGES - 1) / SPARKLE_SLOTS;
+    }
     case 'breathe':
       if (same) return deep(fx.size * first) ? perCycle(2) : Infinity;
       return measuredRate(fx, n);
@@ -185,10 +201,10 @@ function measuredRate(fx: CompiledEffect, period: number): number {
   const at = { index: 0, count: 1 };
   const span = Math.round(period * SAMPLES);
   const changes: number[] = [];
-  let lo = renderEffect(probe, fx, at, 0).i, hi = lo, dir = 0;
+  let lo = renderAnimation(probe, fx, at, 0).i, hi = lo, dir = 0;
   // One period to settle, then the changes of the next.
   for (let s = 1; s < 2 * span; s++) {
-    const v = renderEffect(probe, fx, at, s / SAMPLES).i;
+    const v = renderAnimation(probe, fx, at, s / SAMPLES).i;
     let changed = false;
     if (dir !== -1 && hi - v >= SWING_DEPTH) {
       dir = -1;
@@ -271,10 +287,37 @@ const stepB = dark();
 
 /**
  * One segment's light for an effect at `phase` (in cycles; the engine advances
- * it at safeRate()). The segment's place along the line is
- * x = index / (count − 1), mapped by the direction.
+ * it at safeRate()): the animation, over the base colour when there is one. The
+ * segment's place along the line is x = index / (count − 1), mapped by the direction.
  */
 export function renderEffect(out: Light, fx: CompiledEffect, ctx: Pick<LayerContext, 'index' | 'count'>, phase: number): Light {
+  renderAnimation(out, fx, ctx, phase);
+  return fx.base ? over(out, fx.base) : out;
+}
+
+/**
+ * The animation (`out`, at its intensity e) over a base: the base weighted by 1 − e and the
+ * animation's colour by e, as light adds up. Dark animation shows the base, full shows only
+ * the animation, and a soft edge blends between them.
+ */
+function over(out: Light, base: Light): Light {
+  const e = out.i;
+  if (e >= 1) return out;
+  const eb = (1 - e) * base.i;
+  const i = e + eb;
+  if (i <= 1e-9) return out;
+  const r = e * out.r + eb * base.r, g = e * out.g + eb * base.g, b = e * out.b + eb * base.b;
+  const w = e * out.w + eb * base.w, a = e * out.a + eb * base.a, u = e * out.u + eb * base.u;
+  const m = Math.max(r, g, b, w, a, u);
+  if (m > 0) {
+    out.r = r / m; out.g = g / m; out.b = b / m; out.w = w / m; out.a = a / m; out.u = u / m;
+  }
+  out.i = Math.min(1, i);
+  return out;
+}
+
+/** The effect's own moving pattern for one segment, without its base colour. */
+function renderAnimation(out: Light, fx: CompiledEffect, ctx: Pick<LayerContext, 'index' | 'count'>, phase: number): Light {
   const count = ctx.count, index = ctx.index;
   const span = Math.max(1, count - 1);
   const centred = fx.direction === 'centreOut' || fx.direction === 'outsideIn';
@@ -400,10 +443,14 @@ function chaseStep(out: Light, fx: CompiledEffect, xw: number, step: number, ste
   return lit(out, colour, frac(v) * steps < block ? 1 : 0);
 }
 
-/** Sparkle in one slot: a spark (the last colour at full) or the base (the first colour at 40 %). */
+/**
+ * Sparkle in one slot: a spark (a colour from the list at full, picked from the segment and
+ * the slot) or, between sparks, dark over the effect's base colour, else the first colour at 40 %.
+ */
 function sparkleSlot(out: Light, fx: CompiledEffect, index: number, slot: number): Light {
-  if (hash(index, slot) < fx.size) return lit(out, fx.colours[fx.colours.length - 1]!, 1);
-  return lit(out, fx.colours[0]!, SPARKLE_BASE);
+  const n = fx.colours.length;
+  if (hash(index, slot) < fx.size) return lit(out, n === 1 ? fx.colours[0]! : fx.colours[Math.floor(hash(~index, slot) * n)]!, 1);
+  return lit(out, fx.colours[0]!, fx.base ? 0 : SPARKLE_BASE);
 }
 
 /** A number in 0..1 from a segment and a slot, the same every time. */

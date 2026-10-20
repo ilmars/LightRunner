@@ -107,18 +107,185 @@ test('sparkle is the same for the same inputs, and sparks about `size` of the li
   const a = fx({ effect: 'sparkle', colours: [BLUE, RED], size: 0.25 });
   const b = fx({ effect: 'sparkle', colours: [BLUE, RED], size: 0.25 });
   assert.deepEqual(sparkle(a), sparkle(b));
-  // Hard: each segment is the base (blue at 40 %) or a spark (red at full).
+  // Hard: each segment is the base (blue at 40 %) or a spark (blue or red at full).
   const hard = fx({ effect: 'sparkle', colours: [BLUE, RED], size: 0.25, edge: 'hard' });
   let sparks = 0, all = 0;
   for (let s = 0; s < 400; s++) {
     for (let k = 0; k < 32; k++) {
       const l = at(hard, k, 32, (s + 0.5) / 8);
-      if (l.r === 1 && l.i === 1) sparks++;
-      else assert.ok(l.b === 1 && Math.abs(l.i - 0.4) < 1e-12, `segment ${k} slot ${s}: ${JSON.stringify(l)}`);
+      if (l.i === 1) {
+        assert.ok((l.r === 1 && l.b === 0) || (l.b === 1 && l.r === 0), `segment ${k} slot ${s}: ${JSON.stringify(l)}`);
+        sparks++;
+      } else assert.ok(l.b === 1 && l.r === 0 && Math.abs(l.i - 0.4) < 1e-12, `segment ${k} slot ${s}: ${JSON.stringify(l)}`);
       all++;
     }
   }
   assert.ok(sparks / all > 0.2 && sparks / all < 0.3, `sparked ${sparks / all}`);
+});
+
+// ---- Every effect uses all its colours, in the order they play ----
+
+/** The colour a lit light shows, as one letter: R, G, B (or ? for anything else); '.' when dark. */
+function letter(l: Light): string {
+  if (l.i < 1e-9) return '.';
+  if (l.r === 1 && l.g === 0 && l.b === 0) return 'R';
+  if (l.g === 1 && l.r === 0 && l.b === 0) return 'G';
+  if (l.b === 1 && l.r === 0 && l.g === 0) return 'B';
+  return '?';
+}
+
+test('a chase gives neighbouring blocks the colours in turn, and each block keeps its colour as it moves', () => {
+  const colours = [RED, GREEN, BLUE];
+  for (const waves of [1, 2, 4]) {
+    const chase = fx({ effect: 'chase', colours, edge: 'hard', waves, size: 0.5 });
+    for (const phase of [0.02, 0.3, 1.02, 2.5, 7.77]) {
+      const row = Array.from({ length: 32 }, (_, k) => letter(at(chase, k, 32, phase))).join('');
+      // The blocks along the line, in order: each one's colour, then the next block's is the one before it in the list
+      // (the first block along the line is the newest), so going along the line goes back through the list.
+      const blocks = row.split('.').filter((s) => s).map((s) => s[0]!);
+      assert.ok(row.split('.').filter((s) => s).every((s) => new Set(s).size === 1), `waves ${waves} phase ${phase}: ${row}`);
+      for (let b = 1; b < blocks.length; b++) {
+        const here = 'RGB'.indexOf(blocks[b]!), before = 'RGB'.indexOf(blocks[b - 1]!);
+        assert.equal((before - here + 3) % 3, 1, `waves ${waves} phase ${phase}: ${row}`);
+      }
+      if (waves > 1) assert.ok(new Set(blocks).size > 1, `waves ${waves} phase ${phase}: ${row}`);
+    }
+  }
+  // Over the cycles, a one-wave chase goes through every colour: block k is colour k mod 3.
+  const one = fx({ effect: 'chase', colours, edge: 'hard', size: 0.5 });
+  assert.deepEqual([0.1, 1.1, 2.1, 3.1].map((p) => letter(at(one, 0, 32, p))), ['R', 'G', 'B', 'R']);
+});
+
+test('sparkle takes each spark from the colour list, the same every time, over the first colour at 40 %', () => {
+  const sparkle = fx({ effect: 'sparkle', colours: [RED, GREEN, BLUE], size: 0.3, edge: 'hard' });
+  const counts: Record<string, number> = {};
+  for (let s = 0; s < 400; s++) {
+    for (let k = 0; k < 32; k++) {
+      const l = at(sparkle, k, 32, (s + 0.5) / 8);
+      assert.deepEqual(l, at(sparkle, k, 32, (s + 0.5) / 8));
+      const key = l.i === 1 ? letter(l) : Math.abs(l.i - 0.4) < 1e-12 && letter(l) === 'R' ? 'base' : `? ${JSON.stringify(l)}`;
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+  }
+  assert.deepEqual(Object.keys(counts).sort(), ['B', 'G', 'R', 'base']);
+  // Each colour sparks about as often as the others.
+  for (const c of ['R', 'G', 'B']) assert.ok(counts[c]! > 700 && counts[c]! < 1400, `${c}: ${counts[c]}`);
+  // One colour: as before, a full spark of it over itself at 40 %.
+  const one = fx({ effect: 'sparkle', colours: [GREEN], size: 0.3, edge: 'hard' });
+  for (let k = 0; k < 32; k++) {
+    const l = at(one, k, 32, 0.3);
+    assert.equal(letter(l), 'G');
+    assert.ok(l.i === 1 || Math.abs(l.i - 0.4) < 1e-12);
+  }
+});
+
+test('yo-yo and meteor run in their first colour only', () => {
+  for (const effect of ['yoyo', 'meteor'] as const) {
+    for (const edge of ['soft', 'hard'] as const) {
+      const f = fx({ effect, colours: [RED, GREEN], edge, size: 0.3 });
+      for (let p = 0; p < 200; p++) {
+        for (let k = 0; k < 32; k++) assert.ok('.R'.includes(letter(at(f, k, 32, p * 0.037))), `${effect} ${edge} phase ${p * 0.037} segment ${k}`);
+      }
+    }
+  }
+});
+
+// ---- A base colour under the animation ----
+
+const HALF_BLUE = { colour: BLUE, level: 0.5 };
+
+test('a base colour shows at its level where the animation is dark, and the animation shows over it', () => {
+  let dark = 0, full = 0, between = 0;
+  // A hard yo-yo is full or dark; a meteor's tail is in between.
+  for (const effect of ['yoyo', 'meteor'] as const) for (let k = 0; k < 32; k++) {
+    const plain = fx({ effect, size: 0.25, edge: 'hard' });
+    const l = at(fx({ effect, size: 0.25, edge: 'hard', base: HALF_BLUE }), k, 32, 0.4), a = at(plain, k, 32, 0.4);
+    if (a.i === 0) {
+      // Dark animation: the base, blue at 50 %.
+      assert.deepEqual([l.r, l.g, l.b, l.i], [0, 0, 1, 0.5], `segment ${k}`);
+      dark++;
+    } else if (a.i === 1) {
+      // Full animation: only the animation.
+      assert.deepEqual([l.r, l.g, l.b, l.i], [1, 0, 0, 1], `segment ${k}`);
+      full++;
+    } else {
+      // In between, both: brighter than either part alone, never darker than the base.
+      assert.ok(l.i > 0.5 && l.i > a.i && l.i < 1, `segment ${k}: ${l.i}`);
+      assert.ok(Math.abs(l.i - (a.i + (1 - a.i) * 0.5)) < 1e-12, `segment ${k}: ${l.i}`);
+      assert.ok(l.r > 0 && l.b > 0, `segment ${k} mixes red and blue: ${JSON.stringify(l)}`);
+      between++;
+    }
+  }
+  assert.ok(dark > 10 && full >= 4 && between >= 4, `${dark} dark, ${full} full, ${between} between`);
+});
+
+test('a soft edge over a base blends smoothly: the base never switches off', () => {
+  const wave = fx({ effect: 'wave', edge: 'soft', base: { colour: { hex: '#ffb46b', white: 0.4 }, level: 0.3 } });
+  let prev: Light | null = null;
+  for (let n = 0; n <= 400; n++) {
+    const l = at(wave, 5, 32, n / 200);
+    assert.ok(l.i >= 0.3 - 1e-12, `phase ${n / 200}: ${l.i}`);
+    if (prev) {
+      for (const c of ['r', 'g', 'b', 'w', 'i'] as const) assert.ok(Math.abs(l[c] - prev[c]) < 0.05, `phase ${n / 200}: ${c} from ${prev[c]} to ${l[c]}`);
+    }
+    prev = l;
+  }
+  // Sparkle's base is the effect's base when it has one: between sparks, the base colour at its level.
+  const sparkle = fx({ effect: 'sparkle', colours: [RED], size: 0.25, edge: 'hard', base: HALF_BLUE });
+  let bases = 0;
+  for (let k = 0; k < 32; k++) {
+    const l = at(sparkle, k, 32, 0.3);
+    if (l.i === 1) assert.equal(letter(l), 'R');
+    else {
+      assert.deepEqual([letter(l), l.i], ['B', 0.5]);
+      bases++;
+    }
+  }
+  assert.ok(bases > 10);
+});
+
+test('without a base every effect renders exactly as before (one-colour sparkle too)', () => {
+  // A checksum of many renders, taken from the engine before bases and sparks in every colour were added.
+  const WARM = { hex: '#ffb46b', white: 0.5 };
+  let h = 0x811c9dc5;
+  const eat = (v: number) => {
+    const s = v.toString();
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+  };
+  for (const effect of EffectLayer.shape.effect.options) {
+    for (const edge of ['soft', 'hard'] as const) {
+      for (const direction of ['ltr', 'rtl', 'centreOut'] as const) {
+        for (const colours of [[RED], [RED, BLUE, DIM], [WARM, RED]]) {
+          if (effect === 'sparkle' && colours.length > 1) continue;
+          const f = fx({ effect, colours, edge, direction, waves: 2, size: 0.3, intensity: 0.8 });
+          eat(f.maxRate);
+          for (const count of [7, 32]) {
+            for (let p = 0; p < 40; p++) {
+              for (let k = 0; k < count; k++) {
+                const l = at(f, k, count, p * 0.173);
+                for (const v of [l.r, l.g, l.b, l.w, l.a, l.u, l.i]) eat(v);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.equal((h >>> 0).toString(16), '550a8a75');
+});
+
+test('a base never loosens light safety: the bound is the animation\'s', () => {
+  for (const effect of EffectLayer.shape.effect.options) {
+    if (effect === 'sparkle') continue;
+    for (const colours of [[RED], [RED, DIM, WHITE]]) {
+      const without = fx({ effect, colours, edge: 'hard', size: 0.3 });
+      const over = fx({ effect, colours, edge: 'hard', size: 0.3, base: HALF_BLUE });
+      assert.equal(over.maxRate, without.maxRate, effect);
+    }
+  }
+  // Sparkle over a base is judged by its sparks against dark (its own base is the effect's base then).
+  const sparkle = fx({ effect: 'sparkle', colours: [{ hex: '#444444' }], edge: 'hard', base: { colour: WHITE, level: 0.9 } });
+  assert.ok(Number.isFinite(sparkle.maxRate));
 });
 
 test('breathe, meteor, fill and yo-yo do what their names say', () => {
@@ -296,8 +463,12 @@ test('light safety holds for every kind, edge, direction and setting at the fast
     for (const edge of ['soft', 'hard'] as const) {
       for (const direction of ['ltr', 'centreOut', 'outsideIn'] as const) {
         for (const [waves, size] of [[1, 0.5], [3, 0.1], [2, 0.9]] as const) {
-          for (const colours of colourSets) {
-            const f = fx({ effect, edge, direction, waves, size, colours });
+          for (const [colours, base] of [
+            ...colourSets.map((c) => [c, undefined] as const),
+            // Over a base (once a direction is enough): a dim one, and a bright one in a colour the animation also has.
+            ...(direction === 'ltr' ? [[[RED, DIM], { colour: BLUE, level: 0.15 }], [[OFF, WHITE], { colour: WHITE, level: 0.6 }]] as const : []),
+          ]) {
+            const f = fx({ effect, edge, direction, waves, size, colours: [...colours], base });
             const fastest = Number.isFinite(f.maxRate) ? f.maxRate : 16;
             // Asking a bit more than allowed halves it.
             if (Number.isFinite(f.maxRate)) assert.equal(safeRate(f, fastest * 1.01), fastest * 1.01 / 2);
@@ -306,7 +477,7 @@ test('light safety holds for every kind, edge, direction and setting at the fast
             for (const share of [1, 0.8, 0.55]) {
               const rate = fastest * share;
               const changes = changesPerSecond(f, count, rate, Math.min(4, Math.max(2, 3 / rate)));
-              assert.ok(changes <= 6, `${effect} ${edge} ${direction} waves ${waves} size ${size} colours ${colours.length}: ${changes} changes in a second at ${rate} cycles a second`);
+              assert.ok(changes <= 6, `${effect} ${edge} ${direction} waves ${waves} size ${size} colours ${colours.length}${base ? " over a base" : ""}: ${changes} changes in a second at ${rate} cycles a second`);
             }
           }
         }

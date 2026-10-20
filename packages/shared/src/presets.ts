@@ -4,7 +4,7 @@
 
 import { HEX_COLOUR, displayColour } from './protocol.ts';
 import { cleanName, effectSwatch, uniqueId } from './runningorder.ts';
-import { findProfile, isEffectPreset, resolveColour } from './schema.ts';
+import { findProfile, isEffectPreset, layerColours, resolveColour } from './schema.ts';
 import type { ChannelRole, ColourSpec, EffectLayer, Palette, Preset, Profile, Show, StaticLayer } from './schema.ts';
 
 /** True when no fixture in the group has a red, green or blue channel: the picker offers it warm-to-cool white only. */
@@ -133,10 +133,10 @@ export function paletteEntryOf(p: Preset): { palette: string; index: number } | 
   return 'palette' in spec ? { palette: spec.palette, index: spec.index } : null;
 }
 
-/** Every preset with a layer (or an effect colour) that points to this palette entry, in the show's order. */
+/** Every preset with a layer (or an effect colour, or an effect's base) that points to this palette entry, in the show's order. */
 export function presetsUsingPaletteEntry(show: Show, palette: string, index: number): Preset[] {
   const points = (c: ColourSpec) => 'palette' in c && c.palette === palette && c.index === index;
-  return show.presets.filter((p) => p.layers.some((l) => (l.kind === 'static' ? points(l.colour) : l.colours.some(points))));
+  return show.presets.filter((p) => p.layers.some((l) => layerColours(l).some(points)));
 }
 
 /**
@@ -199,7 +199,7 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
   for (const p of out.presets) {
     const layer = p.layers[0];
     if (p.layers.length !== 1 || !layer) continue;
-    const changed = layer.kind === 'static' ? edited.has(p.id) || follows(layer.colour) : layer.colours.some(follows);
+    const changed = (layer.kind === 'static' && edited.has(p.id)) || layerColours(layer).some(follows);
     if (changed) p.swatch = swatchOf(out, p) ?? p.swatch;
   }
 

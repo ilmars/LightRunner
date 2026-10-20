@@ -11,8 +11,11 @@ const hex = z.string().regex(HEX_COLOUR);
 const unit = z.number().min(0).max(1);
 const fade = z.number().min(0).max(600).optional();
 
-/** An effect as the operator page sends it: every colour a plain colour (never a palette reference). */
-export const LiveEffectLayer = EffectLayer.extend({ colours: z.array(PaletteColour).min(1).max(6) });
+/** An effect as the operator page sends it: every colour a plain colour (never a palette reference), the base's too. */
+export const LiveEffectLayer = EffectLayer.extend({
+  colours: z.array(PaletteColour).min(1).max(6),
+  base: z.object({ colour: PaletteColour, level: unit }).optional(),
+});
 export type LiveEffectLayer = z.infer<typeof LiveEffectLayer>;
 
 const bpm = z.number().min(40).max(240);
