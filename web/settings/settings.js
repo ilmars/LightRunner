@@ -171,6 +171,11 @@ function render() {
 
   $('manualForOperators').checked = s.manualForOperators;
 
+  $('oscEnabled').checked = s.osc.enabled;
+  $('oscPort').value = String(s.osc.port);
+  $('oscPortField').hidden = !s.osc.enabled;
+  $('oscProblem').textContent = s.osc.enabled ? s.oscProblem ?? '' : '';
+
   $('frameRate').value = String(s.frameRate);
   $('gamma').value = String(s.gamma);
   $('showName').value = s.showName;
@@ -211,7 +216,7 @@ setInterval(async () => {
 
 function changedFields() {
   const out = {};
-  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators'];
+  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators', 'osc'];
   for (const k of keys) if (JSON.stringify(draft[k]) !== JSON.stringify(saved[k])) out[k] = draft[k];
   if (draft.universe !== undefined && draft.universe !== saved.universes[0]) out.universe = draft.universe;
   return out;
@@ -245,6 +250,8 @@ $('sacnPriority').addEventListener('input', (e) => { draft.output.priority = Num
 $('enttecPort').addEventListener('change', (e) => { draft.output.port = e.target.value; markDirty(); });
 $('universe').addEventListener('input', (e) => { draft.universe = Number(e.target.value); markDirty(); });
 $('manualForOperators').addEventListener('change', (e) => { draft.manualForOperators = e.target.checked; markDirty(); });
+$('oscEnabled').addEventListener('change', (e) => edit((s) => { s.osc.enabled = e.target.checked; }));
+$('oscPort').addEventListener('input', (e) => { draft.osc.port = Number(e.target.value); markDirty(); });
 $('frameRate').addEventListener('change', (e) => { draft.frameRate = Number(e.target.value); markDirty(); });
 $('gamma').addEventListener('input', (e) => { draft.gamma = Number(e.target.value); markDirty(); });
 $('showName').addEventListener('input', (e) => { draft.showName = e.target.value; markDirty(); });

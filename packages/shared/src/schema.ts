@@ -224,6 +224,13 @@ export const OutputRoute = z.object({
 });
 export type OutputRoute = z.infer<typeof OutputRoute>;
 
+/** Other programs controlling the lights over OSC (UDP). Off until switched on. */
+export const OscSettings = z.object({
+  enabled: z.boolean().default(false),
+  port: z.number().int().min(1024).max(65535).default(8000),
+});
+export type OscSettings = z.infer<typeof OscSettings>;
+
 export const Settings = z.object({
   /** The default output: every universe goes here unless a route says otherwise. */
   output: OutputSettings.default({ kind: 'artnet', host: '2.255.255.255' }),
@@ -234,6 +241,8 @@ export const Settings = z.object({
   frameRate: z.number().int().min(10).max(44).default(40),
   gamma: z.number().min(1).max(4).default(2.2),
   pinHash: z.string().optional(),
+  /** Absent in older shows: OSC is off. */
+  osc: OscSettings.optional(),
 }).superRefine((s, ctx) => {
   for (const message of routeProblems(s.output, s.routes)) ctx.addIssue({ code: 'custom', message, path: ['routes'] });
 });

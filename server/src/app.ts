@@ -13,7 +13,7 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
+  BUILT_IN_PROFILES, Command, OscSettings, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
   applyQuickLookToItem, isBlindCommand, isEffectPreset, isShowEdit, moveItem, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,
   type OflFixture, type Pick, type Scope,
   BLACKOUT, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type RuntimeState, type Show, type ShowEdit, type StageCommand,
@@ -24,6 +24,7 @@ import { BLIND_OFF, BLIND_PROBLEM, BlindSession, MAX_DRAFTS, TOO_MANY_DRAFTS } f
 import { discoverArtNet } from './discovery.ts';
 import { NodeWatch } from './nodewatch.ts';
 import { OflClient } from './ofl.ts';
+import { listenOsc, type OscServer } from './osc.ts';
 import { operatorLayout, type OperatorLayout } from './layout.ts';
 import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from './messages.ts';
 import { isLocalAddress } from './net.ts';
@@ -115,6 +116,11 @@ export class App {
   private readonly flashes = new Map<WebSocket, Set<string>>();
   /** Groups each device source ('http', 'osc', 'apc') is holding a Flash on, so they go out when it goes away. */
   private readonly deviceFlashes = new Map<string, Set<string>>();
+  /** The OSC listener while it is switched on in Settings, and why it isn't listening when it should be. */
+  private osc: OscServer | null = null;
+  private oscProblem: string | null = null;
+  /** Starts and stops of the OSC listener, one after another. */
+  private oscBusy: Promise<void> = Promise.resolve();
   /** The last Master a device sent, for steps pressed faster than the state arrives. */
   private deviceMaster: { value: number; at: number } | null = null;
   /** The time limit on each device Flash, by source and group. */
@@ -202,6 +208,7 @@ export class App {
     this.heartbeat.unref();
     await new Promise<void>((resolve) => this.server!.listen(this.opts.port, this.opts.host ?? '0.0.0.0', resolve));
     this.log(`Light Runner on http://localhost:${this.port}/`);
+    await this.syncOsc();
   }
 
   async stop(): Promise<void> {
@@ -215,6 +222,8 @@ export class App {
     for (const t of this.deviceFlashTimers.values()) clearTimeout(t);
     this.deviceFlashTimers.clear();
     this.deviceFlashes.clear();
+    // Stopping is set, so a start still in line does nothing; the listener running now closes here.
+    await this.syncOsc();
     for (const ws of this.wss?.clients ?? []) ws.terminate();
     this.wss?.close();
     await new Promise<void>((resolve) => (this.server ? this.server.close(() => resolve()) : resolve()));
@@ -255,6 +264,37 @@ export class App {
     const show = this.engineShow();
     const plan = planRoutes(show.settings, show.fixtures.map((f) => f.universe));
     this.nodeWatch.watch(plan.destinations.map((d) => (d.output.kind === 'artnet' ? d.output.host : null)));
+  }
+
+  // ---- OSC ----
+
+  /** Make the OSC listener match Settings: open, closed, or moved to another port. Never throws. */
+  private syncOsc(): Promise<void> {
+    this.oscBusy = this.oscBusy.then(() => this.applyOsc());
+    return this.oscBusy;
+  }
+
+  private async applyOsc(): Promise<void> {
+    const o = this.show.settings.osc;
+    const port = o?.enabled && !this.stopping ? o.port : null;
+    if (this.osc && this.osc.port === port) return;
+    if (this.osc) {
+      const old = this.osc;
+      this.osc = null;
+      await old.close();
+      // A Flash it was holding goes out with it.
+      this.releaseDevice('osc');
+      this.log('OSC: stopped listening');
+    }
+    this.oscProblem = null;
+    if (port === null) return;
+    try {
+      this.osc = await listenOsc(port, (action) => this.device(action, 'osc'), (m) => this.log(m));
+      this.log(`OSC: listening on UDP port ${port}`);
+    } catch (err) {
+      this.oscProblem = (err as Error).message;
+      this.log(`OSC: ${this.oscProblem}`);
+    }
   }
 
   // ---- Engine worker ----
@@ -644,6 +684,7 @@ export class App {
       }
     }
     this.watchNode();
+    await this.syncOsc();
     this.layout = this.layout ? operatorLayout(this.show, this.layout.fixtures.map((f) => f.id)) : null;
     this.broadcast(JSON.stringify({ type: 'layout', layout: this.layout }));
   }
@@ -920,6 +961,8 @@ export class App {
       universes: [...new Set(this.show.fixtures.map((f) => f.universe))].sort((a, b) => a - b),
       fixtures: this.show.fixtures.length,
       pinSet: Boolean(s.pinHash),
+      osc: { enabled: s.osc?.enabled ?? false, port: s.osc?.port ?? 8000 },
+      oscProblem: this.oscProblem,
     };
   }
 
@@ -1222,6 +1265,7 @@ export class App {
       if (typeof body.outputEnabled === 'boolean') show.settings.outputEnabled = body.outputEnabled;
       if (body.frameRate !== undefined) show.settings.frameRate = Number(body.frameRate);
       if (body.gamma !== undefined) show.settings.gamma = Number(body.gamma);
+      if (body.osc !== undefined) show.settings.osc = OscSettings.parse(body.osc);
       if (typeof body.manualForOperators === 'boolean') show.operator.manualForOperators = body.manualForOperators;
       if (body.universe !== undefined) {
         // Move the whole rig to one universe (only for single-universe shows).

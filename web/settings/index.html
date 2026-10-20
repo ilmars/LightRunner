@@ -131,6 +131,22 @@
       <p class="hint">Basic lights is set from the operator page: start it, set the stage, then hold Save.</p>
     </section>
 
+    <section class="card" id="oscCard">
+      <h2>OSC</h2>
+      <label class="switch">
+        <input id="oscEnabled" type="checkbox">
+        <span class="track"><span class="knob"></span></span>
+        <span class="switch-label">Let other programs control the lights</span>
+      </label>
+      <p class="hint">Let other programs (like ProPresenter) control the lights over the network. They send messages such as /lightrunner/next or /lightrunner/group/2/level 0.5 to this computer.</p>
+      <div class="field narrow" id="oscPortField">
+        <label for="oscPort">Port</label>
+        <input id="oscPort" type="number" min="1024" max="65535" step="1">
+        <span class="hint">8000 unless the other program needs another.</span>
+      </div>
+      <p class="warn" id="oscProblem"></p>
+    </section>
+
     <section class="card">
       <h2>Engine</h2>
       <div class="grid2">
