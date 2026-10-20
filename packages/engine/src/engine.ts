@@ -853,10 +853,10 @@ export class Engine {
    * look entry's fade (the safe look's on Basic lights), else its preset's. A Basic-lights stage puts
    * the groups it has no preset for on the safe light. Smoke, Master and speed are left alone, and
    * Blackout's memory is cleared. A group naming a preset it can't run (gone, or another group's) is left as it is
-   * (on Basic lights it gets the safe light).
+   * (on Basic lights it gets the safe light). A stage drafted during Blackout applies group by group the same
+   * way (groups still on Blackout's dark go dark), and the stage leaves Blackout with no current look.
    */
   private applyStage(stage: StageState, fade: number | undefined, now: number): string | null {
-    if (stage.look === BLACKOUT) return 'The stage to send is in Blackout.';
     const safe = stage.look === SAFE;
     const lookId = safe ? this.show.operator.safeLook : stage.look;
     const look = lookId ? this.looks.get(lookId) : undefined;
@@ -884,7 +884,8 @@ export class Engine {
     if (stage.look && this.looks.has(stage.look)) this.lastLook = stage.look;
     else if (stage.lastLook) this.lastLook = stage.lastLook;
     this.setLook(stage.look ?? '', now, longest);
-    if (!stage.look) this.look = null;
+    // Out of Blackout (whose memory is gone) there is no current look; Next carries on from lastLook.
+    if (!stage.look || stage.look === BLACKOUT) this.look = null;
     return null;
   }
 

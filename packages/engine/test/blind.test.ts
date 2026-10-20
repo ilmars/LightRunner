@@ -196,7 +196,7 @@ test('applyStage sets the tempo and the current look, so Next and changed follow
   e.apply({ type: 'look', id: 'prayer', fade: 0 }, 4);
   assert.equal(e.liveState(4, 'off').groups.pulpit!.preset, 'pulpit-on', 'prayer leaves the pulpit alone');
 
-  // A stage without a tempo keeps the live one; a stage in Blackout is refused.
+  // A stage without a tempo keeps the live one.
   const f = new Engine(show);
   f.apply({ type: 'tempo', bpm: 100 }, 0);
   const noTempo = d.runtime();
@@ -204,8 +204,41 @@ test('applyStage sets the tempo and the current look, so Next and changed follow
   f.apply(go(noTempo), 1);
   assert.equal(f.liveState(1, 'off').tempo, 100);
   assert.equal(f.liveState(1, 'off').look, 'worship');
-  assert.equal(f.apply(go({ ...d.runtime(), look: 'blackout' }), 2), 'The stage to send is in Blackout.');
-  assert.equal(f.recorded, false);
+});
+
+test('a stage drafted during Blackout brings the lights out of Blackout, group by group', () => {
+  const show = demoShow();
+  const e = new Engine(show);
+  e.apply({ type: 'look', id: 'worship', fade: 0 }, 0);
+  e.apply({ type: 'blackout' }, 1);
+  run(e, 0, 3);
+  const before = e.runtime();
+
+  // The opening colour got ready in Blind during the Blackout: the draft is still "in Blackout", the rest dark.
+  const d = draftOf(e, show, 3);
+  d.apply({ type: 'groupPreset', group: 'audience', preset: 'aud-blue', fade: 0 }, 3);
+  const stage = d.runtime();
+  assert.equal(stage.look, 'blackout');
+  assert.ok(stage.beforeBlackout, 'the draft keeps its Blackout memory, which Go ignores');
+
+  assert.equal(e.apply(go(stage, 2), 3), null);
+  assert.equal(e.recorded, true);
+  const s = e.liveState(3, 'off');
+  assert.equal(s.look, null, 'out of Blackout, with no current look');
+  assert.equal(s.lastLook, 'worship', 'Next carries on from the last song in the draft');
+  assert.equal(e.runtime().beforeBlackout, undefined, 'the Blackout memory is gone');
+  assert.equal(s.groups.audience!.preset, 'aud-blue');
+  for (const g of ['front-wash', 'back-wall', 'pulpit']) assert.equal(s.groups[g]!.preset, '__blackout', g);
+  run(e, 3, 6);
+  assert.ok(lightOf(e, 'aud-1').i > 0.1, 'the audience is lit');
+  for (const id of ['front-1', 'back-1', 'pulpit']) assert.equal(lightOf(e, id).i, 0, `${id} stays dark`);
+  // One Undo puts Blackout back, memory and all.
+  assert.equal(e.apply({ type: 'undo' }, 6), null);
+  assert.equal(e.liveState(6, 'off').look, 'blackout');
+  assert.deepEqual(e.runtime().beforeBlackout, before.beforeBlackout);
+  assert.equal(e.liveState(6, 'off').groups.audience!.preset, '__blackout');
+  run(e, 6, 9);
+  assert.equal(lightOf(e, 'aud-1').i, 0);
 });
 
 test('a draft engine that adopted the clock runs effects in step with the live engine', () => {
