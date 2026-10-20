@@ -118,7 +118,8 @@ export interface EditColour {
   fade?: number;
   /**
    * With a new colour on a colour that points to a palette entry: change the palette entry,
-   * so every colour pointing to it follows. Without a palette entry it does nothing.
+   * so every colour pointing to it follows. Without a palette entry it does nothing. A same-named
+   * colour of another group that points elsewhere (or nowhere) takes the new colour as its own.
    */
   shared?: boolean;
   /** Also change the presets of other groups that have the same name as this one has now. */
@@ -163,7 +164,11 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
 
   const before = new Map(out.presets.map((p) => [p.id, JSON.stringify(p)]));
   const palettesBefore = JSON.stringify(out.palettes);
-  const shared = !!input.shared && paletteEntryOf(target) !== null;
+  // Only colours that point to the same palette entry as this one follow it. Any other colour of
+  // the same name (a plain one, or one pointing to another shared colour) takes the colour as its own.
+  const sharedEntry = input.shared ? paletteEntryOf(target) : null;
+  const followsTarget = (e: { palette: string; index: number } | null) =>
+    !!e && !!sharedEntry && e.palette === sharedEntry.palette && e.index === sharedEntry.index;
   const moved = new Set<string>(); // palette entries that got a new hex, as "palette:index"
   const edited = new Set<string>(); // presets that got a new colour of their own
 
@@ -175,8 +180,8 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
     const layer = p.layers[0] as StaticLayer;
     if (level !== undefined) layer.intensity = level;
     if (colour === undefined) continue;
-    const entry = shared ? paletteEntryOf(p) : null;
-    if (entry) {
+    const entry = paletteEntryOf(p);
+    if (entry && followsTarget(entry)) {
       const found = out.palettes.find((x) => x.id === entry.palette)?.colours[entry.index];
       if (found) {
         found.hex = colour;

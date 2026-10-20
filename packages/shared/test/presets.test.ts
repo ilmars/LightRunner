@@ -346,6 +346,26 @@ test('same-name and shared together change each preset once', () => {
   assert.equal(zilsPoint(out.show, 'drum-cage-zils'), true);
 });
 
+test("with shared on, a same-named colour of another shared colour takes the colour as its own and leaves that shared colour alone", () => {
+  // Background's Tirkīzs (shared colour 6) renamed to Zils; then Key lights' Zils (shared colour 7) is
+  // recoloured with both switches on.
+  const s = editColour(ready(), { preset: 'background-tirkizs', name: 'Zils', sameName: false }).show;
+  const { show, ids } = editColour(s, { preset: 'key-lights-zils', colour: '#103a7c', shared: true, sameName: true });
+  const colours = show.palettes.find((p) => p.id === 'lightkey')!.colours;
+  assert.equal(colours[6]!.hex, '#00ffc8'); // Tirkīzs's shared colour is untouched
+  assert.equal(colours[7]!.hex, '#103a7c');
+  // The renamed one is cut loose with the new colour.
+  assert.deepEqual(preset(show, 'background-tirkizs').layers, [{ kind: 'static', colour: { hex: '#103a7c' }, intensity: 1 }]);
+  assert.equal(preset(show, 'background-tirkizs').swatch, '#103a7c');
+  // The other groups' Tirkīzs still point to shared colour 6 and keep its colour.
+  for (const id of ['key-lights-tirkizs', 'drum-cage-tirkizs', 'b8-side-bar-tirkizs']) {
+    assert.deepEqual((preset(show, id).layers[0] as StaticLayer).colour, { palette: 'lightkey', index: 6 }, id);
+    assert.equal(preset(show, id).swatch, '#00ffc8', id);
+  }
+  for (const id of ZILS) assert.equal(zilsPoint(show, id), true, id);
+  assert.deepEqual([...ids].sort(), [...ZILS, 'background-tirkizs'].sort());
+});
+
 /** A show holding a hidden (custom) preset, as Save makes for an Any colour pick. */
 function saveHidden(s: Show): { show: Show; id: string } {
   const show = structuredClone(s);
