@@ -196,7 +196,8 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
     const layer = p.layers[0];
     if (p.layers.length !== 1 || !layer) continue;
     if (layer.kind === 'static' && (edited.has(p.id) || follows(layer.colour))) {
-      p.swatch = displayColour(resolveColour(layer.colour, palettes).hex, resolveColour(layer.colour, palettes));
+      const light = resolveColour(layer.colour, palettes);
+      p.swatch = displayColour(light.hex, light);
     } else if (layer.kind === 'effect' && layer.colours.some(follows)) {
       p.swatch = effectSwatch(out, layer);
     }
