@@ -14,17 +14,18 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { ZodError } from 'zod';
 import {
   BUILT_IN_PROFILES, Command, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
-  applyQuickLookToItem, isEffectPreset, isShowEdit, moveItem, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,
+  applyQuickLookToItem, isBlindCommand, isEffectPreset, isShowEdit, moveItem, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,
   type OflFixture, type Pick, type Scope,
-  BLACKOUT, type LiveState, type RuntimeState, type Show, type ShowEdit,
+  BLACKOUT, type BlindCommand, type LiveState, type RuntimeState, type Show, type ShowEdit, type StageCommand,
 } from '../../packages/shared/src/index.ts';
-import { settledVisual } from '../../packages/engine/src/index.ts';
+import { settledVisual, type StageClock } from '../../packages/engine/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
+import { BLIND_OFF, BlindSession } from './blind.ts';
 import { discoverArtNet } from './discovery.ts';
 import { NodeWatch } from './nodewatch.ts';
 import { OflClient } from './ofl.ts';
 import { operatorLayout, type OperatorLayout } from './layout.ts';
-import type { FromWorker, TimingStats, ToWorker } from './messages.ts';
+import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from './messages.ts';
 import { isLocalAddress } from './net.ts';
 import { RuntimeSaver, Store } from './store.ts';
 
@@ -106,6 +107,10 @@ export class App {
   /** Checks each tablet missed in a row; reset when it answers. */
   private readonly missedPongs = new Map<WebSocket, number>();
   private heartbeat: NodeJS.Timeout | null = null;
+  /** Each tablet in Blind and its draft of the stage. */
+  private readonly blind = new Map<WebSocket, BlindSession>();
+  /** Frames the drafts and sends each its tablet's picture and state; runs while any tablet is in Blind. */
+  private blindTimer: NodeJS.Timeout | null = null;
   private latestRuntime: RuntimeState | null = null;
   private ready!: Promise<void>;
   private readonly sessions = new Sessions();
@@ -133,6 +138,11 @@ export class App {
 
   get state(): LiveState | null {
     return this.latestState;
+  }
+
+  /** How many tablets are in Blind now. */
+  get drafts(): number {
+    return this.blind.size;
   }
 
   get port(): number {
@@ -178,6 +188,8 @@ export class App {
     this.stopping = true;
     this.nodeWatch.stop();
     if (this.heartbeat) clearInterval(this.heartbeat);
+    this.blind.clear();
+    this.blindTimerFits();
     for (const t of this.identifyTimers.values()) clearTimeout(t);
     for (const ws of this.wss?.clients ?? []) ws.terminate();
     this.wss?.close();
@@ -296,27 +308,38 @@ export class App {
 
   // ---- Command bus: every input ends up here ----
 
-  /** Validate, check permissions and run a command. Returns an error message or null. */
-  async command(input: unknown, role: Role): Promise<string | null> {
-    return (await this.run(input, role)).error;
+  /**
+   * Validate, check permissions and run a command. Returns an error message or null.
+   * `tablet`: the WebSocket it came from, for Blind's commands and the show edits that save its draft.
+   */
+  async command(input: unknown, role: Role, tablet?: WebSocket): Promise<string | null> {
+    return (await this.run(input, role, tablet)).error;
   }
 
   /** Like `command`, and also says whether the command added a step to the Undo list. */
-  private async run(input: unknown, role: Role): Promise<{ error: string | null; recorded: boolean }> {
+  private async run(input: unknown, role: Role, tablet?: WebSocket): Promise<{ error: string | null; recorded: boolean }> {
     const parsed = Command.safeParse(input);
     if (!parsed.success) return { error: `invalid command: ${parsed.error.issues.map((i) => i.message).join('; ')}`, recorded: false };
     const cmd = parsed.data;
     if (isManualCommand(cmd) && role !== 'programmer' && !this.show.operator.manualForOperators) {
       return { error: 'manual control is not enabled for operators', recorded: false };
     }
+    if (isBlindCommand(cmd)) return this.blindCommand(cmd, tablet);
+    // Only Go sends a whole stage, from a tablet's draft.
+    if (cmd.type === 'applyStage') return { error: 'Use Blind and Go to send a whole stage.', recorded: false };
     if (isShowEdit(cmd)) {
       try {
-        await this.editShow(cmd);
+        await this.editShow(cmd, tablet ? this.blind.get(tablet) : undefined);
       } catch (err) {
         return { error: (err as Error).message, recorded: false };
       }
       return { error: null, recorded: true };
     }
+    return this.stageCommand(cmd);
+  }
+
+  /** Run a command on the live stage (Undo of a show edit puts the show back instead). */
+  private async stageCommand(cmd: StageCommand): Promise<{ error: string | null; recorded: boolean }> {
     if (cmd.type === 'undo') {
       const last = this.undoLog.at(-1);
       if (last && last !== 'stage') {
@@ -346,11 +369,91 @@ export class App {
     if (this.undoLog.length > UNDO_KEPT) this.undoLog.shift();
   }
 
-  /** Operator edits to the running order and quick looks. Throws with a plain message when refused. */
-  private async editShow(cmd: ShowEdit): Promise<void> {
+  // ---- Blind: a draft of the stage per tablet ----
+
+  private async blindCommand(cmd: BlindCommand, tablet: WebSocket | undefined): Promise<{ error: string | null; recorded: boolean }> {
+    const done = (error: string | null, recorded = false) => ({ error, recorded });
+    if (!tablet) return done('Blind works on a tablet only.');
+    const session = this.blind.get(tablet);
+    switch (cmd.type) {
+      case 'blindStart': {
+        // The runtime and the stage clocks of the same moment, so the draft's effects run in step.
+        let live: { runtime: RuntimeState; clock: StageClock };
+        try {
+          live = await this.liveStage();
+        } catch (err) {
+          return done((err as Error).message);
+        }
+        // A tablet that went away while the stage was on its way gets no draft.
+        if (tablet.readyState !== tablet.OPEN) return done(null);
+        this.blind.set(tablet, new BlindSession(this.engineShow(), live.runtime, live.clock, performance.now() / 1000));
+        this.blindTimerFits();
+        this.sendDraft(tablet);
+        return done(null);
+      }
+      case 'blindEnd':
+        this.dropDraft(tablet);
+        return done(null);
+      case 'draft': {
+        if (!session) return done(BLIND_OFF);
+        const error = session.apply(cmd.cmd, performance.now() / 1000, (g) => this.isSmokeGroup(g));
+        this.sendDraft(tablet);
+        return done(error);
+      }
+      case 'blindGo': {
+        if (!session) return done(BLIND_OFF);
+        // The live engine fades with its own Fade setting (each look's own when it is Auto), as for looks.
+        const reply = await this.stageCommand({ type: 'applyStage', stage: session.engine.runtime() });
+        if (!reply.error && this.blind.get(tablet) === session) this.dropDraft(tablet);
+        return reply;
+      }
+    }
+  }
+
+  private dropDraft(tablet: WebSocket): void {
+    this.blind.delete(tablet);
+    this.blindTimerFits();
+  }
+
+  /** The draft timer runs while any tablet is in Blind. */
+  private blindTimerFits(): void {
+    if (this.blind.size && !this.blindTimer) {
+      this.blindTimer = setInterval(() => this.frameDrafts(), VISUAL_EVERY);
+      this.blindTimer.unref();
+    } else if (!this.blind.size && this.blindTimer) {
+      clearInterval(this.blindTimer);
+      this.blindTimer = null;
+    }
+  }
+
+  /** Each draft's picture and (when it changed) state, to its own tablet only. */
+  private frameDrafts(): void {
+    const now = performance.now() / 1000;
+    for (const [tablet, session] of this.blind) {
+      if (this.latestState) session.follow(this.latestState, now);
+      const visual = session.visual(now);
+      // A slow device skips frames rather than falling behind, as with the live picture.
+      if (tablet.readyState === tablet.OPEN && tablet.bufferedAmount < 64 * 1024) {
+        tablet.send(JSON.stringify({ type: 'draftVisual', data: Buffer.from(visual.buffer, visual.byteOffset, visual.byteLength).toString('base64') }));
+      }
+      this.sendDraft(tablet, now);
+    }
+  }
+
+  /** The tablet's draft state, when it changed since the last one it was sent. */
+  private sendDraft(tablet: WebSocket, now = performance.now() / 1000): void {
+    const state = this.blind.get(tablet)?.state(now, this.latestState, (g) => this.isSmokeGroup(g));
+    if (state && tablet.readyState === tablet.OPEN) tablet.send(JSON.stringify({ type: 'draftState', state }));
+  }
+
+  /**
+   * Operator edits to the running order and quick looks. Throws with a plain message when refused.
+   * `draft`: the tablet is in Blind, so Save, Add song and Save as quick look store its draft instead of the stage.
+   */
+  private async editShow(cmd: ShowEdit, draft?: BlindSession): Promise<void> {
     const usesStage = cmd.type === 'saveItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook';
     // Deleting a colour only looks at the stage to keep a lit colour; it is fine during Blackout.
-    const stage = usesStage || cmd.type === 'deleteColour' ? await this.stage() : null;
+    const stage = usesStage && draft ? draft.engine.runtime() : usesStage || cmd.type === 'deleteColour' ? await this.stage() : null;
     if (usesStage && stage?.look === BLACKOUT) throw new Error('Blackout is on. Bring the lights back, then save.');
     // Nothing below waits until the show is replaced, so no other edit can slip in between.
     const before = this.show;
@@ -381,7 +484,9 @@ export class App {
         next = deleteColour(before, cmd.preset); // refuses while a look uses it
         const found = before.presets.find((p) => p.id === cmd.preset)!;
         const group = found.group;
-        if (stage!.groups[group] === cmd.preset || stage!.beforeBlackout?.[group] === cmd.preset) {
+        // In Blind, a colour the tablet's draft runs stays too, so Save and Go can still use it.
+        const lit = (s: RuntimeState) => s.groups[group] === cmd.preset || s.beforeBlackout?.[group] === cmd.preset;
+        if (lit(stage!) || (draft && lit(draft.engine.runtime()))) {
           if (isEffectPreset(found)) throw new Error('That effect is on stage now. Pick something else for the group first.');
           throw new Error('That colour is on stage now. Pick another colour for the group first.');
         }
@@ -404,9 +509,14 @@ export class App {
    * effects the groups run and the stage tempo, so Save keeps both.
    */
   private async stage(): Promise<RuntimeState> {
-    const reply = await this.request<{ runtime?: RuntimeState; error?: string }>((id) => ({ type: 'snapshot', id }));
-    if (!reply.runtime) throw new Error(reply.error ?? 'engine did not answer');
-    return reply.runtime;
+    return (await this.liveStage()).runtime;
+  }
+
+  /** The stage as stage() gives it, and the live stage clocks at the same moment (for a Blind draft). */
+  private async liveStage(): Promise<{ runtime: RuntimeState; clock: StageClock }> {
+    const reply = await this.request<{ runtime?: RuntimeState; clock?: StageClock; error?: string }>((id) => ({ type: 'snapshot', id }));
+    if (!reply.runtime || !reply.clock) throw new Error(reply.error ?? 'engine did not answer');
+    return { runtime: reply.runtime, clock: reply.clock };
   }
 
   async timing(reset = false): Promise<TimingStats> {
@@ -440,6 +550,9 @@ export class App {
     this.store.saveShow(show, { backup });
     this.show = show;
     this.post({ type: 'show', show: this.engineShow() });
+    // Drafts run the edited show too, so a colour added in Blind can be used there.
+    const now = performance.now() / 1000;
+    for (const session of this.blind.values()) session.setShow(this.engineShow(), now);
     this.watchNode();
     this.layout = this.layout ? operatorLayout(this.show, this.layout.fixtures.map((f) => f.id)) : null;
     this.broadcast(JSON.stringify({ type: 'layout', layout: this.layout }));
@@ -467,6 +580,8 @@ export class App {
       this.missedPongs.delete(ws);
       this.flashes.delete(ws);
       release(held);
+      // Its Blind draft goes with it; nothing reaches the stage.
+      this.dropDraft(ws);
     });
     ws.on('message', async (data, isBinary) => {
       if (isBinary) return;
@@ -477,7 +592,7 @@ export class App {
         return;
       }
       if (msg.type === 'command') {
-        const error = await this.command(msg.cmd, role);
+        const error = await this.command(msg.cmd, role, ws);
         const cmd = Command.safeParse(msg.cmd);
         if (!error && cmd.success && cmd.data.type === 'flash') {
           if (closed) {

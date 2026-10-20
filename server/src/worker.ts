@@ -5,7 +5,7 @@
 import { parentPort } from 'node:worker_threads';
 import { Engine } from '../../packages/engine/src/index.ts';
 import { planRoutes, type LiveState, type Show } from '../../packages/shared/src/index.ts';
-import type { FromWorker, TimingStats, ToWorker } from './messages.ts';
+import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from './messages.ts';
 import { ArtNetOutput, ARTNET_PORT } from './output/artnet.ts';
 import { createOutput, OutputSet } from './output/index.ts';
 
@@ -15,8 +15,6 @@ const post = (msg: FromWorker, transfer?: ArrayBuffer[]) => port.postMessage(msg
 
 /** Live state goes out at most this often while fades run (plus at once after any command). */
 const STATE_EVERY = 100;
-/** Visualiser frames go out at this rate; the engine itself runs at the show's frame rate. */
-const VISUAL_EVERY = 50;
 
 let engine: Engine | null = null;
 /** Test hook: send Art-Net for a host to another address and port (normally the host itself, port 6454). */
@@ -139,7 +137,7 @@ port.on('message', (msg: ToWorker) => {
       break;
     }
     case 'snapshot':
-      if (engine) post({ type: 'snapshot', id: msg.id, runtime: engine.runtime() });
+      if (engine) post({ type: 'snapshot', id: msg.id, runtime: engine.runtime(), clock: engine.stageClock() });
       break;
     case 'timing': {
       const { startedAt, ...stats } = timing;
