@@ -20,7 +20,7 @@ import {
 } from '../../packages/shared/src/index.ts';
 import { settledVisual, type StageClock } from '../../packages/engine/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
-import { BLIND_OFF, BlindSession } from './blind.ts';
+import { BLIND_OFF, BLIND_PROBLEM, BlindSession, MAX_DRAFTS, TOO_MANY_DRAFTS } from './blind.ts';
 import { discoverArtNet } from './discovery.ts';
 import { NodeWatch } from './nodewatch.ts';
 import { OflClient } from './ofl.ts';
@@ -109,6 +109,11 @@ export class App {
   private heartbeat: NodeJS.Timeout | null = null;
   /** Each tablet in Blind and its draft of the stage. */
   private readonly blind = new Map<WebSocket, BlindSession>();
+  /**
+   * Counts each tablet's Blind starts and ends, so a start still waiting for the stage when an end
+   * (or a newer start) came makes no draft.
+   */
+  private readonly blindTurn = new Map<WebSocket, number>();
   /** Frames the drafts and sends each its tablet's picture and state; runs while any tablet is in Blind. */
   private blindTimer: NodeJS.Timeout | null = null;
   private latestRuntime: RuntimeState | null = null;
@@ -189,6 +194,7 @@ export class App {
     this.nodeWatch.stop();
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.blind.clear();
+    this.blindTurn.clear();
     this.blindTimerFits();
     for (const t of this.identifyTimers.values()) clearTimeout(t);
     for (const ws of this.wss?.clients ?? []) ws.terminate();
@@ -377,6 +383,10 @@ export class App {
     const session = this.blind.get(tablet);
     switch (cmd.type) {
       case 'blindStart': {
+        const turn = this.nextBlindTurn(tablet);
+        // A tablet already in Blind gets a fresh draft in place of its own, so it doesn't count.
+        const full = () => this.blind.size - (this.blind.has(tablet) ? 1 : 0) >= MAX_DRAFTS;
+        if (full()) return done(TOO_MANY_DRAFTS);
         // The runtime and the stage clocks of the same moment, so the draft's effects run in step.
         let live: { runtime: RuntimeState; clock: StageClock };
         try {
@@ -384,35 +394,76 @@ export class App {
         } catch (err) {
           return done((err as Error).message);
         }
-        // A tablet that went away while the stage was on its way gets no draft.
-        if (tablet.readyState !== tablet.OPEN) return done(null);
-        this.blind.set(tablet, new BlindSession(this.engineShow(), live.runtime, live.clock, performance.now() / 1000));
+        // A tablet that went away, left Blind or started it again while the stage was on its way
+        // gets no draft from this start.
+        if (tablet.readyState !== tablet.OPEN || this.blindTurn.get(tablet) !== turn) return done(null);
+        // Other tablets may have started Blind meanwhile.
+        if (full()) return done(TOO_MANY_DRAFTS);
+        let fresh: BlindSession;
+        try {
+          fresh = new BlindSession(this.engineShow(), live.runtime, live.clock, performance.now() / 1000);
+        } catch (err) {
+          return done(this.draftProblem(tablet, err));
+        }
+        this.blind.set(tablet, fresh);
         this.blindTimerFits();
         this.sendDraft(tablet);
-        return done(null);
+        return done(this.blind.get(tablet) === fresh ? null : BLIND_PROBLEM);
       }
       case 'blindEnd':
+        this.nextBlindTurn(tablet);
         this.dropDraft(tablet);
         return done(null);
       case 'draft': {
         if (!session) return done(BLIND_OFF);
-        const error = session.apply(cmd.cmd, performance.now() / 1000, (g) => this.isSmokeGroup(g));
+        let error: string | null;
+        try {
+          error = session.apply(cmd.cmd, performance.now() / 1000, (g) => this.isSmokeGroup(g));
+        } catch (err) {
+          return done(this.draftProblem(tablet, err));
+        }
         this.sendDraft(tablet);
-        return done(error);
+        return done(this.blind.get(tablet) === session ? error : BLIND_PROBLEM);
       }
       case 'blindGo': {
         if (!session) return done(BLIND_OFF);
+        let stage: RuntimeState;
+        try {
+          stage = session.engine.runtime();
+        } catch (err) {
+          return done(this.draftProblem(tablet, err));
+        }
         // The live engine fades with its own Fade setting (each look's own when it is Auto), as for looks.
-        const reply = await this.stageCommand({ type: 'applyStage', stage: session.engine.runtime() });
+        const reply = await this.stageCommand({ type: 'applyStage', stage });
         if (!reply.error && this.blind.get(tablet) === session) this.dropDraft(tablet);
         return reply;
       }
     }
   }
 
+  /** A new turn for this tablet's Blind: a start that was still waiting for the stage makes no draft now. */
+  private nextBlindTurn(tablet: WebSocket): number {
+    const turn = (this.blindTurn.get(tablet) ?? 0) + 1;
+    this.blindTurn.set(tablet, turn);
+    return turn;
+  }
+
   private dropDraft(tablet: WebSocket): void {
     this.blind.delete(tablet);
     this.blindTimerFits();
+  }
+
+  /**
+   * A tablet's draft threw. Only that draft ends, never the service, and the lights are not touched:
+   * the tablet is sent `draftEnded` with the reason, and the command that met the problem (if any)
+   * is answered with the same reason. Returns the reason.
+   */
+  private draftProblem(tablet: WebSocket, err: unknown): string {
+    this.log(`Blind: a tablet's draft stopped: ${(err as Error)?.stack ?? String(err)}`);
+    this.nextBlindTurn(tablet);
+    this.dropDraft(tablet);
+    if (tablet.readyState === tablet.OPEN) tablet.send(JSON.stringify({ type: 'draftEnded', reason: BLIND_PROBLEM }));
+    return BLIND_PROBLEM;
   }
 
   /** The draft timer runs while any tablet is in Blind. */
@@ -430,8 +481,14 @@ export class App {
   private frameDrafts(): void {
     const now = performance.now() / 1000;
     for (const [tablet, session] of this.blind) {
-      if (this.latestState) session.follow(this.latestState, now);
-      const visual = session.visual(now);
+      let visual: Uint8Array;
+      try {
+        if (this.latestState) session.follow(this.latestState, now);
+        visual = session.visual(now);
+      } catch (err) {
+        this.draftProblem(tablet, err);
+        continue;
+      }
       // A slow device skips frames rather than falling behind, as with the live picture.
       if (tablet.readyState === tablet.OPEN && tablet.bufferedAmount < 64 * 1024) {
         tablet.send(JSON.stringify({ type: 'draftVisual', data: Buffer.from(visual.buffer, visual.byteOffset, visual.byteLength).toString('base64') }));
@@ -442,7 +499,13 @@ export class App {
 
   /** The tablet's draft state, when it changed since the last one it was sent. */
   private sendDraft(tablet: WebSocket, now = performance.now() / 1000): void {
-    const state = this.blind.get(tablet)?.state(now, this.latestState, (g) => this.isSmokeGroup(g));
+    let state: LiveState | null | undefined;
+    try {
+      state = this.blind.get(tablet)?.state(now, this.latestState, (g) => this.isSmokeGroup(g));
+    } catch (err) {
+      this.draftProblem(tablet, err);
+      return;
+    }
     if (state && tablet.readyState === tablet.OPEN) tablet.send(JSON.stringify({ type: 'draftState', state }));
   }
 
@@ -554,7 +617,14 @@ export class App {
     this.post({ type: 'show', show: this.engineShow() });
     // Drafts run the edited show too, so a colour added in Blind can be used there.
     const now = performance.now() / 1000;
-    for (const session of this.blind.values()) session.setShow(this.engineShow(), now);
+    for (const [tablet, session] of this.blind) {
+      try {
+        session.setShow(this.engineShow(), now);
+      } catch (err) {
+        // The edit still goes through (saved, and the engine has it); only this draft ends.
+        this.draftProblem(tablet, err);
+      }
+    }
     this.watchNode();
     this.layout = this.layout ? operatorLayout(this.show, this.layout.fixtures.map((f) => f.id)) : null;
     this.broadcast(JSON.stringify({ type: 'layout', layout: this.layout }));
@@ -583,6 +653,7 @@ export class App {
       this.flashes.delete(ws);
       release(held);
       // Its Blind draft goes with it; nothing reaches the stage.
+      this.blindTurn.delete(ws);
       this.dropDraft(ws);
     });
     ws.on('message', async (data, isBinary) => {
@@ -594,7 +665,14 @@ export class App {
         return;
       }
       if (msg.type === 'command') {
-        const error = await this.command(msg.cmd, role, ws);
+        let error: string | null;
+        try {
+          error = await this.command(msg.cmd, role, ws);
+        } catch (err) {
+          // Never left to reject unhandled, which would stop the service.
+          this.log(`Command failed: ${(err as Error)?.stack ?? String(err)}`);
+          error = 'That did not work. The lights were not changed.';
+        }
         const cmd = Command.safeParse(msg.cmd);
         if (!error && cmd.success && cmd.data.type === 'flash') {
           if (closed) {

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import { App } from '../src/app.ts';
 import { BlindSession } from '../src/blind.ts';
+import { Engine } from '../../packages/engine/src/index.ts';
 import { parseShow } from '../../packages/shared/src/index.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -16,9 +17,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const REAL_STAGE_ONLY = 'That works on the real stage only.';
 const BLIND_OFF = 'Blind is off.';
+const BLIND_PROBLEM = 'Blind stopped because of a problem. The lights were not changed.';
+const TOO_MANY = 'Too many tablets are in Blind.';
 
-function makeApp(dataDir: string) {
-  return new App({ port: 0, host: '127.0.0.1', dataDir, seedPath, webDir: join(root, 'web'), output: { kind: 'none' }, log: () => {} });
+function makeApp(dataDir: string, log: (msg: string) => void = () => {}) {
+  return new App({ port: 0, host: '127.0.0.1', dataDir, seedPath, webDir: join(root, 'web'), output: { kind: 'none' }, log });
 }
 
 async function api(app: App, method: string, path: string, body?: unknown) {
@@ -71,9 +74,9 @@ async function tablet(app: App) {
   };
 }
 
-async function withApp(fn: (app: App, dir: string) => Promise<void>) {
+async function withApp(fn: (app: App, dir: string) => Promise<void>, log?: (msg: string) => void) {
   const dir = tempDir();
-  const app = makeApp(dir);
+  const app = makeApp(dir, log);
   try {
     await app.start();
     await fn(app, dir);
@@ -367,4 +370,117 @@ test('Save in Blind works for a draft made during Blackout: lit groups keep thei
   // The stage stays in Blackout.
   await sleep(150);
   assert.equal(t.state().look, 'blackout');
+}));
+
+/** The service still answers: a stage command from the tablet and an HTTP GET. */
+async function stillServing(app: App, t: Awaited<ReturnType<typeof tablet>>) {
+  assert.equal(await t.send({ type: 'look', id: 'prayer', fade: 0 }), null);
+  await waitFor(() => t.state()?.look === 'prayer', 2000, 'prayer on stage');
+  const show = await api(app, 'GET', '/api/show');
+  assert.equal(show.status, 200);
+  assert.ok(show.body.groups.length > 0);
+}
+
+const ended = (t: Awaited<ReturnType<typeof tablet>>) => t.seen.filter((m) => m.type === 'draftEnded');
+
+test("a problem in a draft's frame ends that draft only; the service keeps running", (ctx) => {
+  const logged: string[] = [];
+  return withApp(async (app) => {
+    const a = await onWorship(app);
+    const b = await onWorship(app);
+    assert.equal(await a.send({ type: 'blindStart' }), null);
+    assert.equal(await b.send({ type: 'blindStart' }), null);
+    await waitFor(() => a.draft() && b.draft(), 2000, 'both drafts');
+    // Only a's draft breaks.
+    const aSession = (app as any).blind.get([...(app as any).blind.keys()][0]) as BlindSession;
+    const visual = BlindSession.prototype.visual;
+    ctx.mock.method(BlindSession.prototype, 'visual', function (this: BlindSession, now: number) {
+      if (this === aSession) throw new Error('test: the draft broke');
+      return visual.call(this, now);
+    });
+    const msg = await waitFor(() => ended(a)[0], 2000, 'a to be told');
+    assert.equal(msg.reason, BLIND_PROBLEM);
+    assert.equal(app.drafts, 1, "b's draft keeps going");
+    assert.equal(ended(b).length, 0);
+    assert.ok(logged.some((m) => m.includes('test: the draft broke')), 'the problem is logged');
+    assert.equal(await a.send({ type: 'draft', cmd: { type: 'safe' } }), BLIND_OFF);
+    // The lights were not touched.
+    assert.equal(a.state().look, 'worship');
+    assert.equal(a.state().lookChanged, false);
+    await stillServing(app, a);
+  }, (m) => logged.push(m));
+});
+
+test('a problem while running a draft command answers it and ends the draft', (ctx) => withApp(async (app) => {
+  const t = await onWorship(app);
+  assert.equal(await t.send({ type: 'blindStart' }), null);
+  ctx.mock.method(BlindSession.prototype, 'apply', () => { throw new Error('test: apply broke'); });
+  assert.equal(await t.send({ type: 'draft', cmd: { type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 } }), BLIND_PROBLEM);
+  assert.equal(ended(t).length, 1);
+  assert.equal(app.drafts, 0);
+  await sleep(100);
+  assert.equal(t.state().groups['back-wall'].preset, 'back-purple', 'the lights were not changed');
+  await stillServing(app, t);
+}));
+
+test('a problem making a draft refuses the start, and the service keeps running', (ctx) => withApp(async (app) => {
+  const t = await onWorship(app);
+  // Only this thread's engines are stubbed: the drafts'. The live engine runs on the worker.
+  ctx.mock.method(Engine.prototype, 'restore', () => { throw new Error('test: restore broke'); });
+  assert.equal(await t.send({ type: 'blindStart' }), BLIND_PROBLEM);
+  assert.equal(app.drafts, 0);
+  await stillServing(app, t);
+}));
+
+test('a problem as a draft takes a show edit ends that draft, and the edit still goes through', (ctx) => withApp(async (app, dir) => {
+  const t = await onWorship(app);
+  assert.equal(await t.send({ type: 'blindStart' }), null);
+  await waitFor(() => t.draft(), 2000, 'the draft');
+  ctx.mock.method(BlindSession.prototype, 'setShow', () => { throw new Error('test: setShow broke'); });
+  const layouts = t.seen.filter((m) => m.type === 'layout').length;
+  assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: '#123456', name: 'Navy', allGroups: false }), null);
+  assert.ok(savedShow(dir).presets.some((p) => p.name === 'Navy'), 'the colour is saved');
+  assert.ok(t.seen.filter((m) => m.type === 'layout').length > layouts, 'every device is sent the new layout');
+  assert.equal(ended(t).length, 1);
+  assert.equal(app.drafts, 0);
+  await stillServing(app, t);
+}));
+
+test('leaving Blind while its start waits for the stage makes no draft', () => withApp(async (app) => {
+  const t = await onWorship(app);
+  // The stage takes a while to answer, so the end arrives first.
+  const liveStage = (app as any).liveStage.bind(app);
+  (app as any).liveStage = async () => { await sleep(150); return liveStage(); };
+  const start = t.send({ type: 'blindStart' });
+  assert.equal(await t.send({ type: 'blindEnd' }), null);
+  assert.equal(await start, null);
+  await sleep(200);
+  assert.equal(app.drafts, 0);
+  assert.ok(!t.seen.some((m) => m.type === 'draftState'), 'no draft was ever sent');
+
+  // A newer start wins over an older one still on its way, and Blind then works.
+  const first = t.send({ type: 'blindStart' });
+  const second = t.send({ type: 'blindStart' });
+  assert.equal(await first, null);
+  assert.equal(await second, null);
+  assert.equal(app.drafts, 1);
+  assert.equal(t.seen.filter((m) => m.type === 'draftState').length, 1, 'one draft, from the newer start');
+  assert.equal(await t.send({ type: 'draft', cmd: { type: 'look', id: 'prayer', fade: 0 } }), null);
+  await waitFor(() => t.draft()?.look === 'prayer', 2000, 'the draft on prayer');
+}));
+
+test('at most six tablets are in Blind at once', () => withApp(async (app) => {
+  const tablets = await Promise.all(Array.from({ length: 7 }, () => tablet(app)));
+  for (const t of tablets.slice(0, 6)) assert.equal(await t.send({ type: 'blindStart' }), null);
+  assert.equal(app.drafts, 6);
+  const seventh = tablets[6]!;
+  assert.equal(await seventh.send({ type: 'blindStart' }), TOO_MANY);
+  assert.equal(app.drafts, 6);
+  // A tablet already in Blind can still start afresh.
+  assert.equal(await tablets[0]!.send({ type: 'blindStart' }), null);
+  assert.equal(app.drafts, 6);
+  // Once one leaves, there is room again.
+  assert.equal(await tablets[1]!.send({ type: 'blindEnd' }), null);
+  assert.equal(await seventh.send({ type: 'blindStart' }), null);
+  assert.equal(app.drafts, 6);
 }));
