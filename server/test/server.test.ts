@@ -1168,6 +1168,45 @@ test('smoke machines refuse effects', () => withApp(async (app) => {
   assert.match(await t.send({ type: 'groupEffect', group: 'back-wall', effect: liveWave({ colours: [{ palette: 'x', index: 0 }] }) }) ?? '', /^invalid command/);
 }));
 
+test('the effect editor gets an effect as moving frames for a group, at the live tempo, without touching the stage', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  assert.equal(await t.send({ type: 'tempo', bpm: 60 }), null);
+  await waitFor(() => t.state()?.tempo === 60, 2000, 'the tempo');
+  const before = t.state().groups['back-wall'].preset;
+
+  const ok = await api(app, 'POST', '/api/effect-preview', { group: 'back-wall', effect: liveWave() });
+  assert.equal(ok.status, 200);
+  const { fps, count, segments, fixtures, rate, tempo, speed, frames } = ok.body;
+  assert.deepEqual(fixtures, [1, 1, 1, 1, 1, 1]);
+  assert.equal(segments, 6);
+  assert.equal(tempo, 60);
+  assert.equal(speed, 1);
+  // 4 beats at 60 bpm: a quarter of a cycle a second, so two cycles make the 8 s loop.
+  assert.equal(rate, 0.25);
+  assert.equal(count, 160);
+  assert.ok(Math.abs(fps - 20) < 1e-9);
+  const bytes = Buffer.from(frames, 'base64');
+  assert.equal(bytes.length, count * segments * 3);
+  assert.ok(bytes.some((b) => b > 0), 'the wave is lit');
+  await sleep(60);
+  assert.equal(t.state().groups['back-wall'].preset, before, 'nothing goes on stage');
+
+  // Plain words for a group that can't run one, and 400 for a body that isn't an effect.
+  const show = (await api(app, 'GET', '/api/show')).body;
+  show.groups.find((g: any) => g.id === 'pulpit').kind = 'smoke';
+  assert.equal((await api(app, 'PUT', '/api/show', show)).status, 200);
+  const smoke = await api(app, 'POST', '/api/effect-preview', { group: 'pulpit', effect: liveWave() });
+  assert.deepEqual([smoke.status, smoke.body.error], [400, "smoke machines can't run effects"]);
+  const unknown = await api(app, 'POST', '/api/effect-preview', { group: 'nope', effect: liveWave() });
+  assert.deepEqual([unknown.status, unknown.body.error], [404, 'unknown group "nope"']);
+  for (const body of [{}, { group: 'back-wall' }, { group: 'back-wall', effect: liveWave({ effect: 'spin' }) }, { group: 'back-wall', effect: liveWave({ colours: [{ palette: 'x', index: 0 }] }) }]) {
+    const bad = await api(app, 'POST', '/api/effect-preview', body);
+    assert.equal(bad.status, 400, JSON.stringify(body));
+    assert.equal(typeof bad.body.error, 'string');
+  }
+}));
+
 test('a WebSocket message that is valid JSON but not an object is ignored, and the server keeps serving', () => withApp(async (app) => {
   const t = await tablet(app);
   await waitFor(t.layout);
