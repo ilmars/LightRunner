@@ -1,9 +1,11 @@
 // Comparing a show with an incoming one (a show file or a Lightkey project)
 // and merging only the changes someone picked. Items are matched by id.
 
-import { isEffectPreset, parseShow, type Fixture, type Group, type Look, type Preset, type Profile, type Show } from './schema.ts';
+import { presetsUsingPaletteEntry, swatchOf } from './presets.ts';
+import { isEffectPreset, parseShow, type ColourSpec, type Fixture, type Group, type Look, type Palette, type Preset, type Profile, type Show } from './schema.ts';
 
-export type ItemKind = 'profile' | 'fixture' | 'group' | 'preset' | 'look';
+/** `palette`: the shared colours (from Lightkey) that colours in every group can point to. */
+export type ItemKind = 'profile' | 'fixture' | 'group' | 'palette' | 'preset' | 'look';
 export type Change = 'added' | 'changed' | 'removed';
 
 export interface DiffItem {
@@ -24,27 +26,52 @@ export interface Pick {
   change: Change;
 }
 
-type Item = Profile | Fixture | Group | Preset | Look;
-const LISTS: Record<ItemKind, 'profiles' | 'fixtures' | 'groups' | 'presets' | 'looks'> = {
-  profile: 'profiles', fixture: 'fixtures', group: 'groups', preset: 'presets', look: 'looks',
+type Item = Profile | Fixture | Group | Palette | Preset | Look;
+const LISTS: Record<ItemKind, 'profiles' | 'fixtures' | 'groups' | 'palettes' | 'presets' | 'looks'> = {
+  profile: 'profiles', fixture: 'fixtures', group: 'groups', palette: 'palettes', preset: 'presets', look: 'looks',
 };
-const ORDER: ItemKind[] = ['profile', 'fixture', 'group', 'preset', 'look'];
+// Shared colours come before presets: a preset is checked against the shared colours it points to.
+const ORDER: ItemKind[] = ['profile', 'fixture', 'group', 'palette', 'preset', 'look'];
 const kindsFor = (scope: Scope): ItemKind[] => (scope === 'patch' ? ['profile', 'fixture'] : ORDER);
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const list = (show: Show, kind: ItemKind) => show[LISTS[kind]] as Item[];
 
+/** True when a preset's swatch is just what its colour (shared colours looked up in its own show) shows. */
+const swatchFollows = (show: Show, p: Preset) => p.swatch !== undefined && p.swatch === swatchOf(show, p);
+
 /**
- * Whether a group is a smoke machine belongs to this installation: show files and
- * Lightkey projects don't know about smoke, and every group in them reads as a light.
- * So an import never changes it, and it is never shown as a difference.
+ * What is compared of an item.
+ * - Whether a group is a smoke machine belongs to this installation: show files and
+ *   Lightkey projects don't know about smoke, and every group in them reads as a light.
+ *   So an import never changes it, and it is never shown as a difference.
+ * - A preset's swatch that only follows a shared colour is left out: the shared colour is
+ *   compared on its own, and taking it brings the swatch along.
  */
-const withoutKind = (kind: ItemKind, x: Item): unknown => {
-  if (kind !== 'group') return x;
-  const { kind: _ignored, ...rest } = x as Group;
-  return rest;
+const comparable = (kind: ItemKind, x: Item, show: Show): unknown => {
+  if (kind === 'group') {
+    const { kind: _ignored, ...rest } = x as Group;
+    return rest;
+  }
+  if (kind === 'preset' && swatchFollows(show, x as Preset)) {
+    const { swatch: _ignored, ...rest } = x as Preset;
+    return rest;
+  }
+  return x;
 };
-const sameItem = (kind: ItemKind, a: Item, b: Item) => same(withoutKind(kind, a), withoutKind(kind, b));
+const sameItem = (kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show) => same(comparable(kind, a, show), comparable(kind, b, incoming));
+
+/** "colour 8 (Zils)": a shared colour, numbered from 1, with the names of the colours that point to it. */
+function sharedColourLabel(show: Show, incoming: Show, palette: string, index: number): string {
+  const names: string[] = [];
+  for (const s of [show, incoming]) {
+    for (const p of presetsUsingPaletteEntry(s, palette, index)) {
+      if (!p.custom && !isEffectPreset(p) && !names.includes(p.name)) names.push(p.name);
+    }
+  }
+  const shown = names.slice(0, 2).join(', ') + (names.length > 2 ? ' and more' : '');
+  return `colour ${index + 1}${names.length ? ` (${shown})` : ''}`;
+}
 
 function describe(kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show): string[] {
   const out: string[] = [];
@@ -75,9 +102,26 @@ function describe(kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show):
       if (!added.length && !removed.length && !same(ga.fixtures, gb.fixtures)) out.push('fixture order changed');
       break;
     }
+    case 'palette': {
+      const ca = (a as Palette).colours, cb = (b as Palette).colours;
+      for (let i = 0; i < Math.max(ca.length, cb.length); i++) {
+        const x = ca[i], y = cb[i];
+        const label = sharedColourLabel(show, incoming, a.id, i);
+        if (!x) out.push(`adds ${label} ${y!.hex.toLowerCase()}`);
+        else if (!y) out.push(`drops ${label}`);
+        else {
+          const parts: string[] = [];
+          if (x.hex.toLowerCase() !== y.hex.toLowerCase()) parts.push(`${x.hex.toLowerCase()} → ${y.hex.toLowerCase()}`);
+          if ((x.white ?? 0) !== (y.white ?? 0) || (x.amber ?? 0) !== (y.amber ?? 0) || (x.uv ?? 0) !== (y.uv ?? 0)) parts.push('white, amber or UV changed');
+          if (parts.length) out.push(`${label} ${parts.join(', ')}`);
+        }
+      }
+      break;
+    }
     case 'preset': {
       const pa = a as Preset, pb = b as Preset;
       if (!same(pa.layers, pb.layers)) out.push(isEffectPreset(pa) || isEffectPreset(pb) ? 'effect changed' : 'colour or level changed');
+      else if (pa.swatch !== pb.swatch && !(swatchFollows(show, pa) && swatchFollows(incoming, pb))) out.push(`button colour ${pa.swatch ?? 'none'} → ${pb.swatch ?? 'none'}`);
       if (pa.fade !== pb.fade) out.push(`fade ${pa.fade} s → ${pb.fade} s`);
       if (pa.group !== pb.group) out.push(`group ${pa.group} → ${pb.group}`);
       break;
@@ -108,7 +152,7 @@ export function diffShows(current: Show, incoming: Show, scope: Scope = 'all'): 
     for (const [id, b] of next) {
       const a = now.get(id);
       if (!a) items.push({ kind, id, change: 'added', name: label(b, incoming), details: [] });
-      else if (!sameItem(kind, a, b)) items.push({ kind, id, change: 'changed', name: label(b, incoming), details: describe(kind, a, b, current, incoming) });
+      else if (!sameItem(kind, a, b, current, incoming)) items.push({ kind, id, change: 'changed', name: label(b, incoming), details: describe(kind, a, b, current, incoming) });
     }
     for (const [id, a] of now) {
       if (!next.has(id)) items.push({ kind, id, change: 'removed', name: label(a, current), details: [] });
@@ -120,8 +164,10 @@ export function diffShows(current: Show, incoming: Show, scope: Scope = 'all'): 
 /**
  * The current show with only the picked changes taken from `incoming`.
  * Removing something also removes what depends on it (a removed fixture
- * leaves its groups, a removed group takes its presets). Throws with a
- * readable message if the result would be broken.
+ * leaves its groups, a removed group takes its presets). A taken preset, and
+ * every preset pointing to a taken shared colour, gets the swatch of the
+ * shared colour it now points to. Throws with a readable message if the
+ * result would be broken.
  */
 export function applyPicks(current: Show, incoming: Show, picks: Pick[]): Show {
   const out: Show = structuredClone(current);
@@ -148,6 +194,17 @@ export function applyPicks(current: Show, incoming: Show, picks: Pick[]): Show {
       if (p.kind === 'group' && out.operator.groups.length) out.operator.groups.push(p.id);
       if (p.kind === 'look' && out.operator.looks.length) out.operator.looks.push(p.id);
     }
+  }
+  // Swatches agree with the shared colours they end up pointing to (the same rule as the colour editor).
+  const taken = (kind: ItemKind) => new Set(picks.filter((p) => p.kind === kind && p.change !== 'removed').map((p) => p.id));
+  const palettes = taken('palette'), presets = taken('preset');
+  const points = (c: ColourSpec) => 'palette' in c;
+  for (const p of out.presets) {
+    const layer = p.layers.length === 1 ? p.layers[0]! : undefined;
+    if (!layer) continue;
+    const specs = layer.kind === 'static' ? [layer.colour] : layer.colours;
+    if (!specs.some(points)) continue;
+    if (presets.has(p.id) || specs.some((c) => 'palette' in c && palettes.has(c.palette))) p.swatch = swatchOf(out, p) ?? p.swatch;
   }
   try {
     return parseShow(out);

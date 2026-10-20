@@ -195,22 +195,29 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
   }
 
   // Swatches follow the look: the colours edited, and everything that points to a palette entry that moved.
-  const palettes = new Map(out.palettes.map((x) => [x.id, x]));
   const follows = (c: ColourSpec) => 'palette' in c && moved.has(`${c.palette}:${c.index}`);
   for (const p of out.presets) {
     const layer = p.layers[0];
     if (p.layers.length !== 1 || !layer) continue;
-    if (layer.kind === 'static' && (edited.has(p.id) || follows(layer.colour))) {
-      const light = resolveColour(layer.colour, palettes);
-      p.swatch = displayColour(light.hex, light);
-    } else if (layer.kind === 'effect' && layer.colours.some(follows)) {
-      p.swatch = effectSwatch(out, layer);
-    }
+    const changed = layer.kind === 'static' ? edited.has(p.id) || follows(layer.colour) : layer.colours.some(follows);
+    if (changed) p.swatch = swatchOf(out, p) ?? p.swatch;
   }
 
   const ids = out.presets.filter((p) => JSON.stringify(p) !== before.get(p.id)).map((p) => p.id);
   if (!ids.length && JSON.stringify(out.palettes) === palettesBefore) throw new Error('nothing changed');
   return { show: out, ids };
+}
+
+/**
+ * The swatch a preset of one layer shows: its colour (palette colours looked up, white and the
+ * other channels mixed in), or an effect's first colour. Null for a preset of several layers.
+ */
+export function swatchOf(show: Show, p: Preset): string | null {
+  const layer = p.layers.length === 1 ? p.layers[0]! : undefined;
+  if (!layer) return null;
+  if (layer.kind === 'effect') return effectSwatch(show, layer);
+  const light = resolveColour(layer.colour, new Map(show.palettes.map((x) => [x.id, x])));
+  return displayColour(light.hex, light);
 }
 
 /** One plain, lit layer: the only kind of colour the editor can recolour (never an effect). */
