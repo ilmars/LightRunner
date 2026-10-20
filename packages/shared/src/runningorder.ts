@@ -318,7 +318,7 @@ function quickLookIn(show: Show, id: string): QuickLook {
  * what it gives them. A group left out of `groups` is dropped from the look. A group the look doesn't
  * set yet needs `fromStage`, because there is no value to give it otherwise. With `fromStage`, the
  * entries of `groups` (the look's own groups when none are named) are replaced with the stage as it is going;
- * a group the stage has nothing for keeps its old entry. Smoke groups never count, as in saveQuickLook.
+ * a group the stage has nothing for keeps its old entry (a new group needs something on the stage). Smoke groups never count, as in saveQuickLook.
  */
 export function editQuickLook(
   show: Show,
@@ -343,9 +343,12 @@ export function editQuickLook(
   let entries = target.groups.filter((e) => chosen.includes(e.group));
   if (input.fromStage) {
     const fresh = entriesFor(out, stage!, chosen);
+    // A group the look doesn't set has nothing to keep, so the stage must have something for it.
+    for (const group of added) {
+      if (!fresh.some((f) => f.group === group)) throw new Error(`${out.groups.find((g) => g.id === group)?.name ?? group} has nothing on the stage yet`);
+    }
     entries = entries.map((e) => fresh.find((f) => f.group === e.group) ?? e);
     entries.push(...fresh.filter((f) => !entries.some((e) => e.group === f.group)));
-    if (!entries.length) throw new Error('pick at least one group');
   }
   if (input.groups !== undefined || input.fromStage) target.groups = entries;
   if (name !== undefined) target.name = name;

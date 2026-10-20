@@ -735,6 +735,13 @@ test('editQuickLook with the stage keeps the old entry of a group the stage has 
   ]);
 });
 
+test('editQuickLook refuses a new group the stage has nothing for', () => {
+  const s = quickShow();
+  const two = editQuickLook(s, { look: 'walk-in', groups: ['front-wash'] });
+  const stage: Stage = { groups: { 'front-wash': 'front-bright', audience: null }, levels: {} };
+  assert.throws(() => editQuickLook(two, { look: 'walk-in', groups: ['front-wash', 'audience'], fromStage: true }, stage), { message: 'Audience has nothing on the stage yet' });
+});
+
 test('deleteQuickLook removes it from the quick looks, and the look unless the running order uses it', () => {
   const s = quickShow();
   const out = deleteQuickLook(s, 'walk-in');
