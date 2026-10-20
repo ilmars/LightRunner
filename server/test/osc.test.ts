@@ -117,6 +117,23 @@ test('every address maps to its device action', () => {
   assert.deepEqual(act('/lightrunner/master/down'), { kind: 'masterStep', by: -0.1 });
 });
 
+test('a button release (0 or False) does nothing on a trigger address; a press or a bare message acts', () => {
+  const triggers: [string, DeviceAction][] = [
+    ['next', { kind: 'next' }], ['back', { kind: 'backToLook' }], ['undo', { kind: 'undo' }], ['basic', { kind: 'basic' }],
+    ['blackout', { kind: 'blackout' }], ['master/up', { kind: 'masterStep', by: 0.1 }], ['master/down', { kind: 'masterStep', by: -0.1 }],
+  ];
+  for (const [path, action] of triggers) {
+    const a = `/lightrunner/${path}`;
+    assert.equal(act(a, i(0)), null, `${a} 0`);
+    assert.equal(act(a, f(0)), null, `${a} 0.0`);
+    assert.equal(act(a, b(false)), null, `${a} F`);
+    assert.deepEqual(act(a, i(1)), action, `${a} 1`);
+    assert.deepEqual(act(a, f(1)), action, `${a} 1.0`);
+    assert.deepEqual(act(a, b(true)), action, `${a} T`);
+    assert.deepEqual(act(a), action, `${a} with no argument`);
+  }
+});
+
 test('the /lightrunner prefix is not case sensitive, and a trailing slash is allowed', () => {
   assert.deepEqual(act('/LightRunner/Next'), { kind: 'next' });
   assert.deepEqual(act('/LIGHTRUNNER/group/3/LEVEL', f(0.25)), { kind: 'groupLevel', group: 3, value: 0.25 });
@@ -212,6 +229,13 @@ test('the listener runs actions in the order they arrive, logs a bad address onc
     await server.close();
   }
   assert.ok(await portIsFree(server.port), 'closing frees the port');
+});
+
+test('closing a listener twice does not throw', async () => {
+  const server = await listenOsc(0, async () => null, () => {}, '127.0.0.1');
+  await server.close();
+  await server.close(); // already closed
+  assert.ok(await portIsFree(server.port));
 });
 
 test('a port that is taken makes listenOsc fail with plain words', async () => {

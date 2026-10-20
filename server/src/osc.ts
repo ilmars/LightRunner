@@ -111,14 +111,19 @@ export function oscAction(msg: OscMessage): DeviceAction | null {
   /** A level: an integer is a percentage, a float is already 0 to 1. */
   const level = arg && (arg.type === 'i' || arg.type === 'f') && Number.isFinite(arg.value) ? clamp01(arg.type === 'i' ? arg.value / 100 : arg.value) : null;
 
+  // A button that sends 1 on press and 0 on release (TouchOSC, bridges, desks) must act once: the release does nothing.
+  // A bare message with no argument still acts.
+  const release = arg !== undefined && ((arg.type === 'b' && !arg.value) || ((arg.type === 'i' || arg.type === 'f') && arg.value === 0));
+  const trigger = <A extends DeviceAction>(action: A): A | null => (release ? null : action);
+
   switch (rest[0]) {
     case 'item':
       return rest.length === 1 && number !== null ? { kind: 'item', n: number } : null;
-    case 'next': return rest.length === 1 ? { kind: 'next' } : null;
-    case 'back': return rest.length === 1 ? { kind: 'backToLook' } : null;
-    case 'undo': return rest.length === 1 ? { kind: 'undo' } : null;
-    case 'basic': return rest.length === 1 ? { kind: 'basic' } : null;
-    case 'blackout': return rest.length === 1 ? { kind: 'blackout' } : null;
+    case 'next': return rest.length === 1 ? trigger({ kind: 'next' }) : null;
+    case 'back': return rest.length === 1 ? trigger({ kind: 'backToLook' }) : null;
+    case 'undo': return rest.length === 1 ? trigger({ kind: 'undo' }) : null;
+    case 'basic': return rest.length === 1 ? trigger({ kind: 'basic' }) : null;
+    case 'blackout': return rest.length === 1 ? trigger({ kind: 'blackout' }) : null;
     case 'group': {
       if (rest.length !== 3 || !POSITION.test(rest[1])) return null;
       const group = Number(rest[1]);
@@ -135,8 +140,8 @@ export function oscAction(msg: OscMessage): DeviceAction | null {
     }
     case 'master':
       if (rest.length === 1) return level === null ? null : { kind: 'master', value: level };
-      if (rest.length === 2 && rest[1] === 'up') return { kind: 'masterStep', by: 0.1 };
-      if (rest.length === 2 && rest[1] === 'down') return { kind: 'masterStep', by: -0.1 };
+      if (rest.length === 2 && rest[1] === 'up') return trigger({ kind: 'masterStep', by: 0.1 });
+      if (rest.length === 2 && rest[1] === 'down') return trigger({ kind: 'masterStep', by: -0.1 });
       return null;
     default:
       return null;
@@ -201,21 +206,28 @@ export function listenOsc(
   });
 
   return new Promise((resolve, reject) => {
-    socket.once('error', (err: NodeJS.ErrnoException) => {
+    const failed = (err: NodeJS.ErrnoException) => {
       socket.close();
       reject(new Error(
         err.code === 'EADDRINUSE' ? `Port ${port} is already in use by another program.`
           : err.code === 'EACCES' ? `Light Runner is not allowed to use port ${port}.`
           : `Can't listen on port ${port} (${err.message}).`));
-    });
+    };
+    socket.once('error', failed);
     socket.bind(port, host, () => {
+      socket.off('error', failed);
       // Once listening, a socket error is only logged: it must not take the app down.
       socket.on('error', (err) => note('socket', `OSC: ${err.message}`));
       resolve({
         port: socket.address().port,
         close: () => new Promise<void>((done) => {
           closed = true;
-          socket.close(() => done());
+          // A socket that is already closed throws; closing twice must still finish.
+          try {
+            socket.close(() => done());
+          } catch {
+            done();
+          }
         }),
       });
     });
