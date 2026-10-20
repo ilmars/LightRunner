@@ -112,43 +112,98 @@ export interface EditColour {
   name?: string;
   /** New #rrggbb colour; undefined leaves it. */
   colour?: string;
+  /** New brightness of the colour, 0.05 to 1 (the layer's intensity); undefined leaves it. */
+  level?: number;
+  /** New fade time in seconds, 0 to 600 (the preset's own fade); undefined leaves it. */
+  fade?: number;
+  /**
+   * With a new colour on a colour that points to a palette entry: change the palette entry,
+   * so every colour pointing to it follows. Without a palette entry it does nothing.
+   */
+  shared?: boolean;
   /** Also change the presets of other groups that have the same name as this one has now. */
   sameName: boolean;
 }
 
+/** The palette entry a preset's only layer points to; null for a plain colour, an effect or Off. */
+export function paletteEntryOf(p: Preset): { palette: string; index: number } | null {
+  if (!canRecolour(p)) return null;
+  const spec = (p.layers[0] as StaticLayer).colour;
+  return 'palette' in spec ? { palette: spec.palette, index: spec.index } : null;
+}
+
+/** Every preset with a layer (or an effect colour) that points to this palette entry, in the show's order. */
+export function presetsUsingPaletteEntry(show: Show, palette: string, index: number): Preset[] {
+  const points = (c: ColourSpec) => 'palette' in c && c.palette === palette && c.index === index;
+  return show.presets.filter((p) => p.layers.some((l) => (l.kind === 'static' ? points(l.colour) : l.colours.some(points))));
+}
+
 /**
- * Changes the name and/or the colour of a colour in a group's list. A new colour replaces the
- * preset's layer with one plain colour (keeping its brightness) and updates the swatch.
- * Returns the ids changed. Hidden (custom) presets can't be edited from here.
+ * Changes the name, colour, brightness and/or fade of a colour in a group's list. A new colour
+ * replaces the preset's layer with one plain colour (keeping its brightness) and updates the swatch,
+ * or, with `shared` on a palette colour, changes the palette entry itself for everything that points to it.
+ * Returns the ids of every preset changed. Hidden (custom) presets can't be edited from here.
  */
 export function editColour(show: Show, input: EditColour): { show: Show; ids: string[] } {
   const out = structuredClone(show);
   const target = out.presets.find((p) => p.id === input.preset);
   if (!target) throw new Error('that colour is not in the list');
   if (target.custom) throw new Error("that colour can't be edited");
-  if (input.name === undefined && input.colour === undefined) throw new Error('nothing to change');
+  if (input.name === undefined && input.colour === undefined && input.level === undefined && input.fade === undefined) throw new Error('nothing to change');
   const name = input.name === undefined ? undefined : cleanName(input.name);
   if (input.colour !== undefined && !HEX_COLOUR.test(input.colour)) throw new Error('that is not a colour');
   const colour = input.colour?.toLowerCase();
+  const { level, fade } = input;
+  if (level !== undefined && !(level >= 0.05 && level <= 1)) throw new Error('the brightness is between 5 % and 100 %');
+  if (fade !== undefined && !(fade >= 0 && fade <= 600)) throw new Error('the fade is between 0 and 600 seconds');
 
-  if (colour !== undefined && !canRecolour(target)) {
+  if ((colour !== undefined || level !== undefined) && !canRecolour(target)) {
     throw new Error(isOff(target) ? "Off can't be given a colour; add a new colour instead." : "that colour can't be changed here");
   }
 
-  const ids: string[] = [];
+  const before = new Map(out.presets.map((p) => [p.id, JSON.stringify(p)]));
+  const palettesBefore = JSON.stringify(out.palettes);
+  const shared = !!input.shared && paletteEntryOf(target) !== null;
+  const moved = new Set<string>(); // palette entries that got a new hex, as "palette:index"
+  const edited = new Set<string>(); // presets that got a new colour of their own
+
   for (const p of sameNamePresets(out, target, input.sameName)) {
-    const before = JSON.stringify(p);
     if (name !== undefined) p.name = name;
-    // An Off (or other kind of) colour of the same name only takes the new name.
-    if (colour !== undefined && canRecolour(p)) {
-      const layer = recoloured(out, p.layers[0] as StaticLayer, colour);
-      p.layers = [layer];
-      // The swatch shows what the stage does, white, amber and UV included (as a saved Any colour pick does).
-      p.swatch = 'hex' in layer.colour ? displayColour(colour, layer.colour) : colour;
+    if (fade !== undefined) p.fade = fade;
+    // An Off (or other kind of) colour of the same name only takes the new name and fade.
+    if (!canRecolour(p)) continue;
+    const layer = p.layers[0] as StaticLayer;
+    if (level !== undefined) layer.intensity = level;
+    if (colour === undefined) continue;
+    const entry = shared ? paletteEntryOf(p) : null;
+    if (entry) {
+      const found = out.palettes.find((x) => x.id === entry.palette)?.colours[entry.index];
+      if (found) {
+        found.hex = colour;
+        moved.add(`${entry.palette}:${entry.index}`);
+        edited.add(p.id);
+        continue;
+      }
     }
-    if (JSON.stringify(p) !== before) ids.push(p.id);
+    p.layers = [recoloured(out, layer, colour)];
+    edited.add(p.id);
   }
-  if (!ids.length) throw new Error('nothing changed');
+
+  // Swatches follow the look: the colours edited, and everything that points to a palette entry that moved.
+  const palettes = new Map(out.palettes.map((x) => [x.id, x]));
+  const follows = (c: ColourSpec) => 'palette' in c && moved.has(`${c.palette}:${c.index}`);
+  for (const p of out.presets) {
+    const layer = p.layers[0];
+    if (p.layers.length !== 1 || !layer) continue;
+    if (layer.kind === 'static' && (edited.has(p.id) || follows(layer.colour))) {
+      p.swatch = displayColour(resolveColour(layer.colour, palettes).hex, resolveColour(layer.colour, palettes));
+    } else if (layer.kind === 'effect' && layer.colours.some(follows)) {
+      p.swatch = effectSwatch(out, layer);
+    }
+  }
+
+  const ids = out.presets.filter((p) => JSON.stringify(p) !== before.get(p.id)).map((p) => p.id);
+  if (!ids.length && JSON.stringify(out.palettes) === palettesBefore) throw new Error('nothing changed');
   return { show: out, ids };
 }
 

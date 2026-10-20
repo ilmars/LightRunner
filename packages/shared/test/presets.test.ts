@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  addColour, addEffect, canRecolour, checkReferences, deleteColour, editColour, editEffect, EffectLayer, ensureEffects, ensureRunningOrder, groupIsWhiteOnly,
+  addColour, addEffect, canRecolour, checkReferences, deleteColour, displayColour, editColour, editEffect, EffectLayer, ensureEffects, ensureRunningOrder, groupIsWhiteOnly,
   groupSegments, isEffectPreset, isOff, listNames, parseShow, presetUsers, resolveColour,
   type Show, type StaticLayer,
 } from '../src/index.ts';
@@ -230,6 +230,120 @@ test('editing refuses hidden presets, missing ones, bad input and no change', ()
   const plain = addColour(s, { group: 'key-lights', colour: '#123456', name: 'Plain', allGroups: false });
   assert.throws(() => editColour(plain.show, { preset: plain.ids[0]!, name: 'Plain', colour: '#123456', sameName: false }), /nothing changed/);
   assert.equal(preset(editColour(s, { preset: 'key-lights-zils', name: 'y'.repeat(60), sameName: false }).show, 'key-lights-zils').name, 'y'.repeat(40));
+});
+
+test('brightness changes only the layer intensity', () => {
+  const s = rig();
+  const { show, ids } = addColour(s, { group: 'key-lights', colour: '#2A4B9C', name: 'Plain', allGroups: false });
+  const id = ids[0]!;
+  const dim = editColour(show, { preset: id, level: 0.5, sameName: false });
+  assert.deepEqual(dim.ids, [id]);
+  assert.deepEqual(preset(dim.show, id).layers, [{ kind: 'static', colour: { hex: '#2a4b9c' }, intensity: 0.5 }]);
+  assert.equal(preset(dim.show, id).swatch, '#2a4b9c'); // swatches show full brightness
+  assert.equal(preset(show, id).layers[0]!.intensity, 1); // input not changed
+  // A palette colour stays a palette colour when only its brightness changes, and the palette is not touched.
+  const zils = editColour(s, { preset: 'key-lights-zils', level: 0.25, sameName: true });
+  assert.deepEqual(zils.ids.sort(), ['b8-side-bar-zils', 'background-zils', 'drum-cage-zils', 'key-lights-zils']);
+  for (const zid of zils.ids) assert.deepEqual(preset(zils.show, zid).layers, [{ kind: 'static', colour: { palette: 'lightkey', index: 7 }, intensity: 0.25 }]);
+  assert.deepEqual(zils.show.palettes, s.palettes);
+  // Brightness together with a new colour.
+  const both = preset(editColour(s, { preset: 'key-lights-zils', colour: '#103a7c', level: 0.6, sameName: false }).show, 'key-lights-zils');
+  assert.deepEqual(both.layers, [{ kind: 'static', colour: { hex: '#103a7c' }, intensity: 0.6 }]);
+  assert.throws(() => editColour(show, { preset: id, level: 0.01, sameName: false }), /brightness/);
+  assert.throws(() => editColour(show, { preset: id, level: 1, sameName: false }), { message: 'nothing changed' });
+});
+
+test('fade changes the preset fade, also for an effect', () => {
+  const s = rig();
+  const slow = editColour(s, { preset: 'key-lights-zils', fade: 12.5, sameName: false });
+  assert.deepEqual(slow.ids, ['key-lights-zils']);
+  assert.equal(preset(slow.show, 'key-lights-zils').fade, 12.5);
+  assert.equal(preset(slow.show, 'key-lights-zils').swatch, '#0000ff');
+  assert.equal(preset(slow.show, 'background-zils').fade, 3);
+  assert.equal(preset(editColour(s, { preset: 'key-lights-zils', fade: 0, sameName: false }).show, 'key-lights-zils').fade, 0);
+  // Off takes a fade too.
+  assert.equal(preset(editColour(s, { preset: 'key-lights-off', fade: 1, sameName: false }).show, 'key-lights-off').fade, 1);
+  const { show, id } = addEffect(s, { group: 'background', name: 'Wave', effect: EffectLayer.parse({ kind: 'effect', effect: 'wave', colours: [{ hex: '#ff0000' }], speed: { beats: 4 } }) });
+  const fx = editColour(show, { preset: id, fade: 8, sameName: false });
+  assert.equal(preset(fx.show, id).fade, 8);
+  assert.deepEqual(preset(fx.show, id).layers, preset(show, id).layers);
+  assert.throws(() => editColour(s, { preset: 'key-lights-zils', fade: 601, sameName: false }), /fade/);
+  assert.throws(() => editColour(s, { preset: 'key-lights-zils', fade: 3, sameName: false }), { message: 'nothing changed' });
+});
+
+test('brightness is refused for Off, effects and multi-layer presets', () => {
+  const s = rig();
+  assert.throws(() => editColour(s, { preset: 'key-lights-off', level: 0.5, sameName: false }), { message: "Off can't be given a colour; add a new colour instead." });
+  const { show, id } = addEffect(s, { group: 'background', name: 'Wave', effect: EffectLayer.parse({ kind: 'effect', effect: 'wave', colours: [{ hex: '#ff0000' }], speed: { beats: 4 } }) });
+  assert.throws(() => editColour(show, { preset: id, level: 0.5, sameName: false }), { message: "that colour can't be changed here" });
+  const layers: StaticLayer[] = [{ kind: 'static', colour: { hex: '#ff0000' }, intensity: 1 }, { kind: 'static', colour: { hex: '#0000ff' }, intensity: 0.5 }];
+  show.presets.push({ id: 'two', name: 'Two', group: 'key-lights', fade: 3, swatch: '#ff0000', layers });
+  assert.throws(() => editColour(show, { preset: 'two', level: 0.5, sameName: false }), { message: "that colour can't be changed here" });
+  assert.throws(() => editColour(show, { preset: 'two', fade: 5, level: 0.5, sameName: false }), { message: "that colour can't be changed here" });
+  assert.equal(preset(editColour(show, { preset: 'two', fade: 5, sameName: false }).show, 'two').fade, 5);
+});
+
+const ZILS = ['b8-side-bar-zils', 'background-zils', 'drum-cage-zils', 'key-lights-zils'];
+const zilsPoint = (s: Show, id: string) => JSON.stringify((preset(s, id).layers[0] as StaticLayer).colour) === JSON.stringify({ palette: 'lightkey', index: 7 });
+
+test('with shared on, a new colour changes the palette entry and every colour that points to it', () => {
+  const s = ready();
+  const { show, ids } = editColour(s, { preset: 'key-lights-zils', colour: '#103A7C', shared: true, sameName: false });
+  assert.equal(show.palettes.find((p) => p.id === 'lightkey')!.colours[7]!.hex, '#103a7c');
+  for (const id of ZILS) {
+    assert.equal(zilsPoint(show, id), true, id); // still pointing to the palette
+    assert.equal(preset(show, id).swatch, '#103a7c', id);
+    assert.equal(preset(show, id).name, 'Zils');
+  }
+  assert.deepEqual([...ids].sort(), ZILS); // every group's Zils, though only one was edited
+  assert.equal(s.palettes.find((p) => p.id === 'lightkey')!.colours[7]!.hex, '#0000ff'); // input not changed
+  assert.deepEqual(checkReferences(show), []);
+  parseShow(JSON.parse(JSON.stringify(show)));
+  // The palette entry keeps its white, and the swatches show it.
+  const withWhite = structuredClone(s);
+  withWhite.palettes.find((p) => p.id === 'lightkey')!.colours[7] = { hex: '#0000ff', white: 0.3 };
+  const mixed = editColour(withWhite, { preset: 'background-zils', colour: '#103a7c', shared: true, sameName: false }).show;
+  assert.deepEqual(mixed.palettes.find((p) => p.id === 'lightkey')!.colours[7], { hex: '#103a7c', white: 0.3 });
+  assert.equal(preset(mixed, 'key-lights-zils').swatch, displayColour('#103a7c', { white: 0.3 }));
+  // A plain colour has no palette entry: shared does nothing.
+  const plain = addColour(s, { group: 'key-lights', colour: '#123456', name: 'Plain', allGroups: false });
+  const edited = editColour(plain.show, { preset: plain.ids[0]!, colour: '#654321', shared: true, sameName: false });
+  assert.deepEqual(edited.ids, plain.ids);
+  assert.deepEqual(edited.show.palettes, s.palettes);
+});
+
+test('with shared off, a palette colour is cut loose and the others stay', () => {
+  const s = ready();
+  const { show, ids } = editColour(s, { preset: 'key-lights-zils', colour: '#103a7c', shared: false, sameName: false });
+  assert.deepEqual(ids, ['key-lights-zils']);
+  assert.deepEqual(preset(show, 'key-lights-zils').layers, [{ kind: 'static', colour: { hex: '#103a7c' }, intensity: 1 }]);
+  assert.equal(preset(show, 'key-lights-zils').swatch, '#103a7c');
+  assert.deepEqual(show.palettes, s.palettes);
+  for (const id of ZILS.filter((x) => x !== 'key-lights-zils')) {
+    assert.equal(zilsPoint(show, id), true, id);
+    assert.equal(preset(show, id).swatch, '#0000ff', id);
+  }
+});
+
+test('same-name and shared together change each preset once', () => {
+  const s = ready();
+  const { show, ids } = editColour(s, { preset: 'key-lights-zils', name: 'Deep sea', colour: '#103a7c', shared: true, sameName: true });
+  assert.deepEqual([...ids].sort(), ZILS);
+  assert.equal(new Set(ids).size, ids.length);
+  for (const id of ZILS) {
+    assert.equal(zilsPoint(show, id), true, id);
+    assert.equal(preset(show, id).name, 'Deep sea');
+    assert.equal(preset(show, id).swatch, '#103a7c');
+  }
+  assert.equal(show.palettes.find((p) => p.id === 'lightkey')!.colours[7]!.hex, '#103a7c');
+  // A same-named colour that is a plain colour takes the colour as its own; the palette ones share it.
+  const mixed = structuredClone(s);
+  preset(mixed, 'background-zils').layers = [{ kind: 'static', colour: { hex: '#0000ff' }, intensity: 1 }];
+  const out = editColour(mixed, { preset: 'key-lights-zils', colour: '#103a7c', shared: true, sameName: true });
+  assert.deepEqual([...out.ids].sort(), ZILS);
+  assert.deepEqual(preset(out.show, 'background-zils').layers, [{ kind: 'static', colour: { hex: '#103a7c' }, intensity: 1 }]);
+  assert.equal(out.show.palettes.find((p) => p.id === 'lightkey')!.colours[7]!.hex, '#103a7c');
+  assert.equal(zilsPoint(out.show, 'drum-cage-zils'), true);
 });
 
 /** A show holding a hidden (custom) preset, as Save makes for an Any colour pick. */

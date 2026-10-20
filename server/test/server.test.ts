@@ -699,6 +699,63 @@ test('an Off colour cannot be given a colour over the wire, but can be renamed i
   }
 });
 
+async function withRig(fn: (app: App, dir: string) => Promise<void>) {
+  const dir = tempDir();
+  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'shows/stage-l1.json'), webDir: join(root, 'web'), output: { kind: 'none' }, log: () => {} });
+  try {
+    await app.start();
+    await fn(app, dir);
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const rigPresets = (layout: any, name: string) => layout.groups.flatMap((g: any) => g.presets.filter((p: any) => p.name === name).map((p: any) => ({ ...p, group: g.id })));
+
+test('the layout gives each colour its level, fade and shared reach', () => withRig(async (app) => {
+  const t = await tablet(app);
+  const layout = await waitFor(t.layout);
+  const zils = rigPresets(layout, 'Zils');
+  assert.deepEqual(zils.map((p: any) => p.group), ['key-lights', 'background', 'drum-cage', 'b8-side-bar']);
+  const union = new Set<string>();
+  for (const p of zils) for (const name of p.usedBy) union.add(name);
+  for (const p of zils) {
+    assert.equal(p.level, 1);
+    assert.equal(p.fade, 3);
+    assert.equal(p.shared.groups, 4);
+    assert.deepEqual([...p.shared.usedBy].sort(), [...union].sort());
+  }
+  assert.ok(union.size > 0, 'the rig uses Zils in a look');
+  // Off has a level of 0 and no palette entry.
+  const off = rigPresets(layout, 'Izslēgts')[0];
+  assert.equal(off.level, 0);
+  assert.equal(off.shared, null);
+  assert.equal(await t.send({ type: 'editColour', preset: zils[0].id, level: 0.5, fade: 7, sameName: false }), null);
+  const after = rigPresets(t.layout(), 'Zils');
+  assert.equal(after[0].level, 0.5);
+  assert.equal(after[0].fade, 7);
+  assert.equal(after[1].level, 1);
+  assert.equal(after[0].shared.groups, 4);
+  assert.match((await t.send({ type: 'editColour', preset: zils[0].id, level: 0.01, sameName: false }))!, /^invalid command/);
+  assert.match((await t.send({ type: 'editColour', preset: zils[0].id, fade: 601, sameName: false }))!, /^invalid command/);
+}));
+
+test('an editColour with shared is one Undo step', () => withRig(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const swatches = () => rigPresets(t.layout(), 'Zils').map((p: any) => p.swatch);
+  const before = swatches();
+  assert.equal(await t.send({ type: 'editColour', preset: rigPresets(t.layout(), 'Zils')[0].id, colour: '#103a7c', shared: true, sameName: false }), null);
+  assert.deepEqual(swatches(), ['#103a7c', '#103a7c', '#103a7c', '#103a7c']);
+  const saved = parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8')));
+  assert.equal(saved.palettes.find((p) => p.id === 'lightkey')!.colours[7]!.hex, '#103a7c');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.deepEqual(swatches(), before);
+  const undone = parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8')));
+  assert.equal(undone.palettes.find((p) => p.id === 'lightkey')!.colours[7]!.hex, '#0000ff');
+}));
+
 test('colours can be edited and deleted during Blackout, with no PIN',() => withApp(async (app) => {
   assert.equal((await api(app, 'POST', '/api/pin', { next: '1234' })).status, 200);
   const t = await tablet(app);
