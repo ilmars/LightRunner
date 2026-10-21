@@ -108,7 +108,7 @@ async function withKeys(fn: (rig: Rig) => Promise<void>, opts: { midi?: (log: (m
   const lines: string[] = [];
   const app = new App({
     port: 0, host: '127.0.0.1', dataDir: dir, seedPath, webDir: join(root, 'web'), output: { kind: 'none' },
-    log: (m) => lines.push(m), midi: opts.midi ?? (async () => midi), apcPollMs: 20, apcHoldMs: 150, apcResendPolls: 1e9, learnMs: 400, keysChangedMs: opts.keysChangedMs ?? 20,
+    log: (m) => lines.push(m), midi: opts.midi ?? (async () => midi), apcPollMs: 20, apcHoldMs: 150, apcResendPolls: 1e9, learnMs: 1500, keysChangedMs: opts.keysChangedMs ?? 20,
   });
   try {
     await app.start();
