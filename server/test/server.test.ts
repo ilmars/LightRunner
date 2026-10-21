@@ -197,6 +197,31 @@ test('a show imported without a running order gets one in the layout', async () 
   }
 });
 
+test('the stage view gets each fixture\'s shape, angle and reach', async () => {
+  const dir = tempDir();
+  const app = makeApp(dir);
+  try {
+    await app.start();
+    const show = (await api(app, 'GET', '/api/show')).body;
+    const [beam, outline, smoke] = show.fixtures;
+    Object.assign(beam, { shape: 'beam', angle: -90, reach: 0.15 });
+    Object.assign(outline, { shape: 'outline', w: 0.1, h: 0.2 });
+    // A fixture in a smoke group is a cloud without being told.
+    show.groups.push({ id: 'haze', name: 'Haze', kind: 'smoke', fixtures: [smoke.id] });
+    assert.equal((await api(app, 'PUT', '/api/show', show)).status, 200);
+    const { body: layout } = await api(app, 'GET', '/api/layout');
+    const drawn = (id: string) => layout.fixtures.find((f: any) => f.id === id);
+    assert.deepEqual([drawn(beam.id).shape, drawn(beam.id).angle, drawn(beam.id).reach], ['beam', -90, 0.15]);
+    assert.equal(drawn(outline.id).shape, 'outline');
+    assert.equal(drawn(smoke.id).shape, 'smoke');
+    const plain = layout.fixtures.find((f: any) => ![beam.id, outline.id, smoke.id].includes(f.id));
+    assert.deepEqual([plain.shape, plain.angle, plain.reach], [plain.w || plain.h ? 'bar' : 'dot', null, null]);
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a show with other fixtures gets them on the stage view', async () => {
   const dir = tempDir();
   const app = makeApp(dir);

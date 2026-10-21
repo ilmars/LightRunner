@@ -187,3 +187,36 @@ test('new shared colours are offered, and a preset pointing to them needs them t
   // The swatch is worked out from the shared colour (its white mixed in), as the colour editor does.
   assert.equal(swatch(merged, 'key-lights-roze'), displayColour('#ff00ff', { white: 0.2 }));
 });
+
+test('a shape set up here is kept when the file has none (a Lightkey project)', () => {
+  const current = rig();
+  const cage = current.fixtures.find((f) => f.id === 'l1')!;
+  Object.assign(cage, { shape: 'outline', w: 0.12, h: 0.2 });
+  const front = current.fixtures.find((f) => f.id === 'p1')!;
+  Object.assign(front, { shape: 'beam', angle: -90, reach: 0.15 });
+  // The file knows nothing of shapes: L1 is still the line Lightkey draws, and P1 moved.
+  const incoming = rig();
+  incoming.fixtures.find((f) => f.id === 'p1')!.address = 200;
+  const items = diffShows(current, incoming);
+  assert.equal(items.find((i) => i.id === 'l1'), undefined, 'no change is reported for the cage');
+  assert.deepEqual(items.find((i) => i.id === 'p1')?.details, ['address 1/1 → 1/200']);
+  // Taking P1 and L1 keeps their shapes, and the outline keeps its size.
+  const out = applyPicks(current, incoming, [
+    { kind: 'fixture', id: 'p1', change: 'changed' },
+    { kind: 'fixture', id: 'l1', change: 'changed' },
+  ]);
+  const p1 = out.fixtures.find((f) => f.id === 'p1')!;
+  assert.deepEqual([p1.address, p1.shape, p1.angle, p1.reach], [200, 'beam', -90, 0.15]);
+  const l1 = out.fixtures.find((f) => f.id === 'l1')!;
+  assert.deepEqual([l1.shape, l1.w, l1.h], ['outline', 0.12, 0.2]);
+});
+
+test('a file that has shapes is compared and taken as usual', () => {
+  const current = rig();
+  const incoming = rig();
+  Object.assign(incoming.fixtures.find((f) => f.id === 'b8')!, { shape: 'bar', angle: 30 });
+  const item = diffShows(current, incoming).find((i) => i.id === 'b8');
+  assert.deepEqual(item?.details, ['changed on the stage plan']);
+  const out = applyPicks(current, incoming, [{ kind: 'fixture', id: 'b8', change: 'changed' }]);
+  assert.equal(out.fixtures.find((f) => f.id === 'b8')!.angle, 30);
+});

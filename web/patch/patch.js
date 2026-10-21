@@ -1,6 +1,11 @@
 // Patch page: fixtures, groups and the stage plan. Edits a copy of the show
 // and saves it whole; the server checks it and keeps a backup of the old one.
 
+import {
+  aimBeam, alignFixtures, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setShape, shapeOf, spaceEvenly, touches, turnBar,
+} from './plan.js';
+import { PLAN_ASPECT, barAxis, beamCone } from '../shared/stage.js';
+
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -264,12 +269,18 @@ function clampInt(v, lo, hi, fallback) {
 
 // ---- Adding fixtures ----
 
+// Two forms add fixtures: "Add fixtures" under the table, and "Add fixtures here" on the stage plan.
+// Their fields share names after the prefix: addProfile and planAddProfile, and so on.
+const ADD_FORMS = ['add', 'planAdd'];
+
 function fillAddForm(first) {
-  const sel = $('addProfile');
-  const keep = sel.value;
-  sel.replaceChildren();
-  for (const p of profiles) sel.append(new Option(`${p.name}`, p.id));
-  if (keep) sel.value = keep;
+  for (const form of ADD_FORMS) {
+    const sel = $(`${form}Profile`);
+    const keep = sel.value;
+    sel.replaceChildren();
+    for (const p of profiles) sel.append(new Option(`${p.name}`, p.id));
+    if (keep) sel.value = keep;
+  }
   if (first) {
     // Default to the universe most of the rig is on.
     const counts = new Map();
@@ -280,43 +291,57 @@ function fillAddForm(first) {
   }
 }
 
-function suggestAddress() {
-  const p = profileById.get($('addProfile').value);
-  const n = (p?.channels ?? 1) * Math.max(1, Number($('addCount').value) || 1);
-  const a = nextFree(Number($('addUniverse').value) || 0, n);
-  if (a) $('addAddress').value = String(a);
-  updateAddHint();
+function suggestAddress(form = 'add') {
+  const p = profileById.get($(`${form}Profile`).value);
+  const n = (p?.channels ?? 1) * Math.max(1, Number($(`${form}Count`).value) || 1);
+  const a = nextFree(Number($(`${form}Universe`).value) || 0, n);
+  if (a) $(`${form}Address`).value = String(a);
+  updateAddHint(form);
 }
 
-function updateAddHint() {
-  const p = profileById.get($('addProfile').value);
+function updateAddHint(form = 'add') {
+  const p = profileById.get($(`${form}Profile`).value);
   if (!p) return;
-  const count = Math.max(1, Number($('addCount').value) || 1);
-  const start = Number($('addAddress').value) || 1;
+  const count = Math.max(1, Number($(`${form}Count`).value) || 1);
+  const start = Number($(`${form}Address`).value) || 1;
   const end = start + p.channels * count - 1;
-  $('addHint').textContent = `${count} × ${p.channels} channels: ${start}–${end}${end > 512 ? ' (past 512!)' : ''} on universe ${$('addUniverse').value}.`;
+  $(`${form}Hint`).textContent = `${count} × ${p.channels} channels: ${start}–${end}${end > 512 ? ' (past 512!)' : ''} on universe ${$(`${form}Universe`).value}.`;
 }
 
-for (const id of ['addProfile', 'addCount', 'addUniverse']) $(id).addEventListener('change', suggestAddress);
-$('addAddress').addEventListener('input', updateAddHint);
-$('addCount').addEventListener('input', updateAddHint);
+for (const form of ADD_FORMS) {
+  for (const field of ['Profile', 'Count', 'Universe']) $(`${form}${field}`).addEventListener('change', () => suggestAddress(form));
+  $(`${form}Address`).addEventListener('input', () => updateAddHint(form));
+  $(`${form}Count`).addEventListener('input', () => updateAddHint(form));
+}
+
+/** The fields of an add form, checked; null when the type or name is missing. */
+function addFormValues(form) {
+  const p = profileById.get($(`${form}Profile`).value);
+  const prefix = $(`${form}Name`).value.trim();
+  if (!p || !prefix) return null;
+  return {
+    p, prefix,
+    count: clampInt($(`${form}Count`).value, 1, 64, 1),
+    universe: clampInt($(`${form}Universe`).value, 0, 32767, 0),
+    start: clampInt($(`${form}Address`).value, 1, 512, 1),
+  };
+}
 
 $('addForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
-  const p = profileById.get($('addProfile').value);
-  const prefix = $('addName').value.trim();
-  const count = clampInt($('addCount').value, 1, 64, 1);
-  const universe = clampInt($('addUniverse').value, 0, 32767, 0);
-  const start = clampInt($('addAddress').value, 1, 512, 1);
-  if (!p || !prefix) return;
-  if (addFixtures(p, prefix, count, universe, start)) {
-    toast(`Added ${count} ${count === 1 ? 'fixture' : 'fixtures'}. Put them in a group and on the stage plan, then save.`);
+  const v = addFormValues('add');
+  if (!v) return;
+  if (addFixtures(v.p, v.prefix, v.count, v.universe, v.start)) {
+    toast(`Added ${v.count} ${v.count === 1 ? 'fixture' : 'fixtures'}. Put them in a group and on the stage plan, then save.`);
     suggestAddress();
   }
 });
 
-/** Patch `count` fixtures of type `p` from `start`. Returns the first new fixture, or null. */
-function addFixtures(p, prefix, count, universe, start) {
+/**
+ * Patch `count` fixtures of type `p` from `start`. Returns the first new fixture, or null.
+ * With a `spot` on the stage plan they go in a row from there; a type with several segments arrives as a bar.
+ */
+function addFixtures(p, prefix, count, universe, start, spot = null) {
   if (start + p.channels * count - 1 > 512) {
     toast('Those fixtures run past channel 512. Use a lower start address or another universe.', true);
     return null;
@@ -327,6 +352,8 @@ function addFixtures(p, prefix, count, universe, start) {
   const existing = show.fixtures.map((f) => f.name.match(new RegExp(`^${escaped} (\\d+)$`))).filter(Boolean).map((m) => Number(m[1]));
   const plain = show.fixtures.some((f) => f.name === prefix);
   let n = existing.length ? Math.max(...existing) + 1 : plain ? 2 : 1;
+  const shape = (p.segments ?? 1) > 1 ? 'bar' : 'dot';
+  const spots = spot ? placeRow(spot, count, shape) : null;
   let first = null;
   for (let k = 0; k < count; k++) {
     const name = count === 1 && !existing.length && !plain ? prefix : `${prefix} ${n++}`;
@@ -334,8 +361,10 @@ function addFixtures(p, prefix, count, universe, start) {
     taken.add(id);
     const f = {
       id, name, profile: p.id, universe, address: start + k * p.channels,
-      x: count === 1 ? 0.5 : Math.round((0.1 + (0.8 * k) / (count - 1)) * 1000) / 1000, y: 0.5,
+      x: spots ? spots[k].x : count === 1 ? 0.5 : Math.round((0.1 + (0.8 * k) / (count - 1)) * 1000) / 1000,
+      y: spots ? spots[k].y : 0.5,
     };
+    if (shape === 'bar') setShape(f, 'bar');
     show.fixtures.push(f);
     first ??= f;
   }
@@ -370,11 +399,15 @@ function universeList() {
   return [...set].sort((a, b) => a - b);
 }
 
-function selectFixture(id, scroll) {
+/** Select a fixture in the table, the DMX map and the stage plan; `several` selects more on the plan (Shift or a box). */
+function selectFixture(id, scroll, several = null) {
   selectedId = id;
+  planSelection = several ?? new Set(id ? [id] : []);
   const f = show.fixtures.find((x) => x.id === id);
   if (f) viewUniverse = f.universe;
+  if (id) planSpot = null;
   renderMap();
+  renderStage();
   for (const tr of $('fixtureRows').children) tr.classList.toggle('sel', tr.dataset.id === id);
   if (scroll) document.querySelector(`#fixtureRows tr[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
@@ -494,7 +527,8 @@ function startBlockDrag(ev, f) {
 
 // ---- Fixture library ----
 
-const typeLabel = (p) => p.name.replace(/\s*\([^)]*\)\s*$/, '');
+// The type's name without its mode in brackets, even one with brackets of its own ("AS600B (CCT (8 Bit))").
+const typeLabel = (p) => p.name.replace(/\s*\((?:[^()]|\([^()]*\))*\)\s*$/, '');
 
 function renderLibrary() {
   const q = $('libSearch').value.trim().toLowerCase();
@@ -790,48 +824,338 @@ $('newGroupForm').addEventListener('submit', (ev) => {
 
 // ---- Stage plan ----
 
+/** Where "Add fixture here" was asked for, as fractions of the plan; null when not shown. */
+let planSpot = null;
+/** The fixtures selected on the stage plan: several with Shift-click or a box, else just the selected one. */
+let planSelection = new Set();
+/** The selected fixtures, in show order. */
+const chosenFixtures = () => show.fixtures.filter((f) => planSelection.has(f.id));
+
+/** A pointer position as fractions of the plan, kept on it. */
+function planPoint(e, rect) {
+  const clamp01 = (v) => Math.min(1, Math.max(0, v));
+  return { x: clamp01((e.clientX - rect.left) / rect.width), y: clamp01((e.clientY - rect.top) / rect.height) };
+}
+
+const inSmokeGroup = (f) => show.groups.some((g) => g.kind === 'smoke' && g.fixtures.includes(f.id));
+const pct = (v) => `${v * 100}%`;
+
+/** A resize cursor that follows a handle's direction on screen (degrees, 0 = across). */
+function resizeCursor(angle) {
+  const a = ((Math.round(angle / 45) % 4) + 4) % 4;
+  return ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'][a];
+}
+
+/** Follow a pointer from `ev` until it lets go: `move` gets each position on the plan and the event, `done` whether it moved. */
+function followPointer(ev, target, move, done) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  try { target.setPointerCapture(ev.pointerId); } catch { /* pointer gone */ }
+  const rect = $('stage').getBoundingClientRect();
+  const x0 = ev.clientX, y0 = ev.clientY;
+  let moved = false;
+  const onMove = (e) => {
+    // A click that shifts a pixel or two is still a click.
+    if (!moved && Math.hypot(e.clientX - x0, e.clientY - y0) < 4) return;
+    moved = true;
+    move(planPoint(e, rect), e);
+  };
+  const onUp = () => {
+    target.removeEventListener('pointermove', onMove);
+    target.removeEventListener('pointerup', onUp);
+    target.removeEventListener('pointercancel', onUp);
+    done(moved);
+  };
+  target.addEventListener('pointermove', onMove);
+  target.addEventListener('pointerup', onUp);
+  target.addEventListener('pointercancel', onUp);
+}
+
+/** A handle that follows the pointer; `move` changes the fixture, then the fixture is drawn again where it is. */
+function handle(cls, title, cursor, f, move) {
+  const h = el('div', `plan-handle ${cls}`);
+  h.title = title;
+  if (cursor) h.style.cursor = cursor;
+  h.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0) return;
+    followPointer(ev, h, (p, e) => {
+      move(p, e);
+      placeFixture(f);
+    }, (moved) => { if (moved) changed(); });
+  });
+  return h;
+}
+
+/** The elements drawn for each fixture, so a drag can move them without drawing the whole plan again. */
+const planParts = new Map();
+
+/** Put a fixture's elements where it is now: its mark, its label, and a beam's cone and tip. */
+function placeFixture(f) {
+  const parts = planParts.get(f.id);
+  if (!parts) return;
+  const { body, tag, cone, tip, shape } = parts;
+  body.style.left = pct(f.x);
+  body.style.top = pct(f.y);
+  // How far the mark reaches below its middle, as a fraction of the plan's height, for the label.
+  let below = 0;
+  if (shape === 'bar') {
+    const { length, thickness, angle } = barAxis(f);
+    body.style.width = `max(10px, ${pct(length)})`;
+    body.style.height = `max(6px, ${pct(thickness)})`;
+    body.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
+    const r = (angle * Math.PI) / 180;
+    below = Math.abs(Math.sin(r)) * (length / 2) * PLAN_ASPECT + Math.abs(Math.cos(r)) * (thickness / 2);
+  } else if (shape === 'outline') {
+    body.style.width = pct(f.w ?? 0.1);
+    body.style.height = pct(f.h ?? 0.1);
+    below = (f.h ?? 0.1) / 2;
+  }
+  tag.style.left = pct(f.x);
+  tag.style.top = shape === 'bar' || shape === 'outline' ? `calc(${pct(f.y + below)} + 3px)` : `calc(${pct(f.y)} + 13px)`;
+  if (cone) {
+    const c = beamCone(f);
+    cone.setAttribute('points', [c.lamp, c.left, c.right].map((p) => `${p.x * 100},${p.y * 100}`).join(' '));
+    if (tip) {
+      tip.style.left = pct(c.tip.x);
+      tip.style.top = pct(c.tip.y);
+    }
+  }
+}
+
+/** A small cloud, for a smoke or haze machine. */
+const CLOUD = '<svg viewBox="0 0 28 18" width="28" height="18" aria-hidden="true"><path d="M7 17a6 6 0 0 1-.7-11.96A7.5 7.5 0 0 1 20.4 4.3 6.4 6.4 0 1 1 21.5 17Z"/></svg>';
+
 function renderStage() {
   const root = $('stage');
   root.replaceChildren();
+  planParts.clear();
+  // Beams' cones go underneath everything, in one drawing the size of the plan (its units are percent).
+  const cones = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  cones.setAttribute('class', 'plan-cones');
+  cones.setAttribute('viewBox', '0 0 100 100');
+  cones.setAttribute('preserveAspectRatio', 'none');
+  root.append(cones);
+  planSelection = new Set(chosenFixtures().map((f) => f.id));
+  // Handles only when one fixture is selected.
+  const one = planSelection.size === 1;
   for (const f of show.fixtures) {
-    const bar = Boolean(f.w || f.h);
-    const item = el('div', bar ? 'plan-item bar' : 'plan-item');
-    item.style.left = `${f.x * 100}%`;
-    item.style.top = `${f.y * 100}%`;
-    if (bar) {
-      item.style.width = `max(10px, ${(f.w ?? 0) * 100}%)`;
-      item.style.height = `max(6px, ${(f.h ?? 0) * 100}%)`;
-    }
+    const shape = shapeOf(f, inSmokeGroup(f));
+    const selected = planSelection.has(f.id);
+    const body = el('div', ['plan-item', shape, selected && 'sel'].filter(Boolean).join(' '));
+    if (shape === 'smoke') body.innerHTML = CLOUD;
+    else body.append(el('div', 'shape'));
+    body.title = f.name;
     // Long names ("B6 SonicPulse LED Bar 10") show their short code on the plan; hover shows all.
     const first = f.name.split(' ')[0];
-    const tag = /^[A-Za-z]{1,3}\d{1,3}$/.test(first) ? first : f.name.length > 12 ? `${f.name.slice(0, 11)}…` : f.name;
-    item.append(el('div', 'shape'), el('span', 'tag', tag));
-    item.title = f.name;
-    item.addEventListener('pointerdown', (ev) => {
-      ev.preventDefault();
-      try { item.setPointerCapture(ev.pointerId); } catch { /* pointer gone */ }
-      item.classList.add('dragging');
-      const rect = root.getBoundingClientRect();
-      const move = (e) => {
-        f.x = Math.round(Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)) * 1000) / 1000;
-        f.y = Math.round(Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)) * 1000) / 1000;
-        item.style.left = `${f.x * 100}%`;
-        item.style.top = `${f.y * 100}%`;
-      };
-      const up = () => {
-        item.classList.remove('dragging');
-        item.removeEventListener('pointermove', move);
-        item.removeEventListener('pointerup', up);
-        item.removeEventListener('pointercancel', up);
-        changed();
-      };
-      item.addEventListener('pointermove', move);
-      item.addEventListener('pointerup', up);
-      item.addEventListener('pointercancel', up);
+    const tag = el('span', 'plan-tag', /^[A-Za-z]{1,3}\d{1,3}$/.test(first) ? first : f.name.length > 12 ? `${f.name.slice(0, 11)}…` : f.name);
+    const parts = { body, tag, shape, cone: null, tip: null };
+    if (shape === 'beam') {
+      parts.cone = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      parts.cone.setAttribute('class', selected ? 'plan-cone sel' : 'plan-cone');
+      cones.append(parts.cone);
+    }
+    planParts.set(f.id, parts);
+    body.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return;
+      if (ev.shiftKey) {
+        // Shift-click adds the fixture to the selection, or takes it out.
+        ev.preventDefault();
+        const next = new Set(planSelection);
+        if (next.has(f.id)) next.delete(f.id);
+        else next.add(f.id);
+        selectFixture(next.has(f.id) ? f.id : [...next].at(-1) ?? null, false, next);
+        return;
+      }
+      // Dragging one of several selected moves them all; any other fixture moves on its own.
+      // Each keeps where it was grabbed under the pointer, so a bar doesn't jump to centre on it.
+      const group = planSelection.has(f.id) && planSelection.size > 1 ? chosenFixtures() : [f];
+      const starts = group.map((x) => ({ x: x.x, y: x.y }));
+      const grab = planPoint(ev, root.getBoundingClientRect());
+      for (const x of group) planParts.get(x.id)?.body.classList.add('dragging');
+      followPointer(ev, body, (p) => {
+        moveTogether(group, starts, p.x - grab.x, p.y - grab.y);
+        for (const x of group) placeFixture(x);
+      }, (moved) => {
+        for (const x of group) planParts.get(x.id)?.body.classList.remove('dragging');
+        // A click picks just this one; a drag keeps what was selected.
+        if (!moved || group.length === 1) selectFixture(f.id, false);
+        if (moved) changed();
+      });
     });
-    root.append(item);
+    if (one && selected && shape === 'bar') {
+      // One handle at each end for the length, one on a long side for the thickness, and one past the end to turn it.
+      const angle = barAxis(f).angle;
+      body.append(
+        handle('start', 'Drag to make it longer or shorter', resizeCursor(angle), f, (p) => resizeEnd(f, 'start', p)),
+        handle('end', 'Drag to make it longer or shorter', resizeCursor(angle), f, (p) => resizeEnd(f, 'end', p)),
+        handle('thick', 'Drag to make it thicker or thinner', resizeCursor(angle + 90), f, (p) => resizeThickness(f, p)),
+        handle('turn', 'Drag to turn it (hold Shift to turn freely)', 'grab', f, (p, e) => turnBar(f, p, e.shiftKey)),
+      );
+    }
+    if (one && selected && shape === 'outline') {
+      body.append(handle('corner', 'Drag to change its size', 'nwse-resize', f, (p) => resizeOutline(f, p)));
+    }
+    if (one && selected && shape === 'beam') {
+      parts.tip = handle('tip', 'Drag to aim it and set how far it reaches (hold Shift to aim freely)', 'grab', f, (p, e) => aimBeam(f, p, e.shiftKey));
+      root.append(parts.tip);
+    }
+    root.append(body, tag);
+    placeFixture(f);
+  }
+  if (planSpot) {
+    const add = el('button', 'plan-add', '+ Add fixture here');
+    add.type = 'button';
+    add.style.left = pct(planSpot.x);
+    add.style.top = pct(planSpot.y);
+    add.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    add.addEventListener('click', openPlanAdd);
+    root.append(add);
+  }
+  renderPlanTools();
+}
+
+// A click on an empty spot clears the selection and offers to add a fixture there;
+// a drag from an empty spot draws a box and selects every fixture it touches (with Shift, adds them).
+$('stage').addEventListener('pointerdown', (ev) => {
+  if (ev.button !== 0 || !(ev.target === $('stage') || ev.target.closest('.plan-cones'))) return;
+  const root = $('stage');
+  const spot = planPoint(ev, root.getBoundingClientRect());
+  const adding = ev.shiftKey;
+  let box = null, area = null;
+  followPointer(ev, root, (p) => {
+    area = { left: Math.min(spot.x, p.x), right: Math.max(spot.x, p.x), top: Math.min(spot.y, p.y), bottom: Math.max(spot.y, p.y) };
+    if (!box) root.append((box = el('div', 'plan-box')));
+    Object.assign(box.style, { left: pct(area.left), top: pct(area.top), width: pct(area.right - area.left), height: pct(area.bottom - area.top) });
+  }, (moved) => {
+    if (moved) {
+      const touched = show.fixtures.filter((f) => touches(f, area, inSmokeGroup(f))).map((f) => f.id);
+      const next = new Set(adding ? [...planSelection, ...touched] : touched);
+      planSpot = null;
+      selectFixture(touched.at(-1) ?? [...next].at(-1) ?? null, false, next);
+      return;
+    }
+    planSpot = { x: Math.round(spot.x * 1000) / 1000, y: Math.round(spot.y * 1000) / 1000 };
+    if (!$('planAdd').hidden) {
+      // The form is open: it now adds at the new spot.
+      renderStage();
+      return;
+    }
+    selectFixture(null, false);
+  });
+});
+
+const SHAPE_HINTS = {
+  dot: '',
+  beam: 'Drag the round handle at the tip to aim it and set how far it reaches.',
+  bar: 'Drag the handles to change its length and thickness, or the one past its end to turn it.',
+  outline: 'For a strip round something. Drag the corner handle to change its size.',
+  smoke: 'For a smoke or haze machine.',
+};
+
+/** The rows under the plan: the shape of what is selected, and with several, Align and Space evenly. */
+function renderPlanTools() {
+  const chosen = chosenFixtures();
+  $('planTools').hidden = !chosen.length;
+  $('planHelp').hidden = chosen.length > 0;
+  $('planArrange').hidden = chosen.length < 2;
+  if (!chosen.length) return;
+  const shapes = new Set(chosen.map((f) => shapeOf(f, inSmokeGroup(f))));
+  // A shape is marked only when every selected fixture has it.
+  const shape = shapes.size === 1 ? [...shapes][0] : null;
+  $('planName').textContent = chosen.length === 1 ? chosen[0].name : `${chosen.length} fixtures`;
+  for (const b of $('planShape').children) b.setAttribute('aria-checked', String(b.dataset.shape === shape));
+  const angles = new Set(shape === 'bar' ? chosen.map((f) => Math.round(barAxis(f).angle)) : []);
+  $('planTurn').hidden = shape !== 'bar';
+  $('planAngle').textContent = angles.size === 1 ? `${[...angles][0]}°` : '';
+  $('planToolsHint').textContent = chosen.length === 1 ? SHAPE_HINTS[shape] : '';
+  for (const b of $('planSpace').children) {
+    b.disabled = chosen.length < 3;
+    b.title = b.disabled ? 'Select three or more to space them evenly' : '';
   }
 }
+
+$('planShape').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-shape]');
+  const chosen = chosenFixtures();
+  if (!b || !chosen.length) return;
+  for (const f of chosen) setShape(f, b.dataset.shape, inSmokeGroup(f));
+  changed();
+});
+
+$('planTurn').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-angle]');
+  const chosen = chosenFixtures();
+  if (!b || !chosen.length) return;
+  for (const f of chosen) setBarAngle(f, Number(b.dataset.angle));
+  changed();
+});
+
+$('planAlign').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-align]');
+  if (!b) return;
+  alignFixtures(chosenFixtures(), b.dataset.align, inSmokeGroup);
+  changed();
+});
+
+$('planSpace').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-space]');
+  if (!b || b.disabled) return;
+  spaceEvenly(chosenFixtures(), b.dataset.space);
+  changed();
+});
+
+// Escape lets go of what is selected on the plan (and the "+ Add fixture here" offer), unless typing.
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape' || ev.target.closest?.('input, select, textarea, form')) return;
+  if (!planSelection.size && !planSpot) return;
+  planSpot = null;
+  selectFixture(null, false);
+});
+
+function openPlanAdd() {
+  // Start from what the Add fixtures form has, so a type picked in the library is used here too.
+  for (const field of ['Profile', 'Count', 'Universe']) $(`planAdd${field}`).value = $(`add${field}`).value;
+  const p = profileById.get($('planAddProfile').value);
+  $('planAddName').value = $('addName').value || (p ? typeLabel(p) : '');
+  suggestAddress('planAdd');
+  $('planAdd').hidden = false;
+  $('planAddName').focus();
+  $('planAddName').select();
+}
+
+function closePlanAdd() {
+  $('planAdd').hidden = true;
+  planSpot = null;
+  renderStage();
+}
+
+// A name that came from the type follows a change of type.
+$('planAddProfile').addEventListener('change', (ev) => {
+  const fromType = profiles.some((p) => typeLabel(p) === $('planAddName').value);
+  const p = profileById.get(ev.target.value);
+  if (p && (fromType || !$('planAddName').value)) $('planAddName').value = typeLabel(p);
+});
+
+$('planAddCancel').addEventListener('click', closePlanAdd);
+$('planAdd').addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closePlanAdd(); });
+
+$('planAdd').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const v = addFormValues('planAdd');
+  if (!v || !planSpot) return;
+  const spot = planSpot;
+  $('planAdd').hidden = true;
+  planSpot = null;
+  if (addFixtures(v.p, v.prefix, v.count, v.universe, v.start, spot)) {
+    toast(`Added ${v.count} ${v.count === 1 ? 'fixture. Put it' : 'fixtures. Put them'} in a group, then save.`);
+    suggestAddress();
+  } else {
+    // Nothing was added (past channel 512): keep the sheet open to fix it.
+    planSpot = spot;
+    $('planAdd').hidden = false;
+    renderStage();
+  }
+});
 
 // ---- Save ----
 

@@ -1,7 +1,7 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { SAFE_LIGHT, canRecolour, findProfile, groupIsWhiteOnly, groupSegments, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect } from '../../packages/shared/src/index.ts';
-import type { ChannelRole, GroupKind, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupSegments, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect } from '../../packages/shared/src/index.ts';
+import type { ChannelRole, FixtureShape, GroupKind, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 
 export interface OperatorLook {
@@ -97,7 +97,11 @@ export interface OperatorLayout {
    * In the same order as the bytes of each visualiser frame: 3 bytes per segment,
    * `segments` of them for each fixture. `reversed` fixtures run backwards along a group's line.
    */
-  fixtures: { id: string; name: string; x: number; y: number; w: number | null; h: number | null; segments: number; reversed: boolean }[];
+  fixtures: {
+    id: string; name: string; x: number; y: number; w: number | null; h: number | null; segments: number; reversed: boolean;
+    /** How it is drawn, worked out (a fixture in a smoke group is a cloud); `angle` and `reach` as the show has them, or null. */
+    shape: FixtureShape; angle: number | null; reach: number | null;
+  }[];
   /** Fixture ids of each group, for tapping a group on the mini visualiser. */
   members: Record<string, string[]>;
   manualForOperators: boolean;
@@ -172,7 +176,10 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
       const profile = f ? findProfile(show, f.profile) : undefined;
       if (!f || !profile) return [];
       const segments = planChannels(f, profile, show.settings.gamma).cells;
-      return [{ id, name: f.name, x: f.x, y: f.y, w: f.w ?? null, h: f.h ?? null, segments, reversed: f.reversed ?? false }];
+      return [{
+        id, name: f.name, x: f.x, y: f.y, w: f.w ?? null, h: f.h ?? null, segments, reversed: f.reversed ?? false,
+        shape: fixtureShape(show, f), angle: f.angle ?? null, reach: f.reach ?? null,
+      }];
     }),
     members: Object.fromEntries(show.groups.map((g) => [g.id, g.fixtures])),
     manualForOperators: show.operator.manualForOperators,
