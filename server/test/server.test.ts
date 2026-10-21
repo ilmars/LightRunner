@@ -630,6 +630,9 @@ test("Add to colours keeps an Any colour pick's white, amber and UV, and the gro
   const dim = presetsOf(t.layout(), 'back-wall').find((p) => p.name === 'Dim navy') as any;
   assert.equal(dim.level, 0.4);
   assert.equal(dim.fade, 1);
+  // Its own colour comes as it was typed: the light (scaled by 40 %) can't give #123456 back exactly.
+  assert.equal(dim.colour, '#123456');
+  assert.equal(dim.light.hex, '#071522');
   assert.match((await t.send({ type: 'addColour', group: 'back-wall', colour: '#123457', name: 'x', allGroups: false, level: 0.01 }))!, /^invalid command/);
 }));
 

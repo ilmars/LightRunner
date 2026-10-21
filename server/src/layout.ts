@@ -81,6 +81,11 @@ export interface OperatorPreset {
    * white, amber and UV, scaled by the layer's intensity (null if it has no layers, or is an effect).
    */
   light: LiveLight | null;
+  /**
+   * A plain colour's own #rrggbb, before its brightness (`light` has it scaled), so the colour editor shows exactly
+   * the colour that was typed or picked; null for an effect.
+   */
+  colour: string | null;
   /** When the preset is an effect: its settings, colours as plain colours (as groupEffect takes them). */
   effect: LiveEffectLayer | null;
 }
@@ -189,7 +194,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
         .map((p) => ({
           id: p.id, name: p.name, swatch: p.swatch ?? null,
           usedBy: presetUsers(show, p.id), canRecolour: canRecolour(p), light: presetLight(p, palettes),
-          level: presetLevel(p), fade: p.fade, shared: sharedReach(show, p),
+          colour: presetColour(p, palettes), level: presetLevel(p), fade: p.fade, shared: sharedReach(show, p),
           effect: presetEffect(p, palettes),
         }));
       const any = (roles: ChannelRole[]) => g.fixtures.some((f) => hasRole(f, roles));
@@ -236,6 +241,12 @@ function presetLight(preset: Preset, palettes: ReadonlyMap<string, Palette>): Op
   const top = preset.layers[preset.layers.length - 1];
   if (!top || top.kind !== 'static') return null;
   return liveLight(resolveColour(top.colour, palettes), top.intensity);
+}
+
+/** A preset's top layer's own colour (#rrggbb, before its intensity) when it is a plain colour; null otherwise. */
+function presetColour(preset: Preset, palettes: ReadonlyMap<string, Palette>): string | null {
+  const top = preset.layers[preset.layers.length - 1];
+  return top?.kind === 'static' ? resolveColour(top.colour, palettes).hex.toLowerCase() : null;
 }
 
 /** The brightness of a preset's only layer when it is a plain colour; null otherwise. */
