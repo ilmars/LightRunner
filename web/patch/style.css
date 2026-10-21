@@ -13,7 +13,8 @@
 .dmx-map {
   display: grid; grid-template-columns: repeat(32, minmax(0, 1fr)); grid-auto-rows: 32px; gap: 2px;
   padding: 6px; border-radius: 14px; background: #04070D; box-shadow: inset 0 0 0 1px var(--ds-edge);
-  user-select: none; -webkit-user-select: none; touch-action: none;
+  /* A finger on a free channel scrolls the page; the blocks themselves take the finger for dragging. */
+  user-select: none; -webkit-user-select: none; touch-action: pan-y;
 }
 /* By finger, rows are a full target high. */
 @media (pointer: coarse) { .dmx-map { grid-auto-rows: 44px; } }
@@ -37,7 +38,8 @@
 
 /* ---- Fixture library: beside the map on a wide screen, under it otherwise ---- */
 .library { flex: 0 0 290px; min-width: 0; gap: 10px; padding: 12px; }
-@media (max-width: 899px) { .library { flex: 1 1 100%; } }
+/* Below the width where it fits beside a 600 px map, the library takes the whole width under it. */
+@media (max-width: 961px) { .library { flex: 1 1 100%; } }
 .lib-list {
   overflow: auto; display: flex; flex-direction: column; gap: 4px; max-height: 280px; padding-right: 2px;
   scrollbar-width: thin; scrollbar-color: var(--ds-elevated) transparent;
@@ -173,6 +175,13 @@ table.patch { width: 100%; min-width: 900px; border-collapse: collapse; font-siz
   background: transparent; border: 3px solid #aab3c6; box-shadow: 0 0 0 1px rgba(4, 7, 13, 0.8);
 }
 .plan-item.smoke svg { display: block; fill: #aab3c6; opacity: 0.55; }
+/* By finger every fixture takes a 44 px area round its middle (a long bar or an outline its own size), without moving what is drawn. */
+@media (pointer: coarse) {
+  .plan-item::before {
+    content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: max(100%, 44px); height: max(100%, 44px);
+  }
+}
 .plan-item.dragging { cursor: grabbing; z-index: 2; }
 .plan-item.dragging .shape, .plan-item.sel .shape { outline: 2px solid var(--ds-accent); outline-offset: 1px; }
 .plan-item.sel.smoke { outline: 2px solid var(--ds-accent); outline-offset: 2px; border-radius: 6px; }
