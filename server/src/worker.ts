@@ -41,10 +41,10 @@ function freshTiming(): TimingStats & { startedAt: number } {
   return { frames: 0, period, minInterval: Infinity, maxInterval: 0, late: 0, seconds: 0, startedAt: clock() };
 }
 
-function applyShow(next: Show, pins?: PresetPin[]): void {
+function applyShow(next: Show, keep?: { pins: PresetPin[] }): void {
   period = 1000 / next.settings.frameRate;
   if (!engine) engine = new Engine(next, clock() / 1000);
-  else engine.setShow(next, clock() / 1000, pins);
+  else engine.setShow(next, clock() / 1000, keep);
   // One output per box; outputs whose box didn't change keep running untouched.
   outputs.update(planRoutes(next.settings, next.fixtures.map((f) => f.universe)).destinations);
 }
@@ -127,7 +127,7 @@ port.on('message', (msg: ToWorker) => {
       break;
     }
     case 'show':
-      applyShow(msg.show, msg.pins);
+      applyShow(msg.show, msg.keep);
       stateDue = true;
       break;
     case 'command': {

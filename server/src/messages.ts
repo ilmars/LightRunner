@@ -9,8 +9,8 @@ export const VISUAL_EVERY = 50;
 export type ToWorker =
   /** `artnetRedirect`: test hook, send Art-Net for a host to another address and port. */
   | { type: 'init'; show: Show; runtime: RuntimeState | null; artnetRedirect?: Record<string, { host: string; port: number }> }
-  /** `pins`: groups that carry on as a copy of what they show, so the edit doesn't move the lights (see Engine.setShow). */
-  | { type: 'show'; show: Show; pins?: PresetPin[] }
+  /** `keep`: an edit from Prepare (or its Undo), which never moves the lights; its pins (see Engine.setShow). */
+  | { type: 'show'; show: Show; keep?: { pins: PresetPin[] } }
   | { type: 'command'; id: number; cmd: StageCommand }
   | { type: 'snapshot'; id: number }
   | { type: 'timing'; id: number; reset?: boolean }

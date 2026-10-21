@@ -689,7 +689,7 @@ test('an edit in Prepare keeps the lit colours as they were: a hidden copy and a
   // Red, shared and for every group of that name, with White, Amber and UV and a new brightness.
   const edited = editColour(before, { preset: 'key-lights-sarkans', colour: '#00FF00', white: 0.4, amber: 0.3, uv: 0.2, level: 0.6, shared: true, sameName: true }).show;
   const frozen = JSON.stringify(edited);
-  const { show, pins } = keepLitPresets(before, edited, running);
+  const { show, pins } = keepLitPresets(before, edited, { groups: running });
   assert.equal(JSON.stringify(edited), frozen, 'the input show is not changed');
   assert.deepEqual(pins.map((p) => [p.group, p.from]), [['key-lights', 'key-lights-sarkans'], ['background', 'background-sarkans']]);
   const palettes = before.palettes;
@@ -711,24 +711,42 @@ test('an edit in Prepare keeps the lit colours as they were: a hidden copy and a
 
   // A fade alone, or a colour nobody shows, pins nothing.
   const fadeOnly = editColour(before, { preset: 'key-lights-sarkans', fade: 9, sameName: false }).show;
-  assert.deepEqual(keepLitPresets(before, fadeOnly, running), { show: fadeOnly, pins: [] });
+  assert.deepEqual(keepLitPresets(before, fadeOnly, { groups: running }), { show: fadeOnly, pins: [] });
   const unlit = editColour(before, { preset: 'key-lights-zils', colour: '#123456', sameName: false }).show;
-  assert.deepEqual(keepLitPresets(before, unlit, running).pins, []);
+  assert.deepEqual(keepLitPresets(before, unlit, { groups: running }).pins, []);
   // A second edit while the group runs its copy pins nothing more.
   const again = editColour(show, { preset: 'key-lights-sarkans', colour: '#0000ff', sameName: false }).show;
   const onCopy = { ...running, 'key-lights': pins[0]!.to, background: pins[1]!.to };
-  assert.deepEqual(keepLitPresets(show, again, onCopy).pins, []);
+  assert.deepEqual(keepLitPresets(show, again, { groups: onCopy }).pins, []);
 });
 
 test('an effect edited in Prepare is kept as it was where it runs', () => {
   const s = ready();
   const { show: before, id } = addEffect(s, { group: 'background', name: 'Wave', effect: fx({ colours: [{ palette: 'lightkey', index: 2 }, { hex: '#0000ff' }], base: { colour: { palette: 'lightkey', index: 0 }, level: 0.3 } }) });
   const edited = editEffect(before, { preset: id, effect: fx({ edge: 'hard' }) });
-  const { show, pins } = keepLitPresets(before, edited, { background: id });
+  const { show, pins } = keepLitPresets(before, edited, { groups: { background: id } });
   assert.equal(pins.length, 1);
   const copy = preset(show, pins[0]!.to);
   assert.equal(copy.custom, true);
   assert.deepEqual(copy.layers, resolvedLayers(preset(before, id).layers, before.palettes));
   assert.deepEqual((copy.layers[0] as EffectLayer).colours[0], { hex: '#ff0000' });
   assert.deepEqual((copy.layers[0] as EffectLayer).base, { colour: { hex: '#ffaa5a' }, level: 0.3 });
+});
+
+test("an edit in Prepare during Blackout keeps what Blackout's memory brings back, and a copy with the same light is used again", () => {
+  const before = ready();
+  const edited = editColour(before, { preset: 'key-lights-sarkans', colour: '#00ff00', sameName: false }).show;
+  const stage = { groups: { 'key-lights': '__blackout', background: '__blackout' }, beforeBlackout: { 'key-lights': 'key-lights-sarkans', background: 'background-zils' } };
+  const { show, pins } = keepLitPresets(before, edited, stage);
+  assert.equal(pins.length, 1);
+  assert.deepEqual([pins[0]!.group, pins[0]!.from], ['key-lights', 'key-lights-sarkans']);
+  assert.equal(preset(show, pins[0]!.to).custom, true);
+
+  // Red edited back and then again (Undo kept the copy in the show): the copy of red is used again.
+  const back = { ...before, presets: [...before.presets, preset(show, pins[0]!.to)] };
+  const again = editColour(back, { preset: 'key-lights-sarkans', colour: '#0000ff', sameName: false }).show;
+  const second = keepLitPresets(back, again, { groups: { 'key-lights': 'key-lights-sarkans' } });
+  assert.deepEqual(second.pins, [{ group: 'key-lights', from: 'key-lights-sarkans', to: pins[0]!.to }]);
+  assert.equal(second.show, again, 'no new copy');
+  assert.equal(second.show.presets.filter((p) => p.custom && p.group === 'key-lights' && p.name === 'Sarkans').length, 1);
 });

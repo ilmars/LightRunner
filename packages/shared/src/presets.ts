@@ -492,26 +492,41 @@ export interface PresetPin {
 }
 
 /**
- * Keep the stage as it is through a show edit (one made in Prepare, which never changes the lights): each group
- * `running` a preset whose light the edit changes gets a hidden copy of that preset as it was (palette colours
- * looked up, brightness and fade kept) and a pin from the preset to its copy, for the engine to move the group onto.
- * Returns the edited show with the copies added, and the pins; with no pins, `next` itself. The inputs are not changed.
+ * Keep the stage as it is through a show edit (one made in Prepare, which never changes the lights): each group whose
+ * colour or effect on stage (or in Blackout's memory) the edit changes gets a pin onto a hidden copy of it as it was
+ * (palette colours looked up, brightness and fade kept), for the engine to move the group onto. A hidden preset of the
+ * group that already makes that light, with that name and fade, is used again; otherwise a new copy is added.
+ * Returns the edited show (with any new copies) and the pins; with no new copies, `next` itself. The inputs are not changed.
  */
-export function keepLitPresets(before: Show, next: Show, running: Readonly<Record<string, string | null>>): { show: Show; pins: PresetPin[] } {
+export function keepLitPresets(
+  before: Show, next: Show,
+  stage: { groups: Readonly<Record<string, string | null>>; beforeBlackout?: Readonly<Record<string, string | null>> | null },
+): { show: Show; pins: PresetPin[] } {
   const pins: PresetPin[] = [];
   const copies: Preset[] = [];
   const taken = next.presets.map((p) => p.id);
-  for (const [group, id] of Object.entries(running)) {
-    const was = id ? before.presets.find((p) => p.id === id && p.group === group) : undefined;
-    const is = id ? next.presets.find((p) => p.id === id && p.group === group) : undefined;
+  const lightOf = (p: Preset, show: Show) => JSON.stringify(resolvedLayers(p.layers, show.palettes));
+  const lit = new Set<string>();
+  for (const named of [stage.groups, stage.beforeBlackout ?? {}]) {
+    for (const [group, id] of Object.entries(named)) if (id) lit.add(JSON.stringify([group, id]));
+  }
+  for (const key of lit) {
+    const [group, id] = JSON.parse(key) as [string, string];
+    const was = before.presets.find((p) => p.id === id && p.group === group);
+    const is = next.presets.find((p) => p.id === id && p.group === group);
     // A preset the edit takes away is the engine's to let go of (it keeps the light).
     if (!was || !is) continue;
-    const light = resolvedLayers(was.layers, before.palettes);
-    if (JSON.stringify(light) === JSON.stringify(resolvedLayers(is.layers, next.palettes))) continue;
-    const copy: Preset = { ...structuredClone(was), id: uniqueId(`${was.id}-kept`, taken), layers: light, custom: true };
-    taken.push(copy.id);
-    copies.push(copy);
-    pins.push({ group, from: was.id, to: copy.id });
+    const light = lightOf(was, before);
+    if (light === lightOf(is, next)) continue;
+    const same = (p: Preset, show: Show) => p.custom && p.group === group && p.id !== id && p.name === was.name && p.fade === was.fade && lightOf(p, show) === light;
+    let to = next.presets.find((p) => same(p, next))?.id ?? copies.find((p) => same(p, next))?.id;
+    if (!to) {
+      const copy: Preset = { ...structuredClone(was), id: uniqueId(`${was.id}-kept`, taken), layers: resolvedLayers(was.layers, before.palettes), custom: true };
+      taken.push(copy.id);
+      copies.push(copy);
+      to = copy.id;
+    }
+    pins.push({ group, from: was.id, to });
   }
-  return pins.length ? { show: { ...next, presets: [...next.presets, ...copies] }, pins } : { show: next, pins };
+  return copies.length ? { show: { ...next, presets: [...next.presets, ...copies] }, pins } : { show: next, pins };
 }

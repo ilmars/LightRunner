@@ -740,3 +740,57 @@ test('an edit made in Live still changes the lights wherever the colour is lit',
   assert.equal(app.state!.groups['key-lights']!.preset, 'key-lights-sarkans');
   assert.notDeepEqual(steady(await watch(node, a, 300), 'after').dmx, lights.dmx);
 }));
+
+/** The largest green any key-light segment showed in the stage pictures the tablet got since `from`. */
+function keyGreen(t: { visuals: Buffer[]; layout: () => any }, from: number): number {
+  const fixtures = t.layout().fixtures as { id: string; segments: number }[];
+  const spans: [number, number][] = [];
+  let at = 0;
+  for (const f of fixtures) {
+    if (f.id === 'b1' || f.id === 'b2') spans.push([at, at + f.segments]);
+    at += f.segments;
+  }
+  let most = 0;
+  for (const v of t.visuals.slice(from)) {
+    for (const [a, b] of spans) for (let k = a; k < b; k++) most = Math.max(most, v[k * 3 + 1]!);
+  }
+  return most;
+}
+
+test('an edit in Prepare made in the middle of a fade, or of Blackout fading out, never shows on the lights', () => withRig(async (app) => {
+  const a = await tablet(app);
+  const b = await tablet(app);
+  await waitFor(a.layout);
+  for (const cmd of [
+    { type: 'look', id: 'worship', fade: 0 },
+    { type: 'groupPreset', group: 'key-lights', preset: 'key-lights-sarkans', fade: 0 },
+  ]) assert.equal(await a.send(cmd), null);
+  await sleep(300);
+  assert.equal(await a.send({ type: 'blindStart' }), null);
+  await waitFor(() => a.draft(), 2000, 'the draft');
+
+  // Red fading to blue over 3 s; a second in, red becomes green in Prepare.
+  let from = b.visuals.length;
+  assert.equal(await b.send({ type: 'groupPreset', group: 'key-lights', preset: 'key-lights-zils', fade: 3 }), null);
+  await sleep(1000);
+  assert.equal(await a.send({ type: 'editColour', preset: 'key-lights-sarkans', colour: '#00ff00', sameName: false }), null);
+  await sleep(2500);
+  assert.ok(keyGreen(b, from) <= 2, `no green on the key lights through the fade: ${keyGreen(b, from)}`);
+  assert.equal(app.state!.groups['key-lights']!.preset, 'key-lights-zils');
+
+  // Undo takes the edit back; the key lights go back on red.
+  assert.equal(await a.send({ type: 'blindEnd' }), null);
+  assert.equal(await b.send({ type: 'undo' }), null);
+  await sleep(300);
+  assert.equal(await b.send({ type: 'groupPreset', group: 'key-lights', preset: 'key-lights-sarkans', fade: 0 }), null);
+  await sleep(300);
+  // Blackout fades red out over 1 s; 0.3 s in, red becomes green in Prepare.
+  assert.equal(await a.send({ type: 'blindStart' }), null);
+  await waitFor(() => a.draft(), 2000, 'the draft');
+  from = b.visuals.length;
+  assert.equal(await b.send({ type: 'blackout' }), null);
+  await sleep(300);
+  assert.equal(await a.send({ type: 'editColour', preset: 'key-lights-sarkans', colour: '#00ff00', sameName: false }), null);
+  await sleep(1200);
+  assert.ok(keyGreen(b, from) <= 2, `no green on the key lights through Blackout: ${keyGreen(b, from)}`);
+}));

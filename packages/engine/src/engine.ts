@@ -322,16 +322,19 @@ export class Engine {
   }
 
   /**
-   * Load a new or edited show without disturbing what is on stage. `pins` (an edit made in Prepare, and its Undo):
-   * each group running a pin's `from` carries on as its `to`, with no fade, when the two make the same light.
+   * Load a new or edited show without disturbing what is on stage. `keep` (an edit made in Prepare, and its Undo): the
+   * edit never changes the lights. Each pin whose `to` makes the light its `from` made moves the group running `from`
+   * onto `to` (no fade, an effect keeps its place), and Blackout's memory and the Undo steps with it; a run fading out
+   * whose colour the edit changes keeps the light it had, set aside so the stage takes the edited one when it next uses it.
    */
-  setShow(show: Show, now: number, pins: readonly PresetPin[] = []): void {
+  setShow(show: Show, now: number, keep?: { pins: readonly PresetPin[] }): void {
     const before = this.show as Show | undefined;
     this.show = show;
     const palettes = new Map<string, Palette>(show.palettes.map((p) => [p.id, p]));
     this.presets = new Map(show.presets.map((p) => [p.id, compilePreset(p, palettes, this.rates)]));
     this.rates.prune();
     this.looks = new Map(show.looks.map((l) => [l.id, l]));
+    const pins = keep && before ? this.validPins(keep.pins, before) : [];
 
     const oldFixtures = new Map(this.fixtures.map((f) => [f.id, f]));
     this.fixtures = [];
@@ -366,8 +369,11 @@ export class Engine {
       }
       run.smoke = smoke;
       run.setFixtures(g.fixtures.map((id) => this.fixtureIndex.get(id)).filter((i): i is number => i !== undefined), this.fixtures);
+      // Kept (Prepare): the group carries on as its pin's copy, and runs fading out keep the light they have.
+      const pinned = pins.some((p) => p.pin.group === g.id && this.pinRun(run, p.pin, p.fresh));
+      if (keep && before) this.keepFading(run, before, now);
       // A colour (or effect) edited while it is lit fades to the new one instead of snapping, unless it is pinned.
-      const lit = this.pinned(run, pins.find((p) => p.group === g.id), before) ? null : this.editedColour(run, before, now);
+      const lit = pinned ? null : this.editedColour(run, before, now);
       // Running presets pick up edits; deleted ones keep running until they fade out.
       run.presets.update((key, item) => {
         const fresh = this.presets.get(key);
@@ -409,6 +415,16 @@ export class Engine {
       segments += f.cells.length;
     }
     this.visual = new Uint8Array(segments * 3);
+
+    // What Blackout brings back, and what Undo goes back to, keep the light too.
+    for (const { pin } of pins) {
+      const { group, from, to } = pin;
+      if (this.beforeBlackout?.[group] === from) this.beforeBlackout[group] = to;
+      for (const step of this.history) {
+        if (step.groups[group] === from) step.groups[group] = to;
+        if (step.beforeBlackout?.[group] === from) step.beforeBlackout[group] = to;
+      }
+    }
 
     for (const id of this.flash) if (!this.groups.has(id)) this.flash.delete(id);
     for (const id of this.puffStart.keys()) if (!this.flash.has(id)) this.puffStart.delete(id);
@@ -455,19 +471,42 @@ export class Engine {
     }
   }
 
-  /**
-   * A pin for the group: it runs `from`, and `to` in the new show makes the light `from` made in the old one.
-   * The run carries on under `to` (an effect keeps its place), so nothing on stage moves. True when it moved.
-   */
-  private pinned(group: GroupRun, pin: PresetPin | undefined, before: Show | undefined): boolean {
+  /** The pins whose `to` (in the new show) makes the light their `from` made (in the old one), with `to` compiled. */
+  private validPins(pins: readonly PresetPin[], before: Show): { pin: PresetPin; fresh: CompiledPreset }[] {
+    const out: { pin: PresetPin; fresh: CompiledPreset }[] = [];
+    for (const pin of pins) {
+      const was = before.presets.find((p) => p.id === pin.from);
+      const is = this.show.presets.find((p) => p.id === pin.to);
+      const fresh = this.presets.get(pin.to);
+      if (!was || !is || !fresh || is.group !== pin.group) continue;
+      if (JSON.stringify(resolvedLayers(was.layers, before.palettes)) !== JSON.stringify(resolvedLayers(is.layers, this.show.palettes))) continue;
+      out.push({ pin, fresh });
+    }
+    return out;
+  }
+
+  /** A valid pin for the group running its `from`: the run carries on under `to`, so nothing on stage moves. True when it moved. */
+  private pinRun(group: GroupRun, pin: PresetPin, fresh: CompiledPreset): boolean {
     const running = group.presets.current;
-    if (!pin || !before || !running || group.presets.currentKey !== pin.from) return false;
-    const was = before.presets.find((p) => p.id === pin.from);
-    const is = this.show.presets.find((p) => p.id === pin.to);
-    const fresh = this.presets.get(pin.to);
-    if (!was || !is || !fresh || is.group !== group.id) return false;
-    if (JSON.stringify(resolvedLayers(was.layers, before.palettes)) !== JSON.stringify(resolvedLayers(is.layers, this.show.palettes))) return false;
+    if (!running || group.presets.currentKey !== pin.from) return false;
     return group.presets.rekey(pin.from, pin.to, { ...running, preset: fresh });
+  }
+
+  /**
+   * An edit that must not change the lights: each run fading out (not the one the group settles on) whose preset the
+   * edit changes keeps its old definition, under a spare key, so it fades out as it was and the next use of the
+   * preset starts the edited one.
+   */
+  private keepFading(group: GroupRun, before: Show, now: number): void {
+    const current = group.presets.currentKey;
+    for (const [key] of group.presets.entriesOf()) {
+      if (key === current) continue;
+      const was = before.presets.find((p) => p.id === key);
+      const is = this.show.presets.find((p) => p.id === key);
+      if (!was || !is) continue;
+      if (JSON.stringify(resolvedLayers(was.layers, before.palettes)) === JSON.stringify(resolvedLayers(is.layers, this.show.palettes))) continue;
+      group.presets.setAside(key, `${key}~kept${now}`);
+    }
   }
 
   /**

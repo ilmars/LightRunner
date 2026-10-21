@@ -130,6 +130,22 @@ export class Crossfade<T> {
     return true;
   }
 
+  /** Every key in the mix and its item, the one the mix settles on included. */
+  entriesOf(): [string, T][] {
+    return this.entries.map((e) => [e.key, e.item]);
+  }
+
+  /**
+   * Rename an item fading out (never the one the mix settles on), keeping its weight, so a later push of
+   * `from` starts a new one. Does nothing (false) when there is none, or `to` is already in the mix.
+   */
+  setAside(from: string, to: string): boolean {
+    const e = this.entries.find((x) => x.key === from);
+    if (!e || e === this.incoming || this.entries.some((x) => x.key === to)) return false;
+    e.key = to;
+    return true;
+  }
+
   /** Replace items in place, e.g. after the show is edited. */
   update(fn: (key: string, item: T) => T): void {
     for (const e of this.entries) e.item = fn(e.key, e.item);
