@@ -46,7 +46,6 @@
 .route-head { display: flex; align-items: center; gap: 12px; }
 .route-fields { display: flex; flex-direction: column; gap: 12px; }
 
-.apc-status { margin: 0; font-weight: 500; }
 #pinForm { align-items: end; }
 
 /* Backups: a fold with a row per copy. */
@@ -68,3 +67,26 @@
 .ofl-update details summary { font-weight: 600; min-height: 44px; }
 .ofl-update ul { margin: 6px 0 0; padding-left: 18px; max-height: 220px; overflow: auto; color: var(--ds-muted); font-size: 13px; }
 .ofl-update li .used { color: var(--ds-warn-text); font-weight: 600; margin-left: 6px; }
+
+/* Controller keys: the devices beside the APC mini layout, then every action with its key, in two columns
+   on a wide screen. A row: the action (and "hold" for the held ones) over its key, Assign a key and Clear. */
+.keys-top { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
+@media (min-width: 900px) { .keys-top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.keys-top[hidden], .keys-list[hidden] { display: none; }
+.keys-device-list { display: flex; flex-direction: column; gap: 6px; }
+.keys-device { display: flex; align-items: center; gap: 12px; padding: 0 6px 0 14px; border-radius: var(--ds-r-tile); background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low); }
+.keys-device .meta { flex: 1; min-width: 0; padding: 6px 0; }
+.keys-device .meta b { display: block; font-weight: 600; }
+.keys-device .meta span { color: var(--ds-muted); font-size: 13px; }
+.keys-note { margin: 0; min-height: 1.3em; color: var(--ds-muted); font-size: 13px; }
+.keys-list { columns: 2 480px; column-gap: 24px; }
+.keys-section { break-inside: avoid; display: flex; flex-direction: column; margin-bottom: 16px; }
+.keys-section h3 { margin: 0 0 2px; }
+.krow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-height: 56px; padding: 6px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.08); }
+.kname { flex: 1 1 180px; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; }
+.kname b { font-weight: 600; }
+.khold { color: var(--ds-muted); font-size: 12px; }
+.know { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.kstd { color: var(--ds-muted); }
+.kbtns { display: flex; gap: 8px; margin-left: auto; }
+.kassign { min-width: 128px; }

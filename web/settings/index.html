@@ -199,15 +199,34 @@
       <p class="warn" id="oscProblem"></p>
     </section>
 
-    <section class="card ds-panel" id="apcCard">
+    <section class="card ds-panel span2" id="keysCard">
       <div class="card-head">
         <div class="card-title">
-          <h2 class="ds-caps">APC mini</h2>
-          <p class="card-desc">Faders and pads for the lights, plugged into this computer.</p>
+          <h2 class="ds-caps">Controller keys</h2>
+          <p class="card-desc">What the keys, faders and knobs on a MIDI controller do. Tap Assign a key, then press the key on the controller.</p>
         </div>
       </div>
-      <p id="apcStatus" class="apc-status">APC mini: not connected</p>
-      <p class="hint">Plug an Akai APC mini into this computer and it is found within a few seconds. Faders 1–8 dim the groups and fader 9 is Master. The top two rows of pads start the songs, the rows below pick each group's colours.</p>
+      <p id="keysNoMidi" class="hint" hidden>MIDI support isn't installed on this computer, so controllers can't be used. Run npm install in the Light Runner folder on this computer, then start Light Runner again.</p>
+      <div class="keys-top" id="keysTop">
+        <div class="sub keys-devices">
+          <h3 class="ds-caps">Devices</h3>
+          <p class="hint">Controllers plugged into this computer are found within a few seconds. Light Runner listens to each one that is switched on.</p>
+          <div id="keysDevices" class="keys-device-list"></div>
+        </div>
+        <div class="sub keys-apc">
+          <h3 class="ds-caps">APC mini layout</h3>
+          <label class="ds-switch">
+            <input id="apcLayout" type="checkbox">
+            <span class="ds-switch-track"></span>
+            <span class="switch-label">Use the standard APC mini layout for keys I haven't assigned</span>
+          </label>
+          <p class="hint">Faders 1–8 dim the groups and fader 9 is Master. The top two rows of pads start the running order by place, the rows below pick each group's colours. A key you assign on the APC mini does its new job instead.</p>
+          <div class="row wrap"><button id="apcReset" class="ds-btn ds-btn--quiet" type="button">Reset to the APC mini layout</button></div>
+        </div>
+      </div>
+      <p id="keysNote" class="keys-note" role="status"></p>
+      <div id="keysList" class="keys-list"></div>
+      <p id="keysHint" class="hint">Songs and quick looks get their keys where they are edited on the operator page: Edit list, and a quick look's Edit.</p>
     </section>
 
     <section class="card ds-panel">

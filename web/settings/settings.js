@@ -1,7 +1,7 @@
 // Settings page for the programmer. Talks to the server's /api/settings
 // routes; nothing here changes the stage except the Send DMX switch.
 
-import { request, showProblem, startClock, watchState } from '../shared/appbar.js';
+import { NOT_ANSWERING, request, showProblem, startClock, watchState } from '../shared/appbar.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -71,6 +71,7 @@ async function load() {
   render();
   loadBackups();
   loadOfl();
+  loadKeys();
 }
 
 // ---- Fixture database (Open Fixture Library) ----
@@ -179,7 +180,6 @@ function render() {
   $('oscPort').value = String(s.osc.port);
   $('oscPortField').hidden = !s.osc.enabled;
   $('oscProblem').textContent = s.osc.enabled ? s.oscProblem ?? '' : '';
-  renderApc(s.apc);
 
   $('frameRate').value = String(s.frameRate);
   $('gamma').value = String(s.gamma);
@@ -212,15 +212,211 @@ function renderStatus() {
   if ($('outputProblem').textContent !== problem) $('outputProblem').textContent = problem;
 }
 
-/** Whether an APC mini is plugged in, and which model. */
-function renderApc(apc) {
-  $('apcStatus').textContent =
-    !apc?.midi ? "APC mini: MIDI support isn't installed on this computer" :
-    apc.connected ? `APC mini: connected (${apc.model === 'mk2' ? 'mk2' : 'older model'})` :
-    'APC mini: not connected';
+// ---- Controller keys ----
+// The server lists the devices and every fixed action with its key. Assign a key asks the server to take the next
+// key pressed on a controller (it waits up to 10 s); one page at a time. Changes apply at once, like Send DMX.
+
+/** The view from GET /api/controller, as last shown (its JSON, to redraw only on a change). */
+let keysView = null;
+let keysShown = '';
+/** The action waiting for its key: what it does, its name, the request, when it gives up, the countdown. */
+const keyLearn = { does: null, label: '', ctl: null, until: 0, timer: 0 };
+const sameDoes = (a, b) => !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
+
+async function loadKeys() {
+  try {
+    showKeys(await call('GET', '/api/controller'));
+  } catch {
+    // the next read tries again
+  }
 }
 
-// Keep the status pill and the APC mini line live (the pill also before the PIN is entered, as on Patch).
+/** Draw the card when the view changed (never in the middle of a learn, which keeps its own row up to date). */
+function showKeys(view) {
+  keysView = view;
+  const text = JSON.stringify(view);
+  if (text === keysShown) return;
+  keysShown = text;
+  renderKeys();
+}
+
+const MODEL_NAMES = { mk2: 'mk2', mk1: 'older model' };
+
+function renderKeys() {
+  const v = keysView;
+  if (!v) return;
+  $('keysNoMidi').hidden = v.midi;
+  $('keysTop').hidden = !v.midi;
+  $('keysList').hidden = !v.midi;
+  $('keysHint').hidden = !v.midi;
+  $('keysNote').hidden = !v.midi;
+
+  const list = $('keysDevices');
+  list.replaceChildren();
+  if (!v.devices.length) list.append(el('p', 'hint', 'No controller is connected. Plug one into this computer.'));
+  for (const d of v.devices) {
+    const row = el('div', 'keys-device');
+    const meta = el('div', 'meta');
+    meta.append(el('b', null, d.name));
+    const state = d.listening ? 'connected' : 'not listened to';
+    meta.append(el('span', null, d.model ? `${MODEL_NAMES[d.model]} · ${state}` : state));
+    const sw = el('label', 'ds-switch');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = d.listening;
+    box.setAttribute('aria-label', `Listen to ${d.name}`);
+    box.addEventListener('change', () => listenTo(d.name, box.checked, box));
+    sw.append(box, el('span', 'ds-switch-track'), el('span', 'switch-label', 'Listen'));
+    row.append(meta, sw);
+    list.append(row);
+  }
+  $('apcLayout').checked = v.apcLayout;
+
+  const root = $('keysList');
+  root.replaceChildren();
+  const sections = [...new Set(v.actions.map((a) => a.section))];
+  for (const section of sections) {
+    const box = el('div', 'keys-section');
+    box.append(el('h3', 'ds-caps', section));
+    for (const a of v.actions.filter((x) => x.section === section)) box.append(keyRow(a));
+    root.append(box);
+  }
+  paintLearn();
+}
+
+function keyRow(a) {
+  const row = el('div', 'krow');
+  row.dataset.does = JSON.stringify(a.does);
+  const name = el('div', 'kname');
+  name.append(el('b', null, a.label));
+  if (a.hold) name.append(el('span', 'khold', a.hold));
+  const now = el('span', 'know');
+  if (a.key) now.textContent = a.key;
+  else if (a.standard) now.append(el('span', 'kstd', `APC mini layout: ${a.standard}`));
+  else now.append(el('span', 'kstd', 'No key'));
+  now.classList.toggle('set', !!a.key);
+  name.append(now);
+  const assign = el('button', 'ds-btn ds-btn--quiet kassign', 'Assign a key');
+  assign.type = 'button';
+  assign.addEventListener('click', () => (sameDoes(keyLearn.does, a.does) ? stopLearn() : learnKey(a.does, a.label)));
+  const clear = el('button', 'ds-btn ds-btn--quiet kclear', 'Clear');
+  clear.type = 'button';
+  clear.hidden = !a.key;
+  clear.addEventListener('click', () => clearKey(a.does, a.label));
+  const buttons = el('div', 'kbtns');
+  buttons.append(assign, clear);
+  row.append(name, buttons);
+  return row;
+}
+
+/** The row waiting for its key says so, with the seconds left; the other rows wait their turn. */
+function paintLearn() {
+  for (const row of $('keysList').querySelectorAll('.krow')) {
+    const waiting = sameDoes(keyLearn.does, JSON.parse(row.dataset.does));
+    const btn = row.querySelector('.kassign');
+    row.classList.toggle('learning', waiting);
+    btn.classList.toggle('ds-btn--primary', waiting);
+    btn.classList.toggle('ds-btn--quiet', !waiting);
+    btn.disabled = !!keyLearn.does && !waiting;
+    const left = Math.max(0, Math.ceil((keyLearn.until - performance.now()) / 1000));
+    btn.textContent = waiting ? `Press a key… ${left} s · Stop` : 'Assign a key';
+  }
+}
+
+async function learnKey(does, label) {
+  if (keyLearn.ctl) return;
+  const ctl = new AbortController();
+  Object.assign(keyLearn, { does, label, ctl, until: performance.now() + 10000 });
+  keyLearn.timer = setInterval(paintLearn, 250);
+  $('keysNote').textContent = '';
+  paintLearn();
+  let answer = null;
+  try {
+    const res = await fetch('/api/keys/learn', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ does }), signal: ctl.signal });
+    const data = await res.json().catch(() => ({}));
+    answer = res.ok ? data : { ok: false, message: data.error || `request failed (${res.status})`, bad: true };
+  } catch {
+    if (!ctl.signal.aborted) answer = { ok: false, message: NOT_ANSWERING, bad: true };
+  }
+  if (keyLearn.ctl !== ctl) return;
+  endLearn();
+  if (answer?.ok) {
+    $('keysNote').textContent = answer.note ?? `${label} is now ${answer.key}.`;
+  } else if (answer) {
+    toast(answer.message, answer.bad);
+  }
+  await loadKeys();
+}
+
+function stopLearn() {
+  keyLearn.ctl?.abort();
+  endLearn();
+}
+
+function endLearn() {
+  clearInterval(keyLearn.timer);
+  Object.assign(keyLearn, { does: null, label: '', ctl: null });
+  paintLearn();
+}
+
+async function clearKey(does, label) {
+  try {
+    await call('POST', '/api/keys/clear', { does });
+    $('keysNote').textContent = `${label} has no key now.`;
+  } catch (err) {
+    toast(err.message, true);
+  }
+  await loadKeys();
+}
+
+async function listenTo(device, on, box) {
+  const ignored = new Set((keysView?.devices ?? []).filter((d) => !d.listening).map((d) => d.name));
+  if (on) ignored.delete(device);
+  else ignored.add(device);
+  try {
+    showKeys(await call('PUT', '/api/controller', { ignored: [...ignored] }));
+  } catch (err) {
+    box.checked = !on;
+    toast(err.message, true);
+  }
+}
+
+$('apcLayout').addEventListener('change', async (e) => {
+  const on = e.target.checked;
+  try {
+    showKeys(await call('PUT', '/api/controller', { apcLayout: on }));
+  } catch (err) {
+    e.target.checked = !on;
+    toast(err.message, true);
+  }
+});
+
+// Reset asks twice, as deleting does elsewhere: the first tap arms it for a few seconds.
+let resetArmed = 0;
+$('apcReset').addEventListener('click', async () => {
+  const btn = $('apcReset');
+  if (!resetArmed) {
+    btn.textContent = 'Tap again to clear every key on the APC mini';
+    btn.classList.add('ds-btn--danger');
+    resetArmed = setTimeout(disarmReset, 4000);
+    return;
+  }
+  disarmReset();
+  try {
+    showKeys(await call('POST', '/api/keys/reset'));
+    $('keysNote').textContent = 'The APC mini has its standard layout again.';
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+function disarmReset() {
+  clearTimeout(resetArmed);
+  resetArmed = 0;
+  $('apcReset').textContent = 'Reset to the APC mini layout';
+  $('apcReset').classList.remove('ds-btn--danger');
+}
+
+// Keep the status pill and the controller card live (the pill also before the PIN is entered, as on Patch).
 function watch() {
   watchState({
     pill: $('status'),
@@ -228,9 +424,9 @@ function watch() {
     onState: async (state) => {
       lastState = state;
       renderStatus();
-      if ($('main').hidden) return;
+      if ($('main').hidden || keyLearn.does) return;
       try {
-        renderApc(await (await request('/api/apc', {}, 4000)).json());
+        showKeys(await (await request('/api/controller', {}, 4000)).json());
       } catch {
         // the next read tries again
       }

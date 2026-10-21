@@ -3,7 +3,8 @@
 //   LIGHT_RUNNER_DATA  folder for show.json, runtime.json and backups (default ./data)
 //   LIGHT_RUNNER_OUTPUT=none   run without sending DMX (for testing away from the rig)
 //   LIGHT_RUNNER_FAKE_MIDI=1   test only: simulated controllers (an APC mini mk2 and a nanoKONTROL2) instead of
-//                              the real ones, pressed through POST /api/test/midi (for checking the pages)
+//                              the real ones, pressed through POST /api/test/midi (for checking the pages);
+//                              LIGHT_RUNNER_FAKE_MIDI=missing runs as if the MIDI add-on weren't installed
 
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -27,7 +28,9 @@ const app = new App({
   webDir: resolve(root, 'web'),
   output: process.env.LIGHT_RUNNER_OUTPUT === 'none' ? { kind: 'none' } : undefined,
   // MIDI controllers (the APC mini and others), when the MIDI add-on is installed.
-  midi: fakeMidi ? async () => fakeMidi : loadMidi,
+  midi: fakeMidi ? async () => fakeMidi
+    : process.env.LIGHT_RUNNER_FAKE_MIDI === 'missing' ? (log) => loadMidi(log, async () => { throw new Error('test only: left out'); })
+    : loadMidi,
   fakeMidi,
 });
 
