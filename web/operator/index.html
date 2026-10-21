@@ -190,6 +190,9 @@
             <button id="pAddOpen" class="hbtn" disabled>＋ Keep as a colour</button>
           </div>
           <div id="pAny" class="strip2 hue" aria-label="Any colour"><span id="pAnyH" class="strip-handle" hidden></span></div>
+          <!-- Saturation (not for white-only groups) and Exact values › (hex, R, G, B; folded; not on the phone). -->
+          <div class="cx-line"><div id="pSat" class="cx-sat"></div><span id="pFold" class="cx-foldwrap"></span></div>
+          <div id="pExact" class="cx-exact" hidden></div>
           <div id="pExtras" class="pextras" hidden></div>
           <!-- ＋ Keep as a colour: a name and Add to every group for the strip pick (White, Amber and UV kept). -->
           <div id="pAdd" class="padd" hidden>
@@ -286,6 +289,16 @@
             <button id="ceNoColour" class="ce-chip" aria-pressed="false">No colour</button>
           </div>
         </div>
+        <!-- Saturation: pales the strip's colour towards white light. Not for white-only groups or Off. -->
+        <div id="ceSatRow" class="ce-row">
+          <span class="ce-lab">Saturation</span>
+          <div id="ceSat" class="ce-level"></div>
+        </div>
+        <!-- Exact values ›: the colour as hex and R, G, B (folded). Not for Off. -->
+        <div id="ceExactRow" class="ce-row ce-row-top">
+          <span></span>
+          <div class="ce-exact"><span id="ceFold" class="cx-foldwrap"></span><div id="ceExact" class="cx-exact" hidden></div></div>
+        </div>
         <!-- The colour's White, Amber and UV, for groups that have them (not for Off). -->
         <div id="ceExtrasRow" class="ce-row">
           <span id="ceExtrasLab" class="ce-lab">White · Amber · UV</span>
@@ -360,7 +373,11 @@
           <div class="fe-tray">
             <span id="feTrayLab" class="fe-note"></span>
             <div id="feChoices" class="fe-colours"></div>
-            <div id="feOwn" class="strip2 hue fe-own" aria-label="Pick an own colour" hidden><span id="feOwnH" class="strip-handle" hidden></span></div>
+            <div id="feOwnBox" class="fe-ownbox" hidden>
+              <div id="feOwn" class="strip2 hue fe-own" aria-label="Pick an own colour"><span id="feOwnH" class="strip-handle" hidden></span></div>
+              <div class="cx-line"><div id="feOwnSat" class="cx-sat"></div><span id="feOwnFold" class="cx-foldwrap"></span></div>
+              <div id="feOwnExact" class="cx-exact" hidden></div>
+            </div>
           </div>
         </div>
         <!-- Base: a colour under the effect, where it is dark, at its own brightness. -->
@@ -376,7 +393,11 @@
           <div class="fe-tray">
             <span class="fe-note">Tap a colour for the base</span>
             <div id="feBaseChoices" class="fe-colours" role="radiogroup" aria-label="Base colour"></div>
-            <div id="feBaseOwn" class="strip2 hue fe-own" aria-label="Pick an own colour for the base" hidden><span id="feBaseOwnH" class="strip-handle" hidden></span></div>
+            <div id="feBaseOwnBox" class="fe-ownbox" hidden>
+              <div id="feBaseOwn" class="strip2 hue fe-own" aria-label="Pick an own colour for the base"><span id="feBaseOwnH" class="strip-handle" hidden></span></div>
+              <div class="cx-line"><div id="feBaseOwnSat" class="cx-sat"></div><span id="feBaseOwnFold" class="cx-foldwrap"></span></div>
+              <div id="feBaseOwnExact" class="cx-exact" hidden></div>
+            </div>
           </div>
         </div>
         <div class="ce-row">

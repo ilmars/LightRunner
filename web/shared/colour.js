@@ -11,7 +11,7 @@ export const HUE_STOPS = ['#ff0000', '#ffc800', '#00ff00', '#00ffc8', '#0000ff',
 /** The strip for white-only groups: warm to cool white. */
 export const WHITE_STOPS = ['#ffb46b', '#f4f8ff'];
 
-const clamp01 = (v) => Math.min(1, Math.max(0, v));
+const clamp01 = (v) => (v > 0 ? Math.min(1, v) : 0);
 const stopsOf = (whiteOnly) => (whiteOnly ? WHITE_STOPS : HUE_STOPS);
 
 /** "#rrggbb" to [r, g, b], 0..255. */

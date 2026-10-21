@@ -2,6 +2,7 @@
 // sends commands and shows the live state it is given.
 
 import { barAxis, barEnds, beamCone, outlineCells } from '/shared/stage.js';
+import { HUE_STOPS, WHITE_STOPS, hexRgb, parseChannel, parseHex, rgbHex, stripColour, stripMix, stripPick } from '/shared/colour.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -1596,18 +1597,7 @@ saveBtn.addEventListener('click', (ev) => ev.preventDefault());
 
 const picker = { group: null, tab: 'col' };
 
-const HUE_STOPS = ['#ff0000', '#ffc800', '#00ff00', '#00ffc8', '#0000ff', '#8c00ff', '#ff008c', '#ff0000'];
-const WHITE_STOPS = ['#ffb46b', '#f4f8ff'];
-
-/** The colour a strip shows at position p (0..1), blended like the CSS gradient does. */
-function stripColour(stops, p) {
-  const x = clamp01(p) * (stops.length - 1);
-  const i = Math.min(stops.length - 2, Math.floor(x));
-  const t = x - i;
-  const rgb = (h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16));
-  const a = rgb(stops[i]), b = rgb(stops[i + 1]);
-  return `#${a.map((v, k) => Math.round(v + (b[k] - v) * t).toString(16).padStart(2, '0')).join('')}`;
-}
+// The strips' colours and their maths (place, saturation, exact values) are in /shared/colour.js.
 
 const pickerRow = () => detailRows.find((r) => r.group.id === picker.group);
 
@@ -1897,6 +1887,8 @@ function renderPicker() {
   const running = runningLight(row.group, s);
   pickerColour = running.colour;
   pickerLive = !!s?.live;
+  // Any colour follows the group's Any colour pick (the draft's, in Prepare), unless a finger or a field is on it.
+  if (!anyColour.busy()) anyColour.set(s?.live ? s.live.colour : null);
   const now = performance.now();
   for (const r of extraRows) if (!r.dragging && now >= r.holdUntil) showLevel(r, running[r.key]);
   renderAddColour();
@@ -2020,14 +2012,14 @@ function finishAddColour(error) {
 function openPicker(groupId) {
   if (isSmoke(layout?.groups.find((g) => g.id === groupId))) return;
   closeSheet();
-  if (picker.group !== groupId) {
-    $('pAnyH').hidden = true;
-  }
   $('pAdd').hidden = true;
   picker.group = groupId;
   closeEditor();
   extrasMoved = false;
   buildPickerGrid();
+  // Any colour starts from the group's own Any colour pick (none for another kind of colour; renderPicker), Exact values folded.
+  anyColour.set(null, true);
+  anyColour.fold(false);
   // A group that runs an effect opens on its Effects tab.
   const group = pickerRow()?.group;
   showPickerTab(group && hasLine(group) && runningEffect(group, groupStatus(group)) ? 'fx' : 'col');
@@ -2366,22 +2358,335 @@ function attachStrip(strip, handle, whiteOnly, onColour, onStart) {
   strip.addEventListener('pointercancel', end);
 }
 
-// Any colour: picking sends right away; moves are throttled and the last one always goes.
+/** After the page changes a colour, what the stage says is shown again only this much later (its answer can lag a move). */
+const COLOUR_HOLD = 800;
+/** A typed R, G or B is taken this long after the last key (at once when the field is left), so "128" isn't 1, 12, then 128. */
+const CHANNEL_WAIT = 400;
+let colourToolsMade = 0;
+
+/**
+ * A colour strip with Saturation under it and Exact values (a hex field and R, G, B, folded). The hex is the one
+ * source of truth: the strip's handle, Saturation and the fields are worked out from it (`set`), so a typed colour
+ * that isn't on the strip stays exactly as typed (the handle goes to the nearest place). A move on the strip or on
+ * Saturation makes a new hex from the place, the saturation and the strength the colour had (see /shared/colour.js).
+ *
+ * `onStart()` when a change begins (a touch on the strip or Saturation, or the first change typed since a field got
+ * focus), then `onColour(hex, last)` as it changes and once more with `last` at its end (the finger lifts, or the
+ * field is left). `whiteOnly()` says which strip it is (warm to cool has no Saturation), null while it can't be used.
+ * The parts go into `sat` (Saturation), `fold` (the Exact values button) and `exact` (the fields); `row`: Saturation
+ * as the editors' rows have Brightness (the range inside, the value beside), else "Saturation 100 %" over the slider.
+ */
+function colourTools({ strip, handle, sat, fold, exact, row = false, whiteOnly, onColour, onStart }) {
+  const st = { hex: null, p: null, s: 1, v: 1 };
+  let dragging = false, holdUntil = 0;
+  // A typed change under way: `began` once onStart has gone; `timer` for an R, G or B still being typed; `skip`: Escape.
+  const typed = { began: false, timer: 0, skip: false };
+
+  // Saturation: a fill slider carrying the full colour of the strip's place.
+  const satRow = { dim: el('div', 'ds-fill'), slab: el('span', 'ds-fill-slab'), pct: el('span', 'pct'), value: 1, dragging: false };
+  satRow.dim.setAttribute('role', 'slider');
+  satRow.dim.setAttribute('aria-label', 'Saturation');
+  satRow.dim.setAttribute('aria-valuemin', '0');
+  satRow.dim.setAttribute('aria-valuemax', '100');
+  satRow.dim.append(satRow.slab);
+  if (row) {
+    satRow.dim.append(el('span', 'ce-range', '0 – 100 %'));
+    sat.append(satRow.dim, satRow.pct);
+  } else {
+    sat.append(el('span', 'lab2', 'Saturation'), satRow.pct, satRow.dim);
+  }
+
+  // Exact values: folded; open, a hex field and R, G, B, and a quiet note when something typed can't be used.
+  const foldBtn = el('button', 'cx-fold');
+  foldBtn.type = 'button';
+  foldBtn.append('Exact values', el('span', 'cx-arrow', '›'));
+  if (!exact.id) exact.id = `cxExact${++colourToolsMade}`;
+  foldBtn.setAttribute('aria-controls', exact.id);
+  foldBtn.setAttribute('aria-expanded', 'false');
+  fold.append(foldBtn);
+  const field = (cls, label, numeric) => {
+    const f = el('input', `ds-field ${cls}`);
+    f.type = 'text';
+    f.autocomplete = 'off';
+    f.spellcheck = false;
+    f.setAttribute('enterkeyhint', 'done');
+    f.setAttribute('aria-label', label);
+    if (numeric) {
+      f.inputMode = 'numeric';
+      f.pattern = '[0-9]*';
+      f.maxLength = 3;
+    } else {
+      f.maxLength = 7;
+      f.placeholder = '#RRGGBB';
+      f.setAttribute('autocapitalize', 'characters');
+    }
+    return f;
+  };
+  const hexField = field('cx-hex', 'Colour as hex, #RRGGBB', false);
+  const chans = ['Red', 'Green', 'Blue'].map((name) => field('cx-num', `${name}, 0 to 255`, true));
+  const fields = [hexField, ...chans];
+  const note = el('p', 'cx-note');
+  note.setAttribute('role', 'status');
+  note.hidden = true;
+  const line = el('div', 'cx-fields');
+  const cell = (text, f) => {
+    const l = el('label', 'cx-cell');
+    l.append(el('span', 'cx-lab', text), f);
+    return l;
+  };
+  line.append(cell('Hex', hexField), ...chans.map((f, i) => cell('RGB'[i], f)));
+  exact.append(line, note);
+  exact.hidden = true;
+
+  function render() {
+    const w = whiteOnly();
+    sat.hidden = w !== false;
+    const lit = st.hex !== null && st.v > 0;
+    handle.hidden = st.p === null || !lit;
+    if (!handle.hidden) handle.style.left = `calc(${st.p * 100}% - ${st.p * 4}px)`;
+    // Saturation pales a hue: unavailable until there is one (nothing picked yet, black, or a white typed with none before).
+    const paled = st.p !== null && lit;
+    satRow.dim.classList.toggle('ds-disabled', !paled);
+    satRow.dim.setAttribute('aria-disabled', String(!paled));
+    if (!satRow.dragging) showLevel(satRow, st.hex ? st.s : 1);
+    satRow.dim.style.setProperty('--c', st.p === null ? '#6a7898' : shown(stripMix(false, st.p, 1, 1)));
+    // A field being typed in is never written over.
+    const rgb = st.hex ? hexRgb(st.hex) : null;
+    if (document.activeElement !== hexField) hexField.value = st.hex ? st.hex.toUpperCase() : '';
+    chans.forEach((f, i) => {
+      if (document.activeElement !== f) f.value = rgb ? String(rgb[i]) : '';
+    });
+  }
+
+  /** A finger on the strip or Saturation first ends any typing (its field would otherwise keep focus and go stale). */
+  const blurFields = () => {
+    if (fields.includes(document.activeElement)) document.activeElement.blur();
+  };
+
+  // The strip: the place it is touched picks the hue, at the saturation and strength the colour had.
+  const place = (ev) => {
+    const r = strip.getBoundingClientRect();
+    return r.width > 0 ? clamp01((ev.clientX - r.left) / r.width) : null;
+  };
+  const fromStrip = (ev) => {
+    const w = whiteOnly();
+    const p = place(ev);
+    if (w === null || p === null) return;
+    st.p = p;
+    st.hex = stripMix(w, st.p, st.s, st.v);
+    render();
+    onColour(st.hex, false);
+  };
+  strip.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    const w = whiteOnly();
+    if (w === null) return;
+    blurFields();
+    note.hidden = true;
+    dragging = true;
+    try { strip.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    // From black (No colour) the strip lights again; from white light (0 %), a hue comes back at full colour.
+    if (!st.hex || st.v === 0) st.v = 1;
+    if (!w && st.s === 0) st.s = 1;
+    onStart?.();
+    fromStrip(ev);
+  });
+  strip.addEventListener('pointermove', (ev) => {
+    if (dragging) fromStrip(ev);
+  });
+  const endStrip = () => {
+    if (!dragging) return;
+    dragging = false;
+    holdUntil = performance.now() + COLOUR_HOLD;
+    if (st.hex) onColour(st.hex, true);
+  };
+  strip.addEventListener('pointerup', endStrip);
+  strip.addEventListener('pointercancel', endStrip);
+
+  // Saturation: moves relative to where the finger starts, like the other sliders; whole percent.
+  {
+    let startX = 0, startS = 1, moved = false;
+    const dim = satRow.dim;
+    dim.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      if (whiteOnly() !== false || st.p === null || !st.hex || st.v === 0) return;
+      blurFields();
+      note.hidden = true;
+      satRow.dragging = true;
+      try { dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+      dim.classList.add('ds-dragging');
+      startX = ev.clientX;
+      startS = st.s;
+      moved = false;
+      onStart?.();
+    });
+    dim.addEventListener('pointermove', (ev) => {
+      if (!satRow.dragging) return;
+      const s = Math.round(clamp01(startS + (ev.clientX - startX) / dim.clientWidth) * 100) / 100;
+      showLevel(satRow, s);
+      if (s === st.s) return;
+      st.s = s;
+      st.hex = stripMix(false, st.p, s, st.v);
+      moved = true;
+      render();
+      onColour(st.hex, false);
+    });
+    const end = () => {
+      if (!satRow.dragging) return;
+      satRow.dragging = false;
+      dim.classList.remove('ds-dragging');
+      holdUntil = performance.now() + COLOUR_HOLD;
+      if (moved) onColour(st.hex, true);
+    };
+    dim.addEventListener('pointerup', end);
+    dim.addEventListener('pointercancel', end);
+  }
+
+  // The fields. A whole hex is taken as it is typed; R, G and B a moment after the last key. Left (Done, Enter, a tap
+  // elsewhere), a field that can't be used says why in a quiet note and shows the colour again. Escape puts it back.
+  function apply(hex) {
+    if (hex === st.hex) return;
+    if (!typed.began) {
+      typed.began = true;
+      onStart?.();
+    }
+    Object.assign(st, stripPick(!!whiteOnly(), hex, st));
+    st.hex = hex;
+    render();
+    onColour(hex, false);
+  }
+  const takeChannel = (i) => {
+    const n = parseChannel(chans[i].value);
+    if (n === null) return false;
+    const rgb = st.hex ? hexRgb(st.hex) : [0, 0, 0];
+    rgb[i] = n;
+    apply(rgbHex(rgb));
+    return true;
+  };
+  const refuse = (text) => {
+    note.textContent = text;
+    note.hidden = false;
+  };
+  hexField.addEventListener('input', () => {
+    note.hidden = true;
+    const hex = parseHex(hexField.value);
+    if (hex) apply(hex);
+  });
+  chans.forEach((f, i) => f.addEventListener('input', () => {
+    note.hidden = true;
+    clearTimeout(typed.timer);
+    typed.timer = setTimeout(() => {
+      typed.timer = 0;
+      takeChannel(i);
+    }, CHANNEL_WAIT);
+  }));
+  for (const f of fields) {
+    // Typing replaces what the field shows: its text is selected on focus, and again at the end of the tap that gave it
+    // focus (on touch, focus comes before the finger lifts, and the tap would put the caret back), as Tempo's field does.
+    let focusTap = false;
+    const select = () => f.setSelectionRange(0, f.value.length);
+    f.addEventListener('pointerdown', () => (focusTap = document.activeElement !== f));
+    f.addEventListener('focus', () => {
+      typed.began = false;
+      typed.skip = false;
+      select();
+    });
+    f.addEventListener('click', () => {
+      if (focusTap) select();
+      focusTap = false;
+    });
+    f.addEventListener('keydown', (ev) => {
+      // Nothing else on the page reacts to typing.
+      ev.stopPropagation();
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        f.blur();
+      } else if (ev.key === 'Escape') {
+        typed.skip = true;
+        f.blur();
+      }
+    });
+    f.addEventListener('blur', () => {
+      clearTimeout(typed.timer);
+      typed.timer = 0;
+      const text = f.value.trim();
+      if (!typed.skip && text !== '') {
+        if (f === hexField) {
+          const hex = parseHex(text);
+          if (hex) apply(hex);
+          else refuse('Type a colour as # and six digits or letters A to F, like #FF8800.');
+        } else if (!takeChannel(chans.indexOf(f))) {
+          refuse('R, G and B are whole numbers from 0 to 255.');
+        }
+      }
+      typed.skip = false;
+      if (typed.began) {
+        typed.began = false;
+        holdUntil = performance.now() + COLOUR_HOLD;
+        onColour(st.hex, true);
+      }
+      render();
+    });
+  }
+
+  const showFold = (open) => {
+    if (!open) blurFields();
+    exact.hidden = !open;
+    note.hidden = true;
+    foldBtn.classList.toggle('open', open);
+    foldBtn.setAttribute('aria-expanded', String(open));
+  };
+  foldBtn.addEventListener('click', () => showFold(exact.hidden));
+
+  return {
+    /** The colour now (#rrggbb), null for none. */
+    get hex() { return st.hex; },
+    /**
+     * Shows `hex` (null: none). `fresh` forgets the colour before (a new editor, another group); otherwise a colour
+     * with no hue (black, grey or white) keeps the place it had.
+     */
+    set(hex, fresh = false) {
+      const h = hex ? hex.toLowerCase() : null;
+      if (fresh) {
+        Object.assign(st, { hex: null, p: null, s: 1, v: 1 });
+        holdUntil = 0;
+      }
+      if (h !== st.hex) {
+        note.hidden = true;
+        if (h) Object.assign(st, stripPick(!!whiteOnly(), h, st));
+        else Object.assign(st, { p: null, s: 1, v: 1 });
+        st.hex = h;
+      }
+      render();
+    },
+    /** Folds Exact values (or opens it). */
+    fold: (open = false) => showFold(open),
+    /** A finger or a field is changing it, or did a moment ago: what the stage says must wait. */
+    busy: () => dragging || satRow.dragging || fields.includes(document.activeElement) || performance.now() < holdUntil,
+    render,
+  };
+}
+
+// Any colour: picking sends right away; moves are throttled and the last one always goes. Saturation and a typed
+// colour send the same way (one Undo step per touch, or per field until it is left); in Prepare they go to the draft.
 // The White, Amber and UV sliders' levels go with it when they are the user's: the group
 // already runs an Any colour pick, or a slider was moved since the picker opened. Otherwise
 // (a preset or Basic light with its own white) the pick is the plain colour.
-(() => {
+const anyColour = (() => {
   let keep = false, target = stageTarget();
   const out = dragSender((hex, first) => sendColour(hex, first, keep ? extraLevels() : NO_EXTRAS, target));
-  attachStrip($('pAny'), $('pAnyH'), () => pickerRow()?.group.whiteOnly ?? null,
-    (hex, last) => {
+  return colourTools({
+    strip: $('pAny'), handle: $('pAnyH'), sat: $('pSat'), fold: $('pFold'), exact: $('pExact'),
+    whiteOnly: () => pickerRow()?.group.whiteOnly ?? null,
+    onColour: (hex, last) => {
       if (last) out.end(hex); else out.push(hex);
     },
-    () => {
+    onStart: () => {
       out.start();
       keep = pickerLive || extrasMoved;
       target = stageTarget();
-    });
+    },
+  });
 })();
 
 // ---- The colour editor: a listed colour (Edit this colour) or a new one (＋ New colour), in the whole right column ----
@@ -2552,32 +2857,14 @@ function presetExtras(p) {
   return { white: raw(p.light?.white), amber: raw(p.light?.amber), uv: raw(p.light?.uv) };
 }
 
-/** A listed colour's own #rrggbb (its light is scaled by its brightness; this undoes that). */
+/** A listed colour's own #rrggbb, before its brightness (from an older server: its light, scaled back up). */
 function presetHex(p) {
+  if (p.colour) return p.colour;
   const hex = p.light?.hex;
   if (!hex) return '#000000';
   const k = p.level && p.level > 0 ? p.level : 1;
   const n = parseInt(hex.slice(1), 16);
   return `#${[16, 8, 0].map((sh) => Math.min(255, Math.round(((n >> sh) & 255) / k)).toString(16).padStart(2, '0')).join('')}`;
-}
-
-/** Where on the strip a colour sits (0..1), or null when it isn't one of the strip's colours (a white on the colour strip, say). */
-function stripPlace(hex, whiteOnly) {
-  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return null;
-  const n = parseInt(hex.slice(1), 16);
-  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  const max = Math.max(...rgb);
-  if (max === 0) return null;
-  // The colour at full brightness (a dimmed colour's light is scaled down).
-  const full = rgb.map((v) => (v * 255) / max);
-  let best = null, bestD = Infinity;
-  for (let i = 0; i <= 240; i++) {
-    const c = stripColour(whiteOnly ? WHITE_STOPS : HUE_STOPS, i / 240);
-    const m = parseInt(c.slice(1), 16);
-    const d = Math.hypot(full[0] - ((m >> 16) & 255), full[1] - ((m >> 8) & 255), full[2] - (m & 255));
-    if (d < bestD) [best, bestD] = [i / 240, d];
-  }
-  return bestD <= 40 ? best : null;
 }
 
 /** "Song 2, Song 3 · quick looks: Worship, Prayer": the songs (and any other look) first, then the quick looks. */
@@ -2613,7 +2900,9 @@ function openColourEditor(preset) {
   // A listed plain colour's White, Amber and UV can change too; a new colour starts without them.
   const recolour = !preset || preset.canRecolour !== false;
   const startExtras = preset && recolour ? presetExtras(preset) : { ...NO_EXTRAS };
-  colourEdit = { group: group.id, id: preset?.id ?? null, name: preset?.name ?? '', hex: null, level, startLevel: level, fade, startFade: fade, all: false, startExtras };
+  // The colour as it is: its own hex (before its brightness), so Exact values show exactly what was typed or picked.
+  const startHex = preset && recolour ? presetHex(preset) : null;
+  colourEdit = { group: group.id, id: preset?.id ?? null, name: preset?.name ?? '', hex: null, startHex, level, startLevel: level, fade, startFade: fade, all: false, startExtras };
   pendingEdit = null;
   disarmDelete();
   $('ceName').value = colourEdit.name;
@@ -2621,10 +2910,9 @@ function openColourEditor(preset) {
   $('ceBack').setAttribute('aria-label', `Back to ${group.name}'s colours`);
   $('ceStrip').className = `strip2 ce-strip ${group.whiteOnly ? 'cct' : 'hue'}`;
   $('ceStrip').setAttribute('aria-label', group.whiteOnly ? 'Pick the colour: warm to cool' : 'Pick the colour');
-  // The colour's place on the strip, when it is one of its colours; a new colour has none until one is picked.
-  const place = preset?.light && !noLight(preset.light) ? stripPlace(preset.light.hex, group.whiteOnly) : null;
-  $('ceH').hidden = place === null;
-  if (place !== null) $('ceH').style.left = `calc(${place * 100}% - ${place * 4}px)`;
+  // The colour's place on the strip (the nearest to its hue), its saturation and exact values; a new colour has none until one is picked.
+  ceColour.set(startHex, true);
+  ceColour.fold(false);
   buildEditExtras(recolour ? group : null, startExtras);
   if (level !== null) showEditLevel(level);
   $('ceDelRow').hidden = !preset;
@@ -2679,7 +2967,7 @@ function renderEditor() {
 
   // The swatch: what Save would keep (nothing while there is no light in it).
   const recolour = isNew || p.canRecolour !== false;
-  const colourChanged = !isNew && recolour && (!!colourEdit.hex || extrasChanged());
+  const colourChanged = !isNew && recolour && (hexChanged() || extrasChanged());
   let look = null;
   if (isNew || colourChanged) look = editReady() ? mixedColour(editHex(), editLevels()) : null;
   else look = p.swatch ?? null;
@@ -2690,7 +2978,10 @@ function renderEditor() {
   ceLevel.dim.style.setProperty('--c', off ? '#6a7898' : shown(look) ?? look);
 
   // Colour: not for Off or a colour of several layers (they can be renamed only). No colour: White, Amber or UV alone.
+  // Saturation: not on the warm-to-cool strip. Exact values: the colour as hex and R, G, B.
   $('ceColourRow').hidden = !recolour;
+  $('ceSatRow').hidden = !recolour || group.whiteOnly;
+  $('ceExactRow').hidden = !recolour;
   $('ceNoColour').hidden = !recolour || !editExtraRows.length;
   const none = /^#0{6}$/i.test(editHex());
   $('ceNoColour').classList.toggle('on', none);
@@ -2767,7 +3058,7 @@ $('ceName').addEventListener('input', disarmDelete);
 $('ceNoColour').addEventListener('click', () => {
   if (!colourEdit) return;
   colourEdit.hex = colourEdit.id ? '#000000' : null;
-  $('ceH').hidden = true;
+  ceColour.set(colourEdit.hex);
   disarmDelete();
   renderEditor();
 });
@@ -2798,13 +3089,21 @@ $('ceNoColour').addEventListener('click', () => {
   dim.addEventListener('pointercancel', end);
 }
 
-// The strip only changes the editor: the stage changes when an edited colour that is lit is saved, never while picking.
-attachStrip($('ceStrip'), $('ceH'), () => editGroup()?.whiteOnly ?? null, (hex) => {
-  if (!colourEdit) return;
-  colourEdit.hex = hex;
-  disarmDelete();
-  renderEditor();
+// The strip, Saturation and Exact values only change the editor: the stage changes when an edited colour that is lit
+// is saved, never while picking.
+const ceColour = colourTools({
+  strip: $('ceStrip'), handle: $('ceH'), sat: $('ceSat'), fold: $('ceFold'), exact: $('ceExact'), row: true,
+  whiteOnly: () => editGroup()?.whiteOnly ?? null,
+  onColour: (hex) => {
+    if (!colourEdit) return;
+    colourEdit.hex = hex;
+    disarmDelete();
+    renderEditor();
+  },
 });
+
+/** The colour (#rrggbb) was changed from what the listed colour has (picking it again, or typing it, is no change). */
+const hexChanged = () => !!colourEdit?.hex && colourEdit.hex !== colourEdit.startHex;
 
 const editLevel = () => Math.min(1, Math.max(MIN_LEVEL, Math.round(colourEdit.level * 100) / 100));
 
@@ -2832,7 +3131,7 @@ $('ceSave').addEventListener('click', () => {
   const all = colourEdit.all && !$('ceApplyRow').hidden;
   const cmd = { type: 'editColour', preset: colourEdit.id, sameName: all };
   if (name.trim() !== colourEdit.name) cmd.name = name;
-  if (colourEdit.hex && !$('ceColourRow').hidden) cmd.colour = colourEdit.hex;
+  if (hexChanged() && !$('ceColourRow').hidden) cmd.colour = colourEdit.hex;
   if (extrasChanged()) {
     const now = editLevels();
     for (const k of ['white', 'amber', 'uv']) if (Math.abs(now[k] - colourEdit.startExtras[k]) >= 0.005) cmd[k] = now[k];
@@ -3059,7 +3358,8 @@ function drawEffectEditor() {
     list.append(b);
   }
   // Full only once a pick has ended: the strip must stay under the finger while it picks the sixth colour.
-  list.append(ownChip('feOwn', 'Pick an own colour for the effect', !one && effect.colours.length >= 6 && ownPick.place === null));
+  // Full only when the open box's own colour isn't one of the six: it must stay open while it changes the sixth.
+  list.append(ownChip('feOwn', 'Pick an own colour for the effect', !one && effect.colours.length >= 6 && ownPlace() < 0));
 
   // Base: None, a colour of the list or an own colour, at its brightness.
   const baseKey = effect.base ? colourKey(effect.base.colour) : null;
@@ -3086,7 +3386,7 @@ function drawEffectEditor() {
     drawEffectEditor();
   });
   const baseOpen = feTray === 'base';
-  const ownOpen = baseOpen && !$('feBaseOwn').hidden;
+  const ownOpen = baseOpen && !$('feBaseOwnBox').hidden;
   segButton(listedBase?.name ?? 'Colour', !!listedBase, baseOpen && !ownOpen, () => showTray(baseOpen && !ownOpen ? null : 'base'));
   segButton('Own colour', ownBase, ownOpen, () => {
     if (ownOpen) return showTray(null);
@@ -3332,10 +3632,10 @@ function orderChip(c, n) {
   return b;
 }
 
-/** ＋ Own colour: opens (or closes) the colour strip under its row; `full` when there is no room for another colour. */
+/** ＋ Own colour: opens (or closes) its own colour box under its row; `full` when there is no room for another colour. */
 function ownChip(stripId, label, full = false) {
-  if (full) $(stripId).hidden = true;
-  const open = !$(stripId).hidden;
+  if (full && ownPick.strip === stripId) closeOwnStrips();
+  const open = !$(`${stripId}Box`).hidden;
   const b = el('button', 'fecol add', '＋ Own colour');
   b.type = 'button';
   b.disabled = full;
@@ -3353,15 +3653,20 @@ function ownChip(stripId, label, full = false) {
 /** Which colours the own colour strips hold: hues, or warm to cool for a white-only group. */
 const ownWhiteOnly = () => (pickerRow() ? pickerRow().group.whiteOnly : null);
 
+/** Opens an own colour box with nothing picked yet (the first change adds the colour), Exact values folded. */
 function openOwnStrip(id) {
-  const strip = $(id);
-  strip.className = `strip2 ${ownWhiteOnly() ? 'cct' : 'hue'} fe-own`;
-  strip.hidden = false;
-  $(`${id}H`).hidden = true;
+  closeOwnStrips();
+  $(id).className = `strip2 ${ownWhiteOnly() ? 'cct' : 'hue'} fe-own`;
+  Object.assign(ownPick, { strip: id, key: null, made: null });
+  ownTools[id].set(null, true);
+  ownTools[id].fold(false);
+  $(`${id}Box`).hidden = false;
 }
 
+/** Closes the own colour boxes; the colour a box made stays in the effect. */
 function closeOwnStrips() {
-  for (const id of ['feOwn', 'feBaseOwn']) $(id).hidden = true;
+  Object.assign(ownPick, { strip: null, key: null, made: null });
+  for (const id of ['feOwn', 'feBaseOwn']) $(`${id}Box`).hidden = true;
 }
 
 function setEffectEdit(next) {
@@ -3437,60 +3742,75 @@ function setEffectBase(colour) {
 }
 
 /**
- * The own colour strips. A touch adds an own colour at once (to the effect's colours, or as its
- * base); it follows the finger, and the strip closes when the finger lifts. Own colours join the
- * effect only, never the group's list.
+ * The own colour boxes (＋ Own colour, for the colours or the base): a strip, Saturation and Exact values. The first
+ * change adds an own colour (to the effect's colours, or as its base) and every change after it, while the box is
+ * open, changes that same colour; ＋ Own colour again (or another list) closes the box. Own colours join the effect
+ * only, never the group's list.
+ *
+ * The own colour pick in the open box: its strip's id (null: no box open), the key of the colour it gave the effect
+ * (null until the first change) and the choice it added to the list (null when the colour was in the list already).
  */
+const ownPick = { strip: null, key: null, made: null };
+
+/** The place in the effect's colours of the own colour the open box made, or -1. */
+function ownPlace() {
+  if (ownPick.strip !== 'feOwn' || !ownPick.key || !effectEdit) return -1;
+  return effectEdit.effect.colours.findIndex((c) => colourKey(c) === ownPick.key);
+}
+
 /**
- * The own colour pick under way: where the colour goes (its place in the colours, the end or the
- * only one; or the base), null when none; and the own colour it added, replaced as the finger moves.
+ * Puts `hex` in the effect as the open box's own colour: its place in the colours (a new one at the end, the only one
+ * for a yo-yo or meteor) or the base. False when it can't go there (no room, or the effect has it elsewhere already).
  */
-const ownPick = { place: null, made: null };
-{
-  const own = (stripId, put) => attachStrip($(stripId), $(`${stripId}H`), ownWhiteOnly, (hex, last) => {
-    const { place } = ownPick;
-    if (!effectEdit || place === null) return;
-    const { choices, effect } = effectEdit;
-    // A colour the effect already has elsewhere in its list is passed over: the list never holds one twice.
-    const key = colourKey({ hex });
-    const taken = stripId === 'feOwn' && effect.colours.some((c, i) => i !== place && colourKey(c) === key);
-    if (!taken) {
-      const { made } = ownPick;
-      if (made && choices.includes(made)) choices.splice(choices.indexOf(made), 1);
-      const count = choices.length;
-      const choice = addOwnChoice(choices, { hex });
-      ownPick.made = choices.length > count ? choice : null;
-      put(choice.colour, place);
-      disarmDelete();
+function putOwnColour(stripId, hex, last) {
+  const { choices, effect } = effectEdit;
+  const key = colourKey({ hex });
+  const colour = plainColour({ hex });
+  let next;
+  if (stripId === 'feOwn') {
+    const one = ONE_COLOUR.has(effect.effect);
+    let at = one ? 0 : ownPlace();
+    if (at < 0) at = effect.colours.length;
+    if (at >= 6) {
+      if (last) toast('An effect has at most six colours', true);
+      return false;
     }
-    if (last) {
-      if (taken && place >= effect.colours.length) toast('That colour is in the effect already', true);
-      ownPick.place = null;
-      closeOwnStrips();
-      // A base, or the one colour of a yo-yo or meteor, is picked: its list closes too.
-      if (stripId === 'feBaseOwn' || ONE_COLOUR.has(effectEdit.effect.effect)) feTray = null;
+    // The list never holds a colour twice: one the effect already has elsewhere is passed over.
+    if (effect.colours.some((c, i) => i !== at && colourKey(c) === key)) {
+      if (last) toast('That colour is in the effect already', true);
+      return false;
     }
-    if (!taken || last) {
+    const colours = [...effect.colours];
+    colours[at] = colour;
+    next = { ...effect, colours };
+  } else {
+    next = { ...effect, base: { colour, level: effect.base?.level ?? 0.5 } };
+  }
+  // The choice this box added before goes when nothing uses it any more, so the list doesn't fill with every step.
+  const { made } = ownPick;
+  const uses = (k) => next.colours.some((c) => colourKey(c) === k) || (!!next.base && colourKey(next.base.colour) === k);
+  if (made && made.key !== key && choices.includes(made) && !uses(made.key)) choices.splice(choices.indexOf(made), 1);
+  const count = choices.length;
+  const choice = addOwnChoice(choices, colour);
+  if (choices.length > count) ownPick.made = choice;
+  else if (made?.key !== key) ownPick.made = null;
+  effectEdit.effect = next;
+  ownPick.key = key;
+  disarmDelete();
+  return true;
+}
+
+const ownTools = {};
+for (const stripId of ['feOwn', 'feBaseOwn']) {
+  ownTools[stripId] = colourTools({
+    strip: $(stripId), handle: $(`${stripId}H`), sat: $(`${stripId}Sat`), fold: $(`${stripId}Fold`), exact: $(`${stripId}Exact`),
+    whiteOnly: ownWhiteOnly,
+    onColour: (hex, last) => {
+      if (!effectEdit || ownPick.strip !== stripId) return;
+      if (!putOwnColour(stripId, hex, last) && !last) return;
       drawEffectEditor();
       effectStripDrag(last ? 'end' : 'move');
-    }
-  }, () => {
-    ownPick.place = null;
-    ownPick.made = null;
-    if (!effectEdit) return;
-    const { effect } = effectEdit;
-    const at = ONE_COLOUR.has(effect.effect) ? 0 : effect.colours.length;
-    // ＋ Own colour is unavailable then; this only guards a strip left open.
-    if (stripId === 'feOwn' && at >= 6) return;
-    ownPick.place = at;
-  });
-  own('feOwn', (colour, at) => {
-    const colours = [...effectEdit.effect.colours];
-    colours[at] = { ...colour };
-    effectEdit.effect = { ...effectEdit.effect, colours };
-  });
-  own('feBaseOwn', (colour) => {
-    effectEdit.effect = { ...effectEdit.effect, base: { colour: { ...colour }, level: effectEdit.effect.base?.level ?? 0.5 } };
+    },
   });
 }
 

@@ -456,6 +456,36 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 #pExtras .xcell { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
 #pExtras .lab2, #pExtras .pct, #pExtras .pct.zero { margin: 0; padding: 0; font-size: 12px; color: var(--ds-muted); }
 #pExtras .ds-fill { flex: 1 0 100%; height: 44px; }
+/* Saturation and Exact values under a colour strip (Any colour, the colour editor, own colours in the effect editor).
+   Saturation: "Saturation 100 %" over a 44 px fill slider carrying the strip's colour, with Exact values › at the
+   right of its line (quiet: the edge, muted text); open, a hex field and R, G, B fields (44 px) and a quiet note. */
+.cx-line { display: flex; align-items: flex-end; gap: 10px; min-width: 0; }
+.cx-sat { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.cx-sat[hidden] { display: none; }
+.cx-sat .lab2, .cx-sat .pct, .cx-sat .pct.zero { margin: 0; padding: 0; font-size: 12px; color: var(--ds-muted); }
+.cx-sat .ds-fill { flex: 1 0 100%; height: 44px; }
+.cx-foldwrap { flex: none; display: flex; margin-left: auto; }
+.cx-fold {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px;
+  border: 1px solid var(--ds-edge); border-radius: 10px; background: transparent; color: var(--ds-muted); font-size: 13px; white-space: nowrap;
+}
+.cx-fold:active { background: var(--ds-elevated); }
+.cx-fold.open { color: var(--ds-muted-on); }
+.cx-arrow { display: inline-block; transition: transform 0.15s; }
+.cx-fold.open .cx-arrow { transform: rotate(90deg); }
+.cx-exact { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cx-exact[hidden] { display: none; }
+.cx-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.cx-cell { display: inline-flex; align-items: center; gap: 6px; }
+.cx-lab { color: var(--ds-muted); font-size: 12px; }
+.cx-cell .ds-field {
+  box-sizing: border-box; height: 44px; min-height: 44px; padding: 0 10px; font-size: 15px; font-variant-numeric: tabular-nums;
+  user-select: text; -webkit-user-select: text;
+}
+.cx-hex { width: 108px; }
+.cx-num { width: 62px; text-align: center; }
+.cx-note { margin: 0; color: var(--ds-muted); font-size: 12px; }
+.cx-note[hidden] { display: none; }
 /* ---- Colour editor: the whole right column (Quick looks and Groups give way; the effect editor too), as the mockup's colour editor ---- */
 .right.ce-open { grid-template-rows: minmax(0, 1fr); }
 .right.ce-open > #quickLooks, .right.ce-open > #details { display: none; }
@@ -510,6 +540,9 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .ce-level { display: grid; grid-template-columns: minmax(0, 1fr) 58px; align-items: center; gap: 12px; }
 .ce-range { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ds-muted); font-size: 12px; pointer-events: none; }
 .ce-level .pct { font-size: 14px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+/* Exact values › in the editor: the button, then its fields under it. */
+.ce-exact { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.ce-exact .cx-foldwrap { margin-left: 0; }
 /* Fade into it and Apply to: the segmented style of the picker's tabs, 44 px. */
 .ce-seg { justify-self: start; flex-wrap: wrap; border-radius: 12px; }
 .ce-seg > button { min-height: 44px; padding: 0 12px; font-size: 13px; white-space: nowrap; }
@@ -586,6 +619,9 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .fe-own::before { border-radius: 12px; }
 .fe-own .strip-handle { top: -3px; bottom: -3px; width: 3px; background: #E3E8F0; box-shadow: none; }
 .fe-own[hidden] { display: none; }
+/* ＋ Own colour's box: the strip, Saturation and Exact values; it stays open until ＋ Own colour is tapped again. */
+.fe-ownbox { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.fe-ownbox[hidden] { display: none; }
 /* Base: None | a colour | Own colour, and its brightness (the fill carries the base colour). */
 .fe-base { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .fe-base .ce-seg { flex: none; flex-wrap: nowrap; }
@@ -911,6 +947,8 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   #manualBtn, #manual { display: none !important; }
   /* Effects can be picked here, but their settings stay on the iPad; so does holding a tile to edit it. */
   #fxCard, .hold-hint { display: none !important; }
+  /* Any colour keeps Saturation on the phone; typing exact values stays on the iPad, as the editors do. */
+  .cx-foldwrap, .cx-exact { display: none !important; }
 
   /* Order: the list on its own (the tab names it), big rows. */
   .order { padding: 8px; gap: 4px; }
