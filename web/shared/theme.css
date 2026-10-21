@@ -22,6 +22,8 @@
   --ds-accent-fill: #3A6FB8;
   --ds-accent: #4389E8;
   --ds-edge-on: rgba(67, 137, 232, 0.5);
+  /* A held or pressed blue control's edge (Flash, Puff, Go). */
+  --ds-edge-held: rgba(67, 137, 232, 0.7);
   /* Text. */
   --ds-text: #E3E8F0;
   --ds-muted: #97A4BA;
@@ -63,8 +65,9 @@
   --ds-tile-fill-on: rgba(67, 137, 232, 0.16);
   --ds-fill-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 50%, rgba(0, 0, 0, 0.04) 100%);
   --ds-slab-fill: linear-gradient(90deg, rgba(148, 163, 184, 0.18), rgba(148, 163, 184, 0.18));
-  /* Popovers, menus and sheets over other content. */
+  /* Popovers, menus and sheets over other content; --ds-popover is the solid one (the problem explanation). */
   --ds-glass: rgba(20, 28, 46, 0.94);
+  --ds-popover: #141C2E;
 
   /* Type: size and weight carry the hierarchy; panel titles semibold, the rest regular. */
   --ds-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;

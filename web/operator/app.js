@@ -872,7 +872,7 @@ function problemWords(s) {
     return {
       pill: 'Not sending to the lights',
       title: 'The lights aren\'t getting any commands',
-      text: `Light Runner is working, but Send DMX is switched off in Settings (another desk, such as Lightkey, may have the lights), so the stage won't follow your taps. ${notYou}`,
+      text: `Light Runner is working, but its output to the lights is switched off, so the stage won't follow your taps. Usually another desk, such as Lightkey, has the lights for now. ${notYou}`,
     };
   }
   if (s.output !== 'lost') return null;
@@ -1232,7 +1232,7 @@ function buildDetails() {
       chevron.setAttribute('height', '14');
       chevron.setAttribute('viewBox', '0 0 24 24');
       chevron.setAttribute('aria-hidden', 'true');
-      chevron.innerHTML = '<path d="M9 6l6 6-6 6" fill="none" stroke="#97A4BA" stroke-width="2"/>';
+      chevron.innerHTML = '<path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2"/>';
       chip.append(sw, chipName, chevron);
       chip.addEventListener('click', () => openPicker(group.id));
       Object.assign(row, { chip, sw, chipName });
@@ -3554,6 +3554,8 @@ function wireHold(b, groups) {
 
 function buildFlash() {
   flashAllOff();
+  // A rebuild can change how many buttons there are: fit the bar again once they are in.
+  queueMicrotask(fitBottomBar);
   const root = $('flashArea');
   root.replaceChildren(el('span', 'flash-label ds-caps', 'Flash'));
   // Smoke machines have Puff in the details instead, and "All" never includes them.
@@ -3730,6 +3732,27 @@ keepAwake();
 // the bottom bar to the top of Groups. See docs/superpowers/specs/2026-10-19-phone-remote-design.md.
 
 const phoneQuery = window.matchMedia('(max-width: 700px), (max-height: 500px)');
+const midQuery = window.matchMedia('(min-width: 701px) and (max-width: 1079px) and (min-height: 501px)');
+
+/**
+ * The bottom bar on two lines (Flash above Master and the buttons): always between a phone and the iPad in
+ * landscape, and on the iPad when the Flash buttons don't fit on the bar's one line (many light groups, a wider
+ * font). Never on the phone, where Flash sits in Groups.
+ */
+function fitBottomBar() {
+  const body = document.body;
+  if (phoneQuery.matches || midQuery.matches) {
+    body.classList.toggle('bar-two-rows', !phoneQuery.matches);
+    return;
+  }
+  // Measure on one line (no paint happens in between).
+  body.classList.remove('bar-two-rows');
+  const area = $('flashArea');
+  if (area.scrollWidth > area.clientWidth + 1) body.classList.add('bar-two-rows');
+}
+window.addEventListener('resize', fitBottomBar);
+midQuery.addEventListener('change', fitBottomBar);
+document.fonts?.ready.then(fitBottomBar);
 
 function setPhoneTab(tab) {
   document.body.dataset.tab = tab;
@@ -3762,6 +3785,7 @@ function applyPhone() {
     if (tempo.parentElement !== $('quiet')) $('fadeButton').parentElement.after(tempo);
   }
   showTempoMenu(false);
+  fitBottomBar();
   if (!document.body.dataset.tab) setPhoneTab('order');
 }
 

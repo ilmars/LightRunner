@@ -22,11 +22,12 @@ How the direction was agreed with Ilmārs (19 Oct 2026):
 | `--ds-tile-fill` | `rgba(255,255,255,.035)` | Tiles and buttons at rest |
 | `--ds-elevated` | `rgba(148,163,184,.10)` | Pressed |
 | `--ds-tile-fill-on` + `--ds-edge-on` | blue `rgba(67,137,232,.16)`, edge `.5` | **Blue = selected / on stage**: the item on stage, tabs, Live, Go |
-| `--ds-selected` | `rgba(67,137,232,.22)` | Held (Flash, Puff) |
+| `--ds-selected` + `--ds-edge-held` | `rgba(67,137,232,.22)`, edge `.7` | Held (Flash, Puff); Go's edge |
 | `--ds-warn`, `--ds-warn-text`, `-tint`, `-edge` | `#E3A646`, tint `.13`, edge `.38` | **Amber = changed, Master below full, problems** |
 | `--ds-danger` (`227,106,111`) + `-text` `#EC8286`, `-fill` `.12`, `-edge` `.35` | red glass | **Red = Blackout, delete**, error toast |
 | `--ds-violet`, `-tint`, `-edge` | `#B0A6F5`, `rgba(161,147,242,.13)`, `rgba(171,160,244,.5)` | **Violet = Prepare**, nothing else |
 | `--ds-glass` | `rgba(20,28,46,.94)` + 16 px blur | Surfaces that overlap others: picker, quick-look sheet, Fade and Tempo menus, toast |
+| `--ds-popover` | `#141C2E` | The problem explanation (solid) |
 | `--ds-accent` | `#4389E8` | Thin lines only: focus edge, Save while held |
 | `--ds-accent-fill` | `#3A6FB8` | Save's hold fill, at 35 % |
 | `--ds-text` / `--ds-muted` / `--ds-muted-on` | `#E3E8F0` / `#97A4BA` / `#B7C1D1` | Text, labels, labels on tinted areas |
@@ -92,7 +93,7 @@ The designer's mockup (`Main.dc.html`, kept with the restyle plan) is the refere
 - **Fade and Tempo** (top bar): buttons with a 10 px label over the value ("Fade" over "Auto", "Tempo" over "120 bpm"), each opening a small glass menu (Tempo's: ×2, ÷2, − and +, in a row). **Tap** beside them lights with the blue tint for a moment on each tap. On the phone they share a row at the top of Groups.
 - **Quick looks:** six to a row, 56 px tiles with the name and a strip of 3 px blocks, one per group (faint for a group it leaves alone, grey for one it turns off); two rows show, more scroll.
 - **Running order tags** (12 px, at the right of the row): "● changed" in amber on the item on stage; "next" on the item Next starts; a quiet "safe look" on Basic lights, with a divider under it. In Prepare: "preparing" and "on stage".
-- **Bottom bar:** Master (190 px: "MASTER" and the value over a 32 px track), a divider, "FLASH" with All and a short name per group (the first word of its name), then Undo (icon and word), **Safe · Basic lights** (a faint warm edge), Next ▸ over the next item's name, and Blackout (hold 1 s). 52 px high.
+- **Bottom bar:** Master (180 px: "MASTER" and the value over a 32 px track), a divider, "FLASH" with All and a short name per group (the first word of its name), then Undo (icon and word), **Safe · Basic lights** (a faint warm edge), Next ▸ over the next item's name, and Blackout (hold 1 s). 52 px high, 8 px apart. When Flash doesn't fit on the line (`bar-two-rows`, also always on an upright iPad), Flash gets its own line above the rest.
 - **Operational states**, each different:
   - On stage: blue tint and edge (running order); "On stage" over the name in the top bar, "● changed" in amber.
   - Flash held: blue tint and edge; the top bar notes "Flash: …".

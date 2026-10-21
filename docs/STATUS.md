@@ -23,7 +23,7 @@ Last updated: 20 Oct 2026. Update this file whenever a feature lands or a priori
 | Devices | Stream Deck through Companion's Generic HTTP connection, OSC input and the Akai APC mini, all through the same commands as the iPad (design: [devices](superpowers/specs/2026-10-20-devices-design.md); guide: [companion.md](companion.md)). **Companion:** the HTTP routes above and `GET /api/companion`, a flat status to poll. **OSC:** addresses under `/lightrunner`, off until switched on in Settings (port 8000, input only). **APC mini:** faders are group levels and Master (with pickup, so a light never jumps), pads are the running order and each group's colours, buttons are Flash, Next, Back to, Undo, Basic lights and Blackout (1 s hold); mk2 pads show real colours, the older model green and yellow; the MIDI add-on (`@julusian/midi`) is optional and Settings shows whether the APC is connected. **Not yet tried on the real hardware.** | 4 (Companion, OSC, MIDI) |
 | Tools | Lightkey importer, jump check (no fixture steps >5% per frame over hours of random changes), timing probe | — |
 
-Tests: 479 (`npm test`): 478 pass, 1 is skipped (the Lightkey project test, needs `LIGHTKEY_PROJECT`).
+Tests: 480 (`npm test`): 479 pass, 1 is skipped (the Lightkey project test, needs `LIGHTKEY_PROJECT`).
 
 ## Not built yet (in rough priority order)
 
@@ -45,7 +45,7 @@ Tests: 479 (`npm test`): 478 pass, 1 is skipped (the Lightkey project test, need
 - Prepare: Live (or running-order Edit) throws the draft away at once, without asking.
 - Prepare: the draft's picture can run a frame or two apart from the real stage's.
 - Prepare and the restyle haven't met the real iPad yet: the new colours, the violet top bar, the Live / Prepare switch and Go ▸ need a look in the dark room.
-- The restyled bottom bar fits 1080 px with six Flash buttons; a show with more light groups makes Flash wider than the room it has (the buttons don't shrink below 50 px).
+- The restyled bottom bar fits 1080 px with up to six Flash buttons (All and five light groups) in the system font. With more groups, or a wider font, the bar takes two lines by itself (Flash above Master and the buttons) and the stage area gets about 66 px less height; checked with eight light groups. The Inter font (the restyle's last step) needs this checked again.
 - Not yet tried on a real phone: the phone remote was checked in a browser at phone sizes only.
 - Not yet tried on the real iPad: finger drag in the running order, the on-screen keyboard over the quick-look sheet, two fingers on Flash, pointer capture on iOS Safari, the White, Amber and UV slider tints in the dark room.
 - The stage view doesn't know what each fixture can do: amber shows orange on the colour-temperature front lights, which only go warmer. (UV is already left out where there is no UV.)
