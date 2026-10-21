@@ -200,6 +200,22 @@ test("a draft shows the stage's held lights (manual control stays live)", () => 
   assert.deepEqual(t.draft().fixturesManual, ['back-1']);
 }));
 
+test('a list of manual targets from a tablet is one command: one reply, and refused whole when one is bad', () => withApp(async (app) => {
+  const show = (await api(app, 'GET', '/api/show')).body;
+  show.operator.manualForOperators = true;
+  assert.equal((await api(app, 'PUT', '/api/show', show)).status, 200);
+  const t = await onWorship(app);
+  const before = t.seen.filter((m) => m.type === 'result').length;
+  assert.match(await t.send({ type: 'manual', targets: [{ fixture: 'back-1' }, { fixture: 'nope' }], colour: '#ff0000', intensity: 1 }) ?? '', /nope/);
+  assert.match(await t.send({ type: 'manual', targets: [{ fixture: 'back-1', segment: '2' }], intensity: 1 }) ?? '', /^invalid command/);
+  assert.equal(await t.send({ type: 'manual', targets: [{ fixture: 'back-1' }, { fixture: 'back-2', segment: 0 }], colour: '#ff0000', intensity: 1 }), null);
+  assert.equal(t.seen.filter((m) => m.type === 'result').length - before, 3, 'one reply each');
+  await waitFor(() => t.state()?.held?.length === 2, 2000, 'both held');
+  assert.deepEqual(t.state().held.map((h: any) => h.fixture), ['back-1', 'back-2']);
+  assert.equal(await t.send({ type: 'release', targets: [{ fixture: 'back-1' }, { fixture: 'back-2', segment: 0 }] }), null);
+  await waitFor(() => t.state()?.held?.length === 0, 2000, 'both let go');
+}));
+
 test('Save, Add song and Save as quick look in Blind store the draft, not the stage', () => withApp(async (app, dir) => {
   const t = await tablet(app);
   await waitFor(t.layout);

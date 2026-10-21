@@ -95,6 +95,12 @@ function manualTarget(): ManualTarget {
   return { fixture: ids[f]!, segment: Math.floor(rand() * engine.segmentCounts()[f]!) };
 }
 
+/** One target, or (a third of the time) a list of a few changed together, as Individual lights sends them. */
+function manualTargets(): { target: ManualTarget } | { targets: ManualTarget[]; releaseSegments: boolean } {
+  if (rand() < 0.67) return { target: manualTarget() };
+  return { targets: Array.from({ length: 1 + Math.floor(rand() * 4) }, manualTarget), releaseSegments: rand() < 0.5 };
+}
+
 function randomCommand(): { cmd: StageCommand; fast: boolean } {
   // Tempo and the speed dial change how fast effects run; neither may make one jump.
   if (rand() < 0.05) {
@@ -141,8 +147,8 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
     if (rand() < 0.33) return { cmd: { ...cmd, fade: 0.2, continues: true }, fast: true };
     return { cmd, fast: false };
   }
-  if (r < 0.68) return { cmd: { type: 'manual', target: manualTarget(), colour: hex(), intensity: rand() }, fast: true };
-  if (r < 0.76) return { cmd: { type: 'release', target: manualTarget() }, fast: false };
+  if (r < 0.68) return { cmd: { type: 'manual', ...manualTargets(), colour: hex(), intensity: rand() }, fast: true };
+  if (r < 0.76) return { cmd: { type: 'release', ...manualTargets() }, fast: false };
   if (r < 0.8) return { cmd: { type: 'releaseAll' }, fast: false };
   if (r < 0.85) return { cmd: { type: 'backToLook' }, fast: false };
   if (r < 0.9) return { cmd: { type: 'safe' }, fast: false };

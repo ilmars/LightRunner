@@ -40,14 +40,27 @@ export type StageState = z.infer<typeof StageState>;
 
 /**
  * What manual control holds: a group, a fixture, or one segment of a fixture (in its channel order, as the
- * visualiser's frames have them; 0 is the first). The segment form comes first, so a plain fixture never loses it.
+ * visualiser's frames have them; 0 is the first). Strict: a target with anything else in it (a segment that
+ * isn't a whole number from 0 to 511, a misspelt key) is refused, never taken for the whole fixture.
  */
 export const ManualTarget = z.union([
-  z.object({ group: id }),
-  z.object({ fixture: id, segment: z.number().int().min(0).max(511) }),
-  z.object({ fixture: id }),
+  z.strictObject({ group: id }),
+  z.strictObject({ fixture: id, segment: z.number().int().min(0).max(511) }),
+  z.strictObject({ fixture: id }),
 ]);
 export type ManualTarget = z.infer<typeof ManualTarget>;
+
+/** At most this many targets in one manual or release command (every segment of a large rig). */
+export const MANUAL_TARGETS_MAX = 512;
+const manualTargets = {
+  target: ManualTarget.optional(),
+  /** Several targets, changed together in one frame: the whole command is refused if any of them can't be. */
+  targets: z.array(ManualTarget).min(1).max(MANUAL_TARGETS_MAX).optional(),
+  /** For each whole-fixture target: also let go of the fixture's held segments, in the same change. */
+  releaseSegments: z.boolean().optional(),
+};
+const oneOrMany = (c: { target?: unknown; targets?: unknown }) => (c.target === undefined) !== (c.targets === undefined);
+const ONE_OR_MANY = { message: 'give a target or a list of targets', path: ['targets'] };
 
 /** Commands the engine runs (a Blind draft runs them too). */
 const STAGE_COMMANDS = [
@@ -71,12 +84,18 @@ const STAGE_COMMANDS = [
   z.object({ type: z.literal('groupEffect'), group: id, effect: LiveEffectLayer, fade, continues: z.boolean().optional() }),
   /** Hold the groups at full white while `on`; snaps, and is not saved or undone. */
   z.object({ type: z.literal('flash'), groups: z.array(id).max(64), on: z.boolean() }),
-  /** Hold a group, fixture or segment at this colour (with White, Amber and UV when given) and/or intensity until released. */
+  /**
+   * Hold groups, fixtures or segments at this colour (with White, Amber and UV, which only go with a colour)
+   * and/or intensity until released.
+   */
   z.object({
-    type: z.literal('manual'), target: ManualTarget, colour: hex.optional(), intensity: unit.optional(),
+    type: z.literal('manual'), ...manualTargets, colour: hex.optional(), intensity: unit.optional(),
     white: unit.optional(), amber: unit.optional(), uv: unit.optional(),
-  }),
-  z.object({ type: z.literal('release'), target: ManualTarget }),
+  })
+    .refine(oneOrMany, ONE_OR_MANY)
+    .refine((c) => c.colour !== undefined || (c.white === undefined && c.amber === undefined && c.uv === undefined),
+      { message: 'White, Amber and UV go with a colour', path: ['colour'] }),
+  z.object({ type: z.literal('release'), ...manualTargets }).refine(oneOrMany, ONE_OR_MANY),
   z.object({ type: z.literal('releaseAll') }),
   z.object({ type: z.literal('backToLook') }),
   z.object({ type: z.literal('safe') }),
@@ -197,6 +216,8 @@ export interface GroupStatus {
   changed: boolean;
   /** Under manual control. */
   manual: boolean;
+  /** While under manual control: the colour it is held at (as HeldLight's) and its level 0..1; null otherwise. */
+  hold: { colour: string; level: number } | null;
   /** Fade progress 0..1, 1 when settled. */
   progress: number;
   level: number;

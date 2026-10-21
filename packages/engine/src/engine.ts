@@ -116,6 +116,14 @@ interface ManualHolder {
   manual: ManualRun | null;
 }
 
+/** One target of a manual command, found: what holds it, what it shows now, and its group or whole fixture. */
+interface ManualTake {
+  holder: ManualHolder;
+  showing: Light;
+  group?: GroupRun;
+  whole?: FixtureRun;
+}
+
 class GroupRun {
   readonly id: string;
   /** Fixture indices, in group order. */
@@ -718,7 +726,7 @@ export class Engine {
         return null;
       }
       case 'manual': return this.setManual(cmd, now);
-      case 'release': return this.release(cmd.target, now);
+      case 'release': return this.release(cmd, now);
       case 'releaseAll': this.releaseAll(now); return null;
       case 'backToLook': return this.backToLook(now);
       case 'safe': this.goSafe(now); return null;
@@ -963,66 +971,94 @@ export class Engine {
     return { run, segment };
   }
 
-  private setManual(cmd: Extract<StageCommand, { type: 'manual' }>, now: number): string | null {
-    const { target, colour, intensity } = cmd;
-    let holder: ManualHolder;
-    let showing: Light;
+  /** A manual or release command's targets: its list, or its one target. */
+  private static targetsOf(cmd: { target?: ManualTarget; targets?: ManualTarget[] }): ManualTarget[] {
+    return cmd.targets ?? (cmd.target ? [cmd.target] : []);
+  }
+
+  /**
+   * What a manual target holds, what it shows now (where a take starts from) and, for a whole fixture, the fixture;
+   * or why it can't be held. `forRelease`: a smoke group can be let go of (it has nothing held).
+   */
+  private holderOf(target: ManualTarget, forRelease: boolean): ManualTake | string {
     if ('group' in target) {
       const group = this.groups.get(target.group);
-      if (!group) return `unknown group "${target.group}"`;
-      if (group.smoke) return smokeRefusal(target.group);
-      holder = group;
-      showing = group.out[0] ?? dark();
-      this.takeOwnership(group, now, MANUAL_IN);
-    } else {
-      const found = this.fixtureTarget(target);
+      if (!group) return forRelease ? 'unknown target' : `unknown group "${target.group}"`;
+      if (group.smoke && !forRelease) return smokeRefusal(target.group);
+      return { holder: group, showing: group.out[0] ?? dark(), group };
+    }
+    const found = this.fixtureTarget(target);
+    if (typeof found === 'string') return forRelease && found.startsWith('unknown') ? 'unknown target' : found;
+    if (found.run.smokeGroups.length && !forRelease) return smokeRefusal(target.fixture);
+    // A segment's hold sits on top of the fixture's: it starts from what that segment shows.
+    if (found.segment === null) return { holder: found.run, showing: found.run.cells[0]!, whole: found.run };
+    return { holder: found.run.segmentHolds[found.segment]!, showing: found.run.cells[found.segment]! };
+  }
+
+  /** Every target of a command, or the first reason one of them can't be: then nothing is changed. */
+  private holdersOf(cmd: { target?: ManualTarget; targets?: ManualTarget[] }, forRelease: boolean): ManualTake[] | string {
+    const targets = Engine.targetsOf(cmd);
+    if (!targets.length) return 'no target';
+    const out: ManualTake[] = [];
+    for (const target of targets) {
+      const found = this.holderOf(target, forRelease);
       if (typeof found === 'string') return found;
-      if (found.run.smokeGroups.length) return smokeRefusal(target.fixture);
-      // A segment's hold sits on top of the fixture's: it starts from what that segment shows.
-      holder = found.segment === null ? found.run : found.run.segmentHolds[found.segment]!;
-      showing = found.run.cells[found.segment ?? 0]!;
+      out.push(found);
     }
-    let m = holder.manual;
-    if (!m || m.releasing) {
-      // Start from what the fixture shows now, so taking control never jumps.
-      const start = m && m.releasing ? m.current : showing;
-      m = new ManualRun(start, now);
-      if (holder.manual) m.weight = holder.manual.weight;
-      m.weight.set(1, now, MANUAL_IN);
-      holder.manual = m;
+    return out;
+  }
+
+  /** Every target at once (one command, one frame), or none of them when one can't be held. */
+  private setManual(cmd: Extract<StageCommand, { type: 'manual' }>, now: number): string | null {
+    const found = this.holdersOf(cmd, false);
+    if (typeof found === 'string') return found;
+    const { colour, intensity } = cmd;
+    const light = colour ? fromHex(colour, { white: cmd.white, amber: cmd.amber, uv: cmd.uv }) : null;
+    for (const { holder, showing, group, whole } of found) {
+      if (group) this.takeOwnership(group, now, MANUAL_IN);
+      // A new colour for a whole fixture: its held segments fade back to it.
+      if (whole && cmd.releaseSegments) for (const h of whole.segmentHolds) this.releaseHolder(h, now);
+      let m = holder.manual;
+      if (!m || m.releasing) {
+        // Start from what the fixture shows now, so taking control never jumps.
+        const start = m && m.releasing ? m.current : showing;
+        m = new ManualRun(start, now);
+        if (holder.manual) m.weight = holder.manual.weight;
+        m.weight.set(1, now, MANUAL_IN);
+        holder.manual = m;
+      }
+      if (light) {
+        m.target.r = light.r; m.target.g = light.g; m.target.b = light.b; m.target.w = light.w; m.target.a = light.a; m.target.u = light.u;
+        if (intensity === undefined && light.i < 1) m.target.i = light.i;
+      }
+      if (intensity !== undefined) m.target.i = intensity;
     }
-    if (colour) {
-      const c = fromHex(colour, { white: cmd.white, amber: cmd.amber, uv: cmd.uv });
-      m.target.r = c.r; m.target.g = c.g; m.target.b = c.b; m.target.w = c.w; m.target.a = c.a; m.target.u = c.u;
-      if (intensity === undefined && c.i < 1) m.target.i = c.i;
-    }
-    if (intensity !== undefined) m.target.i = intensity;
     return null;
   }
 
-  private release(target: ManualTarget, now: number): string | null {
-    let holder: ManualHolder | undefined;
-    if ('group' in target) holder = this.groups.get(target.group);
-    else {
-      const found = this.fixtureTarget(target);
-      if (typeof found === 'string') return found.startsWith('unknown') ? 'unknown target' : found;
-      holder = found.segment === null ? found.run : found.run.segmentHolds[found.segment];
+  private release(cmd: Extract<StageCommand, { type: 'release' }>, now: number): string | null {
+    const found = this.holdersOf(cmd, true);
+    if (typeof found === 'string') return found;
+    for (const { holder, whole } of found) {
+      this.releaseHolder(holder, now);
+      if (whole && cmd.releaseSegments) for (const h of whole.segmentHolds) this.releaseHolder(h, now);
     }
-    if (!holder) return `unknown target`;
+    return null;
+  }
+
+  /** Let go: fade back to what is underneath over MANUAL_OUT. */
+  private releaseHolder(holder: ManualHolder, now: number): void {
     if (holder.manual && !holder.manual.releasing) {
       holder.manual.releasing = true;
       holder.manual.weight.set(0, now, MANUAL_OUT);
     }
-    return null;
   }
 
   private releaseAll(now: number): void {
-    for (const g of this.groups.values()) if (g.manual) this.release({ group: g.id }, now);
+    for (const g of this.groups.values()) this.releaseHolder(g, now);
     for (const f of this.fixtures) {
-      if (f.manual) this.release({ fixture: f.id }, now);
-      f.segmentHolds.forEach((h, segment) => {
-        if (h.manual) this.release({ fixture: f.id, segment }, now);
-      });
+      this.releaseHolder(f, now);
+      for (const h of f.segmentHolds) this.releaseHolder(h, now);
     }
   }
 
@@ -1268,6 +1304,7 @@ export class Engine {
         preset,
         changed: expected !== undefined && expected !== preset,
         manual: g.manual !== null && !g.manual.releasing,
+        hold: g.manual && !g.manual.releasing ? this.holdView(g.manual) : null,
         progress: g.presets.progress(now),
         level: g.level.target,
         live: liveView(preset),
@@ -1296,13 +1333,15 @@ export class Engine {
     };
   }
 
+  /** A hold's colour (White, Amber and UV mixed in, as the page draws it) and level. */
+  private holdView(m: ManualRun): { colour: string; level: number } {
+    return { colour: displayColour(toHex(m.target), { white: m.target.w, amber: m.target.a, uv: m.target.u }), level: m.target.i };
+  }
+
   /** Every fixture and segment manual control holds (not ones being released), fixtures in show order. */
   private heldLights(): HeldLight[] {
     const out: HeldLight[] = [];
-    const view = (m: ManualRun) => ({
-      colour: displayColour(toHex(m.target), { white: m.target.w, amber: m.target.a, uv: m.target.u }),
-      level: m.target.i,
-    });
+    const view = (m: ManualRun) => this.holdView(m);
     for (const f of this.fixtures) {
       if (f.manual && !f.manual.releasing) out.push({ fixture: f.id, segment: null, ...view(f.manual) });
       f.segmentHolds.forEach((h, segment) => {
