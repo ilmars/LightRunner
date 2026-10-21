@@ -47,8 +47,10 @@ const swatchFollows = (show: Show, p: Preset) => p.swatch !== undefined && p.swa
  *   So an import never changes it, and it is never shown as a difference.
  * - A preset's swatch that only follows a shared colour is left out: the shared colour is
  *   compared on its own, and taking it brings the swatch along.
+ * - A fixture is compared field by field, whatever order its fields are in (see takenFixture).
  */
 const comparable = (kind: ItemKind, x: Item, show: Show): unknown => {
+  if (kind === 'fixture') return Object.entries(x).filter(([, v]) => v !== undefined).sort(([k1], [k2]) => (k1 < k2 ? -1 : 1));
   if (kind === 'group') {
     const { kind: _ignored, ...rest } = x as Group;
     return rest;
@@ -60,6 +62,23 @@ const comparable = (kind: ItemKind, x: Item, show: Show): unknown => {
   return x;
 };
 const sameItem = (kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show) => same(comparable(kind, a, show), comparable(kind, b, incoming));
+
+/**
+ * What our fixture becomes when the file's one is taken. Its shape on the stage plan belongs to this
+ * installation, like a group's smoke setting: a file whose fixture has no shape, angle or reach (every
+ * Lightkey project) keeps ours, and an outline keeps its size too, since a size from Lightkey means a line.
+ */
+function takenFixture(ours: Fixture, theirs: Fixture): Fixture {
+  if (theirs.shape !== undefined || theirs.angle !== undefined || theirs.reach !== undefined) return theirs;
+  const kept: Partial<Fixture> = { shape: ours.shape, angle: ours.angle, reach: ours.reach };
+  if (ours.shape === 'outline') Object.assign(kept, { w: ours.w, h: ours.h });
+  const out = { ...theirs };
+  for (const [k, v] of Object.entries(kept)) {
+    if (v === undefined) delete out[k as keyof Fixture];
+    else Object.assign(out, { [k]: v });
+  }
+  return out;
+}
 
 /** "colour 8 (Zils)": a shared colour, numbered from 1, with the names of the colours that point to it. */
 function sharedColourLabel(show: Show, incoming: Show, palette: string, index: number): string {
@@ -88,6 +107,7 @@ function describe(kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show):
       if (fa.profile !== fb.profile) out.push(`type ${fa.profile} → ${fb.profile}`);
       if (fa.universe !== fb.universe || fa.address !== fb.address) out.push(`address ${fa.universe}/${fa.address} → ${fb.universe}/${fb.address}`);
       if (fa.x !== fb.x || fa.y !== fb.y || fa.w !== fb.w || fa.h !== fb.h) out.push('moved on the stage plan');
+      if (fa.shape !== fb.shape || fa.angle !== fb.angle || fa.reach !== fb.reach) out.push('changed on the stage plan');
       if (fa.gamma !== fb.gamma) out.push('dimming curve changed');
       if (!!fa.reversed !== !!fb.reversed) out.push(fb.reversed ? 'reversed on' : 'reversed off');
       break;
@@ -149,8 +169,10 @@ export function diffShows(current: Show, incoming: Show, scope: Scope = 'all'): 
       const group = (x as Preset).group;
       return `${s.groups.find((g) => g.id === group)?.name ?? group}: ${x.name}`;
     };
-    for (const [id, b] of next) {
+    for (const [id, file] of next) {
       const a = now.get(id);
+      // What taking it would give: for a fixture, the file's one with our shape where the file has none.
+      const b = a && kind === 'fixture' ? takenFixture(a as Fixture, file as Fixture) : file;
       if (!a) items.push({ kind, id, change: 'added', name: label(b, incoming), details: [] });
       else if (!sameItem(kind, a, b, current, incoming)) items.push({ kind, id, change: 'changed', name: label(b, incoming), details: describe(kind, a, b, current, incoming) });
     }
@@ -184,7 +206,7 @@ export function applyPicks(current: Show, incoming: Show, picks: Pick[]): Show {
     if (!item) throw new Error(`the file has no ${p.kind} "${p.id}"`);
     const k = items.findIndex((x) => x.id === p.id);
     if (k >= 0) {
-      const taken = structuredClone(item);
+      const taken = structuredClone(p.kind === 'fixture' ? takenFixture(items[k] as Fixture, item as Fixture) : item);
       // A smoke group stays a smoke group (and a light group a light group), whatever the file says.
       if (p.kind === 'group') (taken as Group).kind = (items[k] as Group).kind;
       items[k] = taken;

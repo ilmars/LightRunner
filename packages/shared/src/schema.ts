@@ -44,6 +44,10 @@ export type Profile = z.infer<typeof Profile>;
 
 // ---- Patch, groups, palettes ----
 
+/** How a fixture is drawn on the stage plan: a dot, a dot with a cone, a bar, a strip round something, or a smoke cloud. */
+export const FixtureShape = z.enum(['dot', 'beam', 'bar', 'outline', 'smoke']);
+export type FixtureShape = z.infer<typeof FixtureShape>;
+
 export const Fixture = z.object({
   id,
   name: z.string(),
@@ -53,8 +57,15 @@ export const Fixture = z.object({
   x: unit.default(0.5),
   y: unit.default(0.5),
   // Size on the stage plan as a fraction of its width and height; bars draw as bars.
+  // For a bar: its length and thickness; for an outline: its width and height.
   w: unit.optional(),
   h: unit.optional(),
+  /** How it is drawn on the stage plan; missing = worked out (see fixtureShape). */
+  shape: FixtureShape.optional(),
+  /** Degrees clockwise, 0 = pointing right: how far a bar is turned from across, or where a beam points. */
+  angle: z.number().min(-180).max(180).optional(),
+  /** How far a beam's cone reaches, as a fraction of the plan's width. */
+  reach: unit.optional(),
   gamma: z.number().min(1).max(4).optional(),
   /** Hung the other way round: its segments run backwards along a group's line. */
   reversed: z.boolean().optional(),
@@ -374,6 +385,16 @@ export function checkReferences(show: Show): string[] {
 /** The show's own profile with this id, else the built-in one. */
 export function findProfile(show: Show, id: string): Profile | undefined {
   return show.profiles.find((p) => p.id === id) ?? BUILT_IN_PROFILES.find((p) => p.id === id);
+}
+
+/**
+ * How a fixture is drawn on the stage plan. A stored shape wins; otherwise as before shapes were stored:
+ * a smoke cloud in a smoke group, a bar when it has a size, else a dot.
+ */
+export function fixtureShape(show: Show, fixture: Fixture): FixtureShape {
+  if (fixture.shape) return fixture.shape;
+  if (show.groups.some((g) => g.kind === 'smoke' && g.fixtures.includes(fixture.id))) return 'smoke';
+  return fixture.w || fixture.h ? 'bar' : 'dot';
 }
 
 /** Channels a fixture occupies, for overlap warnings. */

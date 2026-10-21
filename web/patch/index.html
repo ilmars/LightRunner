@@ -102,9 +102,57 @@
     <section class="card">
       <div class="card-head">
         <h2>Stage plan</h2>
-        <span class="hint">Drag fixtures to where they hang. The back of the stage is at the top.</span>
+        <span class="hint">The back of the stage is at the top.</span>
       </div>
       <div id="stage" class="stage-plan" aria-label="Stage plan"></div>
+      <p id="planHelp" class="hint plan-help">Drag fixtures to where they hang. Click one to change its shape, size or angle; Shift-click, or drag a box round several, to line them up; click an empty spot to add one.</p>
+      <div id="planTools" class="plan-tools" hidden>
+        <span id="planName" class="plan-name"></span>
+        <div id="planShape" class="ds-seg" role="radiogroup" aria-label="Shape">
+          <button type="button" role="radio" data-shape="dot">Dot</button>
+          <button type="button" role="radio" data-shape="beam">Beam</button>
+          <button type="button" role="radio" data-shape="bar">Bar</button>
+          <button type="button" role="radio" data-shape="outline">Outline</button>
+          <button type="button" role="radio" data-shape="smoke">Smoke</button>
+        </div>
+        <span id="planTurn" class="plan-turn" hidden>
+          <span id="planAngle" class="plan-angle"></span>
+          <button type="button" class="ghost small" data-angle="0">Across</button>
+          <button type="button" class="ghost small" data-angle="90">Upright</button>
+        </span>
+        <span id="planToolsHint" class="hint"></span>
+      </div>
+      <div id="planArrange" class="plan-tools" hidden>
+        <span class="plan-label">Align</span>
+        <div id="planAlign" class="ds-seg" role="group" aria-label="Align">
+          <button type="button" data-align="left">Left</button>
+          <button type="button" data-align="centre">Centre</button>
+          <button type="button" data-align="right">Right</button>
+          <button type="button" data-align="top">Top</button>
+          <button type="button" data-align="middle">Middle</button>
+          <button type="button" data-align="bottom">Bottom</button>
+        </div>
+        <span class="plan-label">Space evenly</span>
+        <div id="planSpace" class="ds-seg" role="group" aria-label="Space evenly">
+          <button type="button" data-space="x">Across</button>
+          <button type="button" data-space="y">Down</button>
+        </div>
+      </div>
+      <form id="planAdd" class="add plan-sheet" hidden>
+        <h3>Add fixtures here</h3>
+        <div class="add-grid">
+          <div class="field"><label for="planAddProfile">Type</label><select id="planAddProfile" required></select></div>
+          <div class="field"><label for="planAddName">Name</label><input id="planAddName" type="text" placeholder="Bar" required></div>
+          <div class="field"><label for="planAddCount">How many</label><input id="planAddCount" type="number" min="1" max="64" value="1" required></div>
+          <div class="field"><label for="planAddUniverse">Universe</label><input id="planAddUniverse" type="number" min="0" max="32767" required></div>
+          <div class="field"><label for="planAddAddress">Start address</label><input id="planAddAddress" type="number" min="1" max="512" required></div>
+        </div>
+        <div class="row plan-sheet-foot">
+          <p class="hint" id="planAddHint"></p>
+          <button type="button" id="planAddCancel" class="ghost">Cancel</button>
+          <button class="primary">Add</button>
+        </div>
+      </form>
     </section>
   </main>
 

@@ -291,8 +291,13 @@ test('show export, import and backup restore', async () => {
 test('patch: profiles list, saving fixtures and groups, and Identify', async () => {
   await withApp(async (call, app) => {
     const profiles = (await call('GET', '/api/profiles')).body;
-    assert.ok(profiles.some((p: any) => p.id === 'generic-rgbw' && p.channels === 4));
+    assert.ok(profiles.some((p: any) => p.id === 'generic-rgbw' && p.channels === 4 && p.segments === 1));
     const show = (await call('GET', '/api/show')).body;
+    // A bar's type says how many segments it has, so the stage plan can draw a new one as a bar.
+    const bar = { id: 'two-cell-bar', name: 'Two cell bar', channels: ['red', 'green', 'blue', 'red', 'green', 'blue'].map((role) => ({ role })) };
+    assert.equal((await call('PUT', '/api/show?source=patch', { ...show, profiles: [...show.profiles, bar] })).status, 200);
+    const withBar = (await call('GET', '/api/profiles')).body;
+    assert.equal(withBar.find((p: any) => p.id === 'two-cell-bar')?.segments, 2);
     show.fixtures.push({ id: 'new-bar', name: 'New bar', profile: 'generic-rgb', universe: 0, address: 100, x: 0.2, y: 0.3 });
     show.groups.push({ id: 'new-group', name: 'New group', fixtures: ['new-bar'] });
     assert.equal((await call('PUT', '/api/show?source=patch', show)).status, 200);
