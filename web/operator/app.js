@@ -1274,6 +1274,9 @@ $('backBtn').addEventListener('click', () => sendStage({ type: 'backToLook' }));
 const saveBtn = $('saveBtn');
 let saveTimer = 0;
 let saveFor = null;
+// The Prepare session the hold started in: a draft that ends mid-hold (Live, Go, a dropped draft) must never
+// turn the hold into a Save of the live stage, nor a hold started live into a Save of a new draft.
+let saveSession = 0;
 /** The Save hold waiting for its answer: { ref, name }, to say "Saved to …" when it works. */
 let itemSave = null;
 saveBtn.addEventListener('pointerdown', (ev) => {
@@ -1281,13 +1284,14 @@ saveBtn.addEventListener('pointerdown', (ev) => {
   const item = stageItem();
   if (!item) return;
   saveFor = item.id;
+  saveSession = prep.session;
   saveBtn.classList.add('holding');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveBtn.classList.remove('holding');
-    // Only if the same item is still on stage; for Basic lights the id is the safe look's.
+    // Only if the same item is still on stage, in the same Live or Prepare session; for Basic lights the id is the safe look's.
     const now = stageItem();
-    if (now && now.id === saveFor) {
+    if (now && now.id === saveFor && prep.session === saveSession) {
       const sent = send({ type: 'saveItem', id: now.id });
       if (sent !== null) itemSave = { ref: sent, name: now.name };
     }
