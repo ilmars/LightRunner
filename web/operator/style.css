@@ -587,6 +587,70 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .fe-edges > button { flex: 1; min-height: 44px; }
 .fe-used { flex: none; margin: 0; color: var(--ds-muted); font-size: 12px; }
 .fe-used[hidden] { display: none; }
+
+/* ---- Individual lights: the whole right column, as the editors (the mockup's individual lights) ---- */
+.mlights { gap: 10px; }
+.mlights .hbtn:disabled { opacity: 0.4; }
+/* In Prepare the button stays where it is, faded: a tap says it works live only. */
+#manualBtn.unavail { opacity: 0.4; }
+.m-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.m-title b { font-size: 17px; font-weight: 600; white-space: nowrap; }
+.m-title span { color: var(--ds-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Pick: All, each group, None. */
+.m-pick { flex: none; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.m-pick > .ds-caps { margin-right: 4px; }
+.m-chips { display: contents; }
+/* The plan: every light where Patch puts it, on the stage view's dark. */
+.m-plan { position: relative; flex: none; height: 236px; border-radius: 14px; background: #04070D; border: 1px solid var(--ds-edge); overflow: hidden; }
+.m-plan-lab { position: absolute; left: 12px; top: 8px; font-size: 10px; pointer-events: none; }
+.mfix {
+  position: absolute; box-sizing: border-box; padding: 4px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--ds-muted);
+}
+.mfix.on { background: rgba(67, 137, 232, 0.14); border-color: rgba(67, 137, 232, 0.7); color: var(--ds-text); }
+/* The light as the stage shows it now, one cell per segment; a dark light is a faint shape. */
+.mvis { flex: none; display: flex; border-radius: 3px; overflow: hidden; background: rgba(148, 163, 184, 0.12); }
+.mfix.round .mvis { border-radius: 50%; }
+.mfix.vert .mvis { flex-direction: column; }
+.mvis > i { flex: 1 1 0; opacity: 0.85; }
+.mname { font-size: 11px; line-height: 1; white-space: nowrap; }
+.mdot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--ds-warn); pointer-events: none; }
+.mdot[hidden] { display: none; }
+/* One bar picked: its segments in their places along it. */
+.m-segrow { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.m-segrow[hidden] { display: none; }
+.m-segof { flex: none; width: 112px; color: var(--ds-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-segs { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.mseg {
+  position: relative; flex: none; width: 44px; height: 44px; padding: 0; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--ds-edge); border-radius: 10px; background: rgba(255, 255, 255, 0.03);
+}
+.mseg.on { background: rgba(67, 137, 232, 0.14); border-color: rgba(67, 137, 232, 0.7); }
+.mseg > i { width: 26px; height: 8px; border-radius: 2px; background: rgba(148, 163, 184, 0.12); }
+.mseg .mdot { top: 2px; right: 2px; width: 6px; height: 6px; }
+.m-note { color: var(--ds-muted); font-size: 12px; margin-left: 6px; white-space: nowrap; }
+/* What is picked, then its colours, Any colour … and the level. */
+.m-sum { flex: none; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.m-sum b { flex: none; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.m-sum span { min-width: 0; color: var(--ds-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-colours { flex: none; display: flex; align-items: center; gap: 8px; }
+.m-pal { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.mcol { flex: none; width: 44px; height: 44px; padding: 0; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 50%; }
+.mcol.off { background: #05080E; }
+.mcol.on { border: 2px solid var(--ds-accent); box-shadow: inset 0 0 0 3px #141C2E; }
+.m-pal.idle .mcol { opacity: 0.4; }
+#mAnyBtn[aria-expanded="true"] { color: var(--ds-text); background: var(--ds-tile-fill-on); border-color: var(--ds-edge-on); }
+.m-any { height: 40px; border-radius: 12px; box-shadow: none; overflow: visible; }
+.m-any[hidden] { display: none; }
+.m-any::before { border-radius: 12px; }
+.m-any .strip-handle { top: -3px; bottom: -3px; width: 3px; background: #E3E8F0; box-shadow: none; }
+.m-level { flex: none; display: flex; align-items: center; gap: 10px; }
+.m-lab { flex: none; width: 44px; color: var(--ds-muted); font-size: 13px; }
+.m-level .ds-fill { flex: 1; min-width: 0; height: 48px; }
+.m-level .pct { flex: none; width: 58px; font-size: 17px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.m-level .pct.zero { color: var(--ds-muted); }
+.m-level .ds-fill.idle { opacity: 0.4; }
+
 /* ---- New quick look sheet (same cover as the colour picker) ---- */
 .lab-note { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .qs-name {
@@ -788,6 +852,8 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
 
   /* A remote doesn't change the prepared show. */
   #editBtn, #qEditBtn, #orderFoot, #saveBtn, #pEditCur, #pAddOpen, #pAdd, #colEdit, #fxEdit, .pc.newfx, .ql.newq { display: none !important; }
+  /* Individual lights needs the iPad's room for the stage plan. */
+  #manualBtn, #manual { display: none !important; }
   /* Effects can be picked here, but their settings stay on the iPad. */
   #fxCard { display: none !important; }
 

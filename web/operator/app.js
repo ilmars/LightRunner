@@ -79,6 +79,7 @@ function connect() {
     if (ev.data instanceof ArrayBuffer) {
       visual = new Uint8Array(ev.data);
       drawStage();
+      paintManual();
       return;
     }
     const msg = JSON.parse(ev.data);
@@ -90,6 +91,9 @@ function connect() {
       syncQuickSheet();
       buildSheetGroups();
       buildFlash();
+      // Operators can lose manual control in Settings; the panel goes with it.
+      if (!layout.manualForOperators) closeManual();
+      else if (manualSel.open) buildManual();
       render();
     } else if (msg.type === 'state') {
       if (state && msg.state.look !== seenLook) previousLook = seenLook;
@@ -583,6 +587,8 @@ function setPrepare(on, tell = true) {
     prep.startRef = null;
     prep.starting = false;
   }
+  // Individual lights holds the real stage: it closes for Prepare.
+  if (on) closeManual();
   prep.on = on;
   prep.session++;
   prep.state = null;
@@ -1300,6 +1306,11 @@ function renderDetails() {
   $('backBtn').hidden = !changed;
   $('saveBtn').hidden = !item;
   $('saveBtn').classList.toggle('dirty', changed && !prep.on);
+  // Individual lights: only when operators have manual control; faded in Prepare (manual control is live only).
+  $('manualBtn').hidden = !layout.manualForOperators;
+  $('manualBtn').classList.toggle('unavail', prep.on);
+  $('manualBtn').setAttribute('aria-disabled', String(prep.on));
+  $('manualBtn').title = prep.on ? MANUAL_LIVE_ONLY : 'Set single lights';
   if (item) {
     $('backBtn').setAttribute('aria-label', `Back to ${item.name} as saved`);
     $('saveBtn').querySelector('.label').replaceChildren(el('span', null, `Save to ${item.name}`), el('small', null, 'hold'));
@@ -1326,6 +1337,7 @@ function renderDetails() {
   }
   if (picker.group) renderPicker();
   if (qs.open) renderSheet();
+  renderManual();
 }
 
 // Back and Save.
@@ -2416,9 +2428,9 @@ function closeColourEditor(keepPending = false) {
   markEditorOpen();
 }
 
-/** An editor (colour or effect) open: it takes the whole right column, and Quick looks and Groups give way. */
+/** An editor (colour or effect) or Individual lights open: it takes the whole right column, and Quick looks and Groups give way. */
 function markEditorOpen() {
-  $('colEdit').parentElement.classList.toggle('ce-open', !$('colEdit').hidden || !$('fxEdit').hidden);
+  $('colEdit').parentElement.classList.toggle('ce-open', !$('colEdit').hidden || !$('fxEdit').hidden || !$('manual').hidden);
 }
 
 /** Closes whichever editor is open (colour or effect). */
@@ -3558,6 +3570,541 @@ function drawEffectStrip(frame) {
   return true;
 }
 
+// ---- Individual lights: single lights (or one segment of a bar) held at a colour and level until released ----
+// Manual control of the live stage (never a Prepare draft): `manual`, `release` and `releaseAll` with fixture and
+// segment targets. Only when operators have manual control (Settings). What is held comes from the live state
+// (`state.held`, and `manual` on a group); the plan draws what each light shows now from the live picture.
+
+/** Said when Individual lights is tapped in Prepare. */
+const MANUAL_LIVE_ONLY = 'Individual lights work on the live stage only. Switch to Live to use them.';
+
+/**
+ * The panel while it is open. `fixtures`: the picked lights' ids, in the order they were picked. `segments`: the picked
+ * segments (as the engine numbers them) of the one bar picked; empty for the whole of each light.
+ */
+const manualSel = { open: false, fixtures: [], segments: [] };
+/** One entry per light on the plan: { f, first, group, button, cells, dot, vert, round }; `cells` in their places along it. */
+let manualFix = [];
+/** The segment row's buttons, for the one bar picked: { segment, button, cell, dot }; `segRowFor` is that bar's id. */
+let manualSegs = [];
+let segRowFor = null;
+/** The colour circles on show and the groups they came from (to rebuild only when that changes). */
+let manualColours = [];
+let manualColoursKey = null;
+/** The level slider: { value, dragging, holdUntil }. */
+const manualLevel = { dim: $('mLevel'), slab: $('mLevelSlab'), pct: $('mLevelPct'), value: 0, dragging: false, holdUntil: 0 };
+
+/** Lights that are smoke machines (in a smoke group): manual control can't hold them, so they aren't on the plan. */
+function smokeFixtures() {
+  const out = new Set();
+  for (const g of layout?.groups ?? []) if (isSmoke(g)) for (const id of layout.members?.[g.id] ?? []) out.add(id);
+  return out;
+}
+
+/** The first light group a fixture is in (what it runs when nothing holds it), or undefined. */
+const lightGroupOf = (id) => lightGroups().find((g) => (layout.members?.[g.id] ?? []).includes(id));
+
+/** A light's short name on the plan: the first word of its name ("B3" for "B3 SonicPulse LED Bar 10"). */
+const shortName = (f) => (f.name || f.id).trim().split(/\s+/)[0] || f.id;
+
+/**
+ * A colour as manual control holds it: brightest channel at full, with what it would send and how it looks (`display`,
+ * White, Amber and UV mixed in). `off` when it has no light at all.
+ */
+function normalLight(hex, { white = 0, amber = 0, uv = 0 } = {}) {
+  const n = parseInt(hex.slice(1), 16);
+  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255);
+  const m = Math.max(...rgb, white, amber, uv);
+  if (m < 0.004) return { off: true, hex: '#000000', white: 0, amber: 0, uv: 0, display: '#000000', bright: 0 };
+  const full = `#${rgb.map((v) => Math.round((v / m) * 255).toString(16).padStart(2, '0')).join('')}`;
+  const extras = { white: white / m, amber: amber / m, uv: uv / m };
+  return { off: false, hex: full, ...extras, display: mixedColour(full, extras), bright: m };
+}
+
+/** Two colours from normalLight() that are the same but for rounding (a colour kept at half brightness, scaled back up). */
+function sameLight(a, b) {
+  if (a.off || b.off) return a.off === b.off;
+  const parts = (c) => {
+    const n = parseInt(c.hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255).concat([c.white, c.amber, c.uv]);
+  };
+  const x = parts(a), y = parts(b);
+  return x.every((v, k) => Math.abs(v - y[k]) < 0.03);
+}
+
+/** The held entry for a light (segment null: the whole light) in the live state, or null. */
+const heldOf = (fixture, segment = null) => state?.held?.find((h) => h.fixture === fixture && h.segment === segment) ?? null;
+const heldSegmentsOf = (fixture) => (state?.held ?? []).filter((h) => h.fixture === fixture && h.segment !== null);
+
+/** Every light held one way or another: on its own, by a segment, or by its group (from another desk or the API). */
+function heldFixtures() {
+  const out = new Set((state?.held ?? []).map((h) => h.fixture));
+  for (const g of lightGroups()) if (state?.groups?.[g.id]?.manual) for (const id of layout.members?.[g.id] ?? []) out.add(id);
+  return out;
+}
+
+/**
+ * What a light (or one segment) shows now, as this panel works with it: { display, level, name, held }. Held: its colour
+ * and level. Otherwise its group's: the colour it runs and the level it shows (the group's dimmer times the colour's brightness).
+ */
+function lightNow(fixture, segment = null) {
+  const h = (segment !== null ? heldOf(fixture, segment) : null) ?? heldOf(fixture);
+  if (h) {
+    const circle = manualColours.find((c) => !c.off && c.display === h.colour);
+    // (The name of the circle it was set with; a strip colour is "Custom".)
+    return { display: h.colour, light: null, level: h.level, name: h.level > 0 ? circle?.name ?? 'Custom' : 'Off', held: true };
+  }
+  const g = lightGroupOf(fixture);
+  const s = g ? state?.groups?.[g.id] : null;
+  if (!g || !s) return { display: '#000000', light: null, level: 0, name: 'Off', held: false };
+  const run = runningLight(g, s);
+  const c = normalLight(run.colour, run);
+  const info = presetInfo(g, s);
+  return { display: c.display, light: c.off ? null : c, level: clamp01((s.level ?? 0) * c.bright), name: c.off ? 'Off' : info.name, held: false };
+}
+
+/** What a send goes to: the picked segments of the one bar picked, else each picked light. */
+function manualTargets() {
+  if (manualSel.segments.length && manualSel.fixtures.length === 1) {
+    const fixture = manualSel.fixtures[0];
+    return manualSel.segments.map((segment) => ({ fixture, segment }));
+  }
+  return manualSel.fixtures.map((fixture) => ({ fixture }));
+}
+
+/** The groups of the picked lights (every light group when nothing is picked), for the colour circles. */
+function pickedGroups() {
+  if (!manualSel.fixtures.length) return lightGroups();
+  return lightGroups().filter((g) => manualSel.fixtures.some((id) => (layout.members?.[g.id] ?? []).includes(id)));
+}
+
+function openManual() {
+  if (!layout?.manualForOperators || phoneQuery.matches) return;
+  if (prep.on) {
+    toast(MANUAL_LIVE_ONLY, true);
+    return;
+  }
+  closePicker();
+  closeSheet();
+  manualSel.open = true;
+  $('manual').hidden = false;
+  markEditorOpen();
+  buildManual();
+  renderManual();
+  $('manual').scrollTop = 0;
+}
+
+/** Done: the panel goes, and the pick with it (it opens on a fresh pick). The lights stay held. */
+function closeManual() {
+  if (!manualSel.open) return;
+  manualSel.open = false;
+  manualSel.fixtures = [];
+  manualSel.segments = [];
+  manualLevel.dragging = false;
+  $('manual').hidden = true;
+  showManualStrip(false);
+  markEditorOpen();
+}
+
+function showManualStrip(open) {
+  $('mAny').hidden = !open;
+  $('mAnyBtn').setAttribute('aria-expanded', String(open));
+  if (!open) $('mAnyH').hidden = true;
+}
+
+/** The Pick chips and the plan, from the layout; the plan's places come from Patch, as the stage view draws them. */
+function buildManual() {
+  if (!layout) return;
+  const smoke = smokeFixtures();
+  // Where each light's segments start in the visualiser's frames (every fixture counts, smoke machines too).
+  let at = 0;
+  const planned = [];
+  for (const f of layout.fixtures) {
+    const first = at;
+    at += Math.max(1, f.segments ?? 1);
+    if (!smoke.has(f.id)) planned.push({ f, first });
+  }
+  const known = new Set(planned.map((p) => p.f.id));
+  manualSel.fixtures = manualSel.fixtures.filter((id) => known.has(id));
+  if (manualSel.fixtures.length !== 1) manualSel.segments = [];
+
+  const chips = $('mGroups');
+  chips.replaceChildren();
+  const pickChip = (name, ids) => {
+    const b = el('button', 'ce-chip', name);
+    b.dataset.ids = ids.join(' ');
+    b.addEventListener('click', () => {
+      manualSel.fixtures = [...ids];
+      manualSel.segments = [];
+      renderManual();
+    });
+    chips.append(b);
+  };
+  pickChip('All', planned.map((p) => p.f.id));
+  for (const g of lightGroups()) {
+    const ids = (layout.members?.[g.id] ?? []).filter((id) => known.has(id));
+    if (ids.length) pickChip(g.name, ids);
+  }
+
+  const plan = $('mPlan');
+  for (const old of manualFix) old.button.remove();
+  manualFix = planned.map(({ f, first }) => {
+    const segs = Math.max(1, f.segments ?? 1);
+    const bar = !!(f.w || f.h);
+    const button = el('button', 'mfix');
+    const vis = el('span', 'mvis');
+    // One cell per segment, in its place: segment 0 at the left or top, at the right or bottom when hung reversed.
+    const cells = Array.from({ length: segs }, () => el('i'));
+    const order = Array.from({ length: segs }, (_, k) => (f.reversed ? segs - 1 - k : k));
+    vis.append(...order.map((s) => cells[s]));
+    const dot = el('span', 'mdot');
+    dot.hidden = true;
+    button.append(vis, el('span', 'mname', shortName(f)), dot);
+    button.addEventListener('click', () => {
+      const k = manualSel.fixtures.indexOf(f.id);
+      if (k >= 0) manualSel.fixtures.splice(k, 1); else manualSel.fixtures.push(f.id);
+      manualSel.segments = [];
+      renderManual();
+    });
+    plan.append(button);
+    return { f, first, group: lightGroupOf(f.id), button, vis, cells, dot, bar, round: !bar, vert: false, painted: [] };
+  });
+  placeManual();
+  segRowFor = null;
+  manualColoursKey = null;
+}
+
+/** Puts each light's button where the stage plan has it, sized to the light (a bar at its length), 44 px at least. */
+function placeManual() {
+  const plan = $('mPlan');
+  const W = plan.clientWidth, H = plan.clientHeight;
+  if (!W || !H) return;
+  const padX = 30, padTop = 30, padBottom = 30;
+  const iw = W - 2 * padX, ih = H - padTop - padBottom;
+  for (const m of manualFix) {
+    const { f } = m;
+    const cx = padX + f.x * iw, cy = padTop + f.y * ih;
+    let vw = 18, vh = 18;
+    if (m.bar) {
+      vw = Math.max(8, (f.w ?? 0) * iw);
+      vh = Math.max(6, (f.h ?? 0) * ih);
+    }
+    m.vert = m.bar && vh > vw;
+    if (m.bar && !m.vert) vh = Math.min(vh, 12);
+    if (m.vert) vw = Math.min(vw, 10);
+    m.button.classList.toggle('round', m.round);
+    m.button.classList.toggle('vert', m.vert);
+    m.vis.style.width = `${vw}px`;
+    m.vis.style.height = `${vh}px`;
+    // The light, 5 px, then its 11 px name; the light's middle sits at its place on the plan.
+    const content = vh + 16;
+    // A bar's button is its length (and a little), so bars hung end to end keep apart.
+    const w = Math.max(44, m.bar && !m.vert ? vw + 8 : 44);
+    const h = Math.max(44, content + 8);
+    m.box = { cx, cy, left: cx - w / 2, top: cy - vh / 2 - (h - content) / 2, w, h };
+  }
+  spreadBoxes(manualFix.filter((m) => !m.bar || m.vert).map((m) => m.box));
+  for (const m of manualFix) {
+    const { w, h } = m.box;
+    const left = Math.min(Math.max(2, m.box.left), W - w - 2);
+    const top = Math.min(Math.max(2, m.box.top), H - h - 2);
+    Object.assign(m.button.style, { left: `${left}px`, top: `${top}px`, width: `${w}px`, height: `${h}px` });
+  }
+}
+
+/**
+ * Small lights in a row closer together than a button is wide (a row of spot lights) move apart just enough for one
+ * 44 px button each, the row staying centred where they are.
+ */
+function spreadBoxes(boxes) {
+  const gap = 2;
+  const rows = [];
+  for (const b of [...boxes].sort((x, y) => x.left - y.left)) {
+    const row = rows.find((r) => {
+      const last = r[r.length - 1];
+      return Math.abs(b.cy - last.cy) < 8 && b.left < last.left + last.w + gap;
+    });
+    if (!row) {
+      rows.push([b]);
+      continue;
+    }
+    const last = row[row.length - 1];
+    b.left = last.left + last.w + gap;
+    row.push(b);
+  }
+  for (const row of rows) {
+    if (row.length < 2) continue;
+    const shift = row.reduce((sum, b) => sum + b.cx - (b.left + b.w / 2), 0) / row.length;
+    for (const b of row) b.left += shift;
+  }
+}
+if ('ResizeObserver' in window) new ResizeObserver(() => { if (manualSel.open) placeManual(); }).observe($('mPlan'));
+
+/** A light's colour as the stage shows it now (from the live picture), or '' for a dark one (the faint shape shows). */
+function visualColour(index) {
+  const v = visual;
+  const [r, g, b] = shownRgb(v[index * 3] ?? 0, v[index * 3 + 1] ?? 0, v[index * 3 + 2] ?? 0);
+  return Math.max(r, g, b) < 10 ? '' : `rgb(${r},${g},${b})`;
+}
+
+/** Each light's cells (and the segment row's) in the colours the stage shows now; only what changed is touched. */
+function paintManual() {
+  if (!manualSel.open) return;
+  for (const m of manualFix) {
+    m.cells.forEach((cell, s) => {
+      const c = visualColour(m.first + s);
+      if (m.painted[s] !== c) {
+        m.painted[s] = c;
+        cell.style.background = c;
+      }
+    });
+  }
+  const bar = manualFix.find((m) => m.f.id === segRowFor);
+  if (bar) for (const s of manualSegs) s.cell.style.background = visualColour(bar.first + s.segment);
+}
+
+/** The segment row for the one bar picked (nothing for a light of one segment, or several lights). */
+function buildSegRow() {
+  const one = manualSel.fixtures.length === 1 ? manualFix.find((m) => m.f.id === manualSel.fixtures[0]) : null;
+  const id = one && one.cells.length > 1 ? one.f.id : null;
+  $('mSegRow').hidden = !id;
+  if (id === segRowFor) return;
+  segRowFor = id;
+  const row = $('mSegs');
+  row.replaceChildren();
+  manualSegs = [];
+  if (!one || !id) return;
+  const segs = one.cells.length;
+  $('mSegOf').textContent = `Segments of ${shortName(one.f)}`;
+  row.setAttribute('aria-label', `Segments of ${one.f.name}`);
+  for (let k = 0; k < segs; k++) {
+    // Left to right (top to bottom) as on the bar: reversed bars number their segments from the other end.
+    const segment = one.f.reversed ? segs - 1 - k : k;
+    const button = el('button', 'mseg');
+    const cell = el('i');
+    const dot = el('span', 'mdot');
+    dot.hidden = true;
+    button.append(cell, dot);
+    button.addEventListener('click', () => {
+      const n = manualSel.segments.indexOf(segment);
+      if (n >= 0) manualSel.segments.splice(n, 1); else manualSel.segments.push(segment);
+      renderManual();
+    });
+    row.append(button);
+    manualSegs.push({ segment, button, cell, dot, place: k });
+  }
+}
+
+/** The colour circles: the picked lights' group colours (one of each), faded while nothing is picked. */
+function buildManualColours() {
+  const groups = pickedGroups();
+  const key = groups.map((g) => g.id).join(' ');
+  if (key === manualColoursKey) return;
+  manualColoursKey = key;
+  manualColours = [];
+  for (const g of groups) {
+    for (const p of g.presets) {
+      if (p.effect || !p.light) continue;
+      const c = normalLight(p.light.hex, p.light);
+      // One circle per colour: "Silti 50%" is "Silti 3200K" at half, and this panel's level does the dimming.
+      if (manualColours.some((x) => sameLight(x, c))) continue;
+      manualColours.push({ name: p.name, ...c });
+    }
+  }
+  // Off last, as in the colour lists.
+  manualColours.sort((a, b) => Number(a.off) - Number(b.off));
+  const pal = $('mPal');
+  pal.replaceChildren();
+  for (const c of manualColours) {
+    const b = el('button', c.off ? 'mcol off' : 'mcol');
+    if (!c.off) b.style.background = tint(c.display, 0.82);
+    b.setAttribute('aria-label', c.name);
+    b.title = c.name;
+    b.addEventListener('click', () => pickManualColour(c));
+    c.button = b;
+    pal.append(b);
+  }
+}
+
+/**
+ * Hold the picked lights (or segments) at a colour. Each keeps its own level; a dark one comes up at the colour's own
+ * brightness. Off keeps the colour and takes the level to 0. A whole light's colour replaces its held segments' (they fade back to it).
+ */
+function sendManualColour(c) {
+  const targets = manualTargets();
+  if (!targets.length) {
+    toast('Tap lights on the plan to pick them first.', true);
+    return;
+  }
+  for (const target of targets) {
+    const now = lightNow(target.fixture, target.segment ?? null);
+    if (target.segment === undefined) {
+      for (const h of heldSegmentsOf(target.fixture)) send({ type: 'release', target: { fixture: h.fixture, segment: h.segment } });
+    }
+    if (c.off) {
+      send({ type: 'manual', target, intensity: 0 });
+      continue;
+    }
+    const intensity = now.level >= 0.05 ? now.level : c.bright;
+    const extras = Object.fromEntries(['white', 'amber', 'uv'].filter((k) => c[k] > 0.001).map((k) => [k, Math.round(c[k] * 1000) / 1000]));
+    send({ type: 'manual', target, colour: c.hex, ...extras, intensity: Math.round(intensity * 1000) / 1000 });
+  }
+}
+
+function pickManualColour(c) {
+  sendManualColour(c);
+  renderManual();
+}
+
+/** The level for every picked target; a whole light's held segments follow it, so the whole bar dims. */
+function sendManualLevel(v) {
+  const intensity = Math.round(clamp01(v) * 1000) / 1000;
+  for (const target of manualTargets()) {
+    send({ type: 'manual', target, intensity });
+    if (target.segment === undefined) {
+      for (const h of heldSegmentsOf(target.fixture)) send({ type: 'manual', target: { fixture: h.fixture, segment: h.segment }, intensity });
+    }
+  }
+}
+
+function showManualLevel(v) {
+  const p = clamp01(v);
+  manualLevel.value = p;
+  manualLevel.slab.style.width = `${p * 100}%`;
+  manualLevel.pct.textContent = `${Math.round(p * 100)} %`;
+  manualLevel.pct.classList.toggle('zero', p === 0);
+  manualLevel.dim.setAttribute('aria-valuenow', String(Math.round(p * 100)));
+}
+
+// The level moves relative to where the finger starts, as the group dimmers; nothing happens with nothing picked.
+(() => {
+  const m = manualLevel;
+  const out = throttle(sendManualLevel);
+  let startX = 0, startV = 0;
+  m.dim.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    if (!manualTargets().length) return;
+    m.dragging = true;
+    try { m.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    m.dim.classList.add('ds-dragging');
+    startX = ev.clientX;
+    startV = m.value;
+  });
+  m.dim.addEventListener('pointermove', (ev) => {
+    if (!m.dragging) return;
+    showManualLevel(startV + (ev.clientX - startX) / m.dim.clientWidth);
+    out.push(m.value);
+  });
+  const end = () => {
+    if (!m.dragging) return;
+    m.dragging = false;
+    m.dim.classList.remove('ds-dragging');
+    m.holdUntil = performance.now() + 600;
+    if (m.value !== startV) out.end(m.value);
+  };
+  m.dim.addEventListener('pointerup', end);
+  m.dim.addEventListener('pointercancel', end);
+})();
+
+// Any colour …: a strip under the circles (warm to cool when every picked light is white only). Moves are throttled; the last one always goes.
+(() => {
+  const out = throttle((hex) => sendManualColour(normalLight(hex)));
+  const whiteOnly = () => {
+    if (!manualTargets().length) return null;
+    return pickedGroups().every((g) => g.whiteOnly);
+  };
+  attachStrip($('mAny'), $('mAnyH'), whiteOnly, (hex, last) => (last ? out.end(hex) : out.push(hex)), () => {
+    if (!manualTargets().length) toast('Tap lights on the plan to pick them first.', true);
+  });
+})();
+
+$('mAnyBtn').addEventListener('click', () => showManualStrip($('mAny').hidden));
+$('manualBtn').addEventListener('click', openManual);
+$('mBack').addEventListener('click', closeManual);
+$('mDone').addEventListener('click', closeManual);
+$('mNone').addEventListener('click', () => {
+  manualSel.fixtures = [];
+  manualSel.segments = [];
+  renderManual();
+});
+// Release picked: the picked segments, or each picked light with any segments of it that are held.
+$('mRelease').addEventListener('click', () => {
+  for (const target of manualTargets()) {
+    send({ type: 'release', target });
+    if (target.segment === undefined) {
+      for (const h of heldSegmentsOf(target.fixture)) send({ type: 'release', target: { fixture: h.fixture, segment: h.segment } });
+    }
+  }
+  manualSel.segments = [];
+  renderManual();
+});
+$('mReleaseAll').addEventListener('click', () => send({ type: 'releaseAll' }));
+
+/** Keeps the panel true to the live state and the pick: chips, the plan's picks and dots, segments, summary, colours, level. */
+function renderManual() {
+  if (!manualSel.open || !layout || !state) return;
+  const picked = new Set(manualSel.fixtures);
+  for (const chip of $('mGroups').children) {
+    const ids = chip.dataset.ids ? chip.dataset.ids.split(' ') : [];
+    chip.classList.toggle('on', ids.length > 0 && ids.length === picked.size && ids.every((id) => picked.has(id)));
+  }
+  const held = heldFixtures();
+  buildManualColours();
+  for (const m of manualFix) {
+    const on = picked.has(m.f.id);
+    m.button.classList.toggle('on', on);
+    m.button.setAttribute('aria-pressed', String(on));
+    m.dot.hidden = !held.has(m.f.id);
+    const now = lightNow(m.f.id);
+    m.button.setAttribute('aria-label', `${m.f.name}, ${m.group?.name ?? 'no group'}, ${now.name} ${Math.round(now.level * 100)} %${held.has(m.f.id) ? ', held' : ''}`);
+  }
+  buildSegRow();
+  const bar = manualFix.find((m) => m.f.id === segRowFor);
+  for (const s of manualSegs) {
+    const on = manualSel.segments.includes(s.segment);
+    s.button.classList.toggle('on', on);
+    s.button.setAttribute('aria-pressed', String(on));
+    const h = heldOf(segRowFor, s.segment);
+    s.dot.hidden = !h;
+    s.button.setAttribute('aria-label', `${shortName(bar.f)} segment ${s.place + 1}${h ? ', held' : ''}`);
+  }
+
+  // The summary, and what the first picked target shows (its colour circle, the level).
+  const targets = manualTargets();
+  const first = targets[0];
+  const now = first ? lightNow(first.fixture, first.segment ?? null) : null;
+  const n = manualSel.fixtures.length;
+  const segs = manualSel.segments.length;
+  $('mSelTitle').textContent = n
+    ? `${n} ${n > 1 ? 'lights' : 'light'} picked${segs && bar ? ` · ${segs} of ${bar.cells.length} segments` : ''}`
+    : 'Tap lights on the plan to pick them';
+  const names = manualSel.fixtures.map((id) => shortName(manualFix.find((m) => m.f.id === id)?.f ?? { id }));
+  $('mSelNames').textContent = n ? `${names.join(', ')} · ${now.name}` : 'or pick a whole group above';
+  $('mPal').classList.toggle('idle', !n);
+  for (const c of manualColours) {
+    // A held light by its exact colour; one its group drives by the colour it runs (at whatever brightness).
+    const on = !!now && (c.off ? now.level === 0 : now.level > 0 && (now.light ? sameLight(c, now.light) : c.display === now.display));
+    c.button.classList.toggle('on', on);
+    c.button.setAttribute('aria-pressed', String(on));
+  }
+  const whiteOnly = n > 0 && pickedGroups().every((g) => g.whiteOnly);
+  $('mAny').className = `strip2 m-any ${whiteOnly ? 'cct' : 'hue'}`;
+  $('mAny').setAttribute('aria-label', whiteOnly ? 'Any white, warm to cool' : 'Any colour');
+  $('mAnyBtn').textContent = whiteOnly ? 'Any white …' : 'Any colour …';
+  manualLevel.dim.classList.toggle('idle', !n);
+  manualLevel.dim.style.setProperty('--c', now && now.level > 0 ? shown(now.display) : '#5a6478');
+  if (!manualLevel.dragging && performance.now() >= manualLevel.holdUntil) showManualLevel(now?.level ?? 0);
+
+  // Release picked: while something picked is held. Release all: every light held, however it was taken.
+  const pickedHeld = targets.some((t) => (t.segment === undefined
+    ? !!heldOf(t.fixture) || heldSegmentsOf(t.fixture).length > 0
+    : !!heldOf(t.fixture, t.segment)));
+  $('mRelease').disabled = !pickedHeld;
+  $('mReleaseAll').textContent = `Release all · ${held.size}`;
+  $('mReleaseAll').disabled = held.size === 0;
+  paintManual();
+}
+
 // ---- Quick looks: tabs and grid ----
 
 let quickTab = 'plain';
@@ -4192,6 +4739,7 @@ function applyPhone() {
     setPrepare(false);
     if (picker.group) closeEditor();
     closeSheet();
+    closeManual();
   } else {
     if (flash.parentElement !== $('masterFader').parentElement) $('masterFader').after(flash);
     if (tempo.parentElement !== $('quiet')) $('fadeButton').parentElement.after(tempo);

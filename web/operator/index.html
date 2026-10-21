@@ -142,6 +142,8 @@
         <h2 id="dTitle">Groups</h2>
         <!-- "drag to dim"; in Prepare "<item> · draft". -->
         <span id="dSub" class="dsub">drag to dim</span>
+        <!-- Only when operators have manual control (Settings); in Prepare it is faded and says it works live only. -->
+        <button id="manualBtn" class="hbtn" hidden>Individual lights</button>
         <button id="backBtn" class="hbtn" hidden>Back to saved</button>
         <button id="saveBtn" class="save" hidden><span class="fill"></span><span class="label"></span></button>
       </div>
@@ -372,6 +374,47 @@
       <div id="feFineBox" class="fe-fine-box" hidden></div>
       <span class="grow"></span>
       <p id="feUsed" class="fe-used"></p>
+    </section>
+    <!-- Individual lights: pick single lights (or one segment of a bar) on a plan of the stage and set their colour and level.
+         They hold until released (Release picked, Release all, Basic lights, Blackout), then fade back to their group. The whole
+         column, as the editors; live only (manual control never goes into a Prepare draft). -->
+    <section id="manual" class="block cedit mlights" aria-label="Individual lights" hidden>
+      <div class="ce-head">
+        <button id="mBack" class="ebtn">‹ Groups</button>
+        <div class="m-title">
+          <b>Individual lights</b>
+          <span>Lights you set here leave their group until you release them</span>
+        </div>
+        <span class="grow"></span>
+        <button id="mReleaseAll" class="hbtn">Release all · 0</button>
+        <button id="mDone" class="hbtn pdone">Done</button>
+      </div>
+      <div class="m-pick">
+        <span class="ds-caps">Pick</span>
+        <div id="mGroups" class="m-chips"></div>
+        <button id="mNone" class="ebtn">None</button>
+      </div>
+      <!-- The stage plan (fixture places from Patch): a button per light, its name under it and an amber dot while it is held. -->
+      <div id="mPlan" class="m-plan" role="group" aria-label="Stage plan"><span class="ds-caps m-plan-lab">Back of stage</span></div>
+      <!-- With one bar picked: its segments, in their places along the bar. -->
+      <div id="mSegRow" class="m-segrow" hidden>
+        <span id="mSegOf" class="m-segof"></span>
+        <div id="mSegs" class="m-segs" role="group"></div>
+        <span class="m-note">tap to colour single segments</span>
+      </div>
+      <div class="m-sum"><b id="mSelTitle"></b><span id="mSelNames"></span></div>
+      <!-- The picked lights' group colours, then Any colour … for a strip. -->
+      <div class="m-colours">
+        <div id="mPal" class="m-pal"></div>
+        <button id="mAnyBtn" class="hbtn" aria-expanded="false" aria-controls="mAny">Any colour …</button>
+      </div>
+      <div id="mAny" class="strip2 hue m-any" aria-label="Any colour" hidden><span id="mAnyH" class="strip-handle" hidden></span></div>
+      <div class="m-level">
+        <span class="m-lab">Level</span>
+        <div id="mLevel" class="ds-fill" role="slider" aria-label="Level of picked lights" aria-valuemin="0" aria-valuemax="100"><span id="mLevelSlab" class="ds-fill-slab"></span></div>
+        <span id="mLevelPct" class="pct"></span>
+        <button id="mRelease" class="hbtn">Release picked</button>
+      </div>
     </section>
   </main>
 
