@@ -723,9 +723,15 @@ const clampTempo = (bpm) => Math.min(TEMPO_MAX, Math.max(TEMPO_MIN, Math.round(b
 
 const tempoMenu = $('tempoMenu');
 const tempoField = $('tempoField');
+/** True while the menu closes: a refused tempo then says so in a toast, as its note goes with the menu. */
+let tempoClosing = false;
 const showTempoMenu = (open) => {
   // Closing with a typed tempo still in the field: the field's change (on blur) sets it, as Done does.
-  if (!open && document.activeElement === tempoField) tempoField.blur();
+  if (!open && document.activeElement === tempoField) {
+    tempoClosing = true;
+    tempoField.blur();
+    tempoClosing = false;
+  }
   tempoMenu.hidden = !open;
   $('tempoButton').setAttribute('aria-expanded', String(open));
   if (open) {
@@ -871,6 +877,24 @@ tempoField.addEventListener('keydown', (ev) => {
   }
 });
 tempoField.addEventListener('input', () => ($('tempoNote').hidden = true));
+// Typing replaces the tempo shown: its text is selected when the field is focused or tapped.
+let tempoSelectOnUp = false;
+tempoField.addEventListener('focus', () => {
+  tempoField.select();
+  tempoSelectOnUp = true;
+});
+// The tap that focused it would put the caret where the finger lifted; keep the selection instead.
+tempoField.addEventListener('pointerup', (ev) => {
+  if (!tempoSelectOnUp) return;
+  tempoSelectOnUp = false;
+  ev.preventDefault();
+  tempoField.select();
+});
+// Left (after its change, if any): it shows the tempo again, never a number nobody set.
+tempoField.addEventListener('blur', () => {
+  tempoSelectOnUp = false;
+  tempoField.value = String(currentTempo());
+});
 tempoField.addEventListener('change', () => {
   const text = tempoField.value.trim();
   const bpm = /^\d+$/.test(text) ? Number(text) : NaN;
@@ -882,7 +906,9 @@ tempoField.addEventListener('change', () => {
     const note = $('tempoNote');
     const why = Number.isNaN(bpm) ? 'Type a number' : `${bpm} is too ${bpm < TEMPO_MIN ? 'slow' : 'fast'}`;
     note.textContent = `${why}: tempo goes from ${TEMPO_MIN} to ${TEMPO_MAX} bpm.`;
-    note.hidden = false;
+    // Left by a tap outside, the menu closes and takes the note with it: a quiet toast says it instead.
+    if (tempoClosing || tempoMenu.hidden) toast(note.textContent, true);
+    else note.hidden = false;
     tempoField.value = String(currentTempo());
     return;
   }
