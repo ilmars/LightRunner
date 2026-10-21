@@ -619,9 +619,15 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 }
 .mfix.on { background: rgba(67, 137, 232, 0.14); border-color: rgba(67, 137, 232, 0.7); color: var(--ds-text); }
 /* The light as the stage shows it now, one cell per segment; a dark light is a faint shape. */
-.mvis { flex: none; display: flex; border-radius: 3px; overflow: hidden; background: rgba(148, 163, 184, 0.12); }
+/* The light's drawing sits in the space it covers on the plan (a turned bar's corners included), turned about its middle. */
+.mshape { flex: none; position: relative; }
+.mvis { position: absolute; display: flex; border-radius: 3px; overflow: hidden; background: rgba(148, 163, 184, 0.12); }
 .mfix.round .mvis { border-radius: 50%; }
-.mfix.vert .mvis { flex-direction: column; }
+/* An outline: one stroke per segment round its edge. */
+.mvis.outline { background: none; border-radius: 0; overflow: visible; }
+.mvis.outline polyline { fill: none; stroke-width: 3; stroke-linejoin: round; opacity: 0.85; }
+/* Beams' cones, under every button and never in the way of a tap. */
+.m-cones { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .mvis > i { flex: 1 1 0; opacity: 0.85; }
 .mname { font-size: 11px; line-height: 1; white-space: nowrap; }
 .mdot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--ds-warn); pointer-events: none; }

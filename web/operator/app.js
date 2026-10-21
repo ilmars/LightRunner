@@ -3855,18 +3855,57 @@ function buildManual() {
 
   const plan = $('mPlan');
   for (const old of manualFix) old.button.remove();
-  manualFix = planned.map(({ f, first }) => {
+  // Beams' cones go under every button, as the stage view draws them under every light.
+  let cones = plan.querySelector('.m-cones');
+  if (!cones) {
+    cones = document.createElementNS(SVG_NS, 'svg');
+    cones.classList.add('m-cones');
+    cones.setAttribute('aria-hidden', 'true');
+    plan.prepend(cones);
+  }
+  cones.replaceChildren();
+  manualFix = planned.map(({ f, first }, k) => {
     const segs = Math.max(1, f.segments ?? 1);
-    const bar = !!(f.w || f.h);
+    // As the stage view draws it (a light in a smoke group is never here; a lone "smoke" light is a spot).
+    const stored = f.shape ?? (f.w || f.h ? 'bar' : 'dot');
+    const shape = stored === 'bar' || stored === 'outline' || stored === 'beam' ? stored : 'dot';
     const button = el('button', 'mfix');
-    const vis = el('span', 'mvis');
-    // One cell per segment, in its place: segment 0 at the left or top, at the right or bottom when hung reversed.
-    const cells = Array.from({ length: segs }, () => el('i'));
-    const order = Array.from({ length: segs }, (_, k) => (f.reversed ? segs - 1 - k : k));
-    vis.append(...order.map((s) => cells[s]));
+    const wrap = el('span', 'mshape');
+    let vis, cells, cone = null;
+    if (shape === 'outline') {
+      // A strip round something: one stroke per segment, clockwise from the top left (placed in placeManual).
+      vis = document.createElementNS(SVG_NS, 'svg');
+      vis.classList.add('mvis', 'outline');
+      cells = Array.from({ length: segs }, () => document.createElementNS(SVG_NS, 'polyline'));
+      vis.append(...cells);
+    } else {
+      vis = el('span', 'mvis');
+      // One cell per segment, in its place: segment 0 at the bar's start, at its end when hung reversed.
+      cells = Array.from({ length: segs }, () => el('i'));
+      const order = Array.from({ length: segs }, (_, s) => (f.reversed ? segs - 1 - s : s));
+      vis.append(...order.map((s) => cells[s]));
+    }
+    if (shape === 'beam') {
+      const id = `mcone${k}`;
+      const grad = document.createElementNS(SVG_NS, 'linearGradient');
+      grad.id = id;
+      grad.setAttribute('gradientUnits', 'userSpaceOnUse');
+      const stops = [0, 1].map((offset) => {
+        const s = document.createElementNS(SVG_NS, 'stop');
+        s.setAttribute('offset', String(offset));
+        s.setAttribute('stop-opacity', '0');
+        grad.append(s);
+        return s;
+      });
+      const poly = document.createElementNS(SVG_NS, 'polygon');
+      poly.setAttribute('fill', `url(#${id})`);
+      cones.append(grad, poly);
+      cone = { grad, stops, poly, painted: null };
+    }
+    wrap.append(vis);
     const dot = el('span', 'mdot');
     dot.hidden = true;
-    button.append(vis, el('span', 'mname', shortName(f)), dot);
+    button.append(wrap, el('span', 'mname', shortName(f)), dot);
     button.addEventListener('click', () => {
       const k = manualSel.fixtures.indexOf(f.id);
       if (k >= 0) manualSel.fixtures.splice(k, 1); else manualSel.fixtures.push(f.id);
@@ -3874,47 +3913,75 @@ function buildManual() {
       renderManual();
     });
     plan.append(button);
-    return { f, first, group: lightGroupOf(f.id), button, vis, cells, dot, bar, round: !bar, vert: false, painted: [] };
+    return { f, first, group: lightGroupOf(f.id), button, shape, wrap, vis, cells, cone, dot, painted: [] };
   });
   placeManual();
   segRowFor = null;
   manualColoursKey = null;
 }
 
-/** Puts each light's button where the stage plan has it, sized to the light (a bar at its length), 44 px at least. */
+/**
+ * Puts each light's button where the stage plan has it, sized to the light, 44 px at least: a bar at its length and
+ * turned to its angle (the button takes the space it covers), an outline at its size, a spot or beam an 18 px circle.
+ */
 function placeManual() {
   const plan = $('mPlan');
   const W = plan.clientWidth, H = plan.clientHeight;
   if (!W || !H) return;
   const padX = 30, padTop = 30, padBottom = 30;
   const iw = W - 2 * padX, ih = H - padTop - padBottom;
+  const toPx = (p) => [padX + p.x * iw, padTop + p.y * ih];
   for (const m of manualFix) {
     const { f } = m;
-    const cx = padX + f.x * iw, cy = padTop + f.y * ih;
-    let vw = 18, vh = 18;
-    if (m.bar) {
-      vw = Math.max(8, (f.w ?? 0) * iw);
-      vh = Math.max(6, (f.h ?? 0) * ih);
+    const [cx, cy] = toPx(f);
+    // The light's drawing (vw × vh, turned by `turn` degrees) and the space it covers on the plan (bw × bh).
+    let vw = 18, vh = 18, turn = 0;
+    if (m.shape === 'bar') {
+      const [a, b] = barEnds(f).map(toPx);
+      vw = Math.max(8, Math.hypot(b[0] - a[0], b[1] - a[1]));
+      vh = Math.min(12, Math.max(6, barAxis(f).thickness * ih));
+      turn = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+    } else if (m.shape === 'outline') {
+      vw = Math.max(14, (f.w ?? 0) * iw);
+      vh = Math.max(14, (f.h ?? 0) * ih);
     }
-    m.vert = m.bar && vh > vw;
-    if (m.bar && !m.vert) vh = Math.min(vh, 12);
-    if (m.vert) vw = Math.min(vw, 10);
-    m.button.classList.toggle('round', m.round);
-    m.button.classList.toggle('vert', m.vert);
-    m.vis.style.width = `${vw}px`;
-    m.vis.style.height = `${vh}px`;
+    const t = (turn * Math.PI) / 180, cos = Math.abs(Math.cos(t)), sin = Math.abs(Math.sin(t));
+    const bw = vw * cos + vh * sin, bh = vw * sin + vh * cos;
+    m.button.classList.toggle('round', m.shape === 'dot' || m.shape === 'beam');
+    Object.assign(m.wrap.style, { width: `${bw}px`, height: `${bh}px` });
+    Object.assign(m.vis.style, {
+      width: `${vw}px`, height: `${vh}px`, left: `${(bw - vw) / 2}px`, top: `${(bh - vh) / 2}px`,
+      transform: turn ? `rotate(${turn}deg)` : '',
+    });
+    if (m.shape === 'outline') {
+      m.vis.setAttribute('viewBox', `0 0 ${vw} ${vh}`);
+      outlineCells({ left: 1.5, top: 1.5, width: vw - 3, height: vh - 3 }, m.cells.length, f.reversed).forEach((points, s) => {
+        m.cells[s].setAttribute('points', points.map((p) => p.join(',')).join(' '));
+      });
+    }
     // The light, 5 px, then its 11 px name; the light's middle sits at its place on the plan.
-    const content = vh + 16;
-    // A bar's button is its length (and a little), so bars hung end to end keep apart.
-    const w = Math.max(44, m.bar && !m.vert ? vw + 8 : 44);
+    const content = bh + 16;
+    // A bar's button is as long as the bar (and a little), so bars hung end to end keep apart.
+    const w = Math.max(44, bw + 8);
     const h = Math.max(44, content + 8);
-    m.box = { cx, cy, left: cx - w / 2, top: cy - vh / 2 - (h - content) / 2, w, h };
+    m.box = { cx, cy, left: cx - w / 2, top: cy - bh / 2 - (h - content) / 2, w, h, lift: bh / 2 + (h - content) / 2 };
   }
-  spreadBoxes(manualFix.filter((m) => !m.bar || m.vert).map((m) => m.box));
+  spreadBoxes(manualFix.filter((m) => m.box.w <= 44).map((m) => m.box));
   separateBoxes(manualFix.map((m) => m.box), W, H);
+  const cones = plan.querySelector('.m-cones');
+  cones?.setAttribute('viewBox', `0 0 ${W} ${H}`);
   for (const m of manualFix) {
     const { left, top, w, h } = m.box;
     Object.assign(m.button.style, { left: `${left}px`, top: `${top}px`, width: `${w}px`, height: `${h}px` });
+    if (m.cone) {
+      // The cone starts at the lamp's circle, wherever its button had to move to.
+      const dx = left + w / 2 - m.box.cx, dy = top + m.box.lift - m.box.cy;
+      const c = beamCone(m.f);
+      const at = (p) => toPx(p).map((v, k) => v + (k ? dy : dx));
+      m.cone.poly.setAttribute('points', [c.lamp, c.left, c.right].map((p) => at(p).join(',')).join(' '));
+      const [[x1, y1], [x2, y2]] = [at(c.lamp), at(c.tip)];
+      Object.entries({ x1, y1, x2, y2 }).forEach(([k, v]) => m.cone.grad.setAttribute(k, String(v)));
+    }
   }
 }
 
@@ -3992,6 +4059,26 @@ function visualColour(index) {
   return Math.max(r, g, b) < 10 ? '' : `rgb(${r},${g},${b})`;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+/** A dark light on the plan: a faint shape. */
+const DARK_SHAPE = 'rgba(148, 163, 184, 0.12)';
+
+/**
+ * A beam's cone as the stage view draws it: the light's colour, at most 22 % at the lamp and gone at the tip. When the
+ * light is off, a faint grey cone still shows where it points.
+ */
+function paintCone(cone, index) {
+  const [r, g, b] = shownRgb(visual[index * 3] ?? 0, visual[index * 3 + 1] ?? 0, visual[index * 3 + 2] ?? 0);
+  const lit = Math.max(r, g, b) / 255;
+  const [colour, alpha] = lit > 0.02 ? [`rgb(${r},${g},${b})`, 0.22 * lit] : ['rgb(148,163,184)', 0.06];
+  const key = `${colour} ${alpha.toFixed(3)}`;
+  if (cone.painted === key) return;
+  cone.painted = key;
+  cone.stops[0].setAttribute('stop-color', colour);
+  cone.stops[0].setAttribute('stop-opacity', alpha.toFixed(3));
+  cone.stops[1].setAttribute('stop-color', colour);
+}
+
 /** Each light's cells (and the segment row's) in the colours the stage shows now; only what changed is touched. */
 function paintManual() {
   if (!manualSel.open) return;
@@ -4000,9 +4087,12 @@ function paintManual() {
       const c = visualColour(m.first + s);
       if (m.painted[s] !== c) {
         m.painted[s] = c;
-        cell.style.background = c;
+        // An outline's cells are strokes; a dark one is the faint shape, as elsewhere on the plan.
+        if (m.shape === 'outline') cell.style.stroke = c || DARK_SHAPE;
+        else cell.style.background = c;
       }
     });
+    if (m.cone) paintCone(m.cone, m.first);
   }
   const bar = manualFix.find((m) => m.f.id === segRowFor);
   if (bar) for (const s of manualSegs) s.cell.style.background = visualColour(bar.first + s.segment);
