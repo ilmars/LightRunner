@@ -264,7 +264,8 @@ test('a song keeps its key when the running order changes; a deleted song frees 
   await new Promise((r) => ws.once('open', r));
   const command = (cmd: unknown) => new Promise<any>((resolve) => {
     const ref = Math.random();
-    ws.on('message', function on(data) {
+    ws.on('message', function on(data, binary) {
+      if (binary) return; // the stage view's frames
       const msg = JSON.parse(String(data));
       if (msg.type === 'result' && msg.ref === ref) {
         ws.off('message', on);
@@ -452,7 +453,8 @@ async function tablet(url: string, cookie?: string) {
   let ref = 0;
   const command = (cmd: unknown) => new Promise<string | null>((resolve) => {
     const mine = ++ref;
-    ws.on('message', function on(data) {
+    ws.on('message', function on(data, binary) {
+      if (binary) return; // the stage view's frames
       const msg = JSON.parse(String(data));
       if (msg.type === 'result' && msg.ref === mine) {
         ws.off('message', on);
