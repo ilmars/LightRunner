@@ -874,12 +874,13 @@ document.addEventListener('keydown', (ev) => {
 /** A sentence ends with a full stop. */
 const sentence = (text) => (/[.!?]$/.test(text) ? text : `${text}.`);
 
-/** What the pill and its explanation say: `{ pill, title, text }`, or null when nothing is wrong. */
+/** What the pill and its explanation say: `{ pill, short, title, text }` (short: the phone's pill), or null when nothing is wrong. */
 function problemWords(s) {
   const notYou = 'It isn\'t something you did.';
   if (s.output === 'off') {
     return {
       pill: 'Not sending to the lights',
+      short: 'Not sending',
       title: 'The lights aren\'t getting any commands',
       text: `Light Runner is working, but its output to the lights is switched off, so the stage won't follow your taps. Usually another desk, such as Lightkey, has the lights for now. ${notYou}`,
     };
@@ -888,12 +889,14 @@ function problemWords(s) {
   if (s.outputProblemKind === 'other-desk') {
     return {
       pill: 'Another desk is sending',
+      short: 'Another desk',
       title: 'Another desk is also sending to the lights',
       text: `${sentence(s.outputProblem ?? 'Another desk is also sending')} The lights may follow it instead of your taps. ${notYou}`,
     };
   }
   return {
     pill: 'Lights not answering',
+    short: 'Not answering',
     title: 'The lights aren\'t answering',
     text: `${sentence(s.outputProblem ?? 'The lighting network box is not answering')} Light Runner keeps sending, but the stage may not follow your taps. ${notYou}`,
   };
@@ -940,6 +943,7 @@ function render() {
   if (problem) {
     // While preparing the bar is busier: the pill just says there is a problem.
     $('outputText').textContent = prep.on ? 'Problem' : problem.pill;
+    $('outputShort').textContent = problem.short;
     note.setAttribute('aria-label', `${problem.pill}: what it means`);
     $('problemTitle').textContent = problem.title;
     $('problemText').textContent = problem.text;
@@ -1531,7 +1535,8 @@ function buildEffectGrid(group) {
       : 'No group here is a line of lights, so every group takes colours only.';
     return;
   }
-  $('fxLab').textContent = `Effects · tap to run on ${group.name}, hold to edit`;
+  // ", hold to edit" is left out on the phone (no editing there).
+  $('fxLab').replaceChildren(`Effects · tap to run on ${group.name}`, el('span', 'hold-hint', ', hold to edit'));
   for (const p of group.presets.filter((x) => x.effect)) {
     const b = el('button', 'pc fx');
     b.dataset.preset = p.id;

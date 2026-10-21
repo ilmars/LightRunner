@@ -816,37 +816,45 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
 }
 
 /* ---- Phone remote: narrow screens (portrait phones, and phones on their side) ----
-   The same page as a remote in the director's hand: Order, Groups and Looks tabs,
-   Master and the dock (Undo, Blackout, Next) always visible, and nothing that saves
-   or edits the show. See docs/superpowers/specs/2026-10-19-phone-remote-design.md. */
+   The same page as a remote in the director's hand, as the designer's phone artboard: "On stage" with the
+   problem pill, Order / Groups / Looks tabs, one panel for the tab, then Master and Undo · Basic lights · Next ·
+   Blackout always visible. Nothing here saves or edits the show. See docs/superpowers/specs/2026-10-19-phone-remote-design.md
+   and the restyle design (2026-10-20). */
 .phone-tabs { display: none; }
+/* Words only the phone shows (the short problem pill), or only the iPad. */
+.phone-only { display: none; }
 @media (max-width: 700px), (max-height: 500px) {
   body {
-    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 8px;
-    padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 10px;
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   }
-  /* Top line: what's on stage, "changed", and a status dot (tap it for the explanation). */
-  .topbar { grid-column: 1; min-height: 56px; gap: 10px; padding: 0 6px 0 14px; }
+  /* Header: "On stage" over the name and "● changed", the problem pill at the right (short words; tap it for the explanation). */
+  .topbar { grid-column: 1; min-height: 64px; gap: 10px; padding: 10px 12px 10px 16px; border-radius: 16px; }
+  .head-line { gap: 8px; }
   .head-name { font-size: 20px; }
-  /* Smoke stays in the bar: the machine can run while the lights have a problem. */
+  .changed { font-size: 12px; }
+  /* Smoke stays in the header: the machine can run while the lights have a problem. */
   .head-note, #fading, #flashNote { display: none !important; }
   #quiet, .clock, .gear, #modeSwitch, #goBtn, .grow { display: none !important; }
   .now { flex: 1; }
-  .problem-pill { padding: 0 12px; }
+  .problem-pill { padding: 0 12px; font-size: 12px; }
   .problem-pill #outputText { display: none; }
-  .problem-box { position: fixed; top: 72px; left: 10px; right: 10px; width: auto; max-width: none; }
+  .phone-only { display: revert; }
+  .not-phone { display: none; }
+  /* The explanation: the whole width, under the header. */
+  .problem-box { position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 74px); left: 12px; right: 12px; width: auto; max-width: none; }
 
   .phone-tabs {
-    display: flex; gap: 2px; padding: 2px; border-radius: var(--ds-r-tile);
+    display: flex; gap: 2px; padding: 2px; border-radius: 12px;
     background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge);
   }
   .phone-tabs button {
-    flex: 1; min-height: 44px; border: 0; border-radius: var(--ds-r-small); background: transparent;
-    color: var(--ds-muted); font-size: 15px; font-weight: 500;
+    flex: 1; min-height: 44px; border: 0; border-radius: 9px; background: transparent;
+    color: var(--ds-muted); font-size: 14px;
   }
-  .phone-tabs button.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+  .phone-tabs button.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px rgba(67, 137, 232, 0.45); }
 
-  /* One tab at a time fills the middle. */
+  /* One tab at a time fills the middle panel. */
   .left, .right { grid-column: 1; grid-row: 3; min-height: 0; }
   .right { grid-template-rows: minmax(0, 1fr); }
   .stage-box { display: none; }
@@ -857,27 +865,41 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   #editBtn, #qEditBtn, #orderFoot, #saveBtn, #pEditCur, #pAddOpen, #pAdd, #colEdit, #fxEdit, .pc.newfx, .ql.newq { display: none !important; }
   /* Individual lights needs the iPad's room for the stage plan. */
   #manualBtn, #manual { display: none !important; }
-  /* Effects can be picked here, but their settings stay on the iPad. */
-  #fxCard { display: none !important; }
+  /* Effects can be picked here, but their settings stay on the iPad; so does holding a tile to edit it. */
+  #fxCard, .hold-hint { display: none !important; }
 
-  /* Order: big rows. */
-  .order { padding: 6px; }
-  .order-head { min-height: 32px; }
-  .item { min-height: 52px; font-size: 18px; }
+  /* Order: the list on its own (the tab names it), big rows. */
+  .order { padding: 8px; gap: 4px; }
+  .order-head, .sep { display: none; }
+  .order-list { gap: 4px; }
+  .item { min-height: 52px; padding: 0 12px; font-size: 16px; }
 
-  /* Groups: one group per row; Flash (moved here from the bottom bar) along the top. */
-  .details { padding: 10px 12px 12px; gap: 8px; }
-  .row { grid-template-columns: minmax(0, 1fr) minmax(0, 150px) 52px; gap: 4px 10px; padding: 6px 0 10px; }
-  .row .ds-fill { grid-column: 1 / -1; grid-row: 2; }
-  /* The Flash buttons share the width, so All and every group fit without scrolling. */
-  /* The tempo row at the top of Groups: the readout and Tap share the width, as tiles. */
-  #details .tempo { flex: none; gap: 6px; }
+  /* Groups: per group a line with the name, the colour (tap for the picker) and the level, then a 44 px slider.
+     The tempo row and Flash (moved here from the top bar and the bottom bar) along the top. */
+  .details { padding: 8px; gap: 4px; }
+  .dhead { display: none; }
+  /* Back to saved, when the item on stage is changed: on its own line at the right. */
+  .dhead:has(> #backBtn:not([hidden])) { display: flex; justify-content: flex-end; min-height: 0; padding: 0 0 4px; }
+  .dhead h2, .dsub { display: none; }
+  .row {
+    grid-template-columns: minmax(0, 1fr) auto 48px; gap: 6px 8px; min-height: 0; padding: 8px 6px 10px;
+    border-top: 0; border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  }
+  .row .ds-fill { grid-column: 1 / -1; grid-row: 2; height: 44px; }
+  .row .ds-fill::after { display: none; }
+  .row .pct { font-size: 14px; }
+  .chip { justify-self: end; max-width: 200px; gap: 8px; padding: 0 2px 0 8px; border: 0; background: transparent; color: var(--ds-muted); font-size: 13px; }
+  .chip i { width: 12px; height: 12px; }
+  .chip span { flex: 0 1 auto; }
+  .row .smoke-cell { justify-self: end; }
+  #details .tempo { flex: none; gap: 6px; padding: 0 2px 4px; }
   #details .tempo .fadepick { flex: 1 1 0; min-width: 0; }
   #details .tempo .fade-btn { width: 100%; }
-  #details .tempo .tap-btn { flex: 1 1 0; font-size: 15px; }
+  #details .tempo .tap-btn { flex: 1 1 0; font-size: 14px; }
   #details .tempo-menu { left: 0; right: auto; }
   #details .tempo-menu button { flex: 1 1 0; min-width: 64px; }
-  #details .flash-area { flex: none; justify-content: stretch; gap: 6px; }
+  /* The Flash buttons share the width, so All and every group fit without scrolling. */
+  #details .flash-area { flex: none; justify-content: stretch; gap: 6px; padding: 0 2px 4px; }
   #details .flash-area .flash-label { display: none; }
   #details .flash-area button { flex: 1 1 0; width: auto; min-width: 0; min-height: 44px; }
   .pgrid, .pgrid.fxgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -889,33 +911,55 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   .cpick .cur { grid-area: cur; } .cpick #pTabs { grid-area: tabs; }
   #pExtras { grid-template-columns: minmax(0, 1fr); }
 
-  /* Looks: two columns. */
-  .quick-looks { padding: 10px 12px 12px; }
-  .qhead { flex-wrap: wrap; gap: 8px; }
-  .sec-sub, .qhead .grow { display: none; }
-  .qgrid { max-height: none; flex: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 60px; }
+  /* Looks: the quick-look tabs across the top, then two columns of tiles. */
+  .quick-looks { padding: 8px; gap: 8px; }
+  .qhead .sec-title, .sec-sub, .qhead .grow { display: none; }
+  .qhead .qtabs { flex: 1; }
+  .qhead .qtabs .tab { flex: 1; font-size: 14px; }
+  .qgrid { max-height: none; flex: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(64px, auto); }
+  .ql { padding: 10px; font-size: 14px; }
 
-  /* Master on its own line, then the dock: Undo · Blackout · a wide Next. */
-  .bottom { grid-column: 1; display: grid; grid-template-columns: 1fr 1fr 2fr; grid-template-rows: auto 64px; align-items: stretch; gap: 8px; padding: 8px; }
-  /* Basic lights joins the dock with the phone's restyle; until then it stays on the iPad. */
-  .bdiv, .bottom > .grow, #basicBtn { display: none; }
-  .master { grid-column: 1 / -1; width: auto; padding: 2px 4px 4px; }
-  .master-track { height: 44px; }
-  .undo { order: 1; } .blackout-btn { order: 2; } .next { order: 3; }
-  .action, .next, .blackout-btn { min-width: 0; min-height: 0; padding: 0 12px; }
-  .next .next-name { max-width: 100%; }
-  .toast { bottom: 172px; max-width: calc(100vw - 24px); }
+  /* Footer: Master on its own line (label, slider, level), then Undo · Basic lights · Next · Blackout. */
+  .bottom {
+    grid-column: 1; display: grid; grid-template-columns: 0.8fr 1fr 1.3fr 1fr; grid-template-rows: auto 52px;
+    align-items: stretch; gap: 10px 6px; padding: 10px; border-radius: 16px;
+  }
+  .bdiv, .bottom > .grow { display: none; }
+  .master { grid-column: 1 / -1; display: grid; grid-template-columns: 54px minmax(0, 1fr) 46px; align-items: center; gap: 10px; width: auto; }
+  .master-label { display: contents; }
+  .master-label .ds-caps { grid-column: 1; grid-row: 1; }
+  .master-label b { grid-column: 3; grid-row: 1; text-align: right; }
+  .master-track { grid-column: 2; grid-row: 1; height: 44px; border-radius: 12px; }
+  .action, .next, .blackout-btn { min-width: 0; min-height: 52px; padding: 0 6px; }
+  .undo svg, .basic small { display: none; }
+  .basic { align-items: center; text-align: center; line-height: 1.2; }
+  .next { align-items: center; }
+  .next .next-name { max-width: 100%; font-size: 14px; }
+  .blackout-btn .label { font-size: 13px; }
+  .blackout-btn small { font-size: 10px; }
+  .toast { bottom: 156px; max-width: calc(100vw - 24px); }
 }
-/* A phone on its side: too short for tabs, content, Master and the dock stacked. The tab's
-   content goes on the left; Master and the dock become a column on the right. */
+/* A phone on its side: too short for the header, tabs, the list and the footer stacked. The tab's panel
+   goes on the left; Master (its label over the slider) and the four buttons, two by two, on the right. */
 @media (max-height: 500px) and (orientation: landscape) {
-  body { grid-template-columns: minmax(0, 1fr) 240px; grid-template-rows: auto auto minmax(0, 1fr); }
-  .topbar { grid-column: 1 / -1; }
+  body { grid-template-columns: minmax(0, 1fr) 240px; grid-template-rows: auto auto minmax(0, 1fr); gap: 8px; }
+  .topbar { grid-column: 1 / -1; min-height: 60px; padding-top: 8px; padding-bottom: 8px; }
+  .problem-box { top: calc(max(12px, env(safe-area-inset-top)) + 68px); }
   .phone-tabs { grid-column: 1; grid-row: 2; }
   .left, .right { grid-column: 1; grid-row: 3; }
-  .bottom { grid-column: 2; grid-row: 2 / 4; grid-template-columns: 1fr 1fr; grid-template-rows: auto minmax(52px, 1fr) minmax(52px, 1fr); align-content: stretch; }
-  .master { grid-column: 1 / -1; }
-  .undo { grid-column: 1; grid-row: 2; } .blackout-btn { grid-column: 2; grid-row: 2; }
-  .next { grid-column: 1 / -1; grid-row: 3; }
+  .bottom { grid-column: 2; grid-row: 2 / 4; grid-template-columns: 1fr 1fr; grid-template-rows: auto minmax(52px, 1fr) minmax(52px, 1fr); align-content: stretch; gap: 8px 6px; }
+  /* Groups: the tempo row and Flash share a line, and each group is one line (name, colour, slider, level). */
+  #details { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); grid-template-rows: auto auto minmax(0, 1fr); column-gap: 8px; }
+  #details > .dhead { grid-column: 1 / -1; }
+  #details > .tempo { grid-column: 1; grid-row: 2; }
+  #details > .flash-area { grid-column: 2; grid-row: 2; }
+  #details > .rows { grid-column: 1 / -1; grid-row: 3; }
+  .row { grid-template-columns: minmax(0, 120px) minmax(0, 150px) minmax(0, 1fr) 48px; padding: 6px; }
+  .row .ds-fill { grid-column: auto; grid-row: auto; }
+  .chip, .row .smoke-cell { justify-self: start; }
+  .qgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .master { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; }
+  .master-label b { grid-column: 2; }
+  .master-track { grid-column: 1 / -1; grid-row: 2; }
   .toast { bottom: 16px; }
 }
