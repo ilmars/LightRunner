@@ -877,22 +877,20 @@ tempoField.addEventListener('keydown', (ev) => {
   }
 });
 tempoField.addEventListener('input', () => ($('tempoNote').hidden = true));
-// Typing replaces the tempo shown: its text is selected when the field is focused or tapped.
-let tempoSelectOnUp = false;
-tempoField.addEventListener('focus', () => {
-  tempoField.select();
-  tempoSelectOnUp = true;
-});
-// The tap that focused it would put the caret where the finger lifted; keep the selection instead.
-tempoField.addEventListener('pointerup', (ev) => {
-  if (!tempoSelectOnUp) return;
-  tempoSelectOnUp = false;
-  ev.preventDefault();
-  tempoField.select();
+// Typing replaces the tempo shown: its text is selected when the field gets focus, and again at the end of the
+// tap that gave it focus (on touch, focus comes after the finger lifts, and the tap would put the caret back).
+// A tap in a field that already has focus moves the caret as usual.
+const selectTempo = () => tempoField.setSelectionRange(0, tempoField.value.length);
+let tempoFocusTap = false;
+tempoField.addEventListener('pointerdown', () => (tempoFocusTap = document.activeElement !== tempoField));
+tempoField.addEventListener('focus', selectTempo);
+tempoField.addEventListener('click', () => {
+  if (tempoFocusTap) selectTempo();
+  tempoFocusTap = false;
 });
 // Left (after its change, if any): it shows the tempo again, never a number nobody set.
 tempoField.addEventListener('blur', () => {
-  tempoSelectOnUp = false;
+  tempoFocusTap = false;
   tempoField.value = String(currentTempo());
 });
 tempoField.addEventListener('change', () => {
