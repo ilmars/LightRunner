@@ -385,18 +385,14 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .labrow .lab2 { margin: 4px 2px 0; }
 .labrow .ds-caps { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .labrow .ebtn:disabled, .labrow .hbtn:disabled { opacity: 0.4; }
-.pill-add { flex: none; min-height: 40px; }
 .padd {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 14px; flex: none; padding: 6px 12px;
   border-radius: var(--ds-r-tile); background: var(--ds-tile-fill); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
-.padd[hidden], .pill-add[hidden], .pswitch[hidden] { display: none; }
-/* The colour editor or ＋ New colour open: Any colour gives way to it. */
-.pcol.editing #pAnyRow, .pcol.editing #pAny { display: none; }
+.padd[hidden], .pswitch[hidden] { display: none; }
+/* The effect open in the effect editor. */
 .pc.editing { border-color: var(--ds-accent); }
 .ghost.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.pedit .pe-strip { grid-column: 1 / -1; height: 40px; }
-.pe-strip[hidden] { display: none; }
 .pe-used { grid-column: 1 / -1; margin: 0 2px; font-size: var(--ds-fs-label); color: var(--ds-muted); }
 .pedit .padd-btns { grid-column: 2; justify-self: end; }
 .ghost.danger.armed { color: var(--ds-danger-text); background: var(--ds-danger-fill); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
@@ -404,12 +400,6 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .padd-top .qs-name { flex: 1; min-width: 0; }
 .padd-sw { flex: none; width: 28px; height: 28px; border-radius: 8px; opacity: 0.8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
 .padd-btns { display: flex; align-items: center; gap: 8px; }
-/* ＋ New colour: its own strip and White, Amber and UV sliders across the form. */
-.pa-strip, .pa-extras, .pa-row { grid-column: 1 / -1; }
-.pa-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; }
-.pa-row[hidden] { display: none; }
-.pa-strip { margin: 4px 0; }
-.pa-strip[hidden] { display: none; }
 /* A switch in the picker's quiet style: faint track, blue tint when on. */
 .pswitch { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; color: var(--ds-muted-on); font-size: 15px; cursor: pointer; }
 .pswitch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
@@ -426,8 +416,6 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .pextras .pct { font-size: var(--ds-fs-value); color: var(--ds-text); font-variant-numeric: tabular-nums; text-align: right; padding-right: 4px; }
 .pextras .pct.zero { color: var(--ds-muted); }
 .pextras .ds-fill { grid-column: 1 / -1; }
-/* Editing a colour: the White, Amber and UV sliders give way to the editor too. */
-.pcol.editing #pExtras { display: none; }
 .strip-handle { position: absolute; top: 4px; bottom: 4px; left: 0; width: 4px; background: #c9ccd2; border-radius: 2px; box-shadow: 0 0 0 1px #000; }
 /* The picker's Any colour strip: 40 px, its colours dimmed, a light line for the handle that stands out above and below. */
 #pAny { height: 40px; border-radius: 12px; box-shadow: none; overflow: visible; }
@@ -438,6 +426,72 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 #pExtras .xcell { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
 #pExtras .lab2, #pExtras .pct, #pExtras .pct.zero { margin: 0; padding: 0; font-size: 12px; color: var(--ds-muted); }
 #pExtras .ds-fill { flex: 1 0 100%; height: 44px; }
+/* ---- Colour editor: the whole right column (Quick looks and Groups give way), as the mockup's colour editor ---- */
+.right.ce-open { grid-template-rows: minmax(0, 1fr); }
+.right.ce-open > #quickLooks, .right.ce-open > #details { display: none; }
+.cedit {
+  display: flex; flex-direction: column; gap: 12px; padding: 10px 16px 14px;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--ds-elevated) transparent;
+}
+.cedit[hidden] { display: none; }
+.cedit > .grow { flex: 1; }
+/* Header: ‹ <group>, Name, Cancel, Save. */
+.ce-head { display: flex; align-items: center; gap: 10px; flex: none; min-width: 0; }
+.ce-back { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.ce-name { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ce-name > span { color: var(--ds-muted); font-size: 12px; }
+.ce-name input {
+  flex: 1; min-width: 0; height: 44px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--ds-edge); border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18); color: var(--ds-text); font: inherit; font-size: 16px; font-weight: 600; user-select: text; -webkit-user-select: text;
+}
+.ce-name input:focus { outline: none; border-color: var(--ds-accent); }
+.ce-name input::placeholder { color: var(--ds-muted); font-weight: 400; }
+.ce-cancel { flex: none; min-height: 44px; padding: 0 14px; border: 1px solid var(--ds-edge); border-radius: 10px; background: transparent; color: var(--ds-text); font-size: 13px; }
+.ce-save { flex: none; min-height: 44px; padding: 0 18px; border: 1px solid rgba(67, 137, 232, 0.5); border-radius: 10px; background: var(--ds-tile-fill-on); color: var(--ds-text); font-size: 14px; font-weight: 600; }
+.ce-cancel:active, .ce-save:active { background: var(--ds-elevated); }
+.ce-save:disabled { opacity: 0.4; }
+/* The preview card: the colour's swatch, "<colour> on <group>" (or "New colour for <group>") and what saving does. */
+.ce-card { flex: none; display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 14px; background: rgba(0, 0, 0, 0.18); border: 1px solid var(--ds-edge); }
+.ce-sw { flex: none; width: 56px; height: 36px; border-radius: 10px; opacity: 0.82; }
+.ce-sw.off { background: #05080E; opacity: 1; box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.3); }
+.ce-card-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ce-card-text b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ce-card-text span { color: var(--ds-muted); font-size: 12px; }
+/* The rows: a 96 px muted label, then the control. */
+.ce-rows { flex: none; display: flex; flex-direction: column; gap: 12px; }
+.ce-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 12px; }
+.ce-row[hidden] { display: none; }
+.ce-row-top { align-items: start; }
+.ce-lab { color: var(--ds-muted); font-size: 13px; }
+.ce-colour { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* The strip, dimmed, with a light line for the colour that stands out above and below (as Any colour's). */
+.ce-strip { flex: 1; height: 44px; border-radius: 12px; box-shadow: none; overflow: visible; }
+.ce-strip::before { border-radius: 12px; }
+.ce-strip .strip-handle { top: -3px; bottom: -3px; width: 3px; background: #E3E8F0; box-shadow: none; }
+.ce-chip { flex: none; min-height: 44px; padding: 0 12px; border: 1px solid var(--ds-edge); border-radius: 9px; background: transparent; color: var(--ds-muted); font-size: 13px; white-space: nowrap; }
+.ce-chip.on { color: var(--ds-text); background: var(--ds-tile-fill-on); border-color: rgba(67, 137, 232, 0.45); }
+.ce-chip[hidden] { display: none; }
+/* White, Amber and UV, three to a row: "White 0 %" over a 44 px fill slider, as in the picker. */
+.ce-extras { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 0; }
+.ce-extras .xcell { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.ce-extras .lab2, .ce-extras .pct, .ce-extras .pct.zero { margin: 0; padding: 0; font-size: 12px; color: var(--ds-muted); }
+.ce-extras .ds-fill { flex: 1 0 100%; height: 44px; }
+/* Brightness: the range inside at the left, the level beside the slider (never over it). */
+.ce-level { display: grid; grid-template-columns: minmax(0, 1fr) 58px; align-items: center; gap: 12px; }
+.ce-range { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ds-muted); font-size: 12px; pointer-events: none; }
+.ce-level .pct { font-size: 14px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+/* Fade into it and Apply to: the segmented style of the picker's tabs, 44 px. */
+.ce-seg { justify-self: start; flex-wrap: wrap; border-radius: 12px; }
+.ce-seg > button { min-height: 44px; padding: 0 12px; font-size: 13px; white-space: nowrap; }
+.ce-seg > button.on { box-shadow: inset 0 0 0 1px rgba(67, 137, 232, 0.45); }
+.ce-used { font-size: 13px; line-height: 1.5; }
+/* Delete colour (a second tap deletes) and one line on what it does. */
+.ce-del { flex: none; display: flex; align-items: center; gap: 12px; }
+.ce-del[hidden] { display: none; }
+.ce-delete { flex: none; min-height: 44px; padding: 0 14px; border: 1px solid rgba(227, 106, 111, 0.3); border-radius: 10px; background: transparent; color: var(--ds-danger-text); font-size: 13px; white-space: nowrap; }
+.ce-delete.armed { background: var(--ds-danger-fill); border-color: var(--ds-danger-edge); }
+.ce-delete:disabled { opacity: 0.4; }
+.ce-delnote { min-width: 0; color: var(--ds-muted); font-size: 12px; }
 /* ---- New quick look sheet (same cover as the colour picker) ---- */
 .lab-note { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .qs-name {
@@ -519,9 +573,6 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .fxedit .fxset { padding-top: 4px; border-top: 0; }
 /* The effect moving along the group's lights, on the stage picture's dark ground; app.js draws it mixed down like a swatch. */
 .fe-strip { display: block; width: 100%; height: 32px; margin: 6px 0 2px; border-radius: var(--ds-r-tile); background: #06080c; box-shadow: var(--ds-shadow-inset); }
-/* The colour editor's Brightness and Fade: the same quiet rows as an effect's settings, under the colour strip. */
-.pedit .pe-set { grid-column: 1 / -1; padding-top: 4px; border-top: 0; }
-.pe-set .fxrow[hidden] { display: none; }
 .fe-kind { flex-wrap: wrap; justify-self: start; }
 .fe-kind > button { min-height: 44px; }
 /* The group's colours to choose from: a tapped one shows its place in the order. */
@@ -678,7 +729,7 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   body[data-tab="groups"] #quickLooks, body[data-tab="looks"] #details { display: none; }
 
   /* A remote doesn't change the prepared show. */
-  #editBtn, #qEditBtn, #orderFoot, #saveBtn, #pEditCur, #pAddOpen, #pAdd, #pEdit, #fxEdit, .pc.newfx, .ql.newq { display: none !important; }
+  #editBtn, #qEditBtn, #orderFoot, #saveBtn, #pEditCur, #pAddOpen, #pAdd, #colEdit, #fxEdit, .pc.newfx, .ql.newq { display: none !important; }
   /* Effects can be picked here, but their settings stay on the iPad. */
   #fxCard { display: none !important; }
 

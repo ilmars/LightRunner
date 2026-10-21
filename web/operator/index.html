@@ -146,8 +146,8 @@
         <button id="saveBtn" class="save" hidden><span class="fill"></span><span class="label"></span></button>
       </div>
       <div id="groupRows" class="rows"></div>
-      <!-- The colour picker: replaces the Groups panel (Quick looks stay). No Edit mode: Edit this colour, ＋ New colour,
-           ＋ Keep as a colour, ＋ New effect and All settings open the editors. -->
+      <!-- The colour picker: replaces the Groups panel (Quick looks stay). No Edit mode: Edit this colour and ＋ New colour
+           open the colour editor (below, the whole column); ＋ Keep as a colour, ＋ New effect and All settings open forms here. -->
       <div id="picker" class="picker cpick" hidden>
         <div class="phead">
           <button id="pBack" class="ebtn">‹ Groups</button>
@@ -174,59 +174,12 @@
           </div>
           <div id="pAny" class="strip2 hue" aria-label="Any colour"><span id="pAnyH" class="strip-handle" hidden></span></div>
           <div id="pExtras" class="pextras" hidden></div>
-          <!-- The colour editor: Edit this colour opens it on the group's current colour, prefilled. -->
-          <div id="pEdit" class="padd pedit" hidden>
-            <div class="padd-top">
-              <i id="peSw" class="padd-sw"></i>
-              <input id="peName" class="qs-name" type="text" maxlength="40" placeholder="Name" aria-label="Name" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
-            </div>
-            <div id="peStrip" class="strip2 hue pe-strip" aria-label="Change the colour"><span id="peH" class="strip-handle" hidden></span></div>
-            <!-- Brightness (hidden for Off, effects and colours with more than one layer) and the colour's own fade. Built on in app.js. -->
-            <div class="fxset pe-set" aria-label="Brightness and fade">
-              <div id="peLevelRow" class="fxrow">
-                <span class="fxitem fxsize">
-                  <span class="lab2">Brightness</span>
-                  <div id="peLevel" class="ds-fill" role="slider" aria-label="Brightness" aria-valuemin="5" aria-valuemax="100"><span id="peLevelSlab" class="ds-fill-slab"></span></div>
-                  <span id="peLevelPct" class="pct"></span>
-                </span>
-              </div>
-              <div class="fxrow">
-                <span class="fxitem">
-                  <span class="lab2">Fade</span>
-                  <div id="peFade" class="ds-seg" role="radiogroup" aria-label="Fade into this colour"></div>
-                </span>
-              </div>
-            </div>
-            <p id="peUsed" class="pe-used"></p>
-            <label id="peSharedWrap" class="pswitch" hidden>
-              <input id="peShared" type="checkbox" role="switch">
-              <span class="track"><span class="knob"></span></span>
-              <span id="peSharedText">Change it everywhere</span>
-            </label>
-            <label id="peSameWrap" class="pswitch" hidden>
-              <input id="peSame" type="checkbox" role="switch">
-              <span class="track"><span class="knob"></span></span>
-              <span>Change in every group with this name</span>
-            </label>
-            <div class="padd-btns">
-              <button id="peDelete" class="ghost danger">Delete</button>
-              <button id="peCancel" class="ghost">Cancel</button>
-              <button id="peSave" class="done">Save</button>
-            </div>
-          </div>
+          <!-- ＋ Keep as a colour: a name and Add to every group for the strip pick (White, Amber and UV kept). -->
           <div id="pAdd" class="padd" hidden>
             <div class="padd-top">
               <i id="paSw" class="padd-sw"></i>
               <input id="paName" class="qs-name" type="text" maxlength="40" placeholder="e.g. Deep blue" aria-label="Name" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
             </div>
-            <!-- ＋ New colour: the colour is picked here, never on stage; White, Amber and UV for groups that have them. -->
-            <div id="paStripRow" class="pa-row" hidden>
-              <p class="lab2">Colour</p>
-              <!-- Only once a colour is picked: takes it off again (White, Amber or UV alone). -->
-              <button id="paNoColour" class="ghost pill-add" hidden>No colour</button>
-            </div>
-            <div id="paStrip" class="strip2 hue pa-strip" aria-label="Pick the colour" hidden><span id="paH" class="strip-handle" hidden></span></div>
-            <div id="paExtras" class="pextras pa-extras" hidden></div>
             <label class="pswitch">
               <input id="paAll" type="checkbox" role="switch">
               <span class="track"><span class="knob"></span></span>
@@ -316,6 +269,64 @@
           </label>
           <p id="qsStageNote" class="lab-note"></p>
         </div>
+      </div>
+    </section>
+    <!-- The colour editor, for a listed colour (Edit this colour) or a new one (＋ New colour): it takes the whole column
+         (Quick looks and Groups give way) and "‹ <group>" goes back to the picker. Nothing here changes the stage until Save. -->
+    <section id="colEdit" class="block cedit" aria-label="Colour editor" hidden>
+      <div class="ce-head">
+        <button id="ceBack" class="ebtn ce-back">‹</button>
+        <label class="ce-name">
+          <span>Name</span>
+          <input id="ceName" type="text" maxlength="40" placeholder="Name this colour" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
+        </label>
+        <button id="ceCancel" class="ce-cancel">Cancel</button>
+        <button id="ceSave" class="ce-save">Save</button>
+      </div>
+      <div class="ce-card">
+        <i id="ceSw" class="ce-sw"></i>
+        <div class="ce-card-text"><b id="ceTitle"></b><span id="ceNote"></span></div>
+      </div>
+      <div class="ce-rows">
+        <!-- The colour (warm to cool for white-only groups); No colour for a new colour of White, Amber or UV alone. Not for Off. -->
+        <div id="ceColourRow" class="ce-row">
+          <span class="ce-lab">Colour</span>
+          <div class="ce-colour">
+            <div id="ceStrip" class="strip2 hue ce-strip" aria-label="Pick the colour"><span id="ceH" class="strip-handle" hidden></span></div>
+            <button id="ceNoColour" class="ce-chip" aria-pressed="false">No colour</button>
+          </div>
+        </div>
+        <!-- A new colour's White, Amber and UV, for groups that have them. -->
+        <div id="ceExtrasRow" class="ce-row">
+          <span id="ceExtrasLab" class="ce-lab">White · Amber · UV</span>
+          <div id="ceExtras" class="pextras ce-extras"></div>
+        </div>
+        <!-- Brightness: not for Off, effects or colours of several layers. -->
+        <div id="ceLevelRow" class="ce-row">
+          <span class="ce-lab">Brightness</span>
+          <div class="ce-level">
+            <div id="ceLevel" class="ds-fill" role="slider" aria-label="Brightness" aria-valuemin="5" aria-valuemax="100"><span id="ceLevelSlab" class="ds-fill-slab"></span><span class="ce-range">5 – 100 %</span></div>
+            <span id="ceLevelPct" class="pct"></span>
+          </div>
+        </div>
+        <div class="ce-row">
+          <span class="ce-lab">Fade into it</span>
+          <div id="ceFade" class="ds-seg ce-seg" role="radiogroup" aria-label="Fade into this colour"></div>
+        </div>
+        <!-- Only this group, or every group with this colour (the shared colour when it is one), or for a new one every group of its kind. -->
+        <div id="ceApplyRow" class="ce-row">
+          <span class="ce-lab">Apply to</span>
+          <div id="ceApply" class="ds-seg ce-seg" role="radiogroup" aria-label="Apply to"></div>
+        </div>
+        <div class="ce-row ce-row-top">
+          <span class="ce-lab">Used in</span>
+          <span id="ceUsed" class="ce-used"></span>
+        </div>
+      </div>
+      <span class="grow"></span>
+      <div id="ceDelRow" class="ce-del">
+        <button id="ceDelete" class="ce-delete">Delete colour</button>
+        <span id="ceDelNote" class="ce-delnote"></span>
       </div>
     </section>
   </main>

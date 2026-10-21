@@ -149,9 +149,9 @@ function setConnected(on) {
   if (!on && pendingEdit !== null) {
     pendingEdit = null;
     pendingEditNext = [];
-    $('peSave').disabled = false;
     $('feSave').disabled = false;
     $('feCopy').disabled = false;
+    renderEditor();
   }
   if (!on && pendingColour !== null) {
     pendingColour = null;
@@ -1400,15 +1400,12 @@ function buildPickerGrid() {
     if (!p.swatch || p.swatch === '#000000') sw.classList.add('off');
     else sw.style.background = shown(p.swatch) ?? NEUTRAL;
     b.append(sw, el('span', null, p.name));
-    b.classList.toggle('editing', colourEdit?.id === p.id);
     b.addEventListener('click', () => sendStage({ type: 'groupPreset', group: row.group.id, preset: p.id }));
     grid.append(b);
   }
   // ＋ New colour: always the last tile.
   const add = el('button', 'pc newfx', '＋ New colour');
-  add.dataset.newColour = '1';
-  add.classList.toggle('editing', !!newColour);
-  add.addEventListener('click', openNewColour);
+  add.addEventListener('click', () => openColourEditor(null));
   grid.append(add);
   $('pTitle').textContent = row.group.name;
   $('pAnyLab').textContent = row.group.whiteOnly ? 'Any white · drag to try it live' : 'Any colour · drag to try it live';
@@ -1609,14 +1606,15 @@ function currentColour(group, s) {
 
 /**
  * How long one round of a running effect takes, as the stage runs it: "one round = 2 s at 120 bpm" (or
- * "one round = 10 s" for Free), with the speed dial; and "· slowed to stay safe" when light safety slows it.
+ * "one round = 10 s" for Free), with the speed dial; when light safety slows it, the slowed length and "· slowed to stay safe".
  */
 function roundText(effect, s) {
   const st = shownState();
   const speed = st?.speed ?? 1;
   const bpm = st?.tempo ?? 120;
   const beats = 'beats' in effect.speed;
-  const secs = beats ? (effect.speed.beats * 60) / (bpm * speed) : effect.speed.seconds / speed;
+  // The engine's own length (slowed by light safety, when it is); worked out here only for an older server.
+  const secs = s?.round ?? (beats ? (effect.speed.beats * 60) / (bpm * speed) : effect.speed.seconds / speed);
   const n = secs >= 10 ? Math.round(secs) : Math.round(secs * 10) / 10;
   const text = beats ? `one round = ${n} s at ${Math.round(bpm)} bpm` : `one round = ${n} s`;
   return s?.slowed ? `${text} · slowed to stay safe` : text;
@@ -1630,25 +1628,24 @@ function liveOfPicker() {
   return row ? liveColour(shownState()?.groups?.[row.group.id]) : null;
 }
 
+/** A light with nothing in it: black with no White, Amber or UV (the server refuses to keep it: "that colour has no light"). */
+const noLight = (c) => /^#0{6}$/.test(c.hex) && !c.white && !c.amber && !c.uv;
+
 /**
- * ＋ Keep as a colour is always there; it works while the group runs a strip colour that isn't a swatch yet and
- * no form is open. Keeps the form in step.
+ * ＋ Keep as a colour is always there; it works while the group runs a strip colour that isn't a swatch yet (and has
+ * some light in it) and the form isn't open. Keeps the form in step.
  */
 function renderAddColour() {
   const row = pickerRow();
-  if (row) $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
-  // ＋ New colour has its own colour: the stage has nothing to do with it.
-  if (newColour) {
-    $('pAddOpen').disabled = true;
-    return;
-  }
+  if (!row) return;
+  $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
   const pick = liveOfPicker();
   // Listed: the group's list has this very light (its colour, White, Amber and UV).
   const listed = !!pick && row.group.presets.some((p) => !p.effect && p.light && colourKey(p.light) === colourKey(pick));
-  const open = !$('pAdd').hidden;
+  const keepable = !!pick && !listed && !noLight(pick);
   // The form follows the colour: it goes when the group no longer runs a new strip colour.
-  if (open && (!pick || listed)) $('pAdd').hidden = true;
-  $('pAddOpen').disabled = !pick || listed || !$('pAdd').hidden;
+  if (!$('pAdd').hidden && !keepable) $('pAdd').hidden = true;
+  $('pAddOpen').disabled = !keepable || !$('pAdd').hidden;
   if (pick) $('paSw').style.background = shown(pick.display) ?? pick.display;
 }
 
@@ -1666,133 +1663,12 @@ function closeAddColour() {
   pendingColour = null;
   $('pAdd').hidden = true;
   $('paName').blur();
-  closeNewColour();
   if (picker.group) renderAddColour();
 }
 
-// ---- ＋ New colour: a colour for the list, picked on the form's own strip ----
-
-/** The New colour form while it is open: `{ hex }`, hex null until a colour is picked. Picking never touches the stage. */
-let newColour = null;
-// Its White, Amber and UV sliders (for groups with those channels), shaped as showLevel wants.
-let newExtraRows = [];
-
-function openNewColour() {
-  const row = pickerRow();
-  if (!row) return;
-  closeEditor();
-  pendingColour = null;
-  newColour = { hex: null };
-  $('paName').value = '';
-  $('paAll').checked = false;
-  const strip = $('paStrip');
-  strip.className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'} pa-strip`;
-  strip.hidden = false;
-  $('paStripRow').hidden = false;
-  $('paH').hidden = true;
-  buildNewExtras(row.group);
-  $('paAddBtn').textContent = 'Save';
-  showNewSwatch();
-  $('pAdd').hidden = false;
-  renderAddColour();
-  for (const b of $('pGrid').children) b.classList.toggle('editing', !!b.dataset.newColour);
-  markEditing();
-  $('pAdd').scrollIntoView({ block: 'nearest' });
-}
-
-/** Back to the Add to colours form (closed); nothing to do when New colour isn't open. */
-function closeNewColour() {
-  if (!newColour) return;
-  newColour = null;
-  $('pAdd').hidden = true;
-  $('paStrip').hidden = true;
-  $('paStripRow').hidden = true;
-  $('paExtras').hidden = true;
-  $('paExtras').replaceChildren();
-  newExtraRows = [];
-  $('paAddBtn').textContent = 'Add';
-  $('paAddBtn').disabled = pendingColour !== null;
-  for (const b of $('pGrid').children) if (b.dataset.newColour) b.classList.remove('editing');
-  markEditing();
-}
-
-/** While an editor is open, its tab's other controls give way (Any colour and its sliders; the running effect's card). */
+/** The effect editor open: the running effect's card gives way to it. */
 function markEditing() {
-  $('pCol').classList.toggle('editing', !!colourEdit || !!newColour);
   $('pFx').classList.toggle('editing', !!effectEdit);
-}
-
-/** White, Amber and UV sliders for the new colour, as Any colour has them; they change only the form. */
-function buildNewExtras(group) {
-  const box = $('paExtras');
-  box.replaceChildren();
-  newExtraRows = [];
-  for (const x of EXTRAS) {
-    if (!group.extras?.[x.key]) continue;
-    const row = extraSlider(box, x, `New colour ${x.label}`);
-    newExtraRows.push(row);
-    let startX = 0, startV = 0;
-    row.dim.addEventListener('pointerdown', (ev) => {
-      ev.preventDefault();
-      row.dragging = true;
-      try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
-      row.dim.classList.add('ds-dragging');
-      startX = ev.clientX;
-      startV = row.value;
-    });
-    row.dim.addEventListener('pointermove', (ev) => {
-      if (!row.dragging) return;
-      showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
-      showNewSwatch();
-    });
-    const end = () => {
-      row.dragging = false;
-      row.dim.classList.remove('ds-dragging');
-    };
-    row.dim.addEventListener('pointerup', end);
-    row.dim.addEventListener('pointercancel', end);
-  }
-  box.hidden = newExtraRows.length === 0;
-}
-
-attachStrip($('paStrip'), $('paH'), () => (newColour ? pickerRow()?.group.whiteOnly ?? null : null), (hex) => {
-  if (!newColour) return;
-  newColour.hex = hex;
-  showNewSwatch();
-});
-
-// No colour: the picked colour comes off again, so the new colour can be White, Amber or UV alone.
-$('paNoColour').addEventListener('click', () => {
-  if (!newColour) return;
-  newColour.hex = null;
-  $('paH').hidden = true;
-  showNewSwatch();
-});
-
-/** Something to add: a colour picked on the strip, or White, Amber or UV above 0 (an amber-only colour, say). */
-function newColourReady() {
-  const levels = newLevels();
-  return !!newColour && (!!newColour.hex || levels.white > 0 || levels.amber > 0 || levels.uv > 0);
-}
-
-/** The new colour's White, Amber and UV, as its sliders show them (0 where the group has no slider). */
-function newLevels() {
-  const levels = { white: 0, amber: 0, uv: 0 };
-  for (const r of newExtraRows) levels[r.key] = Math.round(r.value * 100) / 100;
-  return levels;
-}
-
-/**
- * The form's swatch: the picked colour (none is black) with its White, Amber and UV mixed in, as the
- * saved swatch will look; empty while there is nothing to add. Keeps Save and No colour in step too.
- */
-function showNewSwatch() {
-  if (!newColour) return;
-  const ready = newColourReady();
-  const look = mixedColour(newColour.hex ?? '#000000', newLevels());
-  $('paSw').style.background = ready ? shown(look) ?? look : 'transparent';
-  $('paNoColour').hidden = !newColour.hex;
-  $('paAddBtn').disabled = pendingColour !== null || !ready;
 }
 
 /**
@@ -1821,13 +1697,6 @@ $('paName').addEventListener('keydown', (ev) => {
 // A plain tap. The form closes when the server says yes; on an error it stays to fix.
 $('paAddBtn').addEventListener('click', () => {
   if (pendingColour !== null || !picker.group) return;
-  if (newColour) {
-    if (!newColourReady()) return;
-    // No colour picked: the light is its White, Amber or UV alone, on a black colour.
-    pendingColour = send({ type: 'addColour', group: picker.group, colour: newColour.hex ?? '#000000', ...newLevels(), name: $('paName').value, allGroups: $('paAll').checked });
-    $('paAddBtn').disabled = pendingColour !== null;
-    return;
-  }
   const pick = liveOfPicker();
   if (!pick) {
     closeAddColour();
@@ -1900,7 +1769,7 @@ for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('clic
 $('pEditCur').addEventListener('click', () => {
   const row = pickerRow();
   const preset = row && currentColour(row.group, groupStatus(row.group));
-  if (preset) openEditor(preset);
+  if (preset) openColourEditor(preset);
 });
 
 // All settings: the effect editor, on the effect the group runs. A listed effect is edited in place; one that
@@ -2200,9 +2069,14 @@ function attachStrip(strip, handle, whiteOnly, onColour, onStart) {
     });
 })();
 
-// ---- Edit colours: tap a swatch to rename it, change its colour or delete it ----
+// ---- The colour editor: a listed colour (Edit this colour) or a new one (＋ New colour), in the whole right column ----
 
-/** The preset the editor is open on: { id, name, colour (picked, or null), swatch (as listed) }. */
+/**
+ * The colour editor while it is open. `group`: the group it opened for (it stays on it, and on this colour, whatever
+ * the stage does meanwhile). `id`: the listed colour, null for a new one. `name`: as it opened. `hex`: the colour picked
+ * on the strip, null for none yet (or No colour). `level` / `startLevel`: its brightness (null: no Brightness, as for Off).
+ * `fade` / `startFade`: its fade in seconds. `all`: Apply to every group.
+ */
 let colourEdit = null;
 let deleteArmed = 0;
 // The ref of an edit or delete the server hasn't answered yet.
@@ -2239,187 +2113,363 @@ const FX_STRIP_GAP = 6;
 /** Mixed down like a swatch, so the strip never lights the operator's face. */
 const FX_STRIP_ALPHA = 0.85;
 
-const editedPreset = () => (colourEdit ? pickerRow()?.group.presets.find((p) => p.id === colourEdit.id) : undefined);
+/** The group the colour editor is for, and the listed colour it edits (undefined for a new one, or once it is gone). */
+const editGroup = () => (colourEdit ? layout?.groups.find((g) => g.id === colourEdit.group) : undefined);
+const editedPreset = () => (colourEdit?.id ? editGroup()?.presets.find((p) => p.id === colourEdit.id) : undefined);
 
 /** The fades the editor offers, in seconds. A colour with another fade gets one more button, selected. */
 const COLOUR_FADES = [0, 1, 2, 3, 5, 10];
 const fadeText = (s) => (s === 0 ? 'Instant' : `${s} s`);
 const MIN_LEVEL = 0.05;
 /** The Brightness slider of the colour editor, in the shape `showLevel` wants. */
-const peLevel = { dim: $('peLevel'), slab: $('peLevelSlab'), pct: $('peLevelPct'), value: 1, dragging: false };
+const ceLevel = { dim: $('ceLevel'), slab: $('ceLevelSlab'), pct: $('ceLevelPct'), value: 1, dragging: false };
+/** A new colour's White, Amber and UV sliders (for groups with those channels), shaped as showLevel wants. */
+let editExtraRows = [];
 
 /** Shows the brightness the editor holds (5–100 %). */
 function showEditLevel(v) {
-  showLevel(peLevel, Math.max(MIN_LEVEL, v));
-  if (colourEdit) colourEdit.level = peLevel.value;
+  showLevel(ceLevel, Math.max(MIN_LEVEL, v));
+  if (colourEdit) colourEdit.level = ceLevel.value;
 }
 
-/** The Fade buttons: the usual ones, and the colour's own fade too when it isn't one of them. */
-function buildFadeChoices(current) {
-  const box = $('peFade');
-  const values = COLOUR_FADES.includes(current) ? COLOUR_FADES : [...COLOUR_FADES, current].sort((a, b) => a - b);
+/**
+ * A segmented choice of `values` in `box` (Fade into it, Apply to): the buttons are made again only when the
+ * labels change, so a render never takes a tap away. `pick(value)` runs on a tap.
+ */
+function buildChoice(box, values, label, pick) {
+  const key = values.map(label).join('|');
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
   box.replaceChildren(...values.map((v) => {
-    const b = el('button', null, fadeText(v));
+    const b = el('button', null, label(v));
     b.type = 'button';
     b.setAttribute('role', 'radio');
-    b.dataset.fade = String(v);
+    b.dataset.value = JSON.stringify(v);
     b.addEventListener('click', () => {
       if (!colourEdit) return;
-      colourEdit.fade = v;
-      markFade();
+      pick(v);
       disarmDelete();
+      renderEditor();
     });
     return b;
   }));
-  markFade();
 }
 
-function markFade() {
-  for (const b of $('peFade').children) {
-    const on = colourEdit !== null && Number(b.dataset.fade) === colourEdit.fade;
+function markChoice(box, selected) {
+  for (const b of box.children) {
+    const on = b.dataset.value === JSON.stringify(selected);
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
 }
 
-function openEditor(preset) {
-  const row = pickerRow();
-  if (!row) return;
-  closeNewColour();
-  const fade = preset.fade ?? 0;
-  // Off has a level of 0 and no colour to dim: only a lit plain colour gets the slider.
-  const level = preset.canRecolour === false ? null : preset.level ?? null;
-  colourEdit = { id: preset.id, name: preset.name, colour: null, swatch: preset.swatch ?? NEUTRAL, level, startLevel: level, fade, startFade: fade };
-  pendingEdit = null;
-  disarmDelete();
-  $('peName').value = preset.name;
-  if (colourEdit.level !== null) showEditLevel(colourEdit.level);
-  buildFadeChoices(fade);
-  $('peShared').checked = false;
-  $('peStrip').className = `strip2 pe-strip ${row.group.whiteOnly ? 'cct' : 'hue'}`;
-  $('peStrip').setAttribute('aria-label', row.group.whiteOnly ? 'Change the colour: warm to cool' : 'Change the colour');
-  $('peH').hidden = true;
-  $('peSw').style.background = colourEdit.swatch;
-  // The switch never carries over from an earlier colour: a change reaches other groups only when asked for each time.
-  $('peSame').checked = false;
-  $('peSave').disabled = false;
-  $('pEdit').hidden = false;
-  renderEditor();
-  for (const b of $('pGrid').children) b.classList.toggle('editing', b.dataset.preset === preset.id);
-  markEditing();
-  $('pEdit').scrollIntoView({ block: 'nearest' });
+/** The new colour's White, Amber and UV, as its sliders show them (0 where the group has no slider). */
+function editLevels() {
+  const levels = { white: 0, amber: 0, uv: 0 };
+  for (const r of editExtraRows) levels[r.key] = Math.round(r.value * 100) / 100;
+  return levels;
 }
 
-function closeEditor(keepPending = false) {
-  closeNewColour();
-  colourEdit = null;
-  if (!keepPending) pendingEdit = null;
-  disarmDelete();
-  $('peName').blur();
-  $('pEdit').hidden = true;
-  for (const b of $('pGrid').children) b.classList.remove('editing');
-  closeEffectEditor();
-  markEditing();
+/** A new colour has something in it: a colour picked on the strip, or White, Amber or UV above 0 (an amber-only colour, say). */
+function editReady() {
+  if (!colourEdit || colourEdit.id) return !!colourEdit;
+  const l = editLevels();
+  return !!colourEdit.hex || l.white > 0 || l.amber > 0 || l.uv > 0;
 }
 
-/** "Used in …" for the songs and quick looks that use any of these presets. */
+/** White, Amber and UV sliders for a new colour, as Any colour has them; they change only the editor, never the stage. */
+function buildEditExtras(group) {
+  const box = $('ceExtras');
+  box.replaceChildren();
+  editExtraRows = [];
+  const names = [];
+  for (const x of group ? EXTRAS : []) {
+    if (!group.extras?.[x.key]) continue;
+    names.push(x.label);
+    const row = extraSlider(box, x, `New colour ${x.label}`);
+    editExtraRows.push(row);
+    let startX = 0, startV = 0;
+    row.dim.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      row.dragging = true;
+      try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+      row.dim.classList.add('ds-dragging');
+      startX = ev.clientX;
+      startV = row.value;
+    });
+    row.dim.addEventListener('pointermove', (ev) => {
+      if (!row.dragging) return;
+      showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
+      renderEditor();
+    });
+    const end = () => {
+      row.dragging = false;
+      row.dim.classList.remove('ds-dragging');
+    };
+    row.dim.addEventListener('pointerup', end);
+    row.dim.addEventListener('pointercancel', end);
+  }
+  $('ceExtrasLab').textContent = names.join(' · ');
+}
+
+/** A listed colour's own White, Amber and UV (its light is scaled by its brightness; this undoes that), for the swatch. */
+function presetExtras(p) {
+  const k = p.level && p.level > 0 ? p.level : 1;
+  return { white: (p.light?.white ?? 0) / k, amber: (p.light?.amber ?? 0) / k, uv: (p.light?.uv ?? 0) / k };
+}
+
+/** Where on the strip a colour sits (0..1), or null when it isn't one of the strip's colours (a white on the colour strip, say). */
+function stripPlace(hex, whiteOnly) {
+  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return null;
+  const n = parseInt(hex.slice(1), 16);
+  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const max = Math.max(...rgb);
+  if (max === 0) return null;
+  // The colour at full brightness (a dimmed colour's light is scaled down).
+  const full = rgb.map((v) => (v * 255) / max);
+  let best = null, bestD = Infinity;
+  for (let i = 0; i <= 240; i++) {
+    const c = stripColour(whiteOnly ? WHITE_STOPS : HUE_STOPS, i / 240);
+    const m = parseInt(c.slice(1), 16);
+    const d = Math.hypot(full[0] - ((m >> 16) & 255), full[1] - ((m >> 8) & 255), full[2] - (m & 255));
+    if (d < bestD) [best, bestD] = [i / 240, d];
+  }
+  return bestD <= 40 ? best : null;
+}
+
+/** "Song 2, Song 3 · quick looks: Worship, Prayer": the songs (and any other look) first, then the quick looks. */
+function usedInText(names) {
+  if (!names.length) return 'Nothing yet';
+  const order = new Set(layout.runningOrder.map((l) => l.name));
+  const quick = new Set(layout.quickLooks.map((q) => q.name));
+  const songs = names.filter((n) => order.has(n) || !quick.has(n));
+  const looks = names.filter((n) => !songs.includes(n));
+  const list = (xs) => (xs.length > 6 ? `${xs.slice(0, 6).join(', ')} and ${xs.length - 6} more` : xs.join(', '));
+  if (!songs.length) return `Quick looks: ${list(looks)}`;
+  return looks.length ? `${list(songs)} · quick looks: ${list(looks)}` : list(songs);
+}
+
+/** "Used in …" for the songs and quick looks that use any of these presets (the effect editor's line). */
 function usedText(presets) {
   const used = [...new Set(presets.flatMap((x) => x.usedBy ?? []))];
   return used.length ? `Used in ${used.slice(0, 4).join(', ')}${used.length > 4 ? ` and ${used.length - 4} more` : ''}` : 'Not used in any song or quick look';
 }
 
-/** Who uses it, and whether other groups have a colour of the same name. */
+/**
+ * Opens the colour editor in the whole right column: on a listed colour (from Edit this colour), or with `preset`
+ * null on a new one (＋ New colour). It stays on that colour whatever the stage does, until Cancel, Save or Delete.
+ */
+function openColourEditor(preset) {
+  const row = pickerRow();
+  if (!row) return;
+  closeEditor();
+  const group = row.group;
+  const fade = preset ? preset.fade ?? 0 : 3;
+  // Off has a level of 0 and no colour to dim, and a colour of several layers has no one brightness: no slider.
+  const level = !preset ? 1 : preset.canRecolour === false ? null : preset.level ?? null;
+  colourEdit = { group: group.id, id: preset?.id ?? null, name: preset?.name ?? '', hex: null, level, startLevel: level, fade, startFade: fade, all: false };
+  pendingEdit = null;
+  disarmDelete();
+  $('ceName').value = colourEdit.name;
+  $('ceBack').textContent = `‹ ${group.name}`;
+  $('ceBack').setAttribute('aria-label', `Back to ${group.name}'s colours`);
+  $('ceStrip').className = `strip2 ce-strip ${group.whiteOnly ? 'cct' : 'hue'}`;
+  $('ceStrip').setAttribute('aria-label', group.whiteOnly ? 'Pick the colour: warm to cool' : 'Pick the colour');
+  // The colour's place on the strip, when it is one of its colours; a new colour has none until one is picked.
+  const place = preset?.light && !noLight(preset.light) ? stripPlace(preset.light.hex, group.whiteOnly) : null;
+  $('ceH').hidden = place === null;
+  if (place !== null) $('ceH').style.left = `calc(${place * 100}% - ${place * 4}px)`;
+  buildEditExtras(preset ? null : group);
+  if (level !== null) showEditLevel(level);
+  $('ceDelRow').hidden = !preset;
+  $('colEdit').hidden = false;
+  $('colEdit').parentElement.classList.add('ce-open');
+  $('colEdit').scrollTop = 0;
+  renderEditor();
+}
+
+/** Back to the picker (the colour editor only); `keepPending` keeps waiting for a Save or Delete already sent. */
+function closeColourEditor(keepPending = false) {
+  colourEdit = null;
+  if (!keepPending) pendingEdit = null;
+  disarmDelete();
+  $('ceName').blur();
+  $('colEdit').hidden = true;
+  $('colEdit').parentElement.classList.remove('ce-open');
+}
+
+/** Closes whichever editor is open (colour or effect). */
+function closeEditor(keepPending = false) {
+  closeColourEditor(keepPending);
+  closeEffectEditor();
+}
+
+/** Keeps the editor true to the show and to what has been picked: titles, swatch, the rows that apply, Used in, Delete. */
 function renderEditor() {
+  if (!colourEdit) return;
+  const group = editGroup();
   const p = editedPreset();
-  if (!p) {
-    if (colourEdit) closeEditor(true);
+  // The colour (or its group) went: deleted on another tablet, or by Undo.
+  if (!group || (colourEdit.id && !p)) {
+    closeColourEditor(true);
     return;
   }
-  const others = layout.groups.filter((g) => g.id !== picker.group).flatMap((g) => g.presets.filter((x) => x.name === p.name));
-  $('peSameWrap').hidden = !others.length;
-  if (!others.length) $('peSame').checked = false;
-  // A colour that points to a shared one can change that one instead, for every colour that points to it.
-  const shared = p.shared ?? null;
-  $('peSharedWrap').hidden = !shared;
-  if (!shared) $('peShared').checked = false;
-  if (shared) $('peSharedText').textContent = `Change it everywhere — shared colour, used by ${shared.groups} ${shared.groups === 1 ? 'group' : 'groups'}`;
-  // With a switch on, the change reaches more colours, so list where any of them is used.
-  // "Change it everywhere" only reaches the shared set with a new colour (brightness and fade stay per colour).
-  const affected = $('peSame').checked ? [p, ...others] : [p];
-  const used = shared && $('peShared').checked && colourEdit.colour ? [{ usedBy: shared.usedBy }, ...affected] : affected;
-  $('peUsed').textContent = usedText(used);
-  // An Off colour can be renamed but has no colour to change.
-  $('peStrip').hidden = p.canRecolour === false;
+  const isNew = !p;
+  $('ceTitle').textContent = isNew ? `New colour for ${group.name}` : `${p.name} on ${group.name}`;
+  $('ceNote').textContent = isNew ? 'Trying colours here never changes the stage' : 'The stage changes only when you Save';
+
+  // The swatch: what Save would keep (a new colour: nothing until there is something in it).
+  let look = null;
+  if (isNew) look = editReady() ? mixedColour(colourEdit.hex ?? '#000000', editLevels()) : null;
+  else if (colourEdit.hex) look = mixedColour(colourEdit.hex, presetExtras(p));
+  else look = p.swatch ?? null;
+  const off = !look || look === '#000000';
+  $('ceSw').classList.toggle('off', off);
+  $('ceSw').style.background = off ? '' : shown(look) ?? look;
+  // The Brightness slider carries a little of the colour, as the group dimmers do.
+  ceLevel.dim.style.setProperty('--c', off ? '#6a7898' : shown(look) ?? look);
+
+  // Colour: not for Off or a colour of several layers (they can be renamed only). No colour: a new colour of White, Amber or UV alone.
+  $('ceColourRow').hidden = !isNew && p.canRecolour === false;
+  $('ceNoColour').hidden = !isNew || !editExtraRows.length;
+  const none = isNew && !colourEdit.hex;
+  $('ceNoColour').classList.toggle('on', none);
+  $('ceNoColour').setAttribute('aria-pressed', String(none));
+  $('ceExtrasRow').hidden = !isNew || !editExtraRows.length;
   // Brightness: only where it can change (not Off, an effect or a colour of several layers).
-  $('peLevelRow').hidden = colourEdit.level === null;
+  $('ceLevelRow').hidden = colourEdit.level === null;
+
+  // Fade into it: the usual ones, and the colour's own when it isn't one of them.
+  const fades = COLOUR_FADES.includes(colourEdit.startFade) ? COLOUR_FADES : [...COLOUR_FADES, colourEdit.startFade].sort((a, b) => a - b);
+  buildChoice($('ceFade'), fades, fadeText, (v) => { colourEdit.fade = v; });
+  markChoice($('ceFade'), colourEdit.fade);
+
+  // Apply to: only this group, or every group with this colour (same name, or pointing to the same shared colour);
+  // a new one, every group of its kind. Left out when there is no other group it could reach.
+  const others = isNew ? [] : layout.groups.filter((g) => g.id !== group.id).flatMap((g) => g.presets.filter((x) => x.name === p.name));
+  const shared = isNew ? null : p.shared ?? null;
+  const kind = layout.groups.filter((g) => g.id !== group.id && !isSmoke(g) && g.whiteOnly === group.whiteOnly);
+  const canAll = isNew ? kind.length > 0 : others.length > 0 || (shared?.groups ?? 0) > 1;
+  if (!canAll) colourEdit.all = false;
+  $('ceApplyRow').hidden = !canAll;
+  const everyLabel = isNew ? (group.whiteOnly ? 'Every white-only group' : 'Every colour group') : `Every group with ${p.name}`;
+  buildChoice($('ceApply'), [false, true], (all) => (all ? everyLabel : `Only ${group.name}`), (all) => { colourEdit.all = all; });
+  markChoice($('ceApply'), colourEdit.all);
+
+  // Used in follows Apply to: with every group, the other groups' colours of this name, and (with a new colour) the shared colour's reach.
+  let used = [];
+  if (!isNew) {
+    const affected = colourEdit.all ? [p, ...others] : [p];
+    used = [...new Set([...affected.flatMap((x) => x.usedBy ?? []), ...(colourEdit.all && shared && colourEdit.hex ? shared.usedBy : [])])];
+  }
+  $('ceUsed').textContent = usedInText(used);
+
+  // Save: a new colour needs something in it.
+  $('ceSave').disabled = pendingEdit !== null || (isNew && !editReady());
+
+  // Delete: the server refuses a colour a song or quick look uses, and one the group shows (on stage, or in this tablet's draft).
+  if (!isNew) {
+    const users = p.usedBy ?? [];
+    const showing = [state, prep.on ? prep.state : null].some((st) => st?.groups?.[group.id]?.preset === p.id);
+    $('ceDelete').disabled = pendingEdit !== null || users.length > 0 || showing;
+    if (users.length || showing) disarmDelete();
+    $('ceDelNote').textContent = users.length
+      ? "It can't be deleted while a song or quick look uses it: give them another colour first."
+      : showing
+        ? `It can't be deleted while ${group.name} shows it.`
+        : 'No song or quick look uses it, so deleting it changes nothing else.';
+  }
 }
 
 function disarmDelete() {
   clearTimeout(deleteArmed);
   deleteArmed = 0;
-  for (const id of ['peDelete', 'feDelete']) {
-    $(id).classList.remove('armed');
-    $(id).textContent = 'Delete';
-  }
+  $('ceDelete').classList.remove('armed');
+  $('ceDelete').textContent = 'Delete colour';
+  $('feDelete').classList.remove('armed');
+  $('feDelete').textContent = 'Delete';
 }
 
-$('peCancel').addEventListener('click', () => closeEditor());
-$('peName').addEventListener('keydown', (ev) => {
+$('ceBack').addEventListener('click', () => closeEditor());
+$('ceCancel').addEventListener('click', () => closeEditor());
+$('ceName').addEventListener('keydown', (ev) => {
   ev.stopPropagation();
-  if (ev.key === 'Enter') $('peName').blur();
+  if (ev.key === 'Enter') $('ceName').blur();
 });
-$('peName').addEventListener('input', disarmDelete);
-$('peSame').addEventListener('change', renderEditor);
-$('peShared').addEventListener('change', renderEditor);
+$('ceName').addEventListener('input', disarmDelete);
 
-// Brightness: moves relative to where the finger starts, like the other sliders. Only the editor's pending value moves; Save sends it.
+// No colour: the picked colour comes off again, so a new colour can be White, Amber or UV alone.
+$('ceNoColour').addEventListener('click', () => {
+  if (!colourEdit || colourEdit.id) return;
+  colourEdit.hex = null;
+  $('ceH').hidden = true;
+  renderEditor();
+});
+
+// Brightness: moves relative to where the finger starts, like the other sliders. Only the editor's value moves; Save sends it.
 {
   let startX = 0, startV = 0;
-  const dim = peLevel.dim;
+  const dim = ceLevel.dim;
   dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
     if (!colourEdit || colourEdit.level === null) return;
-    peLevel.dragging = true;
+    ceLevel.dragging = true;
     try { dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     dim.classList.add('ds-dragging');
     startX = ev.clientX;
-    startV = peLevel.value;
+    startV = ceLevel.value;
   });
   dim.addEventListener('pointermove', (ev) => {
-    if (!peLevel.dragging) return;
+    if (!ceLevel.dragging) return;
     showEditLevel(startV + (ev.clientX - startX) / dim.clientWidth);
     disarmDelete();
   });
   const end = () => {
-    peLevel.dragging = false;
+    ceLevel.dragging = false;
     dim.classList.remove('ds-dragging');
   };
   dim.addEventListener('pointerup', end);
   dim.addEventListener('pointercancel', end);
 }
-attachStrip($('peStrip'), $('peH'), () => (pickerRow() ? pickerRow().group.whiteOnly : null), (hex) => {
+
+// The strip only changes the editor: the stage changes when an edited colour that is lit is saved, never while picking.
+attachStrip($('ceStrip'), $('ceH'), () => editGroup()?.whiteOnly ?? null, (hex) => {
   if (!colourEdit) return;
-  const first = !colourEdit.colour;
-  colourEdit.colour = hex;
-  $('peSw').style.background = hex;
+  colourEdit.hex = hex;
   disarmDelete();
-  // A new colour can widen "Used in" (with "Change it everywhere" on).
-  if (first) renderEditor();
+  renderEditor();
 });
 
-// A plain tap. Only what changed is sent; the editor closes when the server says yes.
-$('peSave').addEventListener('click', () => {
+const editLevel = () => Math.min(1, Math.max(MIN_LEVEL, Math.round(colourEdit.level * 100) / 100));
+
+// A plain tap. Only what changed is sent; the editor goes back to the picker when the server says yes (one Undo step).
+$('ceSave').addEventListener('click', () => {
   if (!colourEdit || pendingEdit !== null) return;
-  const name = $('peName').value;
-  const cmd = { type: 'editColour', preset: colourEdit.id, sameName: $('peSame').checked && !$('peSameWrap').hidden };
-  if (name.trim() !== colourEdit.name) cmd.name = name;
-  if (colourEdit.colour && !$('peStrip').hidden) cmd.colour = colourEdit.colour;
-  if (colourEdit.level !== null && Math.abs(colourEdit.level - colourEdit.startLevel) >= 0.005) {
-    cmd.level = Math.min(1, Math.max(MIN_LEVEL, Math.round(colourEdit.level * 100) / 100));
+  const group = editGroup();
+  if (!group) return;
+  const name = $('ceName').value;
+  if (!colourEdit.id) {
+    if (!editReady()) return;
+    // No colour picked: the light is its White, Amber or UV alone, on a black colour.
+    const cmd = { type: 'addColour', group: group.id, colour: colourEdit.hex ?? '#000000', ...editLevels(), name, allGroups: colourEdit.all, fade: colourEdit.fade };
+    if (colourEdit.level !== null && colourEdit.level < 1) cmd.level = editLevel();
+    pendingEditToast = 'Added to colours';
+    pendingEditNext = [];
+    pendingEdit = send(cmd);
+    renderEditor();
+    return;
   }
+  const p = editedPreset();
+  if (!p) return;
+  // Every group: the other groups' colours of this name too (name, colour, brightness and fade), and with a new
+  // colour, the shared colour it points to, so every colour that points to it follows.
+  const all = colourEdit.all && !$('ceApplyRow').hidden;
+  const cmd = { type: 'editColour', preset: colourEdit.id, sameName: all };
+  if (name.trim() !== colourEdit.name) cmd.name = name;
+  if (colourEdit.hex && !$('ceColourRow').hidden) cmd.colour = colourEdit.hex;
+  if (colourEdit.level !== null && Math.abs(colourEdit.level - colourEdit.startLevel) >= 0.005) cmd.level = editLevel();
   if (colourEdit.fade !== colourEdit.startFade) cmd.fade = colourEdit.fade;
-  // "Change it everywhere" only means something with a new colour.
-  if (cmd.colour !== undefined && $('peShared').checked && !$('peSharedWrap').hidden) cmd.shared = true;
+  if (cmd.colour !== undefined && all && p.shared) cmd.shared = true;
   if (cmd.name === undefined && cmd.colour === undefined && cmd.level === undefined && cmd.fade === undefined) {
     closeEditor();
     return;
@@ -2427,22 +2477,23 @@ $('peSave').addEventListener('click', () => {
   pendingEditToast = 'Colour saved';
   pendingEditNext = [];
   pendingEdit = send(cmd);
-  $('peSave').disabled = pendingEdit !== null;
+  renderEditor();
 });
 
-// First tap arms it ("Delete?"), the second one deletes. It disarms after a few seconds.
-$('peDelete').addEventListener('click', () => {
-  if (!colourEdit || pendingEdit !== null) return;
+// First tap arms it ("Tap again to delete"), the second one deletes. It disarms after a few seconds.
+$('ceDelete').addEventListener('click', () => {
+  if (!colourEdit?.id || pendingEdit !== null) return;
   if (!deleteArmed) {
     deleteArmed = setTimeout(disarmDelete, 4000);
-    $('peDelete').classList.add('armed');
-    $('peDelete').textContent = 'Delete?';
+    $('ceDelete').classList.add('armed');
+    $('ceDelete').textContent = 'Tap again to delete';
     return;
   }
   pendingEditToast = 'Colour deleted';
   pendingEditNext = [];
   pendingEdit = send({ type: 'deleteColour', preset: colourEdit.id });
   disarmDelete();
+  renderEditor();
 });
 
 /** The server's answer to a Save or Delete in either editor: the next command if one is waiting, else done. */
@@ -2455,12 +2506,13 @@ function finishEdit(error) {
     failed = true;
   }
   pendingEditNext = [];
-  $('peSave').disabled = false;
   $('feSave').disabled = false;
   $('feCopy').disabled = false;
   if (!failed) {
     closeEditor();
     toast(pendingEditToast, true);
+  } else {
+    renderEditor();
   }
 }
 
