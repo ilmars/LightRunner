@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   addColour, addEffect, canRecolour, checkReferences, deleteColour, displayColour, editColour, editEffect, EffectLayer, ensureEffects, ensureRunningOrder, groupIsWhiteOnly,
-  effectKey, groupSegments, isEffectPreset, isOff, listNames, parseShow, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect,
+  effectKey, groupSegments, isEffectPreset, isOff, keepLitPresets, listNames, parseShow, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, resolvedLayers,
   type Show, type StaticLayer,
 } from '../src/index.ts';
 
@@ -681,4 +681,54 @@ test('ready-made effects are added once to every coloured group with more than o
   const cleared = structuredClone(out);
   cleared.presets = cleared.presets.filter((p) => !isEffectPreset(p));
   assert.deepEqual(ensureEffects(cleared), cleared);
+});
+
+test('an edit in Prepare keeps the lit colours as they were: a hidden copy and a pin for each group whose light changes', () => {
+  const before = ready();
+  const running = { 'key-lights': 'key-lights-sarkans', background: 'background-sarkans', 'drum-cage': 'drum-cage-zils', 'front-lights': null };
+  // Red, shared and for every group of that name, with White, Amber and UV and a new brightness.
+  const edited = editColour(before, { preset: 'key-lights-sarkans', colour: '#00FF00', white: 0.4, amber: 0.3, uv: 0.2, level: 0.6, shared: true, sameName: true }).show;
+  const frozen = JSON.stringify(edited);
+  const { show, pins } = keepLitPresets(before, edited, running);
+  assert.equal(JSON.stringify(edited), frozen, 'the input show is not changed');
+  assert.deepEqual(pins.map((p) => [p.group, p.from]), [['key-lights', 'key-lights-sarkans'], ['background', 'background-sarkans']]);
+  const palettes = before.palettes;
+  for (const pin of pins) {
+    const copy = preset(show, pin.to);
+    const was = preset(before, pin.from);
+    assert.equal(copy.custom, true, 'the copy is hidden');
+    assert.equal(copy.group, pin.group);
+    assert.equal(copy.name, was.name);
+    assert.equal(copy.fade, was.fade);
+    // The copy makes the light the preset made before the edit, with no palette to follow.
+    assert.deepEqual(copy.layers, resolvedLayers(was.layers, palettes));
+    assert.deepEqual(resolvedLayers(copy.layers, show.palettes), resolvedLayers(was.layers, palettes));
+    assert.ok(!JSON.stringify(copy.layers).includes('palette'));
+    // The edit itself is in the show.
+    assert.deepEqual(preset(show, pin.from), preset(edited, pin.from));
+  }
+  assert.equal(show.presets.length, edited.presets.length + 2);
+
+  // A fade alone, or a colour nobody shows, pins nothing.
+  const fadeOnly = editColour(before, { preset: 'key-lights-sarkans', fade: 9, sameName: false }).show;
+  assert.deepEqual(keepLitPresets(before, fadeOnly, running), { show: fadeOnly, pins: [] });
+  const unlit = editColour(before, { preset: 'key-lights-zils', colour: '#123456', sameName: false }).show;
+  assert.deepEqual(keepLitPresets(before, unlit, running).pins, []);
+  // A second edit while the group runs its copy pins nothing more.
+  const again = editColour(show, { preset: 'key-lights-sarkans', colour: '#0000ff', sameName: false }).show;
+  const onCopy = { ...running, 'key-lights': pins[0]!.to, background: pins[1]!.to };
+  assert.deepEqual(keepLitPresets(show, again, onCopy).pins, []);
+});
+
+test('an effect edited in Prepare is kept as it was where it runs', () => {
+  const s = ready();
+  const { show: before, id } = addEffect(s, { group: 'background', name: 'Wave', effect: fx({ colours: [{ palette: 'lightkey', index: 2 }, { hex: '#0000ff' }], base: { colour: { palette: 'lightkey', index: 0 }, level: 0.3 } }) });
+  const edited = editEffect(before, { preset: id, effect: fx({ edge: 'hard' }) });
+  const { show, pins } = keepLitPresets(before, edited, { background: id });
+  assert.equal(pins.length, 1);
+  const copy = preset(show, pins[0]!.to);
+  assert.equal(copy.custom, true);
+  assert.deepEqual(copy.layers, resolvedLayers(preset(before, id).layers, before.palettes));
+  assert.deepEqual((copy.layers[0] as EffectLayer).colours[0], { hex: '#ff0000' });
+  assert.deepEqual((copy.layers[0] as EffectLayer).base, { colour: { hex: '#ffaa5a' }, level: 0.3 });
 });

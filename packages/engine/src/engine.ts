@@ -4,9 +4,9 @@
 
 import {
   BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, LiveEffectLayer, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, displayColour, effectKey, findProfile,
-  liveEffectId, livePresetId, parseLiveEffect, parseLivePreset, resolveColour, resolveEffect,
-  type StageCommand, type EffectLayer, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
-  type GroupStatus, type HeldLight, type Layer, type Palette, type Preset, type RuntimeState, type Show, type StageState,
+  liveEffectId, livePresetId, parseLiveEffect, parseLivePreset, resolvedLayers,
+  type PresetPin, type StageCommand, type EffectLayer, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
+  type GroupStatus, type HeldLight, type Palette, type Preset, type RuntimeState, type Show, type StageState,
 } from '../../shared/src/index.ts';
 import { SafeRates, cyclesPerSecond, safeRate } from './effects.ts';
 import { Crossfade, Ramp } from './fade.ts';
@@ -234,14 +234,6 @@ function sameLight(a: CompiledPreset, b: CompiledPreset): boolean {
   return near(x.r, y.r) && near(x.g, y.g) && near(x.b, y.b) && near(x.w, y.w) && near(x.a, y.a) && near(x.u, y.u) && near(x.i, y.i);
 }
 
-/** A preset's layers with palette colours looked up, so two layers compare by the light they make. */
-function resolvedLayers(layers: Layer[], palettes: Palette[]): Layer[] {
-  const byId = new Map(palettes.map((p) => [p.id, p]));
-  return layers.map((l) => (l.kind === 'static'
-    ? { ...l, colour: resolveColour(l.colour, byId) }
-    : resolveEffect(l, byId)));
-}
-
 /** True when the group runs (or is fading into) a preset with an effect in it, as Save sees it (isEffectPreset). */
 function runsEffect(group: GroupRun): boolean {
   return group.presets.current?.preset.layers.some((l) => l.kind === 'effect') ?? false;
@@ -325,8 +317,11 @@ export class Engine {
     this.setShow(show, now);
   }
 
-  /** Load a new or edited show without disturbing what is on stage. */
-  setShow(show: Show, now: number): void {
+  /**
+   * Load a new or edited show without disturbing what is on stage. `pins` (an edit made in Prepare, and its Undo):
+   * each group running a pin's `from` carries on as its `to`, with no fade, when the two make the same light.
+   */
+  setShow(show: Show, now: number, pins: readonly PresetPin[] = []): void {
     const before = this.show as Show | undefined;
     this.show = show;
     const palettes = new Map<string, Palette>(show.palettes.map((p) => [p.id, p]));
@@ -367,8 +362,8 @@ export class Engine {
       }
       run.smoke = smoke;
       run.setFixtures(g.fixtures.map((id) => this.fixtureIndex.get(id)).filter((i): i is number => i !== undefined), this.fixtures);
-      // A colour (or effect) edited while it is lit fades to the new one instead of snapping.
-      const lit = this.editedColour(run, before, now);
+      // A colour (or effect) edited while it is lit fades to the new one instead of snapping, unless it is pinned.
+      const lit = this.pinned(run, pins.find((p) => p.group === g.id), before) ? null : this.editedColour(run, before, now);
       // Running presets pick up edits; deleted ones keep running until they fade out.
       run.presets.update((key, item) => {
         const fresh = this.presets.get(key);
@@ -454,6 +449,21 @@ export class Engine {
       if (!same) continue;
       group.presets.rekey(key, target.id, { ...group.presets.current!, preset: target });
     }
+  }
+
+  /**
+   * A pin for the group: it runs `from`, and `to` in the new show makes the light `from` made in the old one.
+   * The run carries on under `to` (an effect keeps its place), so nothing on stage moves. True when it moved.
+   */
+  private pinned(group: GroupRun, pin: PresetPin | undefined, before: Show | undefined): boolean {
+    const running = group.presets.current;
+    if (!pin || !before || !running || group.presets.currentKey !== pin.from) return false;
+    const was = before.presets.find((p) => p.id === pin.from);
+    const is = this.show.presets.find((p) => p.id === pin.to);
+    const fresh = this.presets.get(pin.to);
+    if (!was || !is || !fresh || is.group !== group.id) return false;
+    if (JSON.stringify(resolvedLayers(was.layers, before.palettes)) !== JSON.stringify(resolvedLayers(is.layers, this.show.palettes))) return false;
+    return group.presets.rekey(pin.from, pin.to, { ...running, preset: fresh });
   }
 
   /**

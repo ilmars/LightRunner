@@ -13,10 +13,10 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OscSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
+  BUILT_IN_PROFILES, Command, OscSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
   applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,
   type OflFixture, type Pick, type Scope,
-  BLACKOUT, LiveEffectLayer, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type RuntimeState, type Show, type ShowEdit, type StageCommand,
+  BLACKOUT, LiveEffectLayer, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand,
 } from '../../packages/shared/src/index.ts';
 import { effectFrames, settledVisual, type StageClock } from '../../packages/engine/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
@@ -127,6 +127,11 @@ export class App {
   private undoLog: (Show | 'stage')[] = [];
   /** The last itemTempo edit, so a run of them joins one Undo step: its song, when, and the Undo entry it made. */
   private tempoEdit: { item: string; at: number; step: Show | 'stage' } | null = null;
+  /**
+   * For an Undo step of an edit made in Prepare: the groups it moved onto copies of their colours (keepLitPresets),
+   * and back, so Undo puts them on their own colours again without moving the lights.
+   */
+  private readonly undoPins = new WeakMap<Show, PresetPin[]>();
   /**
    * The first operator edit after start or after a programmer save keeps a
    * backup; the rest of a rehearsal's edits don't, so they can't push the
@@ -461,7 +466,8 @@ export class App {
         try {
           // The stage may be running a hidden preset that Save made; keep it, or the
           // next Save or a restart would find it gone.
-          await this.operatorSave(keepCustomPresets(last, this.show));
+          // Groups an edit in Prepare moved onto copies go back onto their own colours, which look the same again.
+          await this.operatorSave(keepCustomPresets(last, this.show), this.undoPins.get(last));
         } catch (err) {
           this.undoLog.push(last); // still there to try again
           return { error: (err as Error).message, recorded: false };
@@ -624,6 +630,8 @@ export class App {
     const usesStage = cmd.type === 'saveItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook' || (cmd.type === 'editQuickLook' && !!cmd.fromStage);
     // Deleting a colour only looks at the stage to keep a lit colour; it is fine during Blackout.
     const stage = usesStage && draft ? draft.engine.runtime() : usesStage || cmd.type === 'deleteColour' ? await this.stage() : null;
+    // In Prepare an edit never changes the lights: what each live group runs now, to keep it as it is.
+    const running = draft ? (stage && !usesStage ? stage : await this.stage()).groups : null;
     // A draft made during Blackout is still saved: the groups it lit keep their colours, the rest are stored as Off,
     // which is what its picture shows.
     if (usesStage && !draft && stage?.look === BLACKOUT) throw new Error('Blackout is on. Bring the lights back, then save.');
@@ -669,12 +677,15 @@ export class App {
         break;
       }
     }
-    await this.operatorSave(next);
+    // Groups on stage showing a colour or effect the edit changes carry on as a hidden copy of it, with no fade.
+    const kept = running ? keepLitPresets(before, next, running) : { show: next, pins: [] };
+    await this.operatorSave(kept.show, kept.pins);
     // Tempo edits of one song within 3 s of each other (tapping along, a held + or −) are one Undo step.
     const at = Date.now();
     const joins = cmd.type === 'itemTempo' && this.tempoEdit !== null && this.tempoEdit.item === cmd.item
       && at - this.tempoEdit.at <= TEMPO_RUN_MS && this.undoLog.at(-1) === this.tempoEdit.step;
     if (!joins) this.remember(before);
+    if (kept.pins.length) this.undoPins.set(before, kept.pins.map((p) => ({ group: p.group, from: p.to, to: p.from })));
     this.tempoEdit = cmd.type === 'itemTempo' ? { item: cmd.item, at, step: this.undoLog.at(-1)! } : null;
     // Undo lights up at once, without waiting for the engine's next state.
     this.publishState();
@@ -713,19 +724,20 @@ export class App {
   }
 
   /** An operator edit or its Undo: saved like any change, but only the first one keeps a backup. */
-  private async operatorSave(show: Show): Promise<void> {
-    await this.putShow(show, !this.operatorBackedUp);
+  private async operatorSave(show: Show, pins?: PresetPin[]): Promise<void> {
+    await this.putShow(show, !this.operatorBackedUp, pins);
     this.operatorBackedUp = true;
   }
 
   /** Save the show, hand it to the engine and send every device the new layout. */
-  private async putShow(show: Show, backup = true): Promise<void> {
+  private async putShow(show: Show, backup = true, pins?: PresetPin[]): Promise<void> {
     // A show that arrives without a running order (import, restore, merge) gets one, as at start,
     // and Basic lights always exists and comes first, whatever Compare with a file took away.
     show = ensureShow(show);
     this.store.saveShow(show, { backup });
     this.show = show;
-    this.post({ type: 'show', show: this.engineShow() });
+    // Only the live engine takes the pins: the drafts show the edit.
+    this.post({ type: 'show', show: this.engineShow(), pins });
     // Drafts run the edited show too, so a colour added in Blind can be used there.
     const now = performance.now() / 1000;
     for (const [tablet, session] of this.blind) {

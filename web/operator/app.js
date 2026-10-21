@@ -1166,10 +1166,13 @@ function runningEffect(group, s) {
   if (s.effect) return s.effect;
   const id = s.preset;
   if (!id) return null;
-  const listed = group.presets.find((p) => p.id === id);
+  const listed = group.presets.find((p) => p.id === id) ?? hiddenPreset(group, id);
   if (listed) return listed.effect ?? null;
   return savedEntry(group, id)?.effect ?? null;
 }
+
+/** A hidden preset of the group (an Any colour Save kept, or the copy an edit in Prepare left on stage), or undefined. */
+const hiddenPreset = (group, id) => group?.hidden?.find((x) => x.id === id);
 
 /** A look's entry that gives the group this preset (a hidden one Save made): the look on stage first, then any. */
 function savedEntry(group, presetId) {
@@ -1204,7 +1207,7 @@ function runningLight(group, s) {
   const effect = runningEffect(group, s);
   if (effect) return { colour: effect.colours[0]?.hex ?? '#000000', white: 0, amber: 0, uv: 0 };
   const id = s?.preset;
-  const light = id === '__safe' ? layout.basicLight : group?.presets.find((x) => x.id === id)?.light;
+  const light = id === '__safe' ? layout.basicLight : (group?.presets.find((x) => x.id === id) ?? hiddenPreset(group, id))?.light;
   if (light) return { colour: light.hex, white: light.white, amber: light.amber, uv: light.uv };
   return { colour: '#000000', white: 0, amber: 0, uv: 0 };
 }
@@ -1221,8 +1224,11 @@ function presetInfo(group, s) {
   if (s.live) return { name: 'Custom', colour: s.live.display, effect: null };
   const p = group?.presets.find((x) => x.id === id);
   if (p) return { name: p.name, colour: p.swatch ?? NEUTRAL, effect };
+  // A hidden one: an Any colour Save kept, or the stage's copy of a colour edited in Prepare (shown as it was).
+  const hidden = hiddenPreset(group, id);
+  if (hidden && !effect) return { name: hidden.name, colour: hidden.swatch ?? NEUTRAL, effect: null };
   // A live change to an effect, or the "Custom effect" a Save kept in the song.
-  if (effect) return { name: savedEntry(group, id)?.name ?? 'Custom effect', colour: effect.colours[0]?.hex ?? NEUTRAL, effect };
+  if (effect) return { name: hidden?.name ?? savedEntry(group, id)?.name ?? 'Custom effect', colour: effect.colours[0]?.hex ?? NEUTRAL, effect };
   return { name: 'Custom', colour: NEUTRAL, effect: null };
 }
 
@@ -2515,7 +2521,10 @@ function renderEditor() {
     colourEdit.name = p.name;
   }
   $('ceTitle').textContent = isNew ? `New colour for ${group.name}` : `${p.name} on ${group.name}`;
-  $('ceNote').textContent = isNew ? 'Trying colours here never changes the stage' : 'The stage changes only when you Save';
+  // In Prepare a Save changes the colour in the list (and the draft) but never the lights: the stage keeps
+  // showing it as it was until it next takes that colour.
+  $('ceNote').textContent = isNew ? 'Trying colours here never changes the stage'
+    : prep.on ? 'Saving changes this colour; the lights change when the stage next uses it' : 'The stage changes only when you Save';
 
   // The swatch: what Save would keep (nothing while there is no light in it).
   const recolour = isNew || p.canRecolour !== false;
@@ -2837,6 +2846,7 @@ function closeEffectEditor() {
 /** Keeps "Used in …" and the round's length true as the show and the tempo change; closes the editor if the effect is gone. */
 function renderEffectEditor() {
   if (!effectEdit) return;
+  $('feNote').textContent = prep.on ? 'only here — after Save, the lights change when the stage next runs it' : "only here — the stage doesn't change until Save";
   followEffectStripClock();
   drawSpeedNote();
   if (effectEdit.id === null) return;

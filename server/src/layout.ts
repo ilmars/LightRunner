@@ -43,6 +43,19 @@ export interface OperatorGroup {
   /** The length of the group's line: the segments of all its fixtures. */
   segments: number;
   presets: OperatorPreset[];
+  /**
+   * The group's hidden presets (an Any colour Save kept, a copy an edit in Prepare left on stage), never listed as colours:
+   * only so the page can show one the stage runs by its name and colour.
+   */
+  hidden: OperatorHidden[];
+}
+
+export interface OperatorHidden {
+  id: string;
+  name: string;
+  swatch: string | null;
+  light: LiveLight | null;
+  effect: LiveEffectLayer | null;
 }
 
 export interface OperatorPreset {
@@ -167,6 +180,9 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
         extras: { white: any(['white']), amber: any(['amber']), uv: any(['uv']) },
         segments: groupSegments(show, g.id),
         presets,
+        hidden: show.presets
+          .filter((p) => p.group === id && p.custom)
+          .map((p) => ({ id: p.id, name: p.name, swatch: p.swatch ?? null, light: presetLight(p, palettes), effect: presetEffect(p, palettes) })),
       }];
     }),
     fixtures: fixtureOrder.flatMap((id) => {

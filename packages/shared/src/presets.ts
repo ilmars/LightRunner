@@ -4,8 +4,8 @@
 
 import { HEX_COLOUR, displayColour } from './protocol.ts';
 import { cleanName, effectSwatch, uniqueId } from './runningorder.ts';
-import { findProfile, isEffectPreset, layerColours, resolveColour } from './schema.ts';
-import type { ChannelRole, ColourSpec, EffectLayer, Palette, Preset, Profile, Show, StaticLayer } from './schema.ts';
+import { findProfile, isEffectPreset, layerColours, resolveColour, resolveEffect } from './schema.ts';
+import type { ChannelRole, ColourSpec, EffectLayer, Layer, Palette, Preset, Profile, Show, StaticLayer } from './schema.ts';
 
 /** True when no fixture in the group has a red, green or blue channel: the picker offers it warm-to-cool white only. */
 export function groupIsWhiteOnly(show: Show, groupId: string): boolean {
@@ -474,4 +474,44 @@ export function ensureEffects(show: Show): Show {
   }
   out.operator.effectsAdded = true;
   return out;
+}
+
+// ---- Edits in Prepare keep the stage as it is ----
+
+/** A preset's layers with palette colours looked up, so two layers compare by the light they make. */
+export function resolvedLayers(layers: readonly Layer[], palettes: readonly Palette[]): Layer[] {
+  const byId = new Map(palettes.map((p) => [p.id, p]));
+  return layers.map((l) => (l.kind === 'static' ? { ...l, colour: { ...resolveColour(l.colour, byId) } } : resolveEffect(l, byId)));
+}
+
+/** The group running preset `from` carries on as preset `to`, which makes the same light: no fade, an effect keeps its place. */
+export interface PresetPin {
+  group: string;
+  from: string;
+  to: string;
+}
+
+/**
+ * Keep the stage as it is through a show edit (one made in Prepare, which never changes the lights): each group
+ * `running` a preset whose light the edit changes gets a hidden copy of that preset as it was (palette colours
+ * looked up, brightness and fade kept) and a pin from the preset to its copy, for the engine to move the group onto.
+ * Returns the edited show with the copies added, and the pins; with no pins, `next` itself. The inputs are not changed.
+ */
+export function keepLitPresets(before: Show, next: Show, running: Readonly<Record<string, string | null>>): { show: Show; pins: PresetPin[] } {
+  const pins: PresetPin[] = [];
+  const copies: Preset[] = [];
+  const taken = next.presets.map((p) => p.id);
+  for (const [group, id] of Object.entries(running)) {
+    const was = id ? before.presets.find((p) => p.id === id && p.group === group) : undefined;
+    const is = id ? next.presets.find((p) => p.id === id && p.group === group) : undefined;
+    // A preset the edit takes away is the engine's to let go of (it keeps the light).
+    if (!was || !is) continue;
+    const light = resolvedLayers(was.layers, before.palettes);
+    if (JSON.stringify(light) === JSON.stringify(resolvedLayers(is.layers, next.palettes))) continue;
+    const copy: Preset = { ...structuredClone(was), id: uniqueId(`${was.id}-kept`, taken), layers: light, custom: true };
+    taken.push(copy.id);
+    copies.push(copy);
+    pins.push({ group, from: was.id, to: copy.id });
+  }
+  return pins.length ? { show: { ...next, presets: [...next.presets, ...copies] }, pins } : { show: next, pins };
 }

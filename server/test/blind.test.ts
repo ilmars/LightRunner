@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createSocket } from 'node:dgram';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import { App } from '../src/app.ts';
@@ -606,4 +607,136 @@ test('Update from the stage in Blind stores the draft, not the stage', () => wit
   assert.equal(savedLook(dir, quick.id), undefined);
   await sleep(150);
   assert.equal(t.state().groups['back-wall'].preset, liveWall);
+}));
+
+/** A stand-in Art-Net node on this machine: every ArtDmx packet it gets, as "universe:data". */
+async function artnetNode() {
+  const socket = createSocket('udp4');
+  await new Promise<void>((r) => socket.bind(0, '127.0.0.1', r));
+  const packets: string[] = [];
+  socket.on('message', (m) => {
+    if (m.subarray(0, 8).toString('ascii') === 'Art-Net\0' && m.readUInt16LE(8) === 0x5000) packets.push(`${m.readUInt16LE(14)}:${m.subarray(18).toString('hex')}`);
+  });
+  return { port: socket.address().port, packets, close: () => socket.close() };
+}
+
+/** The stage-L1 rig, sending Art-Net to `node` (and nowhere else). */
+async function withRig(fn: (app: App, node: Awaited<ReturnType<typeof artnetNode>>) => Promise<void>) {
+  const node = await artnetNode();
+  const dir = tempDir();
+  const app = new App({
+    port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'shows/stage-l1.json'), webDir: join(root, 'web'),
+    output: { kind: 'artnet', host: '192.0.2.1' }, artnetRedirect: { '192.0.2.1': { host: '127.0.0.1', port: node.port } }, log: () => {},
+  });
+  try {
+    await app.start();
+    await fn(app, node);
+  } finally {
+    await app.stop();
+    node.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Every packet the node gets for `ms` from now, by universe, and the tablet's live pictures in that time. */
+async function watch(node: { packets: string[] }, t: { visuals: Buffer[] }, ms: number) {
+  const from = node.packets.length, seen = t.visuals.length;
+  await sleep(ms);
+  const byUniverse = new Map<string, Set<string>>();
+  for (const p of node.packets.slice(from)) {
+    const [u, data] = p.split(':') as [string, string];
+    if (!byUniverse.has(u)) byUniverse.set(u, new Set());
+    byUniverse.get(u)!.add(data);
+  }
+  return { byUniverse, count: node.packets.length - from, visuals: new Set(t.visuals.slice(seen).map((v) => v.toString('hex'))) };
+}
+
+/** Lights that hold still: each universe's one packet, and the one live picture. */
+function steady(w: Awaited<ReturnType<typeof watch>>, what: string) {
+  assert.ok(w.count >= 10, `${what}: packets ${w.count}`);
+  for (const [u, set] of w.byUniverse) assert.equal(set.size, 1, `${what}: universe ${u} changed`);
+  assert.equal(w.visuals.size, 1, `${what}: the stage view changed`);
+  return { dmx: [...w.byUniverse].map(([u, set]) => `${u}:${[...set][0]}`).sort(), visual: [...w.visuals][0] };
+}
+
+test('a colour or effect edited in Prepare never moves the lights: the draft takes it, the stage keeps a copy until it next takes that colour', () => withRig(async (app, node) => {
+  const a = await tablet(app);
+  const b = await tablet(app);
+  await waitFor(a.layout);
+  // A steady red colour fade (two reds) on the side bar, to edit as an effect.
+  const red = { kind: 'effect', effect: 'colourFade', colours: [{ hex: '#ff0000' }, { hex: '#ff0000' }], speed: { beats: 4 } };
+  assert.equal(await a.send({ type: 'addEffect', group: 'b8-side-bar', name: 'Steady red', effect: red }), null);
+  const fx = (await api(app, 'GET', '/api/show')).body.presets.find((p: any) => p.name === 'Steady red').id;
+  for (const cmd of [
+    { type: 'look', id: 'worship', fade: 0 },
+    { type: 'groupPreset', group: 'key-lights', preset: 'key-lights-sarkans', fade: 0 },
+    { type: 'groupPreset', group: 'background', preset: 'background-sarkans', fade: 0 },
+    { type: 'groupPreset', group: 'b8-side-bar', preset: fx, fade: 0 },
+  ]) assert.equal(await a.send(cmd), null);
+  await waitFor(() => b.state()?.groups['b8-side-bar'].preset === fx, 2000, 'the stage set');
+  await sleep(300);
+  assert.equal(await a.send({ type: 'blindStart' }), null);
+  await waitFor(() => a.draft(), 2000, 'the draft');
+  const lights = steady(await watch(node, b, 400), 'before the edits');
+
+  // Red, shared by every group of that name: a new colour, brightness, White, Amber and UV. And the effect turns green.
+  assert.equal(await a.send({ type: 'editColour', preset: 'key-lights-sarkans', colour: '#00ff00', white: 0.5, amber: 0.4, uv: 0.3, level: 0.5, shared: true, sameName: true }), null);
+  const green = { ...red, colours: [{ hex: '#00ff00' }, { hex: '#00ff00' }] };
+  assert.equal(await a.send({ type: 'editEffect', preset: fx, effect: green }), null);
+  assert.deepEqual(steady(await watch(node, b, 1000), 'after the edits'), lights, 'the lights and the stage view did not move');
+
+  // The stage runs copies of how the colours were, so the song reads as changed; the draft has the edits.
+  const live = app.state!.groups;
+  for (const [group, id] of [['key-lights', 'key-lights-sarkans'], ['background', 'background-sarkans'], ['b8-side-bar', fx]]) {
+    assert.notEqual(live[group]!.preset, id, `${group} runs a copy`);
+    assert.equal(live[group]!.changed, true);
+    assert.equal(a.draft().groups[group].preset, id, `the draft's ${group} runs the edited one`);
+  }
+  const show = (await api(app, 'GET', '/api/show')).body;
+  assert.equal(show.palettes.find((p: any) => p.id === 'lightkey').colours[2].hex, '#00ff00');
+  const pick = (id: string) => show.presets.find((p: any) => p.id === id);
+  assert.equal(pick(live['key-lights']!.preset!).custom, true);
+  assert.deepEqual(pick(live['b8-side-bar']!.preset!).layers[0].colours, red.colours);
+  // The page can show the copies as the colours they are.
+  const hidden = (await waitFor(() => b.layout()?.groups.find((g: any) => g.id === 'background')?.hidden.find((h: any) => h.id === live.background!.preset), 2000, 'the copy in the layout'));
+  assert.equal(hidden.name, 'Sarkans');
+  assert.equal(hidden.light.hex, '#ff0000');
+  // The draft's picture shows the edit.
+  await waitFor(() => a.draftVisuals().at(-1)?.toString('hex') !== lights.visual, 4000, "the draft's picture to change");
+
+  // Undo from Live takes back each edit with its copy, and the lights still don't move.
+  assert.equal(await a.send({ type: 'blindEnd' }), null);
+  const during = watch(node, b, 1200);
+  assert.equal(await a.send({ type: 'undo' }), null);
+  assert.equal(await a.send({ type: 'undo' }), null);
+  assert.deepEqual(steady(await during, 'through Undo'), lights);
+  const back = app.state!.groups;
+  assert.equal(back['key-lights']!.preset, 'key-lights-sarkans');
+  assert.equal(back.background!.preset, 'background-sarkans');
+  assert.equal(back['b8-side-bar']!.preset, fx);
+  assert.equal((await api(app, 'GET', '/api/show')).body.palettes.find((p: any) => p.id === 'lightkey').colours[2].hex, '#ff0000');
+
+  // Edited again in Prepare, then Go: the stage takes the colour.
+  assert.equal(await a.send({ type: 'fadeTime', value: 0 }), null);
+  assert.equal(await a.send({ type: 'blindStart' }), null);
+  await waitFor(() => a.draft(), 2000, 'the draft');
+  assert.equal(await a.send({ type: 'editColour', preset: 'key-lights-sarkans', colour: '#0000ff', sameName: false }), null);
+  await waitFor(() => app.state!.groups['key-lights']!.preset !== 'key-lights-sarkans', 2000, 'the key lights on their copy');
+  assert.equal(await a.send({ type: 'blindGo' }), null);
+  await waitFor(() => app.state!.groups['key-lights']!.preset === 'key-lights-sarkans', 2000, 'Go to put the key lights on the edited red');
+  await sleep(300);
+  assert.notDeepEqual(steady(await watch(node, b, 300), 'after Go').dmx, lights.dmx, 'the lights took the edit');
+}));
+
+test('an edit made in Live still changes the lights wherever the colour is lit', () => withRig(async (app, node) => {
+  const a = await tablet(app);
+  await waitFor(a.layout);
+  assert.equal(await a.send({ type: 'fadeTime', value: 0 }), null);
+  assert.equal(await a.send({ type: 'groupPreset', group: 'key-lights', preset: 'key-lights-sarkans', fade: 0 }), null);
+  await sleep(300);
+  const lights = steady(await watch(node, a, 300), 'before');
+  assert.equal(await a.send({ type: 'editColour', preset: 'key-lights-sarkans', colour: '#0000ff', sameName: false }), null);
+  await sleep(4000);
+  assert.equal(app.state!.groups['key-lights']!.preset, 'key-lights-sarkans');
+  assert.notDeepEqual(steady(await watch(node, a, 300), 'after').dmx, lights.dmx);
 }));

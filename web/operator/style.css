@@ -64,7 +64,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .black-label { color: var(--ds-danger-text); }
 .head-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; white-space: nowrap; overflow: hidden; }
 .head-name { min-width: 0; font-size: 20px; line-height: 1.15; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
-.head-note { flex: none; font-size: 13px; color: var(--ds-muted); }
+/* A long note ("On stage: <name>") gives way first, so the name keeps its room. */
+.head-note { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--ds-muted); }
 .changed { flex: none; color: var(--warn); font-size: 13px; }
 .notes { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .q { display: inline-flex; align-items: center; color: var(--dim); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -514,7 +515,7 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .fe-preview { flex: none; display: flex; flex-direction: column; gap: 6px; }
 .fe-prev-lab { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; min-width: 0; }
 .fe-prev-lab .ds-caps { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fe-prev-lab .fe-note { flex: none; }
+.fe-prev-lab .fe-note { flex: 0 1 auto; min-width: 0; text-align: right; }
 .fe-strip { display: block; width: 100%; height: 34px; border-radius: 12px; background: #04070D; }
 /* Effect: one chip per kind, the chosen one blue. */
 .fe-kind { display: flex; flex-wrap: wrap; gap: 6px; }
