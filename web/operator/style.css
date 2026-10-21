@@ -534,7 +534,6 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .fe-order .fe-note { margin-left: 4px; }
 .fe-ghost { position: fixed; z-index: 50; margin: 0; pointer-events: none; opacity: 0.9; background: var(--ds-popover); }
 /* The list ＋ Colour (or a base colour) opens under its row: the colours to tap, and ＋ Own colour's strip. */
-.ce-row[hidden] { display: none; }
 .fe-tray { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 8px; margin-top: -4px; border-radius: 12px; background: rgba(0, 0, 0, 0.14); border: 1px solid var(--ds-edge); }
 .fe-colours { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 6px; }
 .fecol {
@@ -564,7 +563,7 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 /* Speed: 1 … 32 beats and Free (then its seconds), with the round's length. */
 .fe-speed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; }
 .fe-speed-seg { display: flex; flex-wrap: wrap; gap: 6px; }
-.fe-speed-seg .ce-seg > button { min-width: 40px; font-variant-numeric: tabular-nums; }
+.fe-speed-seg .ce-seg > button { min-width: 44px; font-variant-numeric: tabular-nums; }
 .fe-speed-seg .ce-seg[hidden] { display: none; }
 /* Fine-tune: a quiet bar with its summary; open, its settings three to a row. */
 .fe-fine {
@@ -585,7 +584,7 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .fe-stepb:disabled { opacity: 0.4; }
 .fe-count { font-weight: 600; font-variant-numeric: tabular-nums; }
 .fe-edges { display: flex; flex-wrap: nowrap; }
-.fe-edges > button { flex: 1; min-height: 40px; }
+.fe-edges > button { flex: 1; min-height: 44px; }
 .fe-used { flex: none; margin: 0; color: var(--ds-muted); font-size: 12px; }
 .fe-used[hidden] { display: none; }
 /* ---- New quick look sheet (same cover as the colour picker) ---- */

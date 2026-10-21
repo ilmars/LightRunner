@@ -3317,6 +3317,12 @@ $('feMore').addEventListener('click', () => showEffectMenu($('feMenu').hidden));
 window.addEventListener('pointerdown', (ev) => {
   if (!$('feMenu').hidden && !$('feMoreWrap').contains(ev.target)) showEffectMenu(false);
 }, true);
+// Escape closes it, and the keyboard goes back to ⋯ (as the Tempo menu's).
+$('feMoreWrap').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape' || $('feMenu').hidden) return;
+  showEffectMenu(false);
+  $('feMore').focus();
+});
 $('feName').addEventListener('keydown', (ev) => {
   ev.stopPropagation();
   if (ev.key === 'Enter') $('feName').blur();

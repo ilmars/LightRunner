@@ -39,6 +39,7 @@ Tests: 488 (`npm test`): 487 pass, 1 is skipped (the Lightkey project test, need
 - The stage view on the operator page keeps showing the last frame while the tablet is offline (the red banner does show).
 - "Compare with a file" with the Lightkey project lists P5 as new and ticked; untick it (P5 is not used).
 - One server test (show saved with backups) has failed once on Windows and passed on re-run.
+- The server test "Save, add and Save as quick look work after Basic lights" failed once in a full run on Windows (21 Oct: EPERM renaming `show.json.tmp` to `show.json`, a file still held open) and passed on re-run.
 - Each Save of an Any colour adds a hidden custom preset; old ones aren't cleaned up. The same goes for a changed effect (a hidden "Custom effect").
 - "Compare with a file" lists the ready-made effects as removed when the file has none of them (they are not ticked; applying it would delete them).
 - Effects haven't met the real rig yet: speeds, sizes and the 3-flashes-a-second limit are checked on the engine and in a browser, not in the dark room. Whether a bar needs Reversed is for the owner to check at the church.
