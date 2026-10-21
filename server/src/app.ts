@@ -1348,11 +1348,12 @@ export class App {
         const fromPatch = url.searchParams.get('source') === 'patch';
         // Patch never edits settings, and a Patch page left open holds an old copy of them: keep the live ones
         // (Send DMX, output, routes), or saving the patch could start sending DMX again.
-        // An imported file keeps this installation's PIN: it must not change who can log in.
+        // An imported file keeps this installation's PIN: it must not change who can log in. It keeps this computer's
+        // Listen switches too (they name the controllers plugged in here); its keys and APC mini layout switch are taken.
         // Controller keys are assigned while Patch may be open, so its copy keeps the live ones too.
         show = fromPatch
           ? { ...show, operator: { ...show.operator, controller: this.show.operator.controller }, settings: this.show.settings }
-          : { ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash } };
+          : withIgnored({ ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash } }, this.show.operator.controller?.ignored);
         await this.setShow(show);
         this.log(fromPatch ? 'Patch saved' : `Imported show "${show.name}"`);
         json(res, 200, this.settingsView());
@@ -1742,6 +1743,16 @@ export class App {
     if (error) throw new HttpError(error.startsWith('unknown') ? 404 : 400, error);
     json(res, 200, { ok: true });
   }
+}
+
+/** The show with these controllers not listened to (Settings › Controller keys › Devices), and only these. */
+function withIgnored(show: Show, ignored: string[] | undefined): Show {
+  const c = show.operator.controller;
+  if (!c && !ignored?.length) return show;
+  const controller = { ...c, keys: c?.keys ?? [] };
+  if (ignored?.length) controller.ignored = [...ignored];
+  else delete controller.ignored;
+  return { ...show, operator: { ...show.operator, controller } };
 }
 
 /**

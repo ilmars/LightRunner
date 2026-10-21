@@ -704,3 +704,22 @@ test('Reset to the APC mini layout and Clear of a fixed key each keep a backup f
     prog.close();
   }
 }));
+
+test("importing a show file keeps this computer's Listen switches; the APC mini layout switch comes from the file", () => withKeys(async (rig) => {
+  const { url } = rig;
+  assert.equal((await call(url, 'PUT', '/api/controller', { ignored: ['nanoKONTROL2'] })).status, 200);
+  const file = await (await fetch(`${url}/api/show`)).json();
+  const put = (show: unknown) => fetch(`${url}/api/show`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(show) });
+  // A file from another computer, with its own switches.
+  file.operator.controller = { keys: [], apcLayout: false, ignored: ['Other desk'] };
+  assert.equal((await put(file)).status, 200);
+  let show = await (await fetch(`${url}/api/show`)).json();
+  assert.deepEqual(show.operator.controller.ignored, ['nanoKONTROL2']);
+  assert.equal(show.operator.controller.apcLayout, false);
+  // A file without any: the switches here stay, the layout is on.
+  delete file.operator.controller;
+  assert.equal((await put(file)).status, 200);
+  show = await (await fetch(`${url}/api/show`)).json();
+  assert.deepEqual(show.operator.controller.ignored, ['nanoKONTROL2']);
+  assert.equal(show.operator.controller.apcLayout, undefined);
+}));
