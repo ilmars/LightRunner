@@ -633,7 +633,10 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .m-sum { flex: none; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .m-sum b { flex: none; font-size: 14px; font-weight: 600; white-space: nowrap; }
 .m-sum span { min-width: 0; color: var(--ds-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-blacknote { flex: none; margin: 0; color: var(--ds-muted); font-size: 12px; }
+.m-blacknote[hidden] { display: none; }
 .m-colours { flex: none; display: flex; align-items: center; gap: 8px; }
+#mAnyBtn:disabled { opacity: 0.4; }
 .m-pal { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .mcol { flex: none; width: 44px; height: 44px; padding: 0; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 50%; }
 .mcol.off { background: #05080E; }

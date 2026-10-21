@@ -130,7 +130,11 @@ function connect() {
         if (!msg.error) toast(`Saved to ${itemSave.name}`, true);
         itemSave = null;
       }
-      if (msg.error) toast(msg.error);
+      // Individual lights' answers say what went wrong in plain words (once for the whole drag).
+      if (msg.ref !== null && manualRefs.has(msg.ref)) {
+        manualRefs.delete(msg.ref);
+        if (msg.error) toast(manualProblem(msg.error));
+      } else if (msg.error) toast(msg.error);
     }
   };
 }
@@ -3654,7 +3658,16 @@ function lightNow(fixture, segment = null) {
     // (The name of the circle it was set with; a strip colour is "Custom".)
     return { display: h.colour, light: null, level: h.level, name: h.level > 0 ? circle?.name ?? 'Custom' : 'Off', held: true };
   }
-  const g = lightGroupOf(fixture);
+  // A group under manual control (from another desk or the API) owns its lights: they show its hold, times its dimmer.
+  const groups = lightGroups().filter((x) => (layout.members?.[x.id] ?? []).includes(fixture));
+  const heldGroup = groups.find((x) => state?.groups?.[x.id]?.manual && state.groups[x.id].hold);
+  if (heldGroup) {
+    const { hold, level = 1 } = state.groups[heldGroup.id];
+    const shows = clamp01(hold.level * level);
+    const circle = manualColours.find((c) => !c.off && c.display === hold.colour);
+    return { display: hold.colour, light: null, level: shows, name: shows > 0 ? circle?.name ?? 'Custom' : 'Off', held: true };
+  }
+  const g = groups[0];
   const s = g ? state?.groups?.[g.id] : null;
   if (!g || !s) return { display: '#000000', light: null, level: 0, name: 'Off', held: false };
   const run = runningLight(g, s);
@@ -3726,7 +3739,10 @@ function buildManual() {
   }
   const known = new Set(planned.map((p) => p.f.id));
   manualSel.fixtures = manualSel.fixtures.filter((id) => known.has(id));
-  if (manualSel.fixtures.length !== 1) manualSel.segments = [];
+  // A re-patch can take segments away: picked ones the light no longer has go.
+  const onePicked = manualSel.fixtures.length === 1 ? planned.find((p) => p.f.id === manualSel.fixtures[0]) : null;
+  const segCount = onePicked ? Math.max(1, onePicked.f.segments ?? 1) : 0;
+  manualSel.segments = segCount > 1 ? manualSel.segments.filter((k) => k < segCount) : [];
 
   const chips = $('mGroups');
   chips.replaceChildren();
@@ -3804,11 +3820,49 @@ function placeManual() {
     m.box = { cx, cy, left: cx - w / 2, top: cy - vh / 2 - (h - content) / 2, w, h };
   }
   spreadBoxes(manualFix.filter((m) => !m.bar || m.vert).map((m) => m.box));
+  separateBoxes(manualFix.map((m) => m.box), W, H);
   for (const m of manualFix) {
-    const { w, h } = m.box;
-    const left = Math.min(Math.max(2, m.box.left), W - w - 2);
-    const top = Math.min(Math.max(2, m.box.top), H - h - 2);
+    const { left, top, w, h } = m.box;
     Object.assign(m.button.style, { left: `${left}px`, top: `${top}px`, width: `${w}px`, height: `${h}px` });
+  }
+}
+
+/**
+ * Any two buttons that still overlap (a short bar just over a long one, a side bar over the end of a row) move apart
+ * the short way: the smaller one moves (both half way when they are the same size), inside the plan. No two 44 px
+ * targets overlap, and each light stays as near its place as that allows.
+ */
+function separateBoxes(boxes, W, H) {
+  const gap = 2;
+  const clamp = (b) => {
+    b.left = Math.min(Math.max(2, b.left), W - b.w - 2);
+    b.top = Math.min(Math.max(2, b.top), H - b.h - 2);
+  };
+  boxes.forEach(clamp);
+  for (let pass = 0; pass < 80; pass++) {
+    let moved = false;
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i], b = boxes[j];
+        const ox = Math.min(a.left + a.w, b.left + b.w) - Math.max(a.left, b.left) + gap;
+        const oy = Math.min(a.top + a.h, b.top + b.h) - Math.max(a.top, b.top) + gap;
+        if (ox <= gap || oy <= gap) continue;
+        moved = true;
+        const across = ox < oy;
+        const centre = (x) => (across ? x.left + x.w / 2 : x.top + x.h / 2);
+        // Which way each goes: away from the other (by list order when they sit on the same spot).
+        const dir = centre(a) < centre(b) || (centre(a) === centre(b) && i < j) ? -1 : 1;
+        const sizeA = a.w * a.h, sizeB = b.w * b.h;
+        const shareA = sizeA === sizeB ? 0.5 : sizeA < sizeB ? 1 : 0;
+        const by = across ? ox : oy;
+        const key = across ? 'left' : 'top';
+        a[key] += dir * by * shareA;
+        b[key] -= dir * by * (1 - shareA);
+        clamp(a);
+        clamp(b);
+      }
+    }
+    if (!moved) break;
   }
 }
 
@@ -3936,20 +3990,43 @@ function sendManualColour(c) {
     toast('Tap lights on the plan to pick them first.', true);
     return;
   }
+  if (blackedOut()) return;
+  // A whole light's held segments fade back to its new colour, in the same change.
+  const releaseSegments = targets.some((t) => t.segment === undefined) || undefined;
+  if (c.off) {
+    sendManual({ type: 'manual', targets, intensity: 0, releaseSegments });
+    return;
+  }
+  // One command for each level among the targets (usually one): each keeps its own, a dark one comes up at the colour's.
+  const byLevel = new Map();
   for (const target of targets) {
     const now = lightNow(target.fixture, target.segment ?? null);
-    if (target.segment === undefined) {
-      for (const h of heldSegmentsOf(target.fixture)) send({ type: 'release', target: { fixture: h.fixture, segment: h.segment } });
-    }
-    if (c.off) {
-      send({ type: 'manual', target, intensity: 0 });
-      continue;
-    }
-    const intensity = now.level >= 0.05 ? now.level : c.bright;
-    const extras = Object.fromEntries(['white', 'amber', 'uv'].filter((k) => c[k] > 0.001).map((k) => [k, Math.round(c[k] * 1000) / 1000]));
-    send({ type: 'manual', target, colour: c.hex, ...extras, intensity: Math.round(intensity * 1000) / 1000 });
+    const level = Math.round((now.level >= 0.05 ? now.level : c.bright) * 1000) / 1000;
+    if (!byLevel.has(level)) byLevel.set(level, []);
+    byLevel.get(level).push(target);
+  }
+  const extras = Object.fromEntries(['white', 'amber', 'uv'].filter((k) => c[k] > 0.001).map((k) => [k, Math.round(c[k] * 1000) / 1000]));
+  for (const [intensity, list] of byLevel) {
+    sendManual({ type: 'manual', targets: list, colour: c.hex, ...extras, intensity, releaseSegments });
   }
 }
+
+/** The refs of Individual lights' commands the server hasn't answered yet (their errors get plain words). */
+const manualRefs = new Set();
+function sendManual(cmd) {
+  const r = send(cmd);
+  if (r !== null) manualRefs.add(r);
+  return r;
+}
+
+/** What to say when the server refuses an Individual lights change; never its own wording. */
+function manualProblem(error) {
+  if (/not enabled/.test(error)) return 'Individual lights are turned off in Settings.';
+  return "Those lights couldn't be changed. Pick them again and try once more.";
+}
+
+/** Blackout is on: the lights stay off until a song or Basic lights, so this panel changes nothing meanwhile. */
+const blackedOut = () => state?.look === 'blackout';
 
 function pickManualColour(c) {
   sendManualColour(c);
@@ -3958,13 +4035,14 @@ function pickManualColour(c) {
 
 /** The level for every picked target; a whole light's held segments follow it, so the whole bar dims. */
 function sendManualLevel(v) {
+  if (blackedOut()) return;
   const intensity = Math.round(clamp01(v) * 1000) / 1000;
-  for (const target of manualTargets()) {
-    send({ type: 'manual', target, intensity });
-    if (target.segment === undefined) {
-      for (const h of heldSegmentsOf(target.fixture)) send({ type: 'manual', target: { fixture: h.fixture, segment: h.segment }, intensity });
-    }
+  const targets = manualTargets();
+  for (const t of manualTargets()) {
+    if (t.segment === undefined) for (const h of heldSegmentsOf(t.fixture)) targets.push({ fixture: h.fixture, segment: h.segment });
   }
+  // One command for them all, changed in one frame.
+  if (targets.length) sendManual({ type: 'manual', targets, intensity });
 }
 
 function showManualLevel(v) {
@@ -3983,7 +4061,7 @@ function showManualLevel(v) {
   let startX = 0, startV = 0;
   m.dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
-    if (!manualTargets().length) return;
+    if (!manualTargets().length || blackedOut()) return;
     m.dragging = true;
     try { m.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     m.dim.classList.add('ds-dragging');
@@ -4010,7 +4088,7 @@ function showManualLevel(v) {
 (() => {
   const out = throttle((hex) => sendManualColour(normalLight(hex)));
   const whiteOnly = () => {
-    if (!manualTargets().length) return null;
+    if (!manualTargets().length || blackedOut()) return null;
     return pickedGroups().every((g) => g.whiteOnly);
   };
   attachStrip($('mAny'), $('mAnyH'), whiteOnly, (hex, last) => (last ? out.end(hex) : out.push(hex)), () => {
@@ -4029,16 +4107,15 @@ $('mNone').addEventListener('click', () => {
 });
 // Release picked: the picked segments, or each picked light with any segments of it that are held.
 $('mRelease').addEventListener('click', () => {
-  for (const target of manualTargets()) {
-    send({ type: 'release', target });
-    if (target.segment === undefined) {
-      for (const h of heldSegmentsOf(target.fixture)) send({ type: 'release', target: { fixture: h.fixture, segment: h.segment } });
-    }
-  }
+  const targets = manualTargets();
+  if (!targets.length || blackedOut()) return;
+  sendManual({ type: 'release', targets, releaseSegments: true });
   manualSel.segments = [];
   renderManual();
 });
-$('mReleaseAll').addEventListener('click', () => send({ type: 'releaseAll' }));
+$('mReleaseAll').addEventListener('click', () => {
+  if (!blackedOut()) sendManual({ type: 'releaseAll' });
+});
 
 /** Keeps the panel true to the live state and the pick: chips, the plan's picks and dots, segments, summary, colours, level. */
 function renderManual() {
@@ -4080,7 +4157,12 @@ function renderManual() {
     : 'Tap lights on the plan to pick them';
   const names = manualSel.fixtures.map((id) => shortName(manualFix.find((m) => m.f.id === id)?.f ?? { id }));
   $('mSelNames').textContent = n ? `${names.join(', ')} · ${now.name}` : 'or pick a whole group above';
-  $('mPal').classList.toggle('idle', !n);
+  const dark = blackedOut();
+  $('mBlackNote').hidden = !dark;
+  $('mPal').classList.toggle('idle', !n || dark);
+  for (const c of manualColours) c.button.disabled = dark;
+  $('mAnyBtn').disabled = dark;
+  if (dark && !$('mAny').hidden) showManualStrip(false);
   for (const c of manualColours) {
     // A held light by its exact colour; one its group drives by the colour it runs (at whatever brightness).
     const on = !!now && (c.off ? now.level === 0 : now.level > 0 && (now.light ? sameLight(c, now.light) : c.display === now.display));
@@ -4091,7 +4173,8 @@ function renderManual() {
   $('mAny').className = `strip2 m-any ${whiteOnly ? 'cct' : 'hue'}`;
   $('mAny').setAttribute('aria-label', whiteOnly ? 'Any white, warm to cool' : 'Any colour');
   $('mAnyBtn').textContent = whiteOnly ? 'Any white …' : 'Any colour …';
-  manualLevel.dim.classList.toggle('idle', !n);
+  manualLevel.dim.classList.toggle('idle', !n || dark);
+  manualLevel.dim.setAttribute('aria-disabled', String(dark));
   manualLevel.dim.style.setProperty('--c', now && now.level > 0 ? shown(now.display) : '#5a6478');
   if (!manualLevel.dragging && performance.now() >= manualLevel.holdUntil) showManualLevel(now?.level ?? 0);
 
@@ -4099,9 +4182,9 @@ function renderManual() {
   const pickedHeld = targets.some((t) => (t.segment === undefined
     ? !!heldOf(t.fixture) || heldSegmentsOf(t.fixture).length > 0
     : !!heldOf(t.fixture, t.segment)));
-  $('mRelease').disabled = !pickedHeld;
+  $('mRelease').disabled = !pickedHeld || dark;
   $('mReleaseAll').textContent = `Release all · ${held.size}`;
-  $('mReleaseAll').disabled = held.size === 0;
+  $('mReleaseAll').disabled = held.size === 0 || dark;
   paintManual();
 }
 
@@ -4666,6 +4749,12 @@ let toastTimer = 0;
 /** Shows a short message: a problem, or with `quiet` a plain confirmation. */
 function toast(text, quiet = false) {
   const t = $('toast');
+  // The same message again (a drag refused at every move) just stays up a little longer.
+  if (!t.hidden && t.textContent === text) {
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (t.hidden = true), 3500);
+    return;
+  }
   t.textContent = text;
   t.classList.toggle('quiet', quiet);
   t.hidden = false;
