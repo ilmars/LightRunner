@@ -1,66 +1,154 @@
+<p align="center">
+  <img src="web/shared/icon.svg" width="96" height="96" alt="Light Runner icon: a row of light segments growing brighter towards a warm white light">
+</p>
+
 # Light Runner
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Light Runner lets volunteers run the lights for a church service from a tablet, after a five-minute briefing. They tap a look (Walk-in, Worship, Sermon…) and the whole room fades smoothly to it. One small server on a computer at the church drives the lights; every tablet, laptop, Stream Deck and APC mini shows the same live state.
+Light Runner lets volunteers run the lights for a church service from a tablet, after a five-minute briefing. They tap the next song in the running order and the whole room fades smoothly to it. One small server on a computer at the church drives the lights; every iPad, phone, Stream Deck and MIDI controller shows the same live state.
 
 It was built for one church's stage and is shared under the MIT license so other churches and small venues can use it too.
 
-## What it does
+![The operator page on an iPad: the stage view, the running order with Song 2 on stage, quick looks, and a row per group with its colour and dimmer](docs/screenshots/operator-live.png)
 
-- **Looks and presets.** A look sets every group of lights at once; a group preset changes just one group (say, the back wall to blue during a song) and leaves the rest running.
-- **Fades that never jump.** Every change fades with an ease-in-out curve, including a new tap in the middle of a fade. An automated check runs hours of random changes and fails if any light ever steps more than 5% between frames.
-- **Made for volunteers.** Big look tiles in service order, a **Next** button, **Undo**, a green **Safe** button that always brings back a warm stage wash, and a **Blackout** that needs a one-second hold. Dark interface, so the tablet doesn't light the operator's face.
-- **Dimmers.** A Master fader is always on screen; group faders open from a small Groups button that also shows which groups are dimmed.
-- **Fade time.** Use each look's own fade, or set one for everything (instant, 1, 3, 5 or 10 s).
-- **Patch like Lightkey.** A graphical DMX map per universe: drag fixtures to re-address them, drag fixture types onto free channels, see overlaps at once. Groups, a stage plan, and Identify to flash a fixture so you can find it.
-- **Fixture database.** Fixture definitions from the [Open Fixture Library](https://open-fixture-library.org) (about 650 fixtures). Download it once to use it without internet, and check for updates later.
-- **Lightkey import.** Bring a Lightkey project in, and see exactly what is new or changed before you take it.
-- **Outputs.** Art-Net, sACN (E1.31) or an ENTTEC DMX USB Pro. A node finder, a Send DMX switch to hand the lights over to another desk, and a warning if the node stops answering or another desk is also sending.
-- **Keeps going.** DMX runs on its own thread with a steady 40 fps clock. Every save is atomic with 20 backups, and after a restart the stage comes back exactly as it was.
+## A short tour
 
-## Pages
+### Live, Prepare and Go
 
-| Page | Who | What's on it |
-| --- | --- | --- |
-| `/operator/` | Volunteers (no login) | Live stage view, look tiles with a colour strip per group, Next, Undo, group presets, Master and group dimmers, Fade, Safe, Blackout |
-| `/patch/` | Programmer (PIN) | DMX map, fixture library and Open Fixture Library, fixture table, groups, stage plan |
-| `/settings/` | Programmer (PIN) | DMX output and node finder, Send DMX, operator options, fixture database, PIN, backups, export, compare with a file |
+The operator page is made for an iPad held sideways. On the left are a small picture of the stage, drawn from what the lights are really doing, and the **running order**: Basic lights first (the safe look), then the songs. Tap a song and the stage fades to it; **Next ▸** in the bottom bar starts the one after it. On the right are **quick looks**, which change only some groups (say, the back wall to turquoise) and leave the rest alone, and **Groups**, with a colour button and a dimmer for each group of lights.
 
-The programmer pages ask for a PIN once one is set (Settings > Programmer PIN).
+The bottom bar is always there: Master, Flash (while held), Undo, **Safe · Basic lights**, Next and Blackout (hold for a second). Fade sets how long changes take (each song's own, or Instant up to 10 s), and Tempo and Tap set the speed of effects.
 
-## Try it
+**Prepare** gets the next moment ready without touching the lights. The top bar turns violet, and everything you change goes into a draft: pick a song, change colours, effects and levels, and watch the draft in the stage view. **Go ▸** sends the whole draft to the lights in one smooth change. Holding **Save to Sermon** (the button names the song) keeps the draft in that song for next time, still without touching the lights.
 
-You need [Node.js](https://nodejs.org) 24 or newer.
+<p align="center">
+  <img src="docs/screenshots/operator-prepare.png" width="720" alt="Prepare: the violet top bar says the lights don't change, the Sermon is being prepared while Song 2 stays on stage, and Go sends it">
+  <br>
+  <em>Prepare: the Sermon is ready in the draft while Song 2 stays on stage. Go ▸ sends it.</em>
+</p>
+
+### Colours and effects
+
+Tap a group's colour to open the **colour picker**. Tap a colour to fade the group to it, or drag along **Any colour** to try one live, paler or stronger with **Saturation**. Groups that have White, Amber or UV get a slider for each. **Hold** a colour (half a second) to edit it without changing the stage: rename it, change its colour, brightness and fade, and choose whether the change is for this group only or every group with that colour. **Exact values** takes a hex code or R, G and B.
+
+The **Effects** tab has moving looks for any line of lights: colour fade, wave, chase, sparkle, breathe, meteor, fill and yo-yo. Hold one, or tap **All settings ›** on the running one, to open the effect editor: its colours and the order they play in, a base colour under it, speed in beats, direction and size. The strip at the top shows the effect moving on that group's lights; the stage doesn't change until Save.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/colour-picker.png" alt="The colour picker for Key lights: Latvian colour names from the show, Any colour with Saturation at 70 %, and White, Amber and UV"></td>
+    <td width="50%"><img src="docs/screenshots/colour-editor.png" alt="The colour editor for Zils on Key lights, with Exact values open: hex #0000FF and R, G, B"></td>
+  </tr>
+  <tr>
+    <td>The colour picker: tap to fade to a colour, hold to edit it.</td>
+    <td>The colour editor, with Exact values open.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/effect-editor.png" alt="The effect editor for Three waves on the background bars, with the effect moving in the strip at the top"></td>
+    <td><img src="docs/screenshots/individual-lights.png" alt="Individual lights: a plan of the stage with a button per light, two key lights held in pink, and the segments of one bar"></td>
+  </tr>
+  <tr>
+    <td>The effect editor, with the effect moving in the strip.</td>
+    <td>Individual lights: set one light, or one segment of a bar.</td>
+  </tr>
+</table>
+
+### Individual lights
+
+When Settings lets operators use manual control, **Individual lights** in the Groups panel opens a plan of the stage with a button for every light. Pick lights (or a whole group), give them a colour or a level, and they leave their group until you release them; they then fade back. With one bar picked you can colour its segments one by one. Basic lights, Blackout and Back to saved release them all.
+
+### The phone remote
+
+<img src="docs/screenshots/phone-remote.png" width="220" align="right" alt="The phone remote: Order, Groups and Looks tabs, each group's colour and level, and Master, Undo, Basic lights, Next and Blackout at the bottom">
+
+On a phone, the same page becomes a remote: the running order, each group's colour and level, quick looks, Master, Undo, Basic lights, Next and Blackout. It is for running the service from the floor; saving, editing and Prepare stay on the iPad.
+
+Every page shows the same live state, so a change on the phone shows up on the iPad at once, and the other way round.
+
+<br clear="right">
+
+### Settings
+
+Settings (`/settings/`) is for whoever sets the system up. It has:
+
+- **DMX output:** Art-Net, sACN or an ENTTEC DMX USB Pro, a node finder, and a separate output for any universe that needs one. **Send DMX** hands the lights over to another desk and back.
+- **Who to call:** a name and a phone number, shown to the volunteers when something is wrong with the lights.
+- **Controller keys:** what each key, fader and knob on a MIDI controller does (see below).
+- Whether operators may use manual control, OSC, the fixture database, the programmer PIN, backups, exporting the show and **Compare with a file**.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/settings.png" alt="Settings: DMX output with Send DMX, the universes, the operator page options and Who to call"></td>
+    <td width="50%"><img src="docs/screenshots/settings-controller-keys.png" alt="Settings, Controller keys: devices, the APC mini standard layout switch, and every action with its key and Assign a key"></td>
+  </tr>
+</table>
+
+### Patch
+
+Patch (`/patch/`) is where the rig is set up, much like in Lightkey. The **DMX map** shows each universe's channels: drag a fixture to re-address it, drag a fixture type from the library onto free channels, and overlaps show at once in red. There is also a fixture table, groups, and Identify to flash a fixture so you can find it. Fixture types come from the [Open Fixture Library](https://open-fixture-library.org) (about 650 fixtures; download it once to use it without internet) or from a Lightkey project.
+
+The **stage plan** says where each light hangs, and the operator page draws the stage from it. Each light gets a shape: a dot, a beam (a cone you aim), a bar (any length, thickness and angle), an outline (a strip round something) or a smoke cloud. Select several to align them or space them evenly.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/patch-dmx-map.png" alt="Patch: the DMX map of universe 1 with the stage L1 fixtures, and the fixture library"></td>
+    <td width="50%"><img src="docs/screenshots/patch-stage-plan.png" alt="Patch: the stage plan with bars, dots and a strip, and one bar selected with its handles and shape choices"></td>
+  </tr>
+</table>
+
+## Remote control
+
+Everything goes through the same server, so every device and every page always agree on what is on stage. [docs/companion.md](docs/companion.md) has the details and what to check on real hardware.
+
+- **Stream Deck through Bitfocus Companion.** Use Companion's own Generic HTTP connection; no plugin needed. Buttons send simple requests such as `POST /api/next`, `POST /api/item/3` (the third item in the running order) or `POST /api/group/2/colour/4`, and `GET /api/companion` tells the buttons what is on stage, what is next and each group's colour and level.
+- **OSC** from ProPresenter, TouchOSC or a script: addresses under `/lightrunner`, such as `/lightrunner/next`. Off until you switch it on in Settings (port 8000).
+- **Akai APC mini.** Plug it in and it works with the standard layout: faders for the group levels and Master, the top pads for the running order, the pads below for each group's colours, and buttons for Flash, Next, Back to saved, Undo, Basic lights and Blackout (hold). Faders pick up, so a light never jumps. The mk2 shows the real colours on its pads.
+- **Controller keys on any MIDI controller.** Give any key, fader or knob a job by tapping **Assign a key** and pressing it; nobody types MIDI numbers. A key you assign wins over the APC mini's standard layout. Operators can give songs (in running-order Edit) and quick looks their keys on the iPad; the other keys, Reset and the switches are in Settings, behind the programmer PIN when one is set.
+
+Devices and controller keys always act on the real stage, never on an iPad's Prepare. None of this has met the real hardware yet; see [docs/STATUS.md](docs/STATUS.md).
+
+## Reliability and light safety
+
+- **Fades never jump.** Every change fades smoothly, including a new tap in the middle of a fade. An automated check runs hours of random changes and fails if any light ever steps more than 5 % between frames.
+- **No more than 3 flashes a second.** Effects are slowed by themselves when a tempo would make any light flash faster.
+- **Saves are safe.** A save never leaves a half-written show behind, and the last 20 are kept as backups (Settings > Backups).
+- **It keeps going.** DMX runs on its own thread with a steady 40 frames a second and is restarted if it ever crashes. After a restart the stage comes back exactly as it was, and tablets reconnect by themselves.
+
+## Running it
+
+You need [Node.js](https://nodejs.org) 24 or newer. On the church Mac, Node 24 is Homebrew's `node@24`: use `/opt/homebrew/opt/node@24/bin/node` (or put `/opt/homebrew/opt/node@24/bin` on the PATH).
 
 ```bash
 git clone https://github.com/ilmars/LightRunner.git
 cd LightRunner
 npm install
-LIGHT_RUNNER_OUTPUT=none npm start
+LIGHT_RUNNER_OUTPUT=none npm start   # away from the rig: never sends DMX
 ```
 
-Open http://localhost:8080/. `LIGHT_RUNNER_OUTPUT=none` makes sure nothing is sent to any real lights; the first start loads a small demo rig.
+Open http://localhost:8080/. The first start loads a small demo rig. At the venue, leave out `LIGHT_RUNNER_OUTPUT=none` and run `npm start`.
 
-## Set it up at your venue
+| Page | Who | What |
+| --- | --- | --- |
+| `/operator/` | Volunteers (no login) | The iPad page, and the phone remote on a phone |
+| `/patch/` | Programmer (PIN) | DMX map, fixture library, groups, stage plan |
+| `/settings/` | Programmer (PIN) | Outputs, Send DMX, Who to call, controller keys, backups and more |
 
-1. **A computer that stays on** next to the lighting network: a Mac mini, a small PC or a Raspberry Pi 4/5. Turn sleep off.
-2. **A DMX interface:** an Art-Net or sACN node on the network, or an ENTTEC DMX USB Pro on the computer.
-3. **Start Light Runner** (`npm start`) and open `http://<computer's address>:8080/settings/`:
-   - Set a programmer PIN.
-   - Under DMX output, pick Art-Net, sACN or ENTTEC. For Art-Net, **Find nodes** lists the nodes on your network with the universe they listen on; tap **Use**.
-   - Download the fixture database.
-4. **Patch your rig** at `/patch/`: drag fixture types from the library (or the Open Fixture Library) onto the DMX map, make groups, place fixtures on the stage plan, and save. Already using Lightkey? Use Settings > **Compare with a file** with your `.lightkeyproj`, or the command-line importer below.
-5. **Switch on Send DMX** when no other desk is driving the lights.
-6. **On the tablet**, open `/operator/`, add it to the home screen, and set Auto-Lock to Never so the screen stays on during the service.
+Patch and Settings ask for the programmer PIN once one is set (Settings > Programmer PIN). On the iPad, open `/operator/`, add it to the home screen (it has its own icon), and set Auto-Lock to Never so the screen stays on during the service. The Inter font and the icon are served by Light Runner itself, so the pages work with no internet.
 
-Light Runner doesn't start itself on boot yet; see [docs/STATUS.md](docs/STATUS.md).
+| Setting | Default | What |
+| --- | --- | --- |
+| `PORT` | `8080` | Web port |
+| `LIGHT_RUNNER_DATA` | `./data` | The live show, the last state, the backups and the fixture database |
+| `LIGHT_RUNNER_OUTPUT` | — | `none` never sends DMX, whatever the show says |
+| `LIGHT_RUNNER_FAKE_MIDI` | — | **For testing only:** `1` runs with a simulated APC mini mk2 and nanoKONTROL2 |
 
-## Bringing in a Lightkey project
+`data/` is not in git. To keep a show in the repository, export it (Settings > Export show file) into `shows/`. Light Runner doesn't start itself when the computer starts yet; see [docs/STATUS.md](docs/STATUS.md).
 
-In the app: Settings > **Compare with a file**, choose the `.lightkeyproj`. You get a list of new and changed fixture types and fixtures to tick, and only what you tick is taken.
+### Bringing in a Lightkey project
 
-From the command line, to build a whole show from a project:
+In the app: Settings > **Compare with a file**, and choose the `.lightkeyproj`. You see what is new or changed, tick what to take, and only that is taken.
+
+From the command line, to build a whole show from a project (needs Python 3):
 
 ```bash
 python3 tools/import-lightkey.py "My Stage.lightkeyproj" shows/my-show.json \
@@ -69,47 +157,16 @@ python3 tools/import-lightkey.py "My Stage.lightkeyproj" shows/my-show.json \
 node tools/install-show.ts shows/my-show.json   # stop the server first
 ```
 
-Groups are named by fixture short names as they appear in Lightkey; fixtures you don't list get a group per model. Needs Python 3.
+Groups are named by the fixtures' short names in Lightkey; fixtures you don't list get a group per model.
 
-## Remote control (Stream Deck, OSC, APC mini)
-
-Light Runner answers simple HTTP requests from the local network, so Bitfocus Companion's Generic HTTP module can trigger it:
-
-| Request | Does |
-| --- | --- |
-| `POST /api/look/{id}` (optional `?fade=5`) | Fade to a look |
-| `POST /api/group/{group}/preset/{id}` | Fade one group to a preset |
-| `POST /api/group/{group}/level/{0-100}` | Set a group's dimmer |
-| `POST /api/master/{0-100}` | Set the Master |
-| `POST /api/fade/{seconds}` or `/api/fade/auto` | Set the fade time |
-| `POST /api/item/{n}`, `/api/next` | Start item n of the running order (counting from 1), or the next one |
-| `POST /api/group/{n}/colour/{k}` | Group n (counting from 1) to its colour k |
-| `POST /api/flash/{n}/on` and `/off`, `/api/flash/all/on` and `/off` | Flash while held (put out by itself after 15 s) |
-| `POST /api/master/up`, `/api/master/down` | Master up or down one step |
-| `POST /api/back-to-look`, `/api/undo`, `/api/safe`, `/api/blackout` | What the buttons do |
-| `POST /api/group/{group}/manual`, `/api/group/{group}/release` | Manual colour (JSON body `{ "colour": "#ff0000", "intensity": 80 }`) and release |
-| `GET /api/state` | Live state: current look, each group's preset and level, fades, DMX status |
-| `GET /api/looks` | Looks and presets with names and colours, for building buttons |
-| `GET /api/companion` | What is on stage, what is next, Master and each group's colour and level, flat, for Companion to poll |
-
-The same actions are also available as OSC messages (Settings > OSC, port 8000) and from an Akai APC mini plugged into the computer. [docs/companion.md](docs/companion.md) has the exact addresses, how to set up a Stream Deck in Companion, and what the APC mini's pads, buttons and faders do.
-
-## Configuration
-
-| Variable | Default | What |
-| --- | --- | --- |
-| `PORT` | `8080` | Web port |
-| `LIGHT_RUNNER_DATA` | `./data` | Where the live show, the last state, backups and the fixture database are kept |
-| `LIGHT_RUNNER_OUTPUT` | — | `none` never sends DMX, whatever the show says |
-
-`data/` is not in git. To keep a show in the repository, export it (Settings > Export show file) into `shows/`.
+Lightkey and Light Runner must not send to the same node at once. Switch **Send DMX** off in Settings while Lightkey runs the lights, and on again to take them back.
 
 ## Development
 
 ```bash
 npm test             # unit and server tests
 npm run typecheck
-npm run jump-check   # hours of random look changes; no light may step more than 5% per frame
+npm run jump-check   # hours of random changes; no light may step more than 5 % per frame
 npm run timing-probe # DMX frame timing on this computer
 ```
 
@@ -118,16 +175,19 @@ TypeScript runs directly in Node (no build step); the pages are plain HTML and J
 | Folder | What |
 | --- | --- |
 | `packages/shared` | Show format, commands and live state, fixture types, Open Fixture Library converter, show compare and merge |
-| `packages/engine` | The lighting engine: fades, groups, manual, undo, channel mapping. No timers or I/O, so tests and tools run it directly |
-| `server` | Web server and API, WebSocket, DMX worker thread and outputs, saving, fixture database |
-| `web` | Operator, patch and settings pages |
+| `packages/engine` | The lighting engine: fades, groups, effects, manual, undo, channel mapping. No timers or I/O, so tests and tools run it directly |
+| `server` | Web server and API, WebSocket, DMX worker thread and outputs, controllers, saving, fixture database |
+| `web` | Operator, Patch and Settings pages, and the shared look in `web/shared` |
 | `tools` | Lightkey importer, show installer, jump check, timing probe |
 | `shows` | Show files |
 
 More detail:
-- [docs/STATUS.md](docs/STATUS.md): what's built, what's next, known issues
+
 - [docs/SPEC.md](docs/SPEC.md): the product spec
+- [docs/STATUS.md](docs/STATUS.md): what's built, what's next, known issues
 - [docs/DECISIONS.md](docs/DECISIONS.md): choices made and why
+- [docs/companion.md](docs/companion.md): Stream Deck, APC mini, controller keys and OSC
+- [docs/design-system.md](docs/design-system.md): the pages' colours, type and brightness rules
 - [CLAUDE.md](CLAUDE.md): project briefing (also read by Claude Code)
 
 ## Contributing
