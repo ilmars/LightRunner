@@ -194,6 +194,8 @@ export interface GroupStatus {
   live: { colour: string; white: number; amber: number; uv: number; display: string } | null;
   /** When the group runs a live effect (groupEffect): the effect. */
   effect: EffectLayer | null;
+  /** The effect the group runs is slowed by light safety (it would flash too fast at the tempo and speed asked for). */
+  slowed: boolean;
 }
 
 export type OutputStatus = 'ok' | 'lost' | 'off';

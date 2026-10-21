@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { EffectLayer, findProfile, parseShow, type Preset, type Show } from '../../shared/src/index.ts';
+import { EffectLayer, LiveEffectLayer, findProfile, parseShow, type Preset, type Show } from '../../shared/src/index.ts';
 import { Engine } from '../src/index.ts';
 import { SafeRates, compileEffect, cyclesPerSecond, rateChecks, renderEffect, safeRate, type CompiledEffect } from '../src/effects.ts';
 import { dark, type Light } from '../src/light.ts';
@@ -810,4 +810,35 @@ test('effects started at different moments on different groups run in step with 
     e.frame(t);
     if (started) inStep(`seconds at ${t.toFixed(3)} s`);
   }
+});
+
+test('the live state says when light safety slows the effect a group runs', () => {
+  const show = effectsShow(
+    effectPreset('bg-sparkle', BG, { effect: 'sparkle', edge: 'hard', speed: { beats: 1 } }),
+    effectPreset('bg-chase', BG, { effect: 'chase', edge: 'hard', speed: { beats: 1 } }),
+    effectPreset('bg-fade', BG, { effect: 'colourFade', colours: [RED, BLUE], speed: { beats: 1 } }),
+  );
+  const e = new Engine(show, 0);
+  const slowed = (t: number) => e.liveState(t, 'off').groups[BG]!.slowed;
+  // A sparkle at 1 beat a round and 120 bpm would flash too often: slowed.
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-sparkle', fade: 0 }, 0);
+  assert.equal(slowed(0), true);
+  // A chase at 1 beat a round changes each light twice a round: 2 rounds a second is safe at 120 bpm …
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-chase', fade: 0 }, 1);
+  assert.equal(slowed(1), false);
+  // … and too fast at 240 bpm.
+  e.apply({ type: 'tempo', bpm: 240 }, 2);
+  assert.equal(slowed(2), true);
+  // The speed dial counts too.
+  e.apply({ type: 'speed', value: 0.5 }, 3);
+  assert.equal(slowed(3), false);
+  e.apply({ type: 'speed', value: 1 }, 3.5);
+  // A colour fade changes colour, not brightness: never slowed.
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-fade', fade: 0 }, 4);
+  assert.equal(slowed(4), false);
+  // A live effect (groupEffect) the same way.
+  e.apply({ type: 'groupEffect', group: BG, effect: LiveEffectLayer.parse({ kind: 'effect', effect: 'sparkle', colours: [RED], speed: { beats: 1 } }), fade: 0 }, 5);
+  assert.equal(slowed(5), true);
+  // A plain colour, or a group that runs nothing: false.
+  assert.equal(e.liveState(5, 'off').groups['key-lights']!.slowed, false);
 });

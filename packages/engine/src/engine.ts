@@ -8,7 +8,7 @@ import {
   type StageCommand, type EffectLayer, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
   type GroupStatus, type Layer, type Palette, type Preset, type RuntimeState, type Show, type StageState,
 } from '../../shared/src/index.ts';
-import { SafeRates } from './effects.ts';
+import { SafeRates, cyclesPerSecond, safeRate } from './effects.ts';
 import { Crossfade, Ramp } from './fade.ts';
 import { advancePhases, compilePreset, fixedPreset, moves, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
 import { copy, dark, fromHex, mix, mix2, withoutUv, type Light } from './light.ts';
@@ -1242,6 +1242,7 @@ export class Engine {
         level: g.level.target,
         live: liveView(preset),
         effect: (preset ? this.liveEffects.get(preset) : undefined) ?? null,
+        slowed: this.slowed(g),
       };
     }
     return {
@@ -1262,6 +1263,16 @@ export class Engine {
       outputProblem: null,
       outputProblemKind: null,
     };
+  }
+
+  /** The effect a group runs (or is fading into) runs slower than asked, at the tempo and the speed dial's target, so it never flashes. */
+  private slowed(group: GroupRun): boolean {
+    const run = group.presets.current;
+    const top = run?.preset.layers[run.preset.layers.length - 1];
+    if (top?.kind !== 'effect') return false;
+    const speed = this.speed.target;
+    const asked = cyclesPerSecond(top, (this.bpm / 60) * speed, speed);
+    return safeRate(top, asked) < asked;
   }
 
   /** A group the current look lists runs another preset, or has another level target, than the look says. */
