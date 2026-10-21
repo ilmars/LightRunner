@@ -176,7 +176,9 @@ Any MIDI controller plugged into the Light Runner computer can run the lights: a
 - **One key, one job:** a key that already did something moves to the new job, with a quiet note ("Pad 2,3 was Song 4; it is now Prayer."). Each thing has one key: assigning another replaces it.
 - **A song keeps its key** when you move it in the running order. Deleting a song or a quick look frees its key; Undo brings both back.
 - **The APC mini's standard layout** stays for every key you haven't assigned, while "Use the standard APC mini layout for keys I haven't assigned" is on. Its top rows still follow the running order by place. **Reset to the APC mini layout** (tap it twice) takes away every key assigned on the APC mini; keys on other controllers stay.
-- **Devices:** every controller connected is listed with a **Listen** switch. Off, Light Runner lets go of it (another program can use it then).
+- **Who may change keys:** on the operator page anyone can give songs and quick looks their keys. The other keys, Reset and the switches are in Settings, behind the programmer PIN when one is set. Song and quick-look keys are steps on the bottom bar's Undo; changes made in Settings are not.
+- **Devices:** Light Runner opens every MIDI input the computer has, not only controllers you plugged in: on a Mac that includes the IAC Driver and Network Session ports when they are switched on in Audio MIDI Setup. Each is listed with a **Listen** switch. Off, Light Runner lets go of it (another program can use it then); switch off any that aren't controllers.
+- **Two identical controllers** (two nanoKONTROL2s) have the same name, so they share their keys: a key assigned on one works on the other too.
 - Faders and knobs pick up, as the APC's do. Keys always act on the real stage, never on an iPad's Prepare. The keys are saved in the show, so they travel with an exported show file.
 - **Lights on the pads** only on the APC mini: a pad assigned to a song lights like a running-order pad (on stage bright, next dim), one assigned to a quick look lights while the stage runs it. Other controllers get no lights.
 
