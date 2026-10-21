@@ -1242,7 +1242,7 @@ export class Engine {
         level: g.level.target,
         live: liveView(preset),
         effect: (preset ? this.liveEffects.get(preset) : undefined) ?? null,
-        slowed: this.slowed(g),
+        ...this.effectRate(g),
       };
     }
     return {
@@ -1265,14 +1265,18 @@ export class Engine {
     };
   }
 
-  /** The effect a group runs (or is fading into) runs slower than asked, at the tempo and the speed dial's target, so it never flashes. */
-  private slowed(group: GroupRun): boolean {
+  /**
+   * How the effect a group runs (or is fading into) runs, at the tempo and the speed dial's target: `slowed` when light
+   * safety runs it slower than asked, so it never flashes, and `round`, the seconds one round really takes (null: no effect on top).
+   */
+  private effectRate(group: GroupRun): Pick<GroupStatus, 'slowed' | 'round'> {
     const run = group.presets.current;
     const top = run?.preset.layers[run.preset.layers.length - 1];
-    if (top?.kind !== 'effect') return false;
+    if (top?.kind !== 'effect') return { slowed: false, round: null };
     const speed = this.speed.target;
     const asked = cyclesPerSecond(top, (this.bpm / 60) * speed, speed);
-    return safeRate(top, asked) < asked;
+    const rate = safeRate(top, asked);
+    return { slowed: rate < asked, round: rate > 0 ? 1 / rate : null };
   }
 
   /** A group the current look lists runs another preset, or has another level target, than the look says. */

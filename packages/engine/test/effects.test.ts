@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { EffectLayer, LiveEffectLayer, findProfile, parseShow, type Preset, type Show } from '../../shared/src/index.ts';
+import { EffectLayer, LiveEffectLayer, StaticLayer, findProfile, parseShow, type Preset, type Show } from '../../shared/src/index.ts';
 import { Engine } from '../src/index.ts';
 import { SafeRates, compileEffect, cyclesPerSecond, rateChecks, renderEffect, safeRate, type CompiledEffect } from '../src/effects.ts';
 import { dark, type Light } from '../src/light.ts';
@@ -841,4 +841,63 @@ test('the live state says when light safety slows the effect a group runs', () =
   assert.equal(slowed(5), true);
   // A plain colour, or a group that runs nothing: false.
   assert.equal(e.liveState(5, 'off').groups['key-lights']!.slowed, false);
+});
+
+/** A preset of two layers: `under` below, `over` on top (the top one is what shows). */
+function layeredPreset(id: string, group: string, under: Preset['layers'][number], over: Preset['layers'][number]): Preset {
+  return { id, name: id, group, fade: 3, layers: [under, over] };
+}
+
+test('light safety in the live state looks at the top layer of a preset of several layers', () => {
+  const sparkle = EffectLayer.parse({ kind: 'effect', effect: 'sparkle', edge: 'hard', colours: [RED], speed: { beats: 1 } });
+  const colour = StaticLayer.parse({ kind: 'static', colour: BLUE });
+  const show = effectsShow(
+    layeredPreset('bg-under', BG, sparkle, colour),
+    layeredPreset('bg-over', BG, colour, sparkle),
+  );
+  const e = new Engine(show, 0);
+  const status = (t: number) => e.liveState(t, 'off').groups[BG]!;
+  // An effect under a colour on top: the colour is what shows, so nothing is slowed and there is no round.
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-under', fade: 0 }, 0);
+  assert.equal(status(0).slowed, false);
+  assert.equal(status(0).round, null);
+  // The same effect on top: slowed, as on its own.
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-over', fade: 0 }, 1);
+  assert.equal(status(1).slowed, true);
+  assert.ok(status(1).round! > 0.5);
+});
+
+test('the live state gives the length of a round as the effect really runs, light safety included', () => {
+  const show = effectsShow(
+    effectPreset('bg-sparkle', BG, { effect: 'sparkle', edge: 'hard', speed: { beats: 1 } }),
+    effectPreset('bg-chase', BG, { effect: 'chase', edge: 'hard', speed: { beats: 1 } }),
+    effectPreset('bg-free', BG, { effect: 'colourFade', colours: [RED, BLUE], speed: { seconds: 4 } }),
+  );
+  const e = new Engine(show, 0);
+  const status = (t: number) => e.liveState(t, 'off').groups[BG]!;
+  // Nothing running: no round.
+  assert.equal(status(0).round, null);
+  // A chase at 1 beat and 120 bpm runs as asked: half a second a round.
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-chase', fade: 0 }, 0);
+  assert.equal(status(0).round, 0.5);
+  // At 240 bpm it would be a quarter of a second, but light safety halves it (again, if needed).
+  e.apply({ type: 'tempo', bpm: 240 }, 1);
+  const slowedRound = status(1).round!;
+  assert.ok(slowedRound > 0.25);
+  assert.ok(Number.isInteger(Math.log2(slowedRound / 0.25)), `${slowedRound} is not 0.25 s doubled`);
+  // The speed dial counts too: at half speed and 240 bpm, half a second again.
+  e.apply({ type: 'speed', value: 0.5 }, 2);
+  assert.equal(status(2).round, 0.5);
+  e.apply({ type: 'speed', value: 1 }, 2.5);
+  e.apply({ type: 'tempo', bpm: 120 }, 2.6);
+  // A sparkle at 1 beat and 120 bpm is slowed: longer than the half second asked for.
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-sparkle', fade: 0 }, 3);
+  assert.ok(status(3).round! > 0.5);
+  // Free: its own seconds, with the speed dial.
+  e.apply({ type: 'groupPreset', group: BG, preset: 'bg-free', fade: 0 }, 4);
+  assert.equal(status(4).round, 4);
+  e.apply({ type: 'speed', value: 2 }, 5);
+  assert.equal(status(5).round, 2);
+  // A plain colour: no round.
+  assert.equal(e.liveState(5, 'off').groups['key-lights']!.round, null);
 });

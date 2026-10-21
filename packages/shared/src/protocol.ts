@@ -196,6 +196,8 @@ export interface GroupStatus {
   effect: EffectLayer | null;
   /** The effect the group runs is slowed by light safety (it would flash too fast at the tempo and speed asked for). */
   slowed: boolean;
+  /** How long one round of that effect really takes, in seconds (light safety's slowing included); null when the group runs no effect. */
+  round: number | null;
 }
 
 export type OutputStatus = 'ok' | 'lost' | 'off';
