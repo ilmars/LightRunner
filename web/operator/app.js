@@ -4806,7 +4806,14 @@ function fitBottomBar() {
 }
 window.addEventListener('resize', fitBottomBar);
 midQuery.addEventListener('change', fitBottomBar);
+// Inter arrives after the first paint (font-display: swap), and widens the Flash names: check again when it has
+// loaded (each 'loadingdone' is a font that finished; `ready` covers one that loaded before this ran). The stage
+// view's label is drawn in it too.
 document.fonts?.ready.then(fitBottomBar);
+document.fonts?.addEventListener?.('loadingdone', () => {
+  fitBottomBar();
+  drawStage();
+});
 
 function setPhoneTab(tab) {
   document.body.dataset.tab = tab;

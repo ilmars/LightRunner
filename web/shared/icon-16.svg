@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 1024 1024">
+  <!-- Light Runner at 16 px (the browser tab): three thicker segments, so it stays readable. -->
+  <rect width="1024" height="1024" rx="230" fill="#13203D"/>
+  <rect x="200" y="420" width="140" height="184" rx="40" fill="#4389E8" fill-opacity=".25"/>
+  <rect x="401" y="420" width="140" height="184" rx="40" fill="#4389E8" fill-opacity=".5"/>
+  <rect x="600" y="420" width="200" height="184" rx="40" fill="#F4EBD8"/>
+</svg>

@@ -1037,6 +1037,37 @@ test('the layout gives each item its entries, and the preview picture is served'
   assert.equal(missing.status, 404);
 }));
 
+test('the pages, the font and the icon are served with their types', () => withApp(async (app) => {
+  const get = (path: string) => fetch(`http://127.0.0.1:${app.port}${path}`);
+  const types: Record<string, string> = {
+    '/operator/': 'text/html; charset=utf-8',
+    '/shared/theme.css': 'text/css; charset=utf-8',
+    '/shared/fonts/inter-latin-wght-normal.woff2': 'font/woff2',
+    '/shared/fonts/inter-latin-ext-wght-normal.woff2': 'font/woff2',
+    '/shared/fonts/OFL.txt': 'text/plain; charset=utf-8',
+    '/shared/icon.svg': 'image/svg+xml',
+    '/shared/icon-16.svg': 'image/svg+xml',
+    '/shared/icon-180.png': 'image/png',
+  };
+  for (const [path, type] of Object.entries(types)) {
+    const res = await get(path);
+    assert.equal(res.status, 200, path);
+    assert.equal(res.headers.get('content-type'), type, path);
+    if (type === 'font/woff2') assert.equal(Buffer.from(await res.arrayBuffer()).subarray(0, 4).toString('latin1'), 'wOF2', path);
+    else await res.arrayBuffer();
+  }
+  // Every page loads the shared theme (where Inter is) and has the icon.
+  for (const page of ['/operator/', '/patch/', '/settings/']) {
+    const html = await (await get(page)).text();
+    assert.match(html, /<link rel="stylesheet" href="\/shared\/theme\.css">/, page);
+    assert.match(html, /<link rel="icon" href="\/shared\/icon-16\.svg" type="image\/svg\+xml">/, page);
+    assert.match(html, /<link rel="apple-touch-icon" href="\/shared\/icon-180\.png">/, page);
+  }
+  const css = await (await get('/shared/theme.css')).text();
+  assert.match(css, /--ds-font: Inter, system-ui/);
+  for (const m of css.matchAll(/url\(([^)]+\.woff2)\)/g)) assert.equal((await get(`/shared/${m[1]}`)).status, 200, m[1]);
+}));
+
 // ---- Live effects, the song's tempo and the effects list ----
 
 /** A wave as the Effects tab sends it: every setting, colours as plain hex. */

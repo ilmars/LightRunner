@@ -50,7 +50,17 @@ The first suggested palette was measured at about 4× the old screen's average b
 | `--ds-gap` / `--ds-gap-tight` | 10 / 8 px |
 | `--ds-target` | 44 px minimum touch target; 52 px in the operator page's bottom bar |
 | `--ds-shadow-raise`, `--ds-shadow-low` | The 1 px edge, drawn inside (no far shadow) |
-| Type | System font (Inter comes with the restyle's last step). Panel titles 14 px semibold in sentence case ("Running order", "Quick looks", "Groups") with a muted 12–13 px subtitle beside them. Small labels (`ds-caps`): 11 px, 600, `.09em` spacing, upper case, muted ("On stage", "Master", "Flash", "Who to call"); 10 px over a value inside a button (Fade, Tempo, Safe, Next). The name on stage 20 px semibold. Levels 17 px semibold with numbers that keep their width. |
+| Type | **Inter** (variable, 100–900; the pages use 400, 500, 600 and 700), served by Light Runner from `web/shared/fonts/` (Latin, and Latin Extended for the Latvian names; the browser loads the second only when a page shows ā, č, ē …), with the system font as the fallback: `--ds-font: Inter, system-ui, …`. Never a font from the internet: the church Mac may be offline. Panel titles 14 px semibold in sentence case ("Running order", "Quick looks", "Groups") with a muted 12–13 px subtitle beside them. Small labels (`ds-caps`): 11 px, 600, `.09em` spacing, upper case, muted ("On stage", "Master", "Flash", "Who to call"); 10 px over a value inside a button (Fade, Tempo, Safe, Next). The name on stage 20 px semibold. Levels 17 px semibold with numbers that keep their width. |
+
+## App icon
+
+The designer's icon (`Icon.dc.html`, kept with the restyle plan): a run of six segments brightening left to right (the accent `#4389E8` at .14, .24, .38 and .6, then `#9CC0F5` at .88) to a warm-white head `#F4EBD8` with a soft glow, a thin accent line under them, on a dark blue rounded square (`#17264A` to `#0A1222`) with a faint edge.
+
+| File | Use |
+| --- | --- |
+| `web/shared/icon.svg` | The 1024 px master; beside the Patch and Settings titles (26 px) |
+| `web/shared/icon-16.svg` | The browser tab (every page's `rel="icon"`): three thicker segments, so it reads at 16 px |
+| `web/shared/icon-180.png` | The iPad home screen (`apple-touch-icon`): the master drawn square and without the edge, as iOS rounds the corners itself. Made from `icon.svg` with the browser (no tool in the repo); make it again the same way if the master changes |
 
 ## Components
 
@@ -72,7 +82,7 @@ The first suggested palette was measured at about 4× the old screen's average b
 
 | Area | State |
 | --- | --- |
-| Operator page | The designer's restyle (20 Oct): tokens, top bar, running order, quick looks, Groups, bottom bar, colour picker, colour editor, effect editor, Individual lights and the phone done; the quick-look sheet, font and icon follow |
+| Operator page | The designer's restyle (20 Oct): tokens, top bar, running order, quick looks, Groups, bottom bar, colour picker, colour editor, effect editor, Individual lights, the phone, Inter and the icon done; the quick-look sheet follows |
 | Operator page on a phone (the remote) | Done, in the restyle's look (the designer's phone artboard, 390 × 844): a 16 px-radius header ("On stage", the name, "● changed", the problem pill in short words), Order / Groups / Looks as a segmented control (44 px, blue tint when picked), one 18 px-radius panel for the tab, and a footer panel with Master on one line (label, 44 px slider, level) over Undo · Basic lights · Next · Blackout (52 px). Page text only the phone shows has the class `phone-only`, text it leaves out `not-phone` (or `hold-hint` for ", hold to edit"). No saving or editing; side by side when the phone is on its side |
 | Settings | Done: glass panels in a two-column bento grid on wide screens (DMX output, Show and Compare span both), tinted segmented choices and switches (Send DMX on is green), flat fields, status pills, glass top bar and save bar |
 | Patch | Done: the fixture table has no cell borders, faint row dividers and flat fields; group cards are flat glass tiles with pill chips and turn blue-tinted while one of their fields has focus; the DMX map, universe tabs, library list and Open Fixture Library search use the same glass and tinted states. Fixture blocks keep their own per-type colours and the red overlap striping; the stage plan keeps its grid and marks inside a glass frame |

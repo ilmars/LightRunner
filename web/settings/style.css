@@ -36,7 +36,9 @@ a { color: #8fb8f2; }
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05);
 }
-.top h1 { font-size: 20px; font-weight: 600; margin: 0; flex: 1; letter-spacing: 0.01em; }
+.top h1 { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 600; margin: 0; flex: 1; letter-spacing: 0.01em; }
+/* The Light Runner icon in the title's place. */
+.top h1 .brand { flex: none; display: block; }
 .back { text-decoration: none; color: var(--ds-muted-on); font-size: 14px; padding: 8px 14px; border-radius: var(--ds-r-pill); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
 .back:hover { background: var(--raised); }
 
