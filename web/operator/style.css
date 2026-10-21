@@ -390,8 +390,6 @@ body.prepare .save.holding { border-color: var(--prep-text); }
   border-radius: var(--ds-r-tile); background: var(--ds-tile-fill); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 .padd[hidden], .pswitch[hidden] { display: none; }
-/* The effect open in the effect editor. */
-.pc.editing { border-color: var(--ds-accent); }
 .ghost.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
 .pe-used { grid-column: 1 / -1; margin: 0 2px; font-size: var(--ds-fs-label); color: var(--ds-muted); }
 .pedit .padd-btns { grid-column: 2; justify-self: end; }
@@ -462,7 +460,7 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .ce-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 12px; }
 .ce-row[hidden] { display: none; }
 .ce-row-top { align-items: start; }
-.ce-lab { color: var(--ds-muted); font-size: 13px; }
+.ce-lab { color: var(--ds-muted); font-size: 13px; line-height: 1.35; text-wrap: balance; }
 .ce-colour { display: flex; align-items: center; gap: 10px; min-width: 0; }
 /* The strip, dimmed, with a light line for the colour that stands out above and below (as Any colour's). */
 .ce-strip { flex: 1; height: 44px; border-radius: 12px; box-shadow: none; overflow: visible; }
@@ -484,6 +482,7 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .ce-seg { justify-self: start; flex-wrap: wrap; border-radius: 12px; }
 .ce-seg > button { min-height: 44px; padding: 0 12px; font-size: 13px; white-space: nowrap; }
 .ce-seg > button.on { box-shadow: inset 0 0 0 1px rgba(67, 137, 232, 0.45); }
+.ce-seg > button:disabled { opacity: 0.4; }
 .ce-used { font-size: 13px; line-height: 1.5; }
 /* Delete colour (a second tap deletes) and one line on what it does. */
 .ce-del { flex: none; display: flex; align-items: center; gap: 12px; }
@@ -561,10 +560,12 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .fxsize .ds-fill { flex: 1; min-width: 120px; }
 .fxsize .pct { min-width: 52px; text-align: right; font-size: var(--ds-fs-value); font-variant-numeric: tabular-nums; }
 .fxsize .pct.zero { color: var(--ds-muted); }
-/* The effect editor open: the running effect's card gives way to it, as Any colour does on Colours. */
+/* The effect editor open: the running effect's card gives way to it. */
 .pfx.editing #fxCard { display: none; }
 /* ＋ New colour and ＋ New effect: dashed "add" tiles. */
 .pc.newfx { align-items: center; justify-content: center; background: transparent; border: 1px dashed rgba(148, 163, 184, 0.3); color: var(--ds-muted); text-align: center; }
+/* The effect (or ＋ New effect) open in the effect editor: an accent edge. */
+.pc.editing { border-color: var(--ds-accent); }
 .pc.newfx.editing { border: 1px solid var(--ds-accent); }
 .fxedit > * { grid-column: 1 / -1; }
 .fxedit .lab2 { margin: 4px 2px 0; }

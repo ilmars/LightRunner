@@ -2222,22 +2222,38 @@ function markChoice(box, selected) {
   }
 }
 
-/** The new colour's White, Amber and UV, as its sliders show them (0 where the group has no slider). */
+/** The colour's White, Amber and UV, as its sliders show them (as it was, or 0, where the group has no slider). */
 function editLevels() {
-  const levels = { white: 0, amber: 0, uv: 0 };
+  const levels = { ...(colourEdit?.startExtras ?? NO_EXTRAS) };
   for (const r of editExtraRows) levels[r.key] = Math.round(r.value * 100) / 100;
   return levels;
 }
 
-/** A new colour has something in it: a colour picked on the strip, or White, Amber or UV above 0 (an amber-only colour, say). */
-function editReady() {
-  if (!colourEdit || colourEdit.id) return !!colourEdit;
-  const l = editLevels();
-  return !!colourEdit.hex || l.white > 0 || l.amber > 0 || l.uv > 0;
+/** The White, Amber and UV sliders were moved away from what the listed colour has. */
+function extrasChanged() {
+  if (!colourEdit?.id) return false;
+  const now = editLevels();
+  return ['white', 'amber', 'uv'].some((k) => Math.abs(now[k] - colourEdit.startExtras[k]) >= 0.005);
 }
 
-/** White, Amber and UV sliders for a new colour, as Any colour has them; they change only the editor, never the stage. */
-function buildEditExtras(group) {
+/** The colour (#rrggbb) Save would keep: the one picked on the strip, else the listed colour's own (black for None yet). */
+function editHex() {
+  const p = editedPreset();
+  return colourEdit.hex ?? (p ? presetHex(p) : '#000000');
+}
+
+/** There is some light in it: a colour, or White, Amber or UV above 0 (an amber-only colour, say). Save needs it. */
+function editReady() {
+  if (!colourEdit) return false;
+  const p = editedPreset();
+  // Off and colours of several layers keep their light (only their name and fade change).
+  if (p && p.canRecolour === false) return true;
+  const l = editLevels();
+  return !/^#0{6}$/i.test(editHex()) || l.white > 0 || l.amber > 0 || l.uv > 0;
+}
+
+/** White, Amber and UV sliders, as Any colour has them, from `start`; they change only the editor, never the stage. */
+function buildEditExtras(group, start) {
   const box = $('ceExtras');
   box.replaceChildren();
   editExtraRows = [];
@@ -2245,7 +2261,8 @@ function buildEditExtras(group) {
   for (const x of group ? EXTRAS : []) {
     if (!group.extras?.[x.key]) continue;
     names.push(x.label);
-    const row = extraSlider(box, x, `New colour ${x.label}`);
+    const row = extraSlider(box, x, `${x.label} in the colour`);
+    showLevel(row, start[x.key]);
     editExtraRows.push(row);
     let startX = 0, startV = 0;
     row.dim.addEventListener('pointerdown', (ev) => {
@@ -2271,10 +2288,20 @@ function buildEditExtras(group) {
   $('ceExtrasLab').textContent = names.join(' · ');
 }
 
-/** A listed colour's own White, Amber and UV (its light is scaled by its brightness; this undoes that), for the swatch. */
+/** A listed colour's own White, Amber and UV, to whole percent (its light is scaled by its brightness; this undoes that). */
 function presetExtras(p) {
   const k = p.level && p.level > 0 ? p.level : 1;
-  return { white: (p.light?.white ?? 0) / k, amber: (p.light?.amber ?? 0) / k, uv: (p.light?.uv ?? 0) / k };
+  const raw = (v) => Math.min(1, Math.round(((v ?? 0) / k) * 100) / 100);
+  return { white: raw(p.light?.white), amber: raw(p.light?.amber), uv: raw(p.light?.uv) };
+}
+
+/** A listed colour's own #rrggbb (its light is scaled by its brightness; this undoes that). */
+function presetHex(p) {
+  const hex = p.light?.hex;
+  if (!hex) return '#000000';
+  const k = p.level && p.level > 0 ? p.level : 1;
+  const n = parseInt(hex.slice(1), 16);
+  return `#${[16, 8, 0].map((sh) => Math.min(255, Math.round(((n >> sh) & 255) / k)).toString(16).padStart(2, '0')).join('')}`;
 }
 
 /** Where on the strip a colour sits (0..1), or null when it isn't one of the strip's colours (a white on the colour strip, say). */
@@ -2326,7 +2353,10 @@ function openColourEditor(preset) {
   const fade = preset ? preset.fade ?? 0 : 3;
   // Off has a level of 0 and no colour to dim, and a colour of several layers has no one brightness: no slider.
   const level = !preset ? 1 : preset.canRecolour === false ? null : preset.level ?? null;
-  colourEdit = { group: group.id, id: preset?.id ?? null, name: preset?.name ?? '', hex: null, level, startLevel: level, fade, startFade: fade, all: false };
+  // A listed plain colour's White, Amber and UV can change too; a new colour starts without them.
+  const recolour = !preset || preset.canRecolour !== false;
+  const startExtras = preset && recolour ? presetExtras(preset) : { ...NO_EXTRAS };
+  colourEdit = { group: group.id, id: preset?.id ?? null, name: preset?.name ?? '', hex: null, level, startLevel: level, fade, startFade: fade, all: false, startExtras };
   pendingEdit = null;
   disarmDelete();
   $('ceName').value = colourEdit.name;
@@ -2338,7 +2368,7 @@ function openColourEditor(preset) {
   const place = preset?.light && !noLight(preset.light) ? stripPlace(preset.light.hex, group.whiteOnly) : null;
   $('ceH').hidden = place === null;
   if (place !== null) $('ceH').style.left = `calc(${place * 100}% - ${place * 4}px)`;
-  buildEditExtras(preset ? null : group);
+  buildEditExtras(recolour ? group : null, startExtras);
   if (level !== null) showEditLevel(level);
   $('ceDelRow').hidden = !preset;
   $('colEdit').hidden = false;
@@ -2374,13 +2404,19 @@ function renderEditor() {
     return;
   }
   const isNew = !p;
+  // Renamed elsewhere (another tablet, Undo): an untouched name field follows.
+  if (!isNew && p.name !== colourEdit.name) {
+    if ($('ceName').value === colourEdit.name) $('ceName').value = p.name;
+    colourEdit.name = p.name;
+  }
   $('ceTitle').textContent = isNew ? `New colour for ${group.name}` : `${p.name} on ${group.name}`;
   $('ceNote').textContent = isNew ? 'Trying colours here never changes the stage' : 'The stage changes only when you Save';
 
-  // The swatch: what Save would keep (a new colour: nothing until there is something in it).
+  // The swatch: what Save would keep (nothing while there is no light in it).
+  const recolour = isNew || p.canRecolour !== false;
+  const colourChanged = !isNew && recolour && (!!colourEdit.hex || extrasChanged());
   let look = null;
-  if (isNew) look = editReady() ? mixedColour(colourEdit.hex ?? '#000000', editLevels()) : null;
-  else if (colourEdit.hex) look = mixedColour(colourEdit.hex, presetExtras(p));
+  if (isNew || colourChanged) look = editReady() ? mixedColour(editHex(), editLevels()) : null;
   else look = p.swatch ?? null;
   const off = !look || look === '#000000';
   $('ceSw').classList.toggle('off', off);
@@ -2388,13 +2424,13 @@ function renderEditor() {
   // The Brightness slider carries a little of the colour, as the group dimmers do.
   ceLevel.dim.style.setProperty('--c', off ? '#6a7898' : shown(look) ?? look);
 
-  // Colour: not for Off or a colour of several layers (they can be renamed only). No colour: a new colour of White, Amber or UV alone.
-  $('ceColourRow').hidden = !isNew && p.canRecolour === false;
-  $('ceNoColour').hidden = !isNew || !editExtraRows.length;
-  const none = isNew && !colourEdit.hex;
+  // Colour: not for Off or a colour of several layers (they can be renamed only). No colour: White, Amber or UV alone.
+  $('ceColourRow').hidden = !recolour;
+  $('ceNoColour').hidden = !recolour || !editExtraRows.length;
+  const none = /^#0{6}$/i.test(editHex());
   $('ceNoColour').classList.toggle('on', none);
   $('ceNoColour').setAttribute('aria-pressed', String(none));
-  $('ceExtrasRow').hidden = !isNew || !editExtraRows.length;
+  $('ceExtrasRow').hidden = !recolour || !editExtraRows.length;
   // Brightness: only where it can change (not Off, an effect or a colour of several layers).
   $('ceLevelRow').hidden = colourEdit.level === null;
 
@@ -2403,28 +2439,33 @@ function renderEditor() {
   buildChoice($('ceFade'), fades, fadeText, (v) => { colourEdit.fade = v; });
   markChoice($('ceFade'), colourEdit.fade);
 
-  // Apply to: only this group, or every group with this colour (same name, or pointing to the same shared colour);
-  // a new one, every group of its kind. Left out when there is no other group it could reach.
+  // Apply to: only this group, or every group with this colour: the other groups' colours of this name (name, colour,
+  // brightness, fade), and with a new colour the shared colour it points to. A new one: every group of its kind.
+  // Left out when no other group could be reached; "Every group" is unavailable while this edit can't reach another
+  // (a shared colour with no other of its name, until a colour or White, Amber or UV is changed).
   const others = isNew ? [] : layout.groups.filter((g) => g.id !== group.id).flatMap((g) => g.presets.filter((x) => x.name === p.name));
-  const shared = isNew ? null : p.shared ?? null;
+  const shared = isNew ? null : p.shared && p.shared.groups > 1 ? p.shared : null;
   const kind = layout.groups.filter((g) => g.id !== group.id && !isSmoke(g) && g.whiteOnly === group.whiteOnly);
-  const canAll = isNew ? kind.length > 0 : others.length > 0 || (shared?.groups ?? 0) > 1;
-  if (!canAll) colourEdit.all = false;
-  $('ceApplyRow').hidden = !canAll;
+  const showAll = isNew ? kind.length > 0 : others.length > 0 || !!shared;
+  const reachesMore = isNew ? kind.length > 0 : others.length > 0 || (!!shared && colourChanged);
+  if (!reachesMore) colourEdit.all = false;
+  $('ceApplyRow').hidden = !showAll;
   const everyLabel = isNew ? (group.whiteOnly ? 'Every white-only group' : 'Every colour group') : `Every group with ${p.name}`;
   buildChoice($('ceApply'), [false, true], (all) => (all ? everyLabel : `Only ${group.name}`), (all) => { colourEdit.all = all; });
   markChoice($('ceApply'), colourEdit.all);
+  $('ceApply').children[1].disabled = !reachesMore;
 
-  // Used in follows Apply to: with every group, the other groups' colours of this name, and (with a new colour) the shared colour's reach.
+  // Used in: what Save will change. With every group, the other groups' colours of this name, and with a new
+  // colour (or White, Amber or UV) everything that uses the shared colour.
   let used = [];
   if (!isNew) {
     const affected = colourEdit.all ? [p, ...others] : [p];
-    used = [...new Set([...affected.flatMap((x) => x.usedBy ?? []), ...(colourEdit.all && shared && colourEdit.hex ? shared.usedBy : [])])];
+    used = [...new Set([...affected.flatMap((x) => x.usedBy ?? []), ...(colourEdit.all && shared && colourChanged ? shared.usedBy : [])])];
   }
   $('ceUsed').textContent = usedInText(used);
 
-  // Save: a new colour needs something in it.
-  $('ceSave').disabled = pendingEdit !== null || (isNew && !editReady());
+  // Save: the colour needs some light in it.
+  $('ceSave').disabled = pendingEdit !== null || !editReady();
 
   // Delete: the server refuses a colour a song or quick look uses, and one the group shows (on stage, or in this tablet's draft).
   if (!isNew) {
@@ -2457,11 +2498,12 @@ $('ceName').addEventListener('keydown', (ev) => {
 });
 $('ceName').addEventListener('input', disarmDelete);
 
-// No colour: the picked colour comes off again, so a new colour can be White, Amber or UV alone.
+// No colour: the colour comes off, so the colour can be White, Amber or UV alone.
 $('ceNoColour').addEventListener('click', () => {
-  if (!colourEdit || colourEdit.id) return;
-  colourEdit.hex = null;
+  if (!colourEdit) return;
+  colourEdit.hex = colourEdit.id ? '#000000' : null;
   $('ceH').hidden = true;
+  disarmDelete();
   renderEditor();
 });
 
@@ -2520,16 +2562,22 @@ $('ceSave').addEventListener('click', () => {
   }
   const p = editedPreset();
   if (!p) return;
-  // Every group: the other groups' colours of this name too (name, colour, brightness and fade), and with a new
-  // colour, the shared colour it points to, so every colour that points to it follows.
+  if (!editReady()) return;
+  // Every group: the other groups' colours of this name too (name, colour, White, Amber and UV, brightness and fade),
+  // and with a new colour (or White, Amber or UV), the shared colour it points to, so every colour that points to it follows.
   const all = colourEdit.all && !$('ceApplyRow').hidden;
   const cmd = { type: 'editColour', preset: colourEdit.id, sameName: all };
   if (name.trim() !== colourEdit.name) cmd.name = name;
   if (colourEdit.hex && !$('ceColourRow').hidden) cmd.colour = colourEdit.hex;
+  if (extrasChanged()) {
+    const now = editLevels();
+    for (const k of ['white', 'amber', 'uv']) if (Math.abs(now[k] - colourEdit.startExtras[k]) >= 0.005) cmd[k] = now[k];
+  }
+  const recoloured = cmd.colour !== undefined || cmd.white !== undefined || cmd.amber !== undefined || cmd.uv !== undefined;
   if (colourEdit.level !== null && Math.abs(colourEdit.level - colourEdit.startLevel) >= 0.005) cmd.level = editLevel();
   if (colourEdit.fade !== colourEdit.startFade) cmd.fade = colourEdit.fade;
-  if (cmd.colour !== undefined && all && p.shared) cmd.shared = true;
-  if (cmd.name === undefined && cmd.colour === undefined && cmd.level === undefined && cmd.fade === undefined) {
+  if (recoloured && all && p.shared) cmd.shared = true;
+  if (cmd.name === undefined && !recoloured && cmd.level === undefined && cmd.fade === undefined) {
     closeEditor();
     return;
   }
