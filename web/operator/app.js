@@ -93,6 +93,7 @@ function connect() {
       syncQuickSheet();
       buildSheetGroups();
       buildFlash();
+      paintKeyChips();
       // Operators can lose manual control in Settings; the panel goes with it.
       if (!layout.manualForOperators) closeManual();
       else if (manualSel.open) buildManual();
@@ -325,7 +326,8 @@ function showDeleteState(row) {
 }
 
 function buildEditRows(order) {
-  const same = orderRows.length === 0 && editRows.length === order.length && editRows.every((r, k) => r.id === order[k].id);
+  const same = orderRows.length === 0 && editRows.length === order.length && editRows.every((r, k) => r.id === order[k].id)
+    && editKeys === keysOn();
   if (same) {
     // Same items in the same order: only fresh names go in, and never over what is being typed.
     editRows.forEach((row, k) => {
@@ -347,12 +349,17 @@ function buildEditRows(order) {
   }
   orderRows = [];
   editRows = [];
+  editKeys = keysOn();
   const nodes = [];
   let refocus = null;
   for (const item of order) {
     if (isBasic(item)) {
       const fixed = el('div', 'erow fixed');
-      fixed.append(item.name, el('small', null, '· always first'));
+      const name = el('span', 'fname', item.name);
+      name.append(el('small', null, '· always first'));
+      fixed.append(name);
+      // Its Key chip lines up with the songs' (theirs have the drag handle after it).
+      if (editKeys) fixed.append(keyChip({ kind: 'song', id: item.id }, item.name), el('span', 'grip-space'));
       nodes.push(fixed);
       editRows.push({ id: item.id, fixed: true, el: fixed });
       continue;
@@ -371,7 +378,9 @@ function buildEditRows(order) {
     const grip = el('span', 'grip', '≡');
     grip.setAttribute('role', 'button');
     grip.setAttribute('aria-label', 'Drag to move');
-    node.append(del, input, grip);
+    node.append(del, input);
+    if (editKeys) node.append(keyChip({ kind: 'song', id: item.id }, item.name));
+    node.append(grip);
     const row = { id: item.id, name: item.name, el: node, input, del };
     editRows.push(row);
     nodes.push(node);
@@ -548,6 +557,8 @@ function setEditing(on) {
   editing = on;
   confirmDelete = null;
   revealedId = null;
+  // A song's key chip goes with the list: a learn still waiting for one stops.
+  if (!on && keyLearn.does?.kind === 'song') stopLearn();
   $('editBtn').textContent = on ? 'Done' : 'Edit list';
   $('editBtn').classList.toggle('on', on);
   $('editBtn').setAttribute('aria-pressed', String(on));
@@ -557,6 +568,116 @@ function setEditing(on) {
   }
 }
 $('editBtn').addEventListener('click', () => setEditing(!editing));
+
+// ---- Controller keys: a song's or a quick look's key, taken by pressing it on the controller ----
+// Only when the server can use MIDI controllers (layout.keys.midi). A tap on a Key chip asks the server to take the
+// next key pressed (it waits up to 10 s, one page at a time); the bar at the bottom says so and has Clear and Cancel.
+// The key follows the song, not its place. Keys always act on the real stage.
+
+/** The running-order Edit rows were built with Key chips. */
+let editKeys = false;
+const keysOn = () => !!layout?.keys?.midi;
+/** What is waiting for its key: what it does, its name, the request and when it gives up. */
+const keyLearn = { does: null, name: '', ctl: null, until: 0, timer: 0 };
+const sameDoes = (a, b) => !!a && !!b && a.kind === b.kind && a.id === b.id;
+
+/** The key a song or quick look has now ({ place, name }), or null. */
+function keyOfTarget(does) {
+  const map = does.kind === 'song' ? layout?.keys?.songs : layout?.keys?.quickLooks;
+  return map?.[does.id] ?? null;
+}
+
+function keyChip(does, name) {
+  const b = el('button', 'kchip');
+  b.type = 'button';
+  b.dataset.does = JSON.stringify(does);
+  b.dataset.name = name;
+  paintKeyChip(b);
+  // A tap on the chip doesn't reach the row (no drag, no rename).
+  b.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+  b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    if (sameDoes(keyLearn.does, does)) stopLearn();
+    else learnKey(does, b.dataset.name);
+  });
+  return b;
+}
+
+/** "Key" over the place ("pad 1,3"), "＋ Key" without one, "Press a key" while waiting. */
+function paintKeyChip(b) {
+  const does = JSON.parse(b.dataset.does);
+  const key = keyOfTarget(does);
+  const waiting = sameDoes(keyLearn.does, does);
+  b.classList.toggle('on', waiting);
+  b.classList.toggle('set', !!key && !waiting);
+  if (waiting) b.replaceChildren(el('span', 'ds-caps', 'Key'), el('b', null, 'Press it…'));
+  else if (key) b.replaceChildren(el('span', 'ds-caps', 'Key'), el('b', null, key.place));
+  else b.replaceChildren('＋ Key');
+  b.title = key ? `Key: ${key.name}` : 'Assign a key on a controller';
+  b.setAttribute('aria-label', waiting ? 'Waiting for a key. Tap to stop' : key ? `Key: ${key.name}. Tap to assign another` : 'Assign a key');
+}
+
+function paintKeyChips() {
+  for (const b of document.querySelectorAll('.kchip[data-does]')) paintKeyChip(b);
+  paintLearnBar();
+}
+
+function paintLearnBar() {
+  const bar = $('learnBar');
+  bar.hidden = !keyLearn.does;
+  if (!keyLearn.does) return;
+  $('lbWhat').textContent = `Press a key on the controller for ${keyLearn.name}`;
+  $('lbLeft').textContent = ` · ${Math.max(0, Math.ceil((keyLearn.until - performance.now()) / 1000))} s`;
+  $('lbClear').hidden = !keyOfTarget(keyLearn.does);
+}
+
+async function learnKey(does, name) {
+  if (keyLearn.ctl) stopLearn();
+  const ctl = new AbortController();
+  Object.assign(keyLearn, { does, name, ctl, until: performance.now() + 10000 });
+  keyLearn.timer = setInterval(paintLearnBar, 250);
+  paintKeyChips();
+  let answer = null;
+  try {
+    const res = await fetch('/api/keys/learn', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ does }), signal: ctl.signal });
+    const data = await res.json().catch(() => ({}));
+    answer = res.ok ? data : { ok: false, message: data.error || 'That did not work.', bad: true };
+  } catch {
+    if (!ctl.signal.aborted) answer = { ok: false, message: 'Not connected. Lights keep running; try again in a moment.', bad: true };
+  }
+  // Stopped, or another chip took over.
+  if (keyLearn.ctl !== ctl) return;
+  endLearn();
+  if (!answer) return;
+  if (answer.ok) toast(answer.note ?? `${name}: ${answer.key}`, true);
+  else toast(answer.message, !answer.bad);
+}
+
+function stopLearn() {
+  keyLearn.ctl?.abort();
+  endLearn();
+}
+
+function endLearn() {
+  clearInterval(keyLearn.timer);
+  Object.assign(keyLearn, { does: null, name: '', ctl: null });
+  paintKeyChips();
+}
+
+$('lbCancel').addEventListener('click', stopLearn);
+$('lbClear').addEventListener('click', async () => {
+  const { does, name } = keyLearn;
+  if (!does) return;
+  stopLearn();
+  try {
+    const res = await fetch('/api/keys/clear', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ does }) });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) toast(`${name} has no key now`, true);
+    else toast(data.error || 'That did not work.');
+  } catch {
+    toast('Not connected. Lights keep running; try again in a moment.');
+  }
+});
 
 // ---- Prepare: get the next moment ready on a draft of the stage, then Go ----
 // Only this tablet works on its draft; the server keeps it and sends this page its state and picture.
@@ -4500,6 +4621,9 @@ function openSheet(q) {
   $('qsTitle').textContent = q ? 'Edit quick look' : 'New quick look from the stage';
   $('qsDelete').hidden = !q;
   $('qsStageRow').hidden = !q;
+  // Its controller key, once it exists (a new quick look gets one after Save, from its Edit).
+  $('qsKeyRow').hidden = !(q && keysOn());
+  $('qsKeyLine').replaceChildren(...(q && keysOn() ? [keyChip({ kind: 'quickLook', id: q.id }, q.name)] : []));
   $('qsGroupsNote').textContent = q ? '· tap a group to leave it out or to add it' : '· tap a group to leave it out; left-out groups keep what they have';
   buildSheetGroups();
   $('qSheet').hidden = false;
@@ -4508,6 +4632,7 @@ function openSheet(q) {
 }
 
 function closeSheet() {
+  if (keyLearn.does?.kind === 'quickLook') stopLearn();
   qs.open = false;
   qs.look = null;
   qs.orig = null;

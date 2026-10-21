@@ -207,8 +207,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
   position: relative; flex: none; display: flex; align-items: center; gap: 4px; min-height: 50px; padding: 0 4px;
   background: var(--ds-tile-fill); border-radius: var(--ds-r-tile); box-shadow: var(--ds-shadow-low);
 }
-.erow.fixed { padding: 0 14px; background: transparent; box-shadow: none; color: var(--ds-muted); font-size: 16px; }
+.erow.fixed { padding: 0 4px 0 14px; background: transparent; box-shadow: none; color: var(--ds-muted); font-size: 16px; }
+.erow.fixed .fname { flex: 1; min-width: 0; }
 .erow.fixed small { margin-left: 6px; font-size: 12px; }
+.erow .grip-space { flex: none; width: 44px; }
 .erow .del { flex: none; width: 44px; height: 44px; border: 0; background: transparent; color: var(--ds-danger-text); opacity: 0.8; font-size: 22px; border-radius: var(--ds-r-small); }
 .erow .del.sure { width: auto; min-width: 76px; padding: 0 12px; margin-right: 2px; background: var(--ds-danger-fill); color: var(--ds-danger-text); opacity: 1; font-size: 14px; box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
 .erow .ename {
@@ -223,6 +225,31 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .erow.dragging { z-index: 3; background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on), 0 16px 32px -12px rgba(0, 0, 0, 0.7); }
 .erow.dragging .grip { cursor: grabbing; }
 .order-list.reordering .erow:not(.dragging) { transition: transform 0.12s ease-out; }
+
+/* Controller keys: a song's (and a quick look's) key as a quiet chip, "KEY" in small capitals over its place
+   ("pad 1,3"), or "＋ Key"; blue while it waits for a key. The bar at the bottom says what to press. */
+.kchip {
+  flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  min-width: 58px; max-width: 92px; min-height: 44px; padding: 0 8px; border: 1px solid var(--ds-edge); border-radius: var(--ds-r-small);
+  background: transparent; color: var(--ds-muted); font: inherit; font-size: 12px; line-height: 1.15; white-space: nowrap;
+}
+.kchip .ds-caps { font-size: 9px; }
+.kchip b { max-width: 76px; overflow: hidden; text-overflow: ellipsis; color: var(--ds-text); font-weight: 500; }
+.kchip.on { background: var(--ds-tile-fill-on); border-color: var(--ds-edge-on); }
+.qs-key { flex: none; display: flex; flex-direction: column; gap: 6px; }
+.qs-key[hidden] { display: none; }
+.qs-keyline { display: flex; }
+.qs-keyline .kchip { max-width: 200px; min-width: 96px; }
+.qs-keyline .kchip b { max-width: 184px; }
+.learnbar {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 21; display: flex; align-items: center; gap: 8px;
+  max-width: calc(100vw - 24px); padding: 6px 6px 6px 16px; border-radius: var(--ds-r-tile);
+  background: var(--ds-glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  box-shadow: inset 0 0 0 1px var(--ds-edge-on), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
+}
+.learnbar .lb-text { min-width: 0; font-size: 14px; }
+.learnbar .lb-left { color: var(--ds-muted); font-variant-numeric: tabular-nums; }
+.lb-btn { flex: none; min-height: 44px; padding: 0 14px; border: 1px solid var(--ds-edge); border-radius: var(--ds-r-small); background: transparent; color: var(--ds-muted); font: inherit; font-size: 14px; }
 
 /* ---- Right column ---- */
 .right { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: var(--ds-gap); min-height: 0; min-width: 0; }

@@ -253,6 +253,11 @@
           </label>
           <p id="qsStageNote" class="lab-note"></p>
         </div>
+        <!-- Edit only, when the server can use MIDI controllers: the key that runs this quick look. -->
+        <div id="qsKeyRow" class="qs-key" hidden>
+          <p class="lab2">Controller key <span class="lab-note">· tap, then press a key on the controller</span></p>
+          <div id="qsKeyLine" class="qs-keyline"></div>
+        </div>
       </div>
     </section>
     <!-- The colour editor, for a listed colour (Edit this colour) or a new one (＋ New colour): it takes the whole column
@@ -458,6 +463,12 @@
     <button id="blackout" class="action blackout-btn"><span class="hold"></span><span class="label">Blackout<small>hold 1 s</small></span></button>
   </footer>
 
+  <!-- Waiting for a key on a MIDI controller (a song's or a quick look's Key chip). -->
+  <div id="learnBar" class="learnbar" role="status" hidden>
+    <span class="lb-text"><span id="lbWhat"></span><span id="lbLeft" class="lb-left"></span></span>
+    <button id="lbClear" class="lb-btn" type="button">Clear key</button>
+    <button id="lbCancel" class="lb-btn" type="button">Cancel</button>
+  </div>
   <div id="toast" class="toast" hidden></div>
   <script type="module" src="app.js"></script>
 </body>
