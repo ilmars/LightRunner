@@ -2637,7 +2637,7 @@ function colourTools({ strip, handle, sat, fold, exact, row = false, whiteOnly, 
    * why), else it is dropped; either way the change ends (`onColour(hex, true)`) and the field is left. On iPad Safari
    * a tap on a button doesn't take the focus from a field, so Save, Done, a tile and the like call this first.
    */
-  function endTyping(take) {
+  function endTyping(take, quiet = false) {
     const f = fields.includes(document.activeElement) ? document.activeElement : null;
     if (!f && !typed.timer && !typed.began) return;
     const waiting = typed.timer ? typed.chan : -1;
@@ -2657,7 +2657,7 @@ function colourTools({ strip, handle, sat, fold, exact, row = false, whiteOnly, 
     if (typed.began) {
       typed.began = false;
       holdUntil = performance.now() + COLOUR_HOLD;
-      onColour(st.hex, true);
+      if (!quiet) onColour(st.hex, true);
     }
     if (f) {
       // Its blur has nothing more to do.
@@ -2704,6 +2704,8 @@ function colourTools({ strip, handle, sat, fold, exact, row = false, whiteOnly, 
     flush: () => endTyping(true),
     /** Drops an R, G or B still waiting (the picker or editor is closing) and ends the change. */
     cancel: () => endTyping(false),
+    /** As cancel, but nothing more is sent at all (not even the end of the change): the stage is in Blackout. */
+    drop: () => endTyping(false, true),
     /** A finger or a field is changing it, or did a moment ago: what the stage says must wait. */
     busy: () => dragging || satRow.dragging || fields.includes(document.activeElement) || performance.now() < holdUntil,
     render,
@@ -3847,15 +3849,30 @@ function putOwnColour(stripId, hex, last) {
 
 /** Every colour field's typing is taken now (see colourTools' flush), before a button acts on what the colour is. */
 function flushColours() {
-  anyColour.flush();
+  // Any colour sends to the live stage: in Blackout a typed colour would light its group, so it is dropped there.
+  if (!prep.on && state?.look === 'blackout') anyColour.drop();
+  else anyColour.flush();
   ceColour.flush();
   for (const t of Object.values(ownTools)) t.flush();
 }
 
 // On iPad Safari a tap on a button leaves the focus in a field, so an R, G or B being typed would land after the tap
-// (or never, behind a closed editor): every button tap first takes what is typed (Save, Done, Back, Cancel, a tile).
+// (or never, behind a closed editor): a finger or pen coming down on any button first takes what is typed (Save, Done,
+// Back, Cancel, a tile), before the button's own pointerdown starts a hold (Blackout, Flash, Puff, Save to the item),
+// so nothing typed is ever sent after a hold has done its job. A click with no pointerdown before it (a keyboard)
+// takes it then.
+const FLUSH_ON = 'button, a, [role="button"], [role="tab"]';
+let flushedDown = false;
+document.addEventListener('pointerdown', (ev) => {
+  flushedDown = ev.target instanceof Element && !!ev.target.closest(FLUSH_ON);
+  if (flushedDown) flushColours();
+}, true);
 document.addEventListener('click', (ev) => {
-  if (ev.target instanceof Element && ev.target.closest('button, a, [role="button"], [role="tab"]')) flushColours();
+  if (flushedDown) {
+    flushedDown = false;
+    return;
+  }
+  if (ev.target instanceof Element && ev.target.closest(FLUSH_ON)) flushColours();
 }, true);
 
 const ownTools = {};
