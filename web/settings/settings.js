@@ -1,6 +1,8 @@
 // Settings page for the programmer. Talks to the server's /api/settings
 // routes; nothing here changes the stage except the Send DMX switch.
 
+import { showProblem, startClock } from '../shared/appbar.js';
+
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -84,7 +86,7 @@ async function loadOfl() {
     return;
   }
   const pill = $('oflPill');
-  pill.className = `pill ${st.installed ? 'ok' : 'off'}`;
+  pill.className = 'ds-pill';
   pill.textContent = st.downloading ? 'Downloading…' : st.installed ? 'On this computer' : 'Not downloaded';
   const when = st.downloadedAt ? new Date(st.downloadedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
   $('oflState').textContent = st.installed
@@ -195,12 +197,10 @@ function render() {
   markDirty();
 }
 
-function renderStatus(status, enabled, problem) {
-  const pill = $('status');
-  const st = !enabled ? 'off' : status ?? 'off';
-  pill.className = `pill ${st}`;
-  pill.textContent = st === 'ok' ? 'DMX: sending' : st === 'lost' ? 'DMX: output lost' : 'DMX: off';
-  pill.title = problem ?? '';
+/** The top bar's pill (only while something is wrong with the lights) and the DMX output card's problem line. */
+function renderStatus(status, enabled, problem, problemKind) {
+  const output = !enabled ? 'off' : status ?? 'off';
+  showProblem($('status'), { output, outputProblem: problem, outputProblemKind: problemKind });
   $('outputProblem').textContent = enabled && problem ? problem : '';
 }
 
@@ -213,16 +213,18 @@ function renderApc(apc) {
 }
 
 // Keep the status pill and the APC mini line live.
-setInterval(async () => {
-  if ($('main').hidden) return;
+async function watch() {
   try {
     const state = await (await fetch('/api/state')).json();
-    if (state && saved) renderStatus(state.output, saved.outputEnabled, state.outputProblem);
-    renderApc(await (await fetch('/api/apc')).json());
+    // Before the PIN is entered, the pill still shows (as on Patch).
+    if (state && saved && !$('main').hidden) renderStatus(state.output, saved.outputEnabled, state.outputProblem, state.outputProblemKind);
+    else if (state) showProblem($('status'), state);
+    if (!$('main').hidden) renderApc(await (await fetch('/api/apc')).json());
   } catch {
     // offline; try again
   }
-}, 2000);
+}
+setInterval(watch, 2000);
 
 // ---- Editing ----
 
@@ -317,7 +319,7 @@ async function findNodes(btn, box, onUse) {
       const meta = el('div', 'meta');
       meta.append(el('b', null, n.longName || n.shortName || n.ip));
       meta.append(el('span', null, `${n.ip} · ${n.universes.length ? `universe ${n.universes.join(', ')}` : 'no DMX outputs'}${n.thisMachine ? ' · software on this computer, not a node box' : ''}`));
-      const use = el('button', 'ghost small', n.thisMachine ? 'Use anyway' : 'Use');
+      const use = el('button', 'ds-btn', n.thisMachine ? 'Use anyway' : 'Use');
       use.type = 'button';
       use.addEventListener('click', () => {
         if (n.thisMachine && !confirm(`${n.longName || n.shortName} is software on this computer, not the node box. It only reaches the lights while that program runs. Use it anyway?`)) return;
@@ -430,7 +432,7 @@ function routeRow(u, fixtures) {
   meta.append(el('span', null, `${fixtures ? `${fixtures} fixture${fixtures === 1 ? '' : 's'}` : 'No fixtures patched yet'} · ${route ? 'Own output' : 'Default output'}`));
   // A universe nothing is patched on has no output to fall back to: it is only listed because it was added, so it can go.
   const removable = route && !fixtures;
-  const toggle = el('button', 'ghost small', removable ? 'Remove' : route ? 'Use default' : 'Use its own output');
+  const toggle = el('button', removable ? 'ds-btn ds-btn--danger' : 'ds-btn ds-btn--quiet', removable ? 'Remove' : route ? 'Use default' : 'Use its own output');
   toggle.type = 'button';
   toggle.addEventListener('click', () => edit((s) => {
     if (route) s.routes = s.routes.filter((r) => r.universe !== u);
@@ -444,7 +446,7 @@ function routeRow(u, fixtures) {
 
 function routeFields(u, out) {
   const box = el('div', 'route-fields');
-  const seg = el('div', 'segmented small');
+  const seg = el('div', 'ds-seg');
   seg.setAttribute('role', 'radiogroup');
   seg.setAttribute('aria-label', `Output type for universe ${u}`);
   for (const [kind, label] of KINDS) {
@@ -470,7 +472,7 @@ function routeFields(u, out) {
     const id = `route-${u}-${label.replace(/\W+/g, '-').toLowerCase()}`;
     const lab = el('label', null, label);
     lab.htmlFor = id;
-    const input = el('input');
+    const input = el('input', 'ds-field');
     input.id = id;
     input.type = 'text';
     input.inputMode = 'decimal';
@@ -484,7 +486,7 @@ function routeFields(u, out) {
   if (out.kind === 'artnet') {
     const { f, input } = textField('Node IP address', out.host, '192.168.0.120', (v) => { routeFor(u).output.host = v; });
     const line = el('div', 'row');
-    const find = el('button', 'ghost', 'Find nodes');
+    const find = el('button', 'ds-btn', 'Find nodes');
     find.type = 'button';
     const nodes = el('div', 'nodes');
     find.addEventListener('click', () => findNodes(find, nodes, (n) => edit(() => { routeFor(u).output = { kind: 'artnet', host: n.ip }; })));
@@ -493,7 +495,7 @@ function routeFields(u, out) {
     box.append(f, nodes);
   } else if (out.kind === 'sacn') {
     const unicast = Boolean(out.host) || sacnUnicast.has(u);
-    const mode = el('div', 'segmented small');
+    const mode = el('div', 'ds-seg');
     for (const [value, label] of [['multicast', 'Multicast'], ['unicast', 'One receiver']]) {
       const l = el('label');
       const r = el('input');
@@ -519,7 +521,7 @@ function routeFields(u, out) {
   } else if (out.kind === 'enttec') {
     const f = el('div', 'field');
     const lab = el('label', null, 'USB port');
-    const sel = el('select');
+    const sel = el('select', 'ds-field');
     sel.id = `route-${u}-port`;
     lab.htmlFor = sel.id;
     sel.addEventListener('change', (e) => { routeFor(u).output.port = e.target.value; markDirty(); });
@@ -572,7 +574,7 @@ function showComparison(fileName) {
     const rows = items.filter((i) => i.kind === kind);
     if (!rows.length) continue;
     const section = el('div');
-    section.append(el('h3', null, `${KIND_TITLES[kind]} (${rows.length})`));
+    section.append(el('h3', 'ds-caps', `${KIND_TITLES[kind]} (${rows.length})`));
     for (const item of rows) {
       const row = el('label', 'diff-row');
       const box = el('input');
@@ -585,7 +587,7 @@ function showComparison(fileName) {
       what.append(el('b', null, item.name));
       const detail = item.change === 'removed' ? 'In this show but not in the file. Ticking removes it (and what depends on it).' : item.details.join(' · ');
       if (detail) what.append(el('span', null, detail));
-      row.append(box, el('span', `tag ${item.change}`, CHANGE_LABEL[item.change]), what);
+      row.append(box, el('span', `ds-tag ${item.change}`, CHANGE_LABEL[item.change]), what);
       section.append(row);
     }
     list.append(section);
@@ -625,7 +627,8 @@ async function loadBackups() {
   for (const b of backups) {
     const li = el('li');
     li.append(el('span', null, new Date(b.savedAt).toLocaleString()));
-    const restore = el('button', 'ghost small', 'Restore');
+    const restore = el('button', 'ds-btn ds-btn--quiet', 'Restore');
+    restore.type = 'button';
     restore.addEventListener('click', async () => {
       if (!confirm(`Restore the show saved ${new Date(b.savedAt).toLocaleString()}? The current show is kept as a backup.`)) return;
       try {
@@ -676,7 +679,7 @@ let toastTimer = 0;
 function toast(text, bad = false) {
   const t = $('toast');
   t.textContent = text;
-  t.className = bad ? 'toast bad' : 'toast';
+  t.className = bad ? 'ds-toast ds-toast--bad' : 'ds-toast';
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (t.hidden = true), 3500);
@@ -686,4 +689,6 @@ window.addEventListener('beforeunload', (e) => {
   if (saved && Object.keys(changedFields()).length) e.preventDefault();
 });
 
+startClock($('clock'));
+watch();
 start().catch((err) => toast(err.message, true));
