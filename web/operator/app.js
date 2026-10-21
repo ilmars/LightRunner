@@ -327,7 +327,7 @@ function showDeleteState(row) {
 
 function buildEditRows(order) {
   const same = orderRows.length === 0 && editRows.length === order.length && editRows.every((r, k) => r.id === order[k].id)
-    && editKeys === keysOn();
+    && editKeys === keysShown();
   if (same) {
     // Same items in the same order: only fresh names go in, and never over what is being typed.
     editRows.forEach((row, k) => {
@@ -349,7 +349,7 @@ function buildEditRows(order) {
   }
   orderRows = [];
   editRows = [];
-  editKeys = keysOn();
+  editKeys = keysShown();
   const nodes = [];
   let refocus = null;
   for (const item of order) {
@@ -359,7 +359,7 @@ function buildEditRows(order) {
       name.append(el('small', null, '· always first'));
       fixed.append(name);
       // Its Key chip lines up with the songs' (theirs have the drag handle after it).
-      if (editKeys) fixed.append(keyChip({ kind: 'song', id: item.id }, item.name), el('span', 'grip-space'));
+      if (showsChip({ kind: 'song', id: item.id })) fixed.append(keyChip({ kind: 'song', id: item.id }, item.name), el('span', 'grip-space'));
       nodes.push(fixed);
       editRows.push({ id: item.id, fixed: true, el: fixed });
       continue;
@@ -379,7 +379,7 @@ function buildEditRows(order) {
     grip.setAttribute('role', 'button');
     grip.setAttribute('aria-label', 'Drag to move');
     node.append(del, input);
-    if (editKeys) node.append(keyChip({ kind: 'song', id: item.id }, item.name));
+    if (showsChip({ kind: 'song', id: item.id })) node.append(keyChip({ kind: 'song', id: item.id }, item.name));
     node.append(grip);
     const row = { id: item.id, name: item.name, el: node, input, del };
     editRows.push(row);
@@ -574,9 +574,14 @@ $('editBtn').addEventListener('click', () => setEditing(!editing));
 // next key pressed (it waits up to 10 s, one page at a time); the bar at the bottom says so and has Clear and Cancel.
 // The key follows the song, not its place. Keys always act on the real stage.
 
-/** The running-order Edit rows were built with Key chips. */
-let editKeys = false;
-const keysOn = () => !!layout?.keys?.midi;
+/** What the running-order Edit rows' Key chips were built from (rebuilt when it changes). */
+let editKeys = '';
+const keysShown = () => JSON.stringify(layout?.keys ?? null);
+/**
+ * A Key chip shows while a controller is listened to, or when the song or quick look already has a key (so it can
+ * be seen and cleared); never without MIDI support.
+ */
+const showsChip = (does) => !!layout?.keys?.midi && (layout.keys.connected > 0 || !!keyOfTarget(does));
 /** What is waiting for its key: what it does, its name, the request and when it gives up. */
 const keyLearn = { does: null, name: '', ctl: null, until: 0, timer: 0 };
 const sameDoes = (a, b) => !!a && !!b && a.kind === b.kind && a.id === b.id;
@@ -603,18 +608,16 @@ function keyChip(does, name) {
   return b;
 }
 
-/** "Key" over the place ("pad 1,3"), "＋ Key" without one, "Press a key" while waiting. */
+/** The key's place, shortened ("1,3"), "＋" without one, "…" while waiting; the whole name in its title. */
 function paintKeyChip(b) {
   const does = JSON.parse(b.dataset.does);
   const key = keyOfTarget(does);
   const waiting = sameDoes(keyLearn.does, does);
   b.classList.toggle('on', waiting);
   b.classList.toggle('set', !!key && !waiting);
-  if (waiting) b.replaceChildren(el('span', 'ds-caps', 'Key'), el('b', null, 'Press it…'));
-  else if (key) b.replaceChildren(el('span', 'ds-caps', 'Key'), el('b', null, key.place));
-  else b.replaceChildren('＋ Key');
+  b.textContent = waiting ? '…' : key ? key.short : '＋';
   b.title = key ? `Key: ${key.name}` : 'Assign a key on a controller';
-  b.setAttribute('aria-label', waiting ? 'Waiting for a key. Tap to stop' : key ? `Key: ${key.name}. Tap to assign another` : 'Assign a key');
+  b.setAttribute('aria-label', waiting ? 'Waiting for a key. Tap to stop' : key ? `Key: ${key.name}. Tap to assign another` : 'Assign a controller key');
 }
 
 function paintKeyChips() {
@@ -4622,8 +4625,9 @@ function openSheet(q) {
   $('qsDelete').hidden = !q;
   $('qsStageRow').hidden = !q;
   // Its controller key, once it exists (a new quick look gets one after Save, from its Edit).
-  $('qsKeyRow').hidden = !(q && keysOn());
-  $('qsKeyLine').replaceChildren(...(q && keysOn() ? [keyChip({ kind: 'quickLook', id: q.id }, q.name)] : []));
+  const keyed = !!q && showsChip({ kind: 'quickLook', id: q.id });
+  $('qsKeyRow').hidden = !keyed;
+  $('qsKeyLine').replaceChildren(...(keyed ? [keyChip({ kind: 'quickLook', id: q.id }, q.name)] : []));
   $('qsGroupsNote').textContent = q ? '· tap a group to leave it out or to add it' : '· tap a group to leave it out; left-out groups keep what they have';
   buildSheetGroups();
   $('qSheet').hidden = false;

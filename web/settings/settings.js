@@ -291,8 +291,11 @@ function keyRow(a) {
   name.append(el('b', null, a.label));
   if (a.hold) name.append(el('span', 'khold', a.hold));
   const now = el('span', 'know');
-  if (a.key) now.textContent = a.key;
-  else if (a.standard) now.append(el('span', 'kstd', `APC mini layout: ${a.standard}`));
+  // Its own key, and the APC mini layout's when that still does it too (a key on another controller, say).
+  if (a.key) {
+    now.textContent = a.key;
+    if (a.standard) now.append(el('span', 'kstd', ` · and the APC mini layout: ${a.standard}`));
+  } else if (a.standard) now.append(el('span', 'kstd', `APC mini layout: ${a.standard}`));
   else now.append(el('span', 'kstd', 'No key'));
   now.classList.toggle('set', !!a.key);
   name.append(now);

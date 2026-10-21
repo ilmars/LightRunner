@@ -226,21 +226,18 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .erow.dragging .grip { cursor: grabbing; }
 .order-list.reordering .erow:not(.dragging) { transition: transform 0.12s ease-out; }
 
-/* Controller keys: a song's (and a quick look's) key as a quiet chip, "KEY" in small capitals over its place
-   ("pad 1,3"), or "＋ Key"; blue while it waits for a key. The bar at the bottom says what to press. */
+/* Controller keys: a song's (and a quick look's) key as a quiet 44 px chip with its place only ("1,3"), or "＋";
+   blue while it waits for a key. The whole name is in its title and the toast; the bar at the bottom says what to press. */
 .kchip {
-  flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
-  min-width: 58px; max-width: 92px; min-height: 44px; padding: 0 8px; border: 1px solid var(--ds-edge); border-radius: var(--ds-r-small);
-  background: transparent; color: var(--ds-muted); font: inherit; font-size: 12px; line-height: 1.15; white-space: nowrap;
+  flex: none; min-width: 44px; max-width: 64px; min-height: 44px; padding: 0 6px; border: 1px solid var(--ds-edge); border-radius: var(--ds-r-small);
+  background: transparent; color: var(--ds-muted); font: inherit; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.kchip .ds-caps { font-size: 9px; }
-.kchip b { max-width: 76px; overflow: hidden; text-overflow: ellipsis; color: var(--ds-text); font-weight: 500; }
-.kchip.on { background: var(--ds-tile-fill-on); border-color: var(--ds-edge-on); }
+.kchip.set { color: var(--ds-text); }
+.kchip.on { background: var(--ds-tile-fill-on); border-color: var(--ds-edge-on); color: var(--ds-text); }
 .qs-key { flex: none; display: flex; flex-direction: column; gap: 6px; }
 .qs-key[hidden] { display: none; }
 .qs-keyline { display: flex; }
-.qs-keyline .kchip { max-width: 200px; min-width: 96px; }
-.qs-keyline .kchip b { max-width: 184px; }
+.qs-keyline .kchip { max-width: 160px; }
 .learnbar {
   position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 21; display: flex; align-items: center; gap: 8px;
   max-width: calc(100vw - 24px); padding: 6px 6px 6px 16px; border-radius: var(--ds-r-tile);
