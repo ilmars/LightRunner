@@ -1400,12 +1400,14 @@ function endEditHold() {
 
 /**
  * A new finger (or the mouse again) while a hold that fired is still waiting for its lift: the lift was lost (the
- * grid was rebuilt under it) or a second finger came. The clicks are quiet a moment longer, then taps again.
+ * grid was rebuilt under it) or a second finger came. Taps work again at once, so this new one (Save in the editor
+ * the hold opened, say) is never taken for the hold's: a lost lift has no click to come, and the first finger of
+ * two is over the editor by now, not over the tile.
  */
 function dropFiredHold() {
   if (!editHold.fired) return;
   editHold.fired = false;
-  editHold.quietUntil = performance.now() + 400;
+  editHold.quietUntil = 0;
   endEditHold();
 }
 
