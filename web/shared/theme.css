@@ -142,12 +142,18 @@
 
 /* Buttons: flat, softly tinted; pressed is a lighter tint. */
 .ds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: var(--ds-target);
   padding: 0 16px;
   border: 0;
-  border-radius: var(--ds-r-tile);
+  border-radius: var(--ds-r-small);
   font: inherit;
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
   color: var(--ds-text);
   background: var(--ds-tile-fill);
   box-shadow: var(--ds-shadow-low);
@@ -241,3 +247,81 @@
 
 /* Swatch: a small colour square. Saturated colours are dimmed a little. */
 .ds-swatch { display: inline-block; width: 18px; height: 18px; border-radius: 6px; opacity: 0.85; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+
+/* ---- More base components (used by Patch and Settings) ---- */
+
+/* Button kinds, on top of ds-btn. Quiet: the edge and muted text, no fill (Edit list, Discard). Primary: the blue
+   tint with a blue edge (Save, Add, Unlock), never a solid bright slab. Danger: red text and a red edge (Delete). */
+.ds-btn--quiet { background: transparent; color: var(--ds-muted); }
+.ds-btn--quiet:hover { color: var(--ds-text); }
+.ds-btn--primary { background: var(--ds-tile-fill-on); color: var(--ds-text); box-shadow: inset 0 0 0 1px var(--ds-edge-on); font-weight: 600; }
+.ds-btn--primary:active { background: var(--ds-selected); }
+.ds-btn--danger { background: transparent; color: var(--ds-danger-text); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
+.ds-btn--danger:active { background: var(--ds-danger-fill); }
+.ds-btn:disabled { cursor: default; }
+
+/* Add tile: a dashed edge marks "add" (＋ Add a universe, ＋ Add group). */
+.ds-add {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: var(--ds-target); padding: 0 16px; border: 1px dashed rgba(148, 163, 184, 0.28); border-radius: var(--ds-r-tile);
+  background: transparent; color: var(--ds-muted); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+.ds-add:hover { color: var(--ds-text); }
+.ds-add:active { background: var(--ds-elevated); }
+
+/* Segmented choices made of radio buttons: <label><input type=radio><span>…</span></label>, looking like ds-seg's buttons. */
+.ds-seg > label { display: flex; position: relative; cursor: pointer; }
+.ds-seg > label > input { position: absolute; opacity: 0; pointer-events: none; }
+.ds-seg > label > span {
+  display: flex; align-items: center; min-height: var(--ds-target); padding: 0 16px; border-radius: 9px;
+  color: var(--ds-muted); font-size: 14px; white-space: nowrap;
+}
+.ds-seg > label > input:checked + span { background: var(--ds-tile-fill-on); color: var(--ds-text); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.ds-seg > label > input:focus-visible + span { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+
+/* A menu in the field's look, with a small chevron. */
+select.ds-field {
+  appearance: none; -webkit-appearance: none; padding-right: 36px; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ds-muted) 50%), linear-gradient(135deg, var(--ds-muted) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+}
+select.ds-field option { background: var(--ds-surface); color: var(--ds-text); }
+.ds-field[type=search]::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
+
+/* Switch: <label class="ds-switch"><input type=checkbox><span class="ds-switch-track"></span>label</label>.
+   Off: a faint track; on: the blue tint. ds-switch--ok is green when on: only Send DMX. */
+.ds-switch { position: relative; display: inline-flex; align-items: center; gap: 12px; min-height: var(--ds-target); cursor: pointer; color: var(--ds-text); }
+.ds-switch > input { position: absolute; left: 0; top: 50%; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.ds-switch-track {
+  position: relative; flex: none; width: 48px; height: 28px; border-radius: var(--ds-r-pill);
+  background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge); transition: background 0.15s;
+}
+.ds-switch-track::after {
+  content: ""; position: absolute; top: 5px; left: 5px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--ds-muted); transition: transform 0.15s, background 0.15s;
+}
+.ds-switch > input:checked + .ds-switch-track { background: var(--ds-selected); box-shadow: inset 0 0 0 1px var(--ds-edge-held); }
+.ds-switch > input:checked + .ds-switch-track::after { transform: translateX(20px); background: var(--ds-text); }
+.ds-switch > input:focus-visible + .ds-switch-track { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.ds-switch--ok > input:checked + .ds-switch-track { background: rgba(47, 158, 91, 0.24); box-shadow: inset 0 0 0 1px rgba(47, 158, 91, 0.6); }
+.ds-switch--ok > input:checked + .ds-switch-track::after { background: #9fdcb7; }
+
+/* Pill: a status in a few words. Quiet by default; ds-pill--warn is amber (a problem with the lights). */
+.ds-pill {
+  display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 12px; border-radius: var(--ds-r-pill);
+  font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--ds-muted); box-shadow: inset 0 0 0 1px var(--ds-edge);
+}
+.ds-pill:empty { display: none; }
+.ds-pill--warn { min-height: 44px; padding: 0 14px; background: var(--ds-warn-tint); color: var(--ds-warn-text); box-shadow: inset 0 0 0 1px var(--ds-warn-edge); font-weight: 600; }
+
+/* Tag: a word on a tint (New, Changed, Removed). */
+.ds-tag { display: inline-block; font-size: 12px; font-weight: 600; border-radius: var(--ds-r-pill); padding: 2px 10px; text-align: center; white-space: nowrap; }
+
+/* Toast: a message near the bottom. Glass for a confirmation; ds-toast--bad (red glass) for a problem. */
+.ds-toast {
+  position: fixed; left: 50%; bottom: var(--ds-toast-bottom, 96px); transform: translateX(-50%); z-index: 40; max-width: calc(100vw - 32px);
+  padding: 12px 18px; border-radius: var(--ds-r-tile); color: var(--ds-text); font-size: 14px;
+  background: var(--ds-glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
+}
+.ds-toast--bad { background: rgba(58, 22, 30, 0.88); color: #ffe3e6; box-shadow: inset 0 0 0 1px rgba(var(--ds-danger), 0.45), 0 18px 40px -12px rgba(0, 0, 0, 0.7); }
