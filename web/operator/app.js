@@ -951,6 +951,7 @@ document.addEventListener('keydown', (ev) => {
 const sentence = (text) => (/[.!?]$/.test(text) ? text : `${text}.`);
 
 /** What the pill and its explanation say: `{ pill, short, title, text }` (short: the phone's pill), or null when nothing is wrong. */
+// Patch and Settings show the same pill words (problemWords in web/shared/appbar.js): change both together.
 function problemWords(s) {
   const notYou = 'It isn\'t something you did.';
   if (s.output === 'off') {

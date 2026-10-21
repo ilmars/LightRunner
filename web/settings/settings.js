@@ -1,7 +1,7 @@
 // Settings page for the programmer. Talks to the server's /api/settings
 // routes; nothing here changes the stage except the Send DMX switch.
 
-import { showProblem, startClock } from '../shared/appbar.js';
+import { request, showProblem, startClock, watchState } from '../shared/appbar.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -15,7 +15,7 @@ let saved = null; // settings as last loaded from the server
 let draft = null; // settings with unsaved edits
 
 async function call(method, path, body) {
-  const res = await fetch(path, {
+  const res = await request(path, {
     method,
     headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -193,15 +193,23 @@ function render() {
   $('removePin').hidden = !s.pinSet;
   $('savePin').textContent = s.pinSet ? 'Change PIN' : 'Set PIN';
 
-  renderStatus(s.outputStatus, s.outputEnabled);
+  renderStatus();
   markDirty();
 }
 
-/** The top bar's pill (only while something is wrong with the lights) and the DMX output card's problem line. */
-function renderStatus(status, enabled, problem, problemKind) {
-  const output = !enabled ? 'off' : status ?? 'off';
-  showProblem($('status'), { output, outputProblem: problem, outputProblemKind: problemKind });
-  $('outputProblem').textContent = enabled && problem ? problem : '';
+/** The live state as last read (null while the server doesn't answer). */
+let lastState = null;
+
+/**
+ * The top bar's pill (only while something is wrong with the lights) and the DMX output card's problem line,
+ * from the last live state; Send DMX off as saved here shows at once, without waiting for the next read.
+ */
+function renderStatus() {
+  if (!lastState) return; // "Not connected" is showing instead
+  const enabled = saved?.outputEnabled;
+  showProblem($('status'), enabled === false ? { ...lastState, output: 'off' } : lastState);
+  const problem = enabled && lastState.outputProblem ? lastState.outputProblem : '';
+  if ($('outputProblem').textContent !== problem) $('outputProblem').textContent = problem;
 }
 
 /** Whether an APC mini is plugged in, and which model. */
@@ -212,19 +220,26 @@ function renderApc(apc) {
     'APC mini: not connected';
 }
 
-// Keep the status pill and the APC mini line live.
-async function watch() {
-  try {
-    const state = await (await fetch('/api/state')).json();
-    // Before the PIN is entered, the pill still shows (as on Patch).
-    if (state && saved && !$('main').hidden) renderStatus(state.output, saved.outputEnabled, state.outputProblem, state.outputProblemKind);
-    else if (state) showProblem($('status'), state);
-    if (!$('main').hidden) renderApc(await (await fetch('/api/apc')).json());
-  } catch {
-    // offline; try again
-  }
+// Keep the status pill and the APC mini line live (the pill also before the PIN is entered, as on Patch).
+function watch() {
+  watchState({
+    pill: $('status'),
+    offline: $('offline'),
+    onState: async (state) => {
+      lastState = state;
+      renderStatus();
+      if ($('main').hidden) return;
+      try {
+        renderApc(await (await request('/api/apc', {}, 4000)).json());
+      } catch {
+        // the next read tries again
+      }
+    },
+    onLost: () => { lastState = null; },
+    // The page couldn't load while the server was down: load it now.
+    onBack: () => { if (!saved) start().catch((err) => toast(err.message, true)); },
+  });
 }
-setInterval(watch, 2000);
 
 // ---- Editing ----
 
@@ -296,7 +311,7 @@ $('outputEnabled').addEventListener('change', async (e) => {
     const next = await call('PUT', '/api/settings', { outputEnabled: on });
     saved.outputEnabled = next.outputEnabled;
     draft.outputEnabled = next.outputEnabled;
-    renderStatus(next.outputStatus, next.outputEnabled);
+    renderStatus();
     toast(on ? 'Sending DMX' : 'DMX output off');
   } catch (err) {
     e.target.checked = !on;
@@ -546,7 +561,7 @@ $('importFile').addEventListener('change', async (e) => {
   if (!file) return;
   try {
     const lightkey = /\.lightkeyproj$/i.test(file.name);
-    const res = await fetch(`/api/import/preview?name=${encodeURIComponent(file.name)}`, {
+    const res = await request(`/api/import/preview?name=${encodeURIComponent(file.name)}`, {
       method: 'POST',
       headers: { 'content-type': lightkey ? 'application/octet-stream' : 'application/json' },
       body: lightkey ? file : await file.text(),

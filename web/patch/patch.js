@@ -5,7 +5,7 @@ import {
   aimBeam, alignFixtures, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setShape, shapeOf, spaceEvenly, touches, turnBar,
 } from './plan.js';
 import { PLAN_ASPECT, barAxis, beamCone } from '../shared/stage.js';
-import { showProblem, startClock } from '../shared/appbar.js';
+import { request, startClock, watchState } from '../shared/appbar.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -21,7 +21,7 @@ let profiles = []; // [{ id, name, channels }]
 const profileById = new Map();
 
 async function call(method, path, body) {
-  const res = await fetch(path, {
+  const res = await request(path, {
     method,
     headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -1200,14 +1200,11 @@ function toast(text, bad = false) {
 
 // The top bar: the clock, and the pill while something is wrong with the lights.
 startClock($('clock'));
-async function watchOutput() {
-  try {
-    showProblem($('status'), await (await fetch('/api/state')).json());
-  } catch {
-    // offline; try again
-  }
-}
-watchOutput();
-setInterval(watchOutput, 2000);
+watchState({
+  pill: $('status'),
+  offline: $('offline'),
+  // The page couldn't load while the server was down: load it now.
+  onBack: () => { if (!show) start().catch((err) => toast(err.message, true)); },
+});
 
 start().catch((err) => toast(err.message, true));
