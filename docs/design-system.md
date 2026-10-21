@@ -2,7 +2,7 @@
 
 Light Runner's pages share one look: **dark navy soft glass**. Panels and controls are flat, translucent surfaces with a faint 1 px edge. There are no bevels, no inset wells and no heavy shadows. Selected, held and warning states are tinted glass: blue, amber or red. It is built for a dark church: no large area gets bright, fixture colours are mixed down, and the bright accent only appears as thin lines.
 
-Tokens and base components live in [web/shared/theme.css](../web/shared/theme.css). Every page loads it before its own stylesheet. Shared classes are prefixed `ds-` so they never clash with a page's own class names.
+Tokens and base components live in [web/shared/theme.css](../web/shared/theme.css). Every page loads it before its own stylesheet. Shared classes are prefixed `ds-` so they never clash with a page's own class names. The two programmer pages (Patch and Settings) also load [web/shared/programmer.css](../web/shared/programmer.css), the page frame they share (top bar, panels, save bar, PIN entry), and [web/shared/appbar.js](../web/shared/appbar.js) for the top bar's clock and problem pill; neither depends on the other's stylesheet.
 
 How the direction was agreed with Ilmārs (19 Oct 2026):
 
@@ -16,7 +16,7 @@ How the direction was agreed with Ilmārs (19 Oct 2026):
 | Token | Value | Use |
 | --- | --- | --- |
 | `--ds-bg` / `--ds-bg-deep` | `#090F1C` / `#070C17` | The ground (flat on the operator page) |
-| `--ds-bg-rgb` | `9, 15, 28` | The ground for `rgba()`: a bar the page scrolls under (the Settings top bar) |
+| `--ds-bg-rgb` | `9, 15, 28` | The ground for `rgba()` |
 | `--ds-surface` / `--ds-surface-hi` | `#141D30` / `#18233A` | Solid surface tones (a panel over the ground) |
 | `--ds-panel-fill` + `--ds-shadow-raise` | `rgba(28,39,62,.58)`, 1 px edge `rgba(148,163,184,.14)` drawn inside | Panels, the top bar and the bottom bar |
 | `--ds-edge` | `rgba(148,163,184,.14)` | The 1 px edge of panels, tiles and buttons |
@@ -32,7 +32,7 @@ How the direction was agreed with Ilmārs (19 Oct 2026):
 | `--ds-accent` | `#4389E8` | Thin lines only: focus edge, Save while held |
 | `--ds-accent-fill` | `#3A6FB8` | Save's hold fill, at 35 % |
 | `--ds-text` / `--ds-muted` / `--ds-muted-on` | `#E3E8F0` / `#97A4BA` / `#B7C1D1` | Text, labels, labels on tinted areas |
-| `--ds-ok` | `#2f9e5b` | Settings: Send DMX on |
+| `--ds-ok` | `#2f9e5b` | Settings: Send DMX on (a 24 % tint with a 60 % edge: the one green control) |
 
 ### Brightness
 
@@ -71,11 +71,17 @@ The designer's icon (`Icon.dc.html`, kept with the restyle plan): a run of six s
 | `ds-tile` (+ `ds-on`) | Flat tile inside a panel | Selected = blue tint and blue edge |
 | `ds-caps` | Small spaced capitals over a value | "ON STAGE" over the name, "MASTER", "WHO TO CALL" |
 | `ds-label` | Muted small label above a value | "Key lights" over "Vēsi balts" |
-| `ds-btn`, `ds-btn--text`, `ds-btn--pill` | Button, quiet text button, pill | Pressed = lighter tint; disabled = 40 % opacity |
+| `ds-btn`, `ds-btn--text`, `ds-btn--pill` | Button, quiet text button, pill | 44 px, radius 10, tile fill and edge; pressed = lighter tint; disabled = 40 % opacity |
+| `ds-btn--quiet`, `ds-btn--primary`, `ds-btn--danger` | Button kinds | Quiet: the edge, muted text, no fill (Discard, Cancel, Identify, and a Delete in a list of many, red only under the pointer). Primary: blue tint with the `.5` blue edge, 600 (Save, Add, Unlock, Apply selected). Danger: red text and the red edge, no fill (Remove PIN, Remove a universe) |
+| `ds-add` | Add tile | The dashed edge (`rgba(148,163,184,.28)`), muted 13 px, 44 px: ＋ Add a universe, ＋ Add group (Patch's ＋ Add fixture… menu and ＋ Add fixture here have the dashed edge too) |
 | `ds-hold` + `ds-hold-fill` | Button that fills while held | Save (blue), Blackout (red) |
 | `ds-fill` + `-slab`, `-val` | Fill slider | A filled bar on a faint track with a 1 px edge, no thumb; the fill is the control's colour (`--c`) at 22 % with a 2 px line of it (70 %) at the level; the value is shown beside it; `ds-disabled` = 40 % opacity and it doesn't react to a finger (no page uses it since Preview went; kept for a control that can't move) |
-| `ds-seg` | Segmented control and tabs | A dark track (`rgba(0,0,0,.2)`) with the edge; selected = blue tint and edge; 44 px buttons |
-| `ds-field` | Text field | Flat; focus = accent edge |
+| `ds-seg` | Segmented control and tabs | A dark track (`rgba(0,0,0,.2)`) with the edge; selected = blue tint and edge; 44 px buttons. It can also be made of radio buttons (`<label><input type=radio><span>`), as Settings' output choices are |
+| `ds-field` | Text field | Flat; focus = accent edge. `select.ds-field` is a menu with a small chevron |
+| `ds-switch` (+ `ds-switch-track`, `ds-switch--ok`) | On/off switch | A 48 × 28 track on the dark track colour with a muted knob; on = the held blue (`--ds-selected`, `.7` edge) and a text-colour knob; `--ok` is green when on (Send DMX only); the label is 44 px high |
+| `ds-pill`, `ds-pill--warn` | A status in a few words | Quiet: muted text and the edge ("Not downloaded"); warn: the amber problem pill, 44 px (the top bar's "Not sending to the lights") |
+| `ds-tag` | A word on a tint | Compare with a file: New (blue), Changed (amber), Removed (red) |
+| `ds-toast`, `ds-toast--bad` | Message near the bottom | Glass for a confirmation ("Saved"), red glass for a problem; 96 px from the bottom, above the save bar |
 | `ds-sheet` | Glass sheet over one panel | The only place blur is used |
 | `ds-swatch` | Colour square | Dimmed |
 
@@ -84,9 +90,10 @@ The designer's icon (`Icon.dc.html`, kept with the restyle plan): a run of six s
 | Area | State |
 | --- | --- |
 | Operator page | The designer's restyle (20 Oct): tokens, top bar, running order, quick looks, Groups, bottom bar, colour picker, colour editor, effect editor, Individual lights, the phone, Inter and the icon done; the quick-look sheet (Edit looks) still has the earlier look (STATUS, Not built yet) |
+| Programmer pages' frame (`programmer.css`) | A 60 px top bar like the operator page's (`--ds-surface`, radius 16; it stays on top while the page scrolls, and on a phone it takes two lines and scrolls away): the icon (26 px), "Light Runner" in small capitals over the page name (20 px semibold), the amber problem pill only while something is wrong with the lights (the operator page's words, the short ones on a phone), links to Operator, Patch and Settings as a quiet segmented row (the page you're on tinted), the clock, and Log out (Settings, when a PIN is set). Panels 10 px apart (`ds-panel` + `.card`), each headed by a `ds-caps` label over a muted 13 px description, with a control at the right of the head when it has one (Send DMX, the universe tabs, ＋ Add group); a darker inner card (`.sub`: `rgba(0,0,0,.16)` with the edge, radius 14) for a part of a panel. The save bar: a panel 10 px from the bottom while there are unsaved changes, "● Unsaved changes" in amber, Discard (quiet) and Save (primary). PIN entry: one panel in the middle |
 | Operator page on a phone (the remote) | Done, in the restyle's look (the designer's phone artboard, 390 × 844): a 16 px-radius header ("On stage", the name, "● changed", the problem pill in short words), Order / Groups / Looks as a segmented control (44 px, blue tint when picked), one 18 px-radius panel for the tab, and a footer panel with Master on one line (label, 44 px slider, level) over Undo · Basic lights · Next · Blackout (52 px). Page text only the phone shows has the class `phone-only`, text it leaves out `not-phone` (or `hold-hint` for ", hold to edit"). No saving or editing; side by side when the phone is on its side |
-| Settings | Done: glass panels in a two-column bento grid on wide screens (DMX output, Show and Compare span both), tinted segmented choices and switches (Send DMX on is green), flat fields, status pills, glass top bar and save bar |
-| Patch | Done: the fixture table has no cell borders, faint row dividers and flat fields; group cards are flat glass tiles with pill chips and turn blue-tinted while one of their fields has focus; the DMX map, universe tabs, library list and Open Fixture Library search use the same glass and tinted states. Fixture blocks keep their own per-type colours and the red overlap striping; the stage plan keeps its grid and marks inside a glass frame, and its shape, angle and arranging tools under it use `ds-seg` and quiet buttons |
+| Settings | The restyle's look (21 Oct): the programmer pages' frame; each card a panel with a small-capitals label and a one-line description, two columns from 900 px wide (DMX output and Compare with a file across both; DMX output puts Universes beside the default output from 1100 px), one column on an iPad upright and on a phone; `ds-seg` choices, `ds-switch`es (Send DMX on is the one green control), `ds-field`s, Universes and an update to install on a darker inner card, ＋ Add a universe as a dashed add tile, the save bar |
+| Patch | The restyle's look (21 Oct): the programmer pages' frame; DMX patch, Fixtures, Groups and Stage plan as panels with a small-capitals label and a one-line description. The DMX map on the dark plan colour (`#04070D`) with the edge, 32 channels to a row (16 when the map is under 560 px wide, on a phone), rows 44 px high by finger (`pointer: coarse`) and 32 px with a mouse; fixture blocks keep their per-type colours and the red overlap striping; a drop is tinted blue (red where it won't fit). The universe tabs are a `ds-seg`. The fixture library and Open Fixture Library search on a darker inner card beside the map (under it below 900 px), 44 px rows. The fixture table: small-capitals headings, faint row dividers, flat 44 px fields, the selected row blue-tinted and a row with an address problem red-tinted; Identify and Delete quiet. Add fixtures and Add fixtures here on a darker inner card. Groups as tiles (two to a row from 1100 px), 44 px member chips, a dashed ＋ Add fixture… menu, ＋ Add group as a dashed add tile. The stage plan on the dark plan colour with "Back of stage" in 10 px capitals; its marks, cones and handles as before (handles 44 px by finger); the shape, angle, Align and Space evenly rows under it with `ds-seg`s and small-capitals labels; ＋ Add fixture here a glass pill with a dashed edge |
 
 ### Operator page rules
 
