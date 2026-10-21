@@ -432,6 +432,51 @@ test("with shared on, a same-named colour of another shared colour takes the col
   assert.deepEqual([...ids].sort(), [...ZILS, 'background-tirkizs'].sort());
 });
 
+test('a listed colour\'s White, Amber and UV can be changed, kept to whole percent, and the swatch follows', () => {
+  const s = ready();
+  const plain = addColour(s, { group: 'key-lights', colour: '#ff8800', name: 'Warm', allGroups: false, white: 0.2 });
+  const id = plain.ids[0]!;
+  const { show, ids } = editColour(plain.show, { preset: id, amber: 0.456, white: 0, sameName: false });
+  assert.deepEqual(ids, [id]);
+  // White at 0 is taken out; amber is kept to whole percent; the colour and brightness stay.
+  assert.deepEqual(preset(show, id).layers, [{ kind: 'static', colour: { hex: '#ff8800', amber: 0.46 }, intensity: 1 }]);
+  assert.equal(preset(show, id).swatch, displayColour('#ff8800', { amber: 0.46 }));
+  // With a new colour too: both change at once.
+  const both = editColour(plain.show, { preset: id, colour: '#000000', amber: 1, sameName: false }).show;
+  assert.deepEqual(preset(both, id).layers, [{ kind: 'static', colour: { hex: '#000000', white: 0.2, amber: 1 }, intensity: 1 }]);
+  assert.equal(isOff(preset(both, id)), false);
+  // Nothing left in it is refused: that would be Off.
+  assert.throws(() => editColour(plain.show, { preset: id, colour: '#000000', white: 0, sameName: false }), { message: 'that colour has no light: pick a colour, or add White, Amber or UV' });
+  // Out of range is refused; the same levels again change nothing.
+  assert.throws(() => editColour(plain.show, { preset: id, uv: 1.5, sameName: false }), /UV level is between 0 and 100 %/);
+  assert.throws(() => editColour(plain.show, { preset: id, white: 0.2, sameName: false }), { message: 'nothing changed' });
+  // Off has no colour to give them to.
+  assert.throws(() => editColour(s, { preset: 'key-lights-off', amber: 0.5, sameName: false }), { message: "Off can't be given a colour; add a new colour instead." });
+  parseShow(JSON.parse(JSON.stringify(show)));
+});
+
+test('White, Amber and UV follow the shared and same-name choices like a new colour', () => {
+  const s = ready();
+  // Shared: the palette entry takes them, so every colour pointing to it follows and keeps pointing to it.
+  const shared = editColour(s, { preset: 'key-lights-zils', amber: 0.5, shared: true, sameName: true });
+  assert.deepEqual(shared.show.palettes.find((p) => p.id === 'lightkey')!.colours[7], { hex: '#0000ff', amber: 0.5 });
+  assert.deepEqual([...shared.ids].sort(), ZILS);
+  for (const id of ZILS) {
+    assert.equal(zilsPoint(shared.show, id), true, id);
+    assert.equal(preset(shared.show, id).swatch, displayColour('#0000ff', { amber: 0.5 }), id);
+  }
+  // Only this group: it is cut loose with its own colour and the amber; the others stay as they were.
+  const own = editColour(s, { preset: 'key-lights-zils', amber: 0.5, shared: false, sameName: false });
+  assert.deepEqual(own.ids, ['key-lights-zils']);
+  assert.deepEqual(preset(own.show, 'key-lights-zils').layers, [{ kind: 'static', colour: { hex: '#0000ff', amber: 0.5 }, intensity: 1 }]);
+  assert.deepEqual(own.show.palettes, s.palettes);
+  // Same name without shared: each same-named colour gets the amber as its own.
+  const same = editColour(s, { preset: 'key-lights-zils', uv: 0.3, shared: false, sameName: true });
+  assert.deepEqual([...same.ids].sort(), ZILS);
+  for (const id of ZILS) assert.deepEqual((preset(same.show, id).layers[0] as StaticLayer).colour, { hex: '#0000ff', uv: 0.3 }, id);
+  assert.deepEqual(same.show.palettes, s.palettes);
+});
+
 /** A show holding a hidden (custom) preset, as Save makes for an Any colour pick. */
 function saveHidden(s: Show): { show: Show; id: string } {
   const show = structuredClone(s);

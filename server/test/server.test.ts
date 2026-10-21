@@ -809,6 +809,25 @@ test('an editColour with shared is one Undo step', () => withRig(async (app, dir
   assert.equal(undone.palettes.find((p) => p.id === 'lightkey')!.colours[7]!.hex, '#0000ff');
 }));
 
+test("an editColour can change a listed colour's White, Amber and UV, as one Undo step", () => withRig(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const zils = () => rigPresets(t.layout(), 'Zils');
+  const before = zils().map((p: any) => p.swatch);
+  // Only this group's: it gets its own colour with the amber; the light the layout gives shows it.
+  assert.equal(await t.send({ type: 'editColour', preset: zils()[0].id, amber: 0.5, sameName: false }), null);
+  assert.equal(zils()[0].light.amber, 0.5);
+  assert.equal(zils()[0].shared, null);
+  assert.equal(zils()[1].light.amber, 0);
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.deepEqual(zils().map((p: any) => p.swatch), before);
+  // With shared: every Zils follows.
+  assert.equal(await t.send({ type: 'editColour', preset: zils()[0].id, white: 0.25, shared: true, sameName: true }), null);
+  for (const p of zils()) assert.equal(p.light.white, 0.25);
+  assert.match((await t.send({ type: 'editColour', preset: zils()[0].id, uv: 2, sameName: false }))!, /^invalid command/);
+  assert.equal(await t.send({ type: 'editColour', preset: zils()[0].id, colour: '#000000', white: 0, sameName: false }), 'that colour has no light: pick a colour, or add White, Amber or UV');
+}));
+
 test('colours can be edited and deleted during Blackout, with no PIN',() => withApp(async (app) => {
   assert.equal((await api(app, 'POST', '/api/pin', { next: '1234' })).status, 200);
   const t = await tablet(app);

@@ -145,7 +145,14 @@ export interface EditColour {
   /** New fade time in seconds, 0 to 600 (the preset's own fade); undefined leaves it. */
   fade?: number;
   /**
-   * With a new colour on a colour that points to a palette entry: change the palette entry,
+   * New White, Amber and UV levels 0..1, kept to whole percent (0 takes it out); undefined leaves each.
+   * They go with the colour: to the palette entry with `shared`, otherwise into the colour's own.
+   */
+  white?: number;
+  amber?: number;
+  uv?: number;
+  /**
+   * With a new colour (or new White, Amber or UV) on a colour that points to a palette entry: change the palette entry,
    * so every colour pointing to it follows. Without a palette entry it does nothing. A same-named
    * colour of another group that points elsewhere (or nowhere) takes the new colour as its own.
    */
@@ -168,7 +175,7 @@ export function presetsUsingPaletteEntry(show: Show, palette: string, index: num
 }
 
 /**
- * Changes the name, colour, brightness and/or fade of a colour in a group's list. A new colour
+ * Changes the name, colour, White, Amber and UV, brightness and/or fade of a colour in a group's list. A new colour
  * replaces the preset's layer with one plain colour (keeping its brightness) and updates the swatch,
  * or, with `shared` on a palette colour, changes the palette entry itself for everything that points to it.
  * Returns the ids of every preset changed. Hidden (custom) presets can't be edited from here.
@@ -178,7 +185,15 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
   const target = out.presets.find((p) => p.id === input.preset);
   if (!target) throw new Error('that colour is not in the list');
   if (target.custom) throw new Error("that colour can't be edited");
-  if (input.name === undefined && input.colour === undefined && input.level === undefined && input.fade === undefined) throw new Error('nothing to change');
+  const extras: { white?: number; amber?: number; uv?: number } = {};
+  for (const k of ['white', 'amber', 'uv'] as const) {
+    const v = input[k];
+    if (v === undefined) continue;
+    if (!(v >= 0 && v <= 1)) throw new Error(`the ${k === 'uv' ? 'UV' : k} level is between 0 and 100 %`);
+    extras[k] = Math.round(v * 100) / 100;
+  }
+  const newExtras = Object.keys(extras).length > 0;
+  if (input.name === undefined && input.colour === undefined && input.level === undefined && input.fade === undefined && !newExtras) throw new Error('nothing to change');
   const name = input.name === undefined ? undefined : cleanName(input.name);
   if (input.colour !== undefined && !HEX_COLOUR.test(input.colour)) throw new Error('that is not a colour');
   const colour = input.colour?.toLowerCase();
@@ -186,7 +201,7 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
   if (level !== undefined && !(level >= 0.05 && level <= 1)) throw new Error('the brightness is between 5 % and 100 %');
   if (fade !== undefined && !(fade >= 0 && fade <= 600)) throw new Error('the fade is between 0 and 600 seconds');
 
-  if ((colour !== undefined || level !== undefined) && !canRecolour(target)) {
+  if ((colour !== undefined || level !== undefined || newExtras) && !canRecolour(target)) {
     throw new Error(isOff(target) ? "Off can't be given a colour; add a new colour instead." : "that colour can't be changed here");
   }
 
@@ -199,6 +214,15 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
     !!e && !!sharedEntry && e.palette === sharedEntry.palette && e.index === sharedEntry.index;
   const moved = new Set<string>(); // palette entries that got a new hex, as "palette:index"
   const edited = new Set<string>(); // presets that got a new colour of their own
+  /** The new colour and White, Amber and UV on `c` (0 takes one out); a colour with no light left is refused. */
+  const recolour = (c: { hex: string; white?: number; amber?: number; uv?: number }) => {
+    if (colour !== undefined) c.hex = colour;
+    for (const [k, v] of Object.entries(extras) as ['white' | 'amber' | 'uv', number][]) {
+      if (v > 0) c[k] = v;
+      else delete c[k];
+    }
+    if (/^#0{6}$/i.test(c.hex) && !c.white && !c.amber && !c.uv) throw new Error('that colour has no light: pick a colour, or add White, Amber or UV');
+  };
 
   for (const p of sameNamePresets(out, target, input.sameName)) {
     if (name !== undefined) p.name = name;
@@ -207,18 +231,21 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
     if (!canRecolour(p)) continue;
     const layer = p.layers[0] as StaticLayer;
     if (level !== undefined) layer.intensity = level;
-    if (colour === undefined) continue;
+    if (colour === undefined && !newExtras) continue;
     const entry = paletteEntryOf(p);
     if (entry && followsTarget(entry)) {
       const found = out.palettes.find((x) => x.id === entry.palette)?.colours[entry.index];
       if (found) {
-        found.hex = colour;
+        // Two same-named colours pointing to it change it once.
+        if (!moved.has(`${entry.palette}:${entry.index}`)) recolour(found);
         moved.add(`${entry.palette}:${entry.index}`);
         edited.add(p.id);
         continue;
       }
     }
-    p.layers = [recoloured(out, layer, colour)];
+    const own = recoloured(out, layer, colour ?? resolveColour(layer.colour, new Map(out.palettes.map((x) => [x.id, x]))).hex);
+    recolour(own.colour as { hex: string });
+    p.layers = [own];
     edited.add(p.id);
   }
 

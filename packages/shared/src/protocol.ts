@@ -131,12 +131,13 @@ export const Command = z.discriminatedUnion('type', [
     white: unit.optional(), amber: unit.optional(), uv: unit.optional(), level: unit.min(0.05).optional(), fade,
   }),
   /**
-   * Change the name, colour, brightness (`level`) and/or fade of a colour in a group's list; `sameName` also changes the
+   * Change the name, colour, White, Amber and UV, brightness (`level`) and/or fade of a colour in a group's list; `sameName` also changes the
    * same-named ones of other groups. `shared`: a new colour changes the palette entry the colour points to, for every colour that uses it.
    */
   z.object({
     type: z.literal('editColour'), preset: id, name: z.string().optional(), colour: hex.optional(),
-    level: unit.min(0.05).optional(), fade, shared: z.boolean().optional(), sameName: z.boolean(),
+    level: unit.min(0.05).optional(), fade, white: unit.optional(), amber: unit.optional(), uv: unit.optional(),
+    shared: z.boolean().optional(), sameName: z.boolean(),
   }),
   /** Remove a colour (or an effect) from a group's list (refused while a look uses it). */
   z.object({ type: z.literal('deleteColour'), preset: id }),
