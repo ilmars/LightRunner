@@ -203,8 +203,9 @@ export class MidiDriver {
   // ---- Learn ----
 
   /**
-   * The next key pressed on a controller listened to, or null after `ms` or when `cancel` is called: a fresh press
-   * (a note on, or a control change above 0; releases are passed over), and with `levels` only a fader or knob moved.
+   * The next key pressed on a controller listened to, or null after `ms` or when `cancel` is called: with `levels`, a
+   * fader or knob moved (a control change above 0); otherwise a button pressed (a note on, or a control change at full
+   * value). Releases are passed over, and so is anything of the other kind.
    * One at a time: throws while another is waiting.
    */
   learn(ms: number, opts: { levels?: boolean } = {}): { key: Promise<ControlKey | null>; cancel: () => void } {
@@ -350,8 +351,10 @@ export class MidiDriver {
       // Only a fresh press is learned (never a release, which may be another controller's Flash let go of).
       const fresh = msg.type === 'cc' ? msg.value > 0 : msg.on;
       if (learning && fresh) {
-        // Waiting for a fader or knob: a pad or button pressed meanwhile does nothing.
-        if (msg.type === 'cc' || !learning.levels) this.learned(conn, msg, id);
+        // Waiting for a fader or knob: a pad or button pressed meanwhile does nothing. Waiting for a button (a song,
+        // Next): a fader or knob nudged meanwhile does nothing; a control change counts only at full value, as a
+        // button that sends one does when pressed.
+        if (learning.levels ? msg.type === 'cc' : msg.type === 'note' || msg.value === 1) this.learned(conn, msg, id);
         return;
       }
       const until = conn.swallow.get(id);

@@ -605,3 +605,81 @@ test("unplugging a controller that isn't an APC puts out the Flash it holds", ()
   await waitFor(() => port.closed, 1000, 'the port to close');
   await waitFor(() => app.state?.flashing.length === 0, 2000, 'the flash to go out');
 }));
+
+// ---- Last fix wave ----
+
+test('a song learn passes over faders and knobs, and takes a control change only at full value (a button)', () => withKeys(async (rig) => {
+  const { midi, layout } = rig;
+  midi.plug('APC mini mk2');
+  midi.plug('nanoKONTROL2');
+  const apc = await portNamed(midi, 'APC mini mk2');
+  const nano = await portNamed(midi, 'nanoKONTROL2');
+  const song = { kind: 'song', id: layout.runningOrder[1].id };
+  // Fader 9 nudged, a knob turned: still waiting. A button that sends a control change at full value is taken.
+  const a = learn(rig, song, () => {
+    apc.receive([0xb0, 56, 20]);
+    nano.receive([0xb0, 16, 64]);
+    nano.receive([0xb0, 17, 126]);
+  });
+  await sleep(50);
+  assert.ok(rig.app.learning, 'still waiting after a fader and a knob');
+  nano.receive([0xb0, 43, 127]);
+  assert.equal((await a).body.key, 'nanoKONTROL2 · control 43');
+  // A quick look takes a pad (a note on), and a fader moved first is passed over.
+  const b = learn(rig, { kind: 'quickLook', id: layout.quickLooks[0].id }, () => apc.receive([0xb0, 48, 90]));
+  await sleep(50);
+  assert.ok(rig.app.learning, 'still waiting after fader 1');
+  tap(apc, 40);
+  assert.equal((await b).body.key, 'APC mini mk2 · pad 3,1');
+  // Fader 9 never became a song's key, so Master still follows it.
+  const view = (await call(rig.url, 'GET', '/api/controller')).body;
+  assert.equal(view.keys.some((k: any) => k.key === 'APC mini mk2 · fader 9'), false);
+}));
+
+test('with the APC mini layout on, an operator may not give a song a fader or button that has a standard job; pads are fine', () => withKeys(async (rig) => {
+  const { url, layout } = rig;
+  const pin = await fetch(`${url}/api/pin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ next: '2468' }) });
+  const cookie = pin.headers.get('set-cookie')!.split(';')[0]!;
+  const apc = (type: 'note' | 'cc', number: number) => ({ device: 'APC mini mk2', type, channel: 1, number });
+  const song = { kind: 'song', id: layout.runningOrder[2].id };
+  const op = await tablet(url);
+  const prog = await tablet(url, cookie);
+  const programmer = (what: string, job: string) => `That ${what} is ${job} on the APC mini. Only the programmer can give it another job: enter the PIN in Settings.`;
+  try {
+    assert.equal(await op.command({ type: 'setKey', key: apc('cc', 56), does: song }), programmer('fader', 'Master'));
+    assert.equal(await op.command({ type: 'setKey', key: apc('cc', 48), does: song }), programmer('fader', `${layout.groups[0].name} level`));
+    assert.equal(await op.command({ type: 'setKey', key: apc('note', 112), does: song }), programmer('button', 'Next'));
+    assert.equal(await op.command({ type: 'setKey', key: apc('note', 117), does: song }), programmer('button', 'Blackout'));
+    assert.equal(await op.command({ type: 'setKey', key: apc('note', 101), does: song }), programmer('button', `Flash ${layout.groups[1].name}`));
+    assert.equal(await op.command({ type: 'setKey', key: apc('note', 107), does: { kind: 'quickLook', id: layout.quickLooks[0].id } }), programmer('button', 'Flash for group 8'));
+    // Pads (songs and colours in the standard layout), and side buttons 7 and 8 (nothing there), are the operators'.
+    assert.equal(await op.command({ type: 'setKey', key: apc('note', 50), does: song }), null);
+    assert.equal(await op.command({ type: 'setKey', key: apc('note', 118), does: song }), null);
+    // The programmer may; and with the standard layout off, so may operators.
+    assert.equal(await prog.command({ type: 'setKey', key: apc('cc', 56), does: song }), null);
+    assert.equal((await call(url, 'PUT', '/api/controller', { apcLayout: false }, cookie)).status, 200);
+    assert.equal(await op.command({ type: 'setKey', key: apc('note', 112), does: song }), null);
+  } finally {
+    op.close();
+    prog.close();
+  }
+}));
+
+test('an operator is refused a key that already does a fixed job, and told which', () => withKeys(async (rig) => {
+  const { url, layout } = rig;
+  const pin = await fetch(`${url}/api/pin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ next: '2468' }) });
+  const cookie = pin.headers.get('set-cookie')!.split(';')[0]!;
+  const key = { device: 'nanoKONTROL2', type: 'note', channel: 1, number: 70 };
+  const op = await tablet(url);
+  const prog = await tablet(url, cookie);
+  try {
+    assert.equal(await prog.command({ type: 'setKey', key, does: { kind: 'blackout' } }), null);
+    assert.equal(await op.command({ type: 'setKey', key, does: { kind: 'song', id: layout.runningOrder[1].id } }),
+      'That key is Blackout. Only the programmer can give it another job: enter the PIN in Settings.');
+    const view = (await call(url, 'GET', '/api/controller')).body;
+    assert.equal(view.actions.find((a: any) => a.label === 'Blackout').key, 'nanoKONTROL2 · button 70');
+  } finally {
+    op.close();
+    prog.close();
+  }
+}));

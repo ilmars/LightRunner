@@ -17,7 +17,7 @@ import {
   applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,  type OflFixture, type Pick, type Scope,
   BLACKOUT, LiveEffectLayer, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
-  pruneKeys, resetApcKeys, sameTarget, targetName,
+  pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
 } from '../../packages/shared/src/index.ts';
 import { effectFrames, settledVisual, type StageClock } from '../../packages/engine/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
@@ -595,6 +595,11 @@ export class App {
   private async keyCommand(cmd: Extract<Command, { type: 'setKey' | 'clearKey' | 'resetKeys' }>, role: Role, tablet?: WebSocket): Promise<{ error: string | null; recorded: boolean }> {
     const was = cmd.type === 'setKey' ? bindingOf(this.show, cmd.key) : null;
     const operators = cmd.type !== 'resetKeys' && isOperatorKeyTarget(cmd.does) && (!was || isOperatorKeyTarget(was.does));
+    // On the APC mini a fader or button the standard layout uses (Master, Next, a group's Flash) is a fixed job too.
+    const standard = operators && role !== 'programmer' && cmd.type === 'setKey' && !was ? this.standardJob(cmd.key) : null;
+    if (standard) {
+      return { error: `That ${standard.what} is ${standard.job} on the APC mini. Only the programmer can give it another job: enter the PIN in Settings.`, recorded: false };
+    }
     if (!operators && role !== 'programmer') {
       // A song's key that is another job's key now: say which.
       if (cmd.type === 'setKey' && was && isOperatorKeyTarget(cmd.does)) {
@@ -617,6 +622,30 @@ export class App {
       return { error: (err as Error).message, recorded: false };
     }
     return { error: null, recorded: false };
+  }
+
+  /**
+   * What a key does in the APC mini's standard layout while it is on: a fader (a group's level, Master), a side button
+   * (Next, Back to saved, Undo, Basic lights, Flash all, Blackout) or a button under the pads (a group's Flash). Null
+   * for anything else: a pad (songs and colours, which operators may give to songs), another controller, layout off.
+   */
+  private standardJob(key: ControlKey): { what: 'fader' | 'button'; job: string } | null {
+    if (!controllerOf(this.show).apcLayout || !isApcMini(key.device) || key.channel !== 1) return null;
+    const groups = this.layout ? lightGroups(this.layout) : [];
+    const m = /^(fader|side button|lower button) (\d)$/.exec(keyPlace(key));
+    if (!m) return null;
+    const n = Number(m[2]);
+    const group = groups[n - 1];
+    if (m[1] === 'fader') {
+      const job = n === 9 ? 'Master' : group ? targetName(this.show, { kind: 'groupLevel', group: group.id }) : `the level of group ${n}`;
+      return { what: 'fader', job };
+    }
+    if (m[1] === 'lower button') {
+      return { what: 'button', job: group ? targetName(this.show, { kind: 'flash', group: group.id }) : `Flash for group ${n}` };
+    }
+    const side: KeyTarget[] = [{ kind: 'next' }, { kind: 'backToLook' }, { kind: 'undo' }, { kind: 'basic' }, { kind: 'flashAll' }, { kind: 'blackout' }];
+    const does = side[n - 1];
+    return does ? { what: 'button', job: targetName(this.show, does) } : null;
   }
 
   /**
