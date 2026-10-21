@@ -74,14 +74,22 @@
       <!-- Tempo: a readout that opens a few steps, and a Tap button. On the phone this moves to the top of Groups. -->
       <div id="tempoCtl" class="tempo">
         <div class="fadepick">
-          <button id="tempoButton" class="fade-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="tempoMenu" title="Beats per minute">
+          <button id="tempoButton" class="fade-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="tempoMenu" title="Beats per minute">
             <span class="lv-label">Tempo</span><b><span id="tempoValue">120</span> bpm</b>
           </button>
-          <div id="tempoMenu" class="fade-menu tempo-menu" role="menu" hidden>
-            <button role="menuitem" data-step="double" aria-label="Double the tempo">×2</button>
-            <button role="menuitem" data-step="half" aria-label="Half the tempo">÷2</button>
-            <button role="menuitem" data-step="-1" aria-label="One beat per minute slower">−</button>
-            <button role="menuitem" data-step="1" aria-label="One beat per minute faster">+</button>
+          <!-- Type a tempo (Done or Enter sets it), or step it. -->
+          <div id="tempoMenu" class="fade-menu tempo-menu" role="dialog" aria-label="Tempo" hidden>
+            <label class="tempo-type">
+              <input id="tempoField" class="ds-field" type="text" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" maxlength="3" autocomplete="off" aria-label="Tempo in beats per minute" aria-describedby="tempoNote">
+              <span>bpm</span>
+            </label>
+            <div class="tempo-steps">
+              <button type="button" data-step="double" aria-label="Double the tempo">×2</button>
+              <button type="button" data-step="half" aria-label="Half the tempo">÷2</button>
+              <button type="button" data-step="-1" aria-label="One beat per minute slower">−</button>
+              <button type="button" data-step="1" aria-label="One beat per minute faster">+</button>
+            </div>
+            <p id="tempoNote" class="tempo-note" hidden></p>
           </div>
         </div>
         <button id="tapBtn" class="tap-btn" type="button" title="Tap along with the band">Tap</button>

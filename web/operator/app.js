@@ -722,10 +722,17 @@ const TEMPO_MAX = 240;
 const clampTempo = (bpm) => Math.min(TEMPO_MAX, Math.max(TEMPO_MIN, Math.round(bpm)));
 
 const tempoMenu = $('tempoMenu');
+const tempoField = $('tempoField');
 const showTempoMenu = (open) => {
+  // Closing with a typed tempo still in the field: the field's change (on blur) sets it, as Done does.
+  if (!open && document.activeElement === tempoField) tempoField.blur();
   tempoMenu.hidden = !open;
   $('tempoButton').setAttribute('aria-expanded', String(open));
-  if (open) showFadeMenu(false);
+  if (open) {
+    showFadeMenu(false);
+    $('tempoNote').hidden = true;
+    tempoField.value = String(currentTempo());
+  }
 };
 $('tempoButton').addEventListener('click', () => showTempoMenu(tempoMenu.hidden));
 $('fadeButton').addEventListener('click', () => showTempoMenu(false));
@@ -770,6 +777,7 @@ function setTempo(bpm, throttle = false, target = tempoTarget()) {
   tempoLocal = v;
   tempoLocalAt = performance.now();
   $('tempoValue').textContent = String(v);
+  if (document.activeElement !== tempoField) tempoField.value = String(v);
   if (throttle && tempoLocalAt - tempoSentAt < 250) {
     tempoUnsent = v;
     tempoUnsentTarget = target;
@@ -787,10 +795,18 @@ function flushTempo() {
   sendTempo(v, tempoUnsentTarget);
 }
 
+/** A step after typing starts from the typed tempo: leaving the field sets it first. */
+const takeTyped = () => {
+  if (document.activeElement === tempoField) tempoField.blur();
+};
+
 for (const b of tempoMenu.querySelectorAll('button')) {
   const step = b.dataset.step;
   if (step === 'double' || step === 'half') {
-    b.addEventListener('click', () => setTempo(currentTempo() * (step === 'double' ? 2 : 0.5)));
+    b.addEventListener('click', () => {
+      takeTyped();
+      setTempo(currentTempo() * (step === 'double' ? 2 : 0.5));
+    });
     continue;
   }
   const by = Number(step);
@@ -804,6 +820,7 @@ for (const b of tempoMenu.querySelectorAll('button')) {
   };
   b.addEventListener('pointerdown', (ev) => {
     if (ev.button || b.disabled) return;
+    takeTyped();
     try { b.setPointerCapture?.(ev.pointerId); } catch { /* pointer already gone */ }
     // The whole hold goes where it started.
     const target = tempoTarget();
@@ -842,8 +859,41 @@ $('tapBtn').addEventListener('click', (ev) => {
   if (ev.detail === 0) tapTempo();
 });
 
+// Typed: Done or Enter (or leaving the field) sets it, through the same `tempo` command (in Prepare, into the draft).
+// 40–240 bpm; anything else is refused with a quiet note and the field goes back to the tempo. Escape puts it back.
+tempoField.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') {
+    ev.preventDefault();
+    tempoField.blur();
+  } else if (ev.key === 'Escape') {
+    tempoField.value = String(currentTempo());
+    $('tempoNote').hidden = true;
+  }
+});
+tempoField.addEventListener('input', () => ($('tempoNote').hidden = true));
+tempoField.addEventListener('change', () => {
+  const text = tempoField.value.trim();
+  const bpm = /^\d+$/.test(text) ? Number(text) : NaN;
+  if (text === '' || bpm === currentTempo()) {
+    tempoField.value = String(currentTempo());
+    return;
+  }
+  if (!(bpm >= TEMPO_MIN && bpm <= TEMPO_MAX)) {
+    const note = $('tempoNote');
+    const why = Number.isNaN(bpm) ? 'Type a number' : `${bpm} is too ${bpm < TEMPO_MIN ? 'slow' : 'fast'}`;
+    note.textContent = `${why}: tempo goes from ${TEMPO_MIN} to ${TEMPO_MAX} bpm.`;
+    note.hidden = false;
+    tempoField.value = String(currentTempo());
+    return;
+  }
+  setTempo(bpm);
+});
+
 function renderTempo() {
-  $('tempoValue').textContent = String(currentTempo());
+  const bpm = String(currentTempo());
+  $('tempoValue').textContent = bpm;
+  // Never while it is being typed in: a state from the server mustn't overwrite what the finger is typing.
+  if (document.activeElement !== tempoField) tempoField.value = bpm;
 }
 
 // ---- Rendering live state ----
