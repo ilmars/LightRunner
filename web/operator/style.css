@@ -204,20 +204,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* Editing the running order: a delete button, the name as a field, a handle to drag. */
 .erow {
-  position: relative; flex: none; display: flex; align-items: center; gap: 4px; min-height: 50px; padding: 0 4px;
+  position: relative; flex: none; display: flex; align-items: center; gap: 2px; min-height: 50px; padding: 0 4px;
   background: var(--ds-tile-fill); border-radius: var(--ds-r-tile); box-shadow: var(--ds-shadow-low);
 }
 .erow.fixed { padding: 0 4px 0 14px; background: transparent; box-shadow: none; color: var(--ds-muted); font-size: 16px; }
-.erow.fixed .fname { flex: 1; min-width: 0; }
-.erow.fixed small { margin-left: 6px; font-size: 12px; }
+.erow.fixed .fname { flex: 1; min-width: 0; line-height: 1.25; }
+/* "always first" under the name, so it never wraps beside a Key chip. */
+.erow.fixed small { display: block; font-size: 12px; }
 .erow .grip-space { flex: none; width: 44px; }
 .erow .del { flex: none; width: 44px; height: 44px; border: 0; background: transparent; color: var(--ds-danger-text); opacity: 0.8; font-size: 22px; border-radius: var(--ds-r-small); }
 .erow .del.sure { width: auto; min-width: 76px; padding: 0 12px; margin-right: 2px; background: var(--ds-danger-fill); color: var(--ds-danger-text); opacity: 1; font-size: 14px; box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
 .erow .ename {
-  flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--ds-r-small); background: rgba(148, 170, 210, 0.07);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-text); font: inherit; font-size: 17px; user-select: text; -webkit-user-select: text;
+  flex: 1; min-width: 0; min-height: 44px; padding: 0 8px; border: 0; border-radius: var(--ds-r-small); background: rgba(148, 170, 210, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-text); font: inherit; font-size: 16px; user-select: text; -webkit-user-select: text;
+  text-overflow: ellipsis;
 }
 .erow .ename:focus { outline: none; box-shadow: inset 0 0 0 1px var(--ds-accent); }
+/* While a name is typed its Key chip makes way, so a long name has the row's room. */
+.erow:has(.ename:focus) .kchip { display: none; }
 .erow .grip {
   flex: none; width: 44px; height: 44px; display: grid; place-items: center; color: var(--ds-mark); font-size: 22px; cursor: grab;
   touch-action: none; border-radius: var(--ds-r-small);
@@ -860,6 +864,8 @@ body.prepare .save.holding { border-color: var(--prep-text); }
   background: rgba(58, 22, 30, 0.88); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
   color: #ffe3e6; padding: 12px 18px; border-radius: var(--ds-r-tile); border: 0; box-shadow: inset 0 0 0 1px rgba(var(--ds-danger), 0.45), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
 }
+/* While the learn bar is up (it sits where messages do), a message goes above it rather than under it. */
+.learnbar:not([hidden]) ~ .toast { bottom: 160px; }
 /* A plain confirmation ("Saved to …"), not a problem. */
 .toast.quiet { background: var(--ds-glass); color: var(--ds-text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -12px rgba(0, 0, 0, 0.7); }
 [hidden] { display: none !important; }

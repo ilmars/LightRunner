@@ -357,7 +357,7 @@ function buildEditRows(order) {
     if (isBasic(item)) {
       const fixed = el('div', 'erow fixed');
       const name = el('span', 'fname', item.name);
-      name.append(el('small', null, '· always first'));
+      name.append(el('small', null, 'always first'));
       fixed.append(name);
       // Its Key chip lines up with the songs' (theirs have the drag handle after it).
       if (showsChip({ kind: 'song', id: item.id })) fixed.append(keyChip({ kind: 'song', id: item.id }, item.name), el('span', 'grip-space'));
