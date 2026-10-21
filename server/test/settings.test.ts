@@ -158,6 +158,34 @@ test('Who to call: the contact saves, reaches the operator page, and empty field
   });
 });
 
+test('Who to call survives a Patch save and an export and import, and blank fields in a show file are left out', async () => {
+  await withApp(async (call) => {
+    await call('PUT', '/api/settings', { contact: { name: 'Jānis', phone: '+371 2000 0000' } });
+    // Patch saves the show from an old copy: the contact stays.
+    const show = (await call('GET', '/api/show')).body;
+    assert.deepEqual(show.settings.contact, { name: 'Jānis', phone: '+371 2000 0000' });
+    delete show.settings.contact;
+    assert.equal((await call('PUT', '/api/show?source=patch', show)).status, 200);
+    assert.deepEqual((await call('GET', '/api/settings')).body.contact, { name: 'Jānis', phone: '+371 2000 0000' });
+    // Export, then import the file: the contact comes back with it.
+    const exported = (await call('GET', '/api/show')).body;
+    await call('PUT', '/api/settings', { contact: { name: '', phone: '' } });
+    assert.equal((await call('PUT', '/api/show', exported)).status, 200);
+    assert.deepEqual((await call('GET', '/api/settings')).body.contact, { name: 'Jānis', phone: '+371 2000 0000' });
+    // A hand-edited file with a blank field still loads; the blank one is left out, and an empty contact is none.
+    const edited = structuredClone(exported);
+    edited.settings.contact = { name: '  ', phone: '+371 2000 0001' };
+    assert.equal((await call('PUT', '/api/show', edited)).status, 200);
+    let saved = (await call('GET', '/api/show')).body;
+    assert.deepEqual(saved.settings.contact, { phone: '+371 2000 0001' });
+    edited.settings.contact = { name: '', phone: '' };
+    assert.equal((await call('PUT', '/api/show', edited)).status, 200);
+    saved = (await call('GET', '/api/show')).body;
+    assert.equal(saved.settings.contact, undefined);
+    assert.deepEqual((await call('GET', '/api/settings')).body.contact, { name: '', phone: '' });
+  });
+});
+
 async function receiver(): Promise<{ socket: Socket; port: number; universes: Set<number> }> {
   const socket = createSocket('udp4');
   await new Promise<void>((r) => socket.bind(0, '127.0.0.1', r));
