@@ -1,117 +1,201 @@
-/* Patch page: builds on the settings page styles and the shared design system
-   (/shared/theme.css): flat translucent glass, faint 1 px edges, tinted states.
-   Fixture blocks in the DMX map keep their own per-type colours. */
-.top, main.wide { max-width: 1100px; }
-.count { color: var(--dim); font-weight: 400; }
-h3 { font-size: 13px; margin: 0; color: var(--dim); font-weight: 500; letter-spacing: 0.01em; }
+/* Patch page: the page's own parts, on the shared design system (/shared/theme.css) and the programmer
+   pages' frame (/shared/programmer.css). Fixture blocks in the DMX map keep their own per-type colours,
+   and overlaps their red striping. 44 px targets wherever a finger is used. */
+:root { --page-max: 1600px; }
+.patch-page .card-head .warn { flex: none; }
 
-/* ---- Fixture table: no cell borders, faint row dividers ---- */
-.table-wrap { overflow-x: auto; }
-table.patch { width: 100%; min-width: 940px; border-collapse: collapse; font-size: 14px; }
-.patch td:first-child input { min-width: 150px; }
-.patch td:nth-child(2) select { min-width: 185px; }
+/* ---- Graphical patch: 512 channels as a grid, fixtures as blocks ---- */
+.utabs { align-self: center; }
+.utabs > button { font-size: 13px; padding: 0 14px; }
+.utabs > .utab-add { min-width: 44px; padding: 0 12px; }
+.patch-layout { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.map-wrap { flex: 1 1 600px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.dmx-map {
+  display: grid; grid-template-columns: repeat(32, minmax(0, 1fr)); grid-auto-rows: 32px; gap: 2px;
+  padding: 6px; border-radius: 14px; background: #04070D; box-shadow: inset 0 0 0 1px var(--ds-edge);
+  user-select: none; -webkit-user-select: none; touch-action: none;
+}
+/* By finger, rows are a full target high. */
+@media (pointer: coarse) { .dmx-map { grid-auto-rows: 44px; } }
+.cell {
+  background: rgba(148, 163, 184, 0.05); border-radius: 4px; font-size: 9px; color: rgba(151, 164, 186, 0.5);
+  padding: 2px 3px; line-height: 1; cursor: pointer; overflow: hidden; font-variant-numeric: tabular-nums;
+}
+.cell:hover { background: rgba(148, 163, 184, 0.10); color: var(--ds-muted); }
+.cell.drop { background: var(--ds-selected); color: var(--ds-text); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.cell.drop-bad { background: rgba(var(--ds-danger), 0.26); color: var(--ds-text); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
+.block {
+  z-index: 1; border-radius: 5px; border: 2px solid rgba(4, 7, 13, 0.9); color: #fff; font-size: 11px; font-weight: 600;
+  padding: 0 6px; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; cursor: grab;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); touch-action: none; filter: saturate(0.9);
+}
+.block small { font-weight: 500; opacity: 0.75; }
+.block.cont { opacity: 0.85; }
+.block.sel { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: -2px; z-index: 2; }
+.block.bad { background-image: repeating-linear-gradient(135deg, rgba(212, 60, 60, 0.9) 0 6px, rgba(110, 20, 20, 0.9) 6px 12px) !important; }
+.block.dragging { opacity: 0.85; cursor: grabbing; z-index: 3; }
+
+/* ---- Fixture library: beside the map on a wide screen, under it otherwise ---- */
+.library { flex: 0 0 290px; min-width: 0; gap: 10px; padding: 12px; }
+@media (max-width: 899px) { .library { flex: 1 1 100%; } }
+.lib-list {
+  overflow: auto; display: flex; flex-direction: column; gap: 4px; max-height: 280px; padding-right: 2px;
+  scrollbar-width: thin; scrollbar-color: var(--ds-elevated) transparent;
+}
+.lib-item {
+  flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px; min-height: 44px; border-radius: var(--ds-r-small);
+  background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low); cursor: grab; touch-action: none; font-size: 13px; user-select: none; -webkit-user-select: none;
+}
+.lib-item:hover { background: var(--ds-elevated); }
+.lib-item i { width: 12px; height: 12px; border-radius: 4px; flex: none; opacity: 0.9; }
+.lib-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-item small { color: var(--ds-muted); white-space: nowrap; }
+.lib-item.picked { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.drag-ghost {
+  position: fixed; z-index: 50; pointer-events: none; padding: 6px 12px; border-radius: var(--ds-r-small); font-size: 12px; font-weight: 600;
+  color: #fff; transform: translate(12px, -50%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15), 0 8px 20px -6px rgba(0, 0, 0, 0.6);
+}
+
+/* Open Fixture Library search, under the library. */
+.ofl { border-top: 1px solid var(--ds-edge); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.ofl .row .ds-field { min-width: 0; }
+.ofl > label.ds-btn { align-self: flex-start; }
+.ofl-results { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--ds-elevated) transparent; }
+.ofl-results > p { margin: 0; }
+.ofl-hit, .ofl-mode {
+  flex: none; text-align: left; border: 0; border-radius: var(--ds-r-small); background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low);
+  padding: 8px 12px; min-height: 44px; cursor: pointer; font-size: 13px; color: var(--ds-text);
+}
+.ofl-hit small, .ofl-mode small { display: block; color: var(--ds-muted); }
+.ofl-hit:hover, .ofl-mode:hover { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.ofl-hit:active, .ofl-mode:active { background: var(--ds-selected); }
+.ofl-modes { display: flex; flex-direction: column; gap: 4px; }
+.ofl-modes h4 { margin: 4px 0 2px; font-size: 14px; font-weight: 600; }
+.ofl-modes p { margin: 0 0 4px; }
+.ofl .back-link { align-self: flex-start; padding: 0 12px; }
+
+/* ---- Fixture table: no cell borders, faint row dividers, flat fields ---- */
+.table-wrap { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--ds-elevated) transparent; }
+table.patch { width: 100%; min-width: 900px; border-collapse: collapse; font-size: 14px; }
+.patch td:first-child .ds-field { min-width: 130px; }
+.patch td:nth-child(2) select { min-width: 150px; }
 .patch td:nth-child(6) { width: 1%; }
 .patch th {
-  text-align: left; font-size: 12px; color: var(--dim); font-weight: 500; letter-spacing: 0.02em;
-  padding: 4px 8px 8px; border: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07); white-space: nowrap;
+  text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ds-muted);
+  padding: 4px 5px 10px; border-bottom: 1px solid var(--ds-edge); white-space: nowrap;
 }
-.patch td { padding: 5px 8px; height: 52px; border: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.045); vertical-align: middle; }
+.patch td { padding: 6px 5px; height: 58px; border-bottom: 1px solid rgba(148, 163, 184, 0.08); vertical-align: middle; }
 .patch tbody tr:last-child td { border-bottom: 0; }
 .patch .num { width: 84px; }
-.patch input, .patch select { min-height: 40px; padding: 6px 10px; }
-.patch select { padding-right: 32px; }
-.patch input[type=number] { width: 76px; }
-.patch tr.bad td { background: rgba(var(--ds-danger), 0.10); }
-.patch tr.bad td:first-child { border-top-left-radius: var(--ds-r-small); border-bottom-left-radius: var(--ds-r-small); }
-.patch tr.bad td:last-child { border-top-right-radius: var(--ds-r-small); border-bottom-right-radius: var(--ds-r-small); }
-.patch .range { color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.patch .segments { color: var(--dim); font-size: 12px; font-weight: 400; }
+.patch .ds-field { font-size: 14px; padding: 0 10px; }
+.patch select.ds-field { padding-right: 32px; }
+.patch input[type=number].ds-field { width: 76px; }
+.patch tr.sel td { background: var(--ds-tile-fill-on); }
+.patch tr.bad td { background: var(--ds-danger-fill); }
+.patch tr.bad td:first-child, .patch tr.sel td:first-child { border-top-left-radius: var(--ds-r-small); border-bottom-left-radius: var(--ds-r-small); }
+.patch tr.bad td:last-child, .patch tr.sel td:last-child { border-top-right-radius: var(--ds-r-small); border-bottom-right-radius: var(--ds-r-small); }
+.patch .range { color: var(--ds-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.patch .segments { color: var(--ds-muted); font-size: 12px; }
 .patch tr.bad .range { color: var(--ds-danger-text); font-weight: 600; }
 .patch .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip {
   font-size: 12px; padding: 2px 10px; border-radius: var(--ds-r-pill); white-space: nowrap;
-  background: rgba(84, 146, 236, 0.12); color: var(--ds-muted-on); border: 0;
-  box-shadow: inset 0 0 0 1px rgba(98, 155, 240, 0.2);
+  background: var(--ds-tile-fill); color: var(--ds-muted-on); box-shadow: inset 0 0 0 1px var(--ds-edge);
 }
 .patch .actions { display: flex; gap: 6px; justify-content: flex-end; }
-.patch .actions .small { min-height: 40px; }
+.patch .actions .ds-btn { padding: 0 12px; }
+/* Delete is quiet in a list of many, and turns red under the pointer. */
+.del:hover { color: var(--ds-danger-text); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
 
-/* ---- Add fixtures ---- */
-.add { border-top: 1px solid rgba(255, 255, 255, 0.06); padding-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+/* ---- Add fixtures (under the table, and "Add fixtures here" under the plan) ---- */
+.add { margin-top: 2px; }
 .add-grid { display: grid; grid-template-columns: 2fr 1.3fr 0.7fr 0.8fr 0.9fr auto; gap: 10px; align-items: end; }
-@media (max-width: 800px) { .add-grid { grid-template-columns: 1fr 1fr; } }
+.add-grid > .ds-btn { min-width: 96px; }
+@media (max-width: 800px) { .add-grid { grid-template-columns: 1fr 1fr; } .add-grid > .ds-btn { grid-column: 1 / -1; } }
+.add .hint:empty { display: none; }
 
-/* ---- Groups: flat glass tiles ---- */
-.groups { display: flex; flex-direction: column; gap: 10px; }
+/* ---- Groups: flat glass tiles, two to a row on a wide screen ---- */
+.new-group { flex: 0 1 380px; min-width: 0; }
+.new-group .ds-field { min-width: 0; }
+.groups { display: grid; grid-template-columns: 1fr; gap: var(--ds-gap); align-items: start; }
+@media (min-width: 1100px) { .groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .group-card {
-  border: 0; border-radius: var(--ds-r-tile); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
+  border-radius: var(--ds-r-tile); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0;
   background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low);
 }
 /* The card being edited (a field or menu inside it has focus) is tinted blue. */
-.group-card:focus-within { background: linear-gradient(180deg, rgba(84, 146, 236, 0.10), rgba(84, 146, 236, 0.05)); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.group-card .head { display: flex; gap: 10px; align-items: center; }
-.group-card .head input { flex: 1; font-weight: 600; }
+.group-card:focus-within { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.group-card .head { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+.group-card .head .ds-field { flex: 1 1 200px; min-width: 0; font-weight: 600; }
 .group-card .members { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .member {
-  display: inline-flex; align-items: center; gap: 2px; border: 0; border-radius: var(--ds-r-pill);
-  background: rgba(84, 146, 236, 0.12); box-shadow: inset 0 0 0 1px rgba(98, 155, 240, 0.2);
-  padding: 2px 4px 2px 12px; font-size: 13px; color: var(--ds-muted-on);
+  display: inline-flex; align-items: center; min-height: 44px; border-radius: var(--ds-r-pill);
+  background: rgba(0, 0, 0, 0.16); box-shadow: inset 0 0 0 1px var(--ds-edge);
+  padding: 0 2px 0 12px; font-size: 13px; color: var(--ds-muted-on);
 }
 .member button {
-  border: 0; background: transparent; color: var(--ds-muted-on); font-size: 15px; padding: 0 8px; min-height: 34px; min-width: 30px;
+  border: 0; background: transparent; color: var(--ds-muted); font-size: 16px; padding: 0; min-height: 44px; min-width: 32px;
   border-radius: var(--ds-r-pill); cursor: pointer;
 }
-.member button:hover:not(:disabled) { background: var(--ds-elevated); color: var(--text); }
+.member button:hover:not(:disabled) { background: var(--ds-elevated); color: var(--ds-text); }
 .member button:disabled { opacity: 0.3; cursor: default; }
-.member .pos { color: var(--dim); font-size: 11px; margin-right: 4px; }
-.group-card select { width: auto; min-height: 36px; padding: 4px 32px 4px 12px; border-radius: var(--ds-r-pill); font-size: 13px; }
-.group-card .note { font-size: 12px; color: var(--dim); }
-.group-card .group-kind { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.member .pos { color: var(--ds-muted); font-size: 11px; margin-right: 6px; font-variant-numeric: tabular-nums; }
+.member > span:not(.pos) { margin-right: 2px; }
+/* "＋ Add fixture…": a menu with the dashed edge of an add tile. */
+.group-card .member-add {
+  width: auto; min-height: 44px; padding: 0 34px 0 14px; border-radius: var(--ds-r-pill); font-size: 13px; color: var(--ds-muted);
+  background-color: transparent; box-shadow: none; border: 1px dashed rgba(148, 163, 184, 0.28);
+}
+.group-card .note { font-size: 12px; color: var(--ds-muted); }
+.group-card .group-kind { display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; }
 .group-card .group-kind .switch-label { font-size: 14px; }
-.group-card .group-kind .warn { flex-basis: 100%; }
+.group-card .group-kind .note, .group-card .group-kind .warn { flex-basis: 100%; }
 
-/* ---- Stage plan: glass frame, quiet grid, fixture marks as before ---- */
+/* ---- Stage plan: the operator page's dark plan with its edge, a quiet grid, the marks as before ---- */
+.plan-frame { position: relative; }
+.plan-back { position: absolute; top: 9px; left: 12px; font-size: 10px; pointer-events: none; color: rgba(151, 164, 186, 0.7); }
 .stage-plan {
-  position: relative; width: 100%; aspect-ratio: 2.4 / 1; border-radius: var(--ds-r-tile); border: 0;
-  background-color: rgba(8, 12, 22, 0.55);
-  background-image: linear-gradient(rgba(148, 170, 210, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(148, 170, 210, 0.07) 1px, transparent 1px);
-  background-size: 10% 10%; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  position: relative; width: 100%; aspect-ratio: 2.4 / 1; border-radius: 14px;
+  background-color: #04070D;
+  background-image: linear-gradient(rgba(148, 163, 184, 0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+  background-size: 10% 10%; box-shadow: inset 0 0 0 1px var(--ds-edge);
   touch-action: none; overflow: hidden;
 }
 .plan-item {
   position: absolute; transform: translate(-50%, -50%); cursor: grab; touch-action: none;
   display: flex; align-items: center; justify-content: center;
 }
-.plan-item .shape { background: #aab3c6; border: 1px solid rgba(8, 12, 22, 0.8); border-radius: 50%; width: 18px; height: 18px; }
+.plan-item .shape { background: #aab3c6; border: 1px solid rgba(4, 7, 13, 0.8); border-radius: 50%; width: 18px; height: 18px; }
 .plan-item.bar .shape { border-radius: 3px; width: 100%; height: 100%; }
 /* An outline: a strip round something, drawn as its edge only. */
 .plan-item.outline .shape {
   box-sizing: border-box; width: 100%; height: 100%; border-radius: 6px;
-  background: transparent; border: 3px solid #aab3c6; box-shadow: 0 0 0 1px rgba(8, 12, 22, 0.8);
+  background: transparent; border: 3px solid #aab3c6; box-shadow: 0 0 0 1px rgba(4, 7, 13, 0.8);
 }
 .plan-item.smoke svg { display: block; fill: #aab3c6; opacity: 0.55; }
 .plan-item.dragging { cursor: grabbing; z-index: 2; }
-.plan-item.dragging .shape, .plan-item.sel .shape { outline: 2px solid var(--accent); outline-offset: 1px; }
-.plan-item.sel.smoke { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.plan-item.dragging .shape, .plan-item.sel .shape { outline: 2px solid var(--ds-accent); outline-offset: 1px; }
+.plan-item.sel.smoke { outline: 2px solid var(--ds-accent); outline-offset: 2px; border-radius: 6px; }
 .plan-item.sel { z-index: 1; }
 /* The label under each mark; it never turns with a bar. */
 .plan-tag {
-  position: absolute; transform: translateX(-50%); font-size: 11px; color: var(--dim);
+  position: absolute; transform: translateX(-50%); font-size: 11px; color: var(--ds-muted);
   white-space: nowrap; pointer-events: none;
 }
 /* Beams' cones: faint, under everything, and never in the way of a click. */
 .plan-cones { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 .plan-cone { fill: rgba(170, 179, 198, 0.08); stroke: rgba(170, 179, 198, 0.3); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.plan-cone.sel { stroke: rgba(98, 155, 240, 0.6); }
+.plan-cone.sel { stroke: var(--ds-edge-held); }
 
-/* Handles on the selected bar: a small dot, with a larger area around it that takes the pointer. */
+/* Handles on the selected fixture: a small dot, with a larger area round it that takes the pointer (a finger's size by touch). */
 .plan-handle {
   position: absolute; width: 28px; height: 28px; transform: translate(-50%, -50%); touch-action: none;
   display: flex; align-items: center; justify-content: center;
 }
+@media (pointer: coarse) { .plan-handle { width: 44px; height: 44px; } }
 .plan-handle::after {
   content: ''; width: 9px; height: 9px; border-radius: 50%;
-  background: var(--ds-surface-hi); box-shadow: 0 0 0 1.5px var(--accent);
+  background: var(--ds-surface-hi); box-shadow: 0 0 0 1.5px var(--ds-accent);
 }
 /* On a bar these turn with it: ends, one long side, and the turning handle just past the end (a ring). */
 .plan-handle.start { left: 0; top: 50%; }
@@ -123,115 +207,31 @@ table.patch { width: 100%; min-width: 940px; border-collapse: collapse; font-siz
 /* A beam's tip sits on the plan itself, at the end of its cone. */
 .plan-handle.tip { z-index: 2; }
 
-/* "+ Add fixture here" at the clicked spot: a quiet pill. */
+/* "＋ Add fixture here" at the clicked spot: a glass pill with the dashed edge of an add tile. */
 .plan-add {
   position: absolute; transform: translate(-50%, -50%); z-index: 3;
-  padding: 6px 12px; min-height: 32px; border: 0; border-radius: var(--ds-r-pill);
-  background: var(--ds-glass); color: var(--ds-muted-on); font: inherit; font-size: 13px; cursor: pointer;
-  box-shadow: inset 0 0 0 1px var(--ds-edge-on); white-space: nowrap;
+  padding: 0 14px; min-height: 44px; border: 1px dashed rgba(148, 163, 184, 0.4); border-radius: var(--ds-r-pill);
+  background: var(--ds-glass); color: var(--ds-muted-on); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap;
 }
 .plan-add:hover { color: var(--ds-text); }
 
-/* The shape row under the plan, for the selected fixture. */
-.plan-tools { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
-.plan-tools[hidden] { display: none; }
-.plan-name { font-size: 14px; font-weight: 500; min-width: 120px; }
-.plan-tools .ds-seg > button { min-height: 34px; font-size: 14px; padding: 0 12px; }
-.plan-turn { display: inline-flex; align-items: center; gap: 2px; }
-/* Across and Upright: quiet text buttons. */
-.plan-turn button { background: transparent; box-shadow: none; color: var(--dim); font-weight: 400; }
-.plan-turn button:hover { background: rgba(148, 170, 210, 0.08); color: var(--text); }
-.plan-turn[hidden] { display: none; }
-.plan-angle { font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: right; }
-
-/* "Add fixtures here": under the plan, like the Add fixtures form, so the spot stays in view. */
-.plan-sheet { margin-top: 14px; }
-.plan-sheet[hidden] { display: none; }
-.plan-sheet .add-grid { grid-template-columns: 2fr 1.3fr 0.7fr 0.8fr 0.9fr; }
-.plan-sheet-foot .hint { flex: 1; }
-
-/* ---- Graphical patch: 512 channels as a grid, fixtures as blocks ---- */
-.utabs {
-  display: inline-flex; gap: 2px; flex-wrap: wrap; padding: 3px; border-radius: var(--ds-r-tile);
-  background: rgba(148, 170, 210, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-}
-.utab { border: 0; background: transparent; color: var(--dim); border-radius: var(--ds-r-small); min-height: 36px; padding: 0 14px; font-size: 14px; font-weight: 500; cursor: pointer; }
-.utab:hover { background: var(--ds-tile-fill); color: var(--ds-muted-on); }
-.utab.on { color: var(--text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.patch-layout { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
-.map-wrap { flex: 1 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.dmx-map {
-  display: grid; grid-template-columns: repeat(32, minmax(0, 1fr)); grid-auto-rows: 30px; gap: 2px;
-  padding: 6px; border-radius: var(--ds-r-tile); background: rgba(8, 12, 22, 0.4); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-  user-select: none; -webkit-user-select: none; touch-action: none;
-}
-.cell { background: rgba(148, 170, 210, 0.05); border-radius: 4px; font-size: 9px; color: rgba(143, 154, 176, 0.5); padding: 2px 3px; line-height: 1; cursor: pointer; overflow: hidden; }
-.cell:hover { background: rgba(148, 170, 210, 0.10); color: var(--dim); }
-.cell.drop { background: rgba(84, 146, 236, 0.35); color: #fff; box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.cell.drop-bad { background: rgba(var(--ds-danger), 0.40); color: #fff; }
-.block {
-  z-index: 1; border-radius: 5px; border: 2px solid rgba(10, 15, 26, 0.9); color: #fff; font-size: 11px; font-weight: 600;
-  padding: 0 6px; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; cursor: grab;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); touch-action: none; filter: saturate(0.9);
-}
-.block small { font-weight: 500; opacity: 0.75; }
-.block.cont { opacity: 0.85; }
-.block.sel { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: -2px; z-index: 2; }
-.block.bad { background-image: repeating-linear-gradient(135deg, rgba(212, 60, 60, 0.9) 0 6px, rgba(110, 20, 20, 0.9) 6px 12px) !important; }
-.block.dragging { opacity: 0.85; cursor: grabbing; z-index: 3; }
-
-/* ---- Fixture library ---- */
-.library { flex: 0 0 280px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.lib-list { overflow: auto; display: flex; flex-direction: column; gap: 4px; max-height: 260px; padding-right: 2px; scrollbar-width: thin; scrollbar-color: rgba(148, 170, 210, 0.25) transparent; }
-.lib-item {
-  display: flex; align-items: center; gap: 8px; padding: 0 12px; min-height: 40px; border: 0; border-radius: var(--ds-r-small);
-  background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low); cursor: grab; touch-action: none; font-size: 13px; user-select: none;
-}
-.lib-item:hover { background: rgba(148, 170, 210, 0.09); }
-.lib-item i { width: 12px; height: 12px; border-radius: 4px; flex: none; opacity: 0.9; }
-.lib-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lib-item small { color: var(--dim); white-space: nowrap; }
-.lib-item.picked { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.drag-ghost {
-  position: fixed; z-index: 50; pointer-events: none; padding: 6px 12px; border-radius: var(--ds-r-small); font-size: 12px; font-weight: 600;
-  color: #fff; transform: translate(12px, -50%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15), 0 8px 20px -6px rgba(0, 0, 0, 0.6);
-}
-.patch tr.sel td { background: rgba(84, 146, 236, 0.10); }
-.patch tr.sel td:first-child { border-top-left-radius: var(--ds-r-small); border-bottom-left-radius: var(--ds-r-small); }
-.patch tr.sel td:last-child { border-top-right-radius: var(--ds-r-small); border-bottom-right-radius: var(--ds-r-small); }
-
-/* ---- Open Fixture Library search ---- */
-.ofl { border-top: 1px solid rgba(255, 255, 255, 0.06); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
-/* The search box is type=search, which the shared field rules don't cover. */
-.ofl input[type=search], .library input[type=search] {
-  background: rgba(148, 170, 210, 0.07); border: 0; border-radius: var(--ds-r-small);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); padding: 6px 12px; min-height: 44px; width: 100%; color: var(--text);
-  -webkit-appearance: none; appearance: none;
-}
-.ofl input[type=search]:focus { outline: none; box-shadow: inset 0 0 0 1px var(--accent); }
-.ofl input[type=search]::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
-.ofl .row input { min-width: 0; }
-.ofl-results { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow: auto; scrollbar-width: thin; scrollbar-color: rgba(148, 170, 210, 0.25) transparent; }
-.ofl-hit, .ofl-mode {
-  text-align: left; border: 0; border-radius: var(--ds-r-small); background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low);
-  padding: 8px 12px; min-height: 40px; cursor: pointer; font-size: 13px; color: var(--text);
-}
-.ofl-hit small { display: block; color: var(--dim); }
-.ofl-hit:hover, .ofl-mode:hover { background: rgba(84, 146, 236, 0.12); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.ofl-hit:active, .ofl-mode:active { background: var(--ds-selected); }
-.ofl-modes { display: flex; flex-direction: column; gap: 4px; }
-.ofl-modes h4 { margin: 4px 0 2px; font-size: 13px; font-weight: 600; }
-.ofl-mode small { color: var(--dim); }
-.ofl .back-link { background: none; border: 0; color: #8fb8f2; cursor: pointer; padding: 6px 0; min-height: 36px; font-size: 13px; text-align: left; }
-
-/* ---- Several fixtures on the stage plan ---- */
 /* The box drawn round fixtures to select them: a faint blue tint and line. */
 .plan-box {
   position: absolute; z-index: 3; pointer-events: none; border-radius: 2px;
-  background: rgba(84, 146, 236, 0.08); box-shadow: inset 0 0 0 1px rgba(98, 155, 240, 0.55);
+  background: rgba(67, 137, 232, 0.08); box-shadow: inset 0 0 0 1px var(--ds-edge-held);
 }
-#planArrange { margin-top: 8px; }
-.plan-label { font-size: 13px; color: var(--dim); }
-.plan-tools .ds-seg > button:disabled { opacity: 0.4; cursor: default; }
-.plan-help { margin-top: 12px; }
-.plan-help[hidden] { display: none; }
+
+/* The rows under the plan: the selected fixture's shape and angle; with several, Align and Space evenly. */
+.plan-help { margin-top: -2px; }
+.plan-tools { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
+.plan-name { font-size: 14px; font-weight: 600; min-width: 120px; }
+.plan-tools .ds-seg > button { font-size: 13px; padding: 0 14px; }
+.plan-turn { display: inline-flex; align-items: center; gap: 4px; }
+.plan-angle { font-size: 13px; color: var(--ds-muted); font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: right; }
+.plan-label { margin-left: 2px; }
+
+/* "Add fixtures here": under the plan, like the Add fixtures form, so the spot stays in view. */
+.plan-sheet .add-grid { grid-template-columns: 2fr 1.3fr 0.7fr 0.8fr 0.9fr; }
+@media (max-width: 800px) { .plan-sheet .add-grid { grid-template-columns: 1fr 1fr; } }
+.plan-sheet-foot { flex-wrap: wrap; }
+.plan-sheet-foot .hint { flex: 1 1 200px; }
