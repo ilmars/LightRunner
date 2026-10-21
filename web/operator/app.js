@@ -1399,6 +1399,22 @@ function endEditHold() {
 }
 
 /**
+ * A new finger (or the mouse again) while a hold that fired is still waiting for its lift: the lift was lost (the
+ * grid was rebuilt under it) or a second finger came. The clicks are quiet a moment longer, then taps again.
+ */
+function dropFiredHold() {
+  if (!editHold.fired) return;
+  editHold.fired = false;
+  editHold.quietUntil = performance.now() + 400;
+  endEditHold();
+}
+
+/** The picker's tiles are being replaced: a hold that hasn't fired yet ends (it would open a colour that may be gone). */
+function cancelEditHold() {
+  if (editHold.timer) endEditHold();
+}
+
+/**
  * Makes a picker tile open its editor when held (EDIT_HOLD), without changing the stage. The click that ends the hold
  * is swallowed, so the tile's tap (fade to it, run it) doesn't also go. Not on the phone (no editing there).
  */
@@ -1406,6 +1422,7 @@ function holdToEdit(b, open) {
   b.classList.add('movable');
   b.addEventListener('pointerdown', (ev) => {
     if (ev.button !== 0 || document.body.classList.contains('phone')) return;
+    dropFiredHold();
     endEditHold();
     editHold.pointer = ev.pointerId;
     editHold.x = ev.clientX;
@@ -1434,6 +1451,8 @@ const liftEditHold = (ev) => {
   endEditHold();
 };
 window.addEventListener('pointerup', liftEditHold);
+// Any new pointer while a fired hold waits for its lift (not only on a tile), so a lost lift can't keep taps quiet.
+window.addEventListener('pointerdown', dropFiredHold, true);
 window.addEventListener('pointercancel', liftEditHold);
 window.addEventListener('click', (ev) => {
   if (performance.now() >= editHold.quietUntil) return;
@@ -1446,6 +1465,7 @@ function buildPickerGrid() {
   const row = pickerRow();
   if (!row) return;
   const grid = $('pGrid');
+  cancelEditHold();
   grid.replaceChildren();
   // The Colours tab lists colours only; effects have their own tab. A tap fades the group to the colour
   // (in Prepare, the draft's group); a hold opens its editor (the stage doesn't change), as do Edit this colour and ＋ New colour.
