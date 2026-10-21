@@ -72,8 +72,8 @@ The first suggested palette was measured at about 4× the old screen's average b
 
 | Area | State |
 | --- | --- |
-| Operator page | The designer's restyle (20 Oct): tokens, top bar, running order, quick looks, Groups, bottom bar, colour picker, colour editor, effect editor and Individual lights done; the quick-look sheet, phone, font and icon follow |
-| Operator page on a phone (the remote) | Done: Order, Groups and Looks tabs; Master and the dock always visible; no saving or editing; side by side when the phone is on its side |
+| Operator page | The designer's restyle (20 Oct): tokens, top bar, running order, quick looks, Groups, bottom bar, colour picker, colour editor, effect editor, Individual lights and the phone done; the quick-look sheet, font and icon follow |
+| Operator page on a phone (the remote) | Done, in the restyle's look (the designer's phone artboard, 390 × 844): a 16 px-radius header ("On stage", the name, "● changed", the problem pill in short words), Order / Groups / Looks as a segmented control (44 px, blue tint when picked), one 18 px-radius panel for the tab, and a footer panel with Master on one line (label, 44 px slider, level) over Undo · Basic lights · Next · Blackout (52 px). Page text only the phone shows has the class `phone-only`, text it leaves out `not-phone` (or `hold-hint` for ", hold to edit"). No saving or editing; side by side when the phone is on its side |
 | Settings | Done: glass panels in a two-column bento grid on wide screens (DMX output, Show and Compare span both), tinted segmented choices and switches (Send DMX on is green), flat fields, status pills, glass top bar and save bar |
 | Patch | Done: the fixture table has no cell borders, faint row dividers and flat fields; group cards are flat glass tiles with pill chips and turn blue-tinted while one of their fields has focus; the DMX map, universe tabs, library list and Open Fixture Library search use the same glass and tinted states. Fixture blocks keep their own per-type colours and the red overlap striping; the stage plan keeps its grid and marks inside a glass frame |
 
