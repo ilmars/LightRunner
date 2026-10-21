@@ -1385,13 +1385,70 @@ function stripColour(stops, p) {
 
 const pickerRow = () => detailRows.find((r) => r.group.id === picker.group);
 
+/** Holding a colour or an effect in the picker this long opens its editor; a tap still puts it on stage. */
+const EDIT_HOLD = 500;
+/** Moving further than this (px) before then is a swipe (the picker scrolls), not a hold. */
+const EDIT_SLOP = 8;
+// The hold under way: its pointer, where it started and its timer; `quietUntil`: the clicks that end a hold are not taps.
+const editHold = { pointer: null, x: 0, y: 0, timer: 0, fired: false, quietUntil: 0 };
+
+function endEditHold() {
+  clearTimeout(editHold.timer);
+  editHold.timer = 0;
+  editHold.pointer = null;
+}
+
+/**
+ * Makes a picker tile open its editor when held (EDIT_HOLD), without changing the stage. The click that ends the hold
+ * is swallowed, so the tile's tap (fade to it, run it) doesn't also go. Not on the phone (no editing there).
+ */
+function holdToEdit(b, open) {
+  b.classList.add('movable');
+  b.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0 || document.body.classList.contains('phone')) return;
+    endEditHold();
+    editHold.pointer = ev.pointerId;
+    editHold.x = ev.clientX;
+    editHold.y = ev.clientY;
+    editHold.fired = false;
+    editHold.timer = setTimeout(() => {
+      editHold.timer = 0;
+      editHold.fired = true;
+      // Until the finger lifts (and a moment after), clicks are the hold's, not taps.
+      editHold.quietUntil = Infinity;
+      open();
+    }, EDIT_HOLD);
+  });
+  // A long press on a touch screen must not open the page's own menu.
+  b.addEventListener('contextmenu', (ev) => { if (editHold.pointer !== null || editHold.fired) ev.preventDefault(); });
+}
+
+window.addEventListener('pointermove', (ev) => {
+  if (ev.pointerId !== editHold.pointer || !editHold.timer) return;
+  if (Math.hypot(ev.clientX - editHold.x, ev.clientY - editHold.y) > EDIT_SLOP) endEditHold();
+});
+const liftEditHold = (ev) => {
+  if (ev.pointerId !== editHold.pointer) return;
+  if (editHold.fired) editHold.quietUntil = performance.now() + 400;
+  editHold.fired = false;
+  endEditHold();
+};
+window.addEventListener('pointerup', liftEditHold);
+window.addEventListener('pointercancel', liftEditHold);
+window.addEventListener('click', (ev) => {
+  if (performance.now() >= editHold.quietUntil) return;
+  editHold.quietUntil = 0;
+  ev.stopPropagation();
+  ev.preventDefault();
+}, true);
+
 function buildPickerGrid() {
   const row = pickerRow();
   if (!row) return;
   const grid = $('pGrid');
   grid.replaceChildren();
   // The Colours tab lists colours only; effects have their own tab. A tap fades the group to the colour
-  // (in Prepare, the draft's group); the editors open from Edit this colour and ＋ New colour.
+  // (in Prepare, the draft's group); a hold opens its editor (the stage doesn't change), as do Edit this colour and ＋ New colour.
   for (const p of row.group.presets.filter((x) => !x.effect)) {
     const b = el('button', 'pc');
     b.dataset.preset = p.id;
@@ -1401,6 +1458,7 @@ function buildPickerGrid() {
     else sw.style.background = shown(p.swatch) ?? NEUTRAL;
     b.append(sw, el('span', null, p.name));
     b.addEventListener('click', () => sendStage({ type: 'groupPreset', group: row.group.id, preset: p.id }));
+    holdToEdit(b, () => openColourEditor(p));
     grid.append(b);
   }
   // ＋ New colour: always the last tile.
@@ -1436,7 +1494,7 @@ function buildEffectGrid(group) {
       : 'No group here is a line of lights, so every group takes colours only.';
     return;
   }
-  $('fxLab').textContent = `Effects · tap to run on ${group.name}`;
+  $('fxLab').textContent = `Effects · tap to run on ${group.name}, hold to edit`;
   for (const p of group.presets.filter((x) => x.effect)) {
     const b = el('button', 'pc fx');
     b.dataset.preset = p.id;
@@ -1444,8 +1502,9 @@ function buildEffectGrid(group) {
     sw.style.setProperty('--g', effectGradient(p.effect, true));
     b.append(sw, el('span', null, p.name));
     b.classList.toggle('editing', effectEdit?.id === p.id);
-    // On stage, or in the draft in Prepare; All settings (on the running effect's card) opens its editor.
+    // On stage, or in the draft in Prepare; a hold (or All settings, on the running effect's card) opens its editor.
     b.addEventListener('click', () => sendStage({ type: 'groupPreset', group: group.id, preset: p.id }));
+    holdToEdit(b, () => openEffectEditor(p));
     grid.append(b);
   }
   const add = el('button', 'pc newfx', '＋ New effect');
