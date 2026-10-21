@@ -1206,6 +1206,13 @@ test('the effects list: add, edit, rename and delete over the wire, and the layo
   assert.equal(await t.send({ type: 'editEffect', preset: added.id, effect: liveWave({ waves: 1 }) }), null);
   await waitFor(() => t.layout().groups.find((g: any) => g.id === 'back-wall').presets.find((p: any) => p.id === added.id).effect.waves === 1, 2000, 'the edit');
   assert.equal(await t.send({ type: 'editEffect', preset: 'back-amber', effect: liveWave() }), 'that is not an effect');
+  // A new name and new settings in one command are one Undo step; a refused name refuses the settings too.
+  const effectOf = () => t.layout().groups.find((g: any) => g.id === 'back-wall').presets.find((p: any) => p.id === added.id);
+  assert.equal(await t.send({ type: 'editEffect', preset: added.id, effect: liveWave({ waves: 3 }), name: 'Three rolls' }), null);
+  await waitFor(() => effectOf().name === 'Three rolls' && effectOf().effect.waves === 3, 2000, 'the name and settings together');
+  assert.equal(await t.send({ type: 'editEffect', preset: added.id, effect: liveWave({ waves: 2 }), name: ' ' }), 'a name is needed');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  await waitFor(() => effectOf().name === 'Rolling' && effectOf().effect.waves === 1, 2000, 'one Undo step takes both back');
   assert.equal(await t.send({ type: 'editColour', preset: added.id, name: 'Slow roll', sameName: false }), null);
   // On stage it stays.
   assert.equal(await t.send({ type: 'groupPreset', group: 'back-wall', preset: added.id, fade: 0 }), null);

@@ -143,8 +143,8 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('deleteColour'), preset: id }),
   /** A new effect in a group's effects list; an empty name becomes "Effect N". */
   z.object({ type: z.literal('addEffect'), group: id, name: z.string(), effect: LiveEffectLayer }),
-  /** New settings for an effect in a group's list (its name is changed with editColour). */
-  z.object({ type: z.literal('editEffect'), preset: id, effect: LiveEffectLayer }),
+  /** New settings for an effect in a group's list, with a new name when given (one Undo step); a name alone can go with editColour. */
+  z.object({ type: z.literal('editEffect'), preset: id, effect: LiveEffectLayer, name: z.string().optional() }),
   // Blind, from a tablet's WebSocket only: the server keeps that tablet a draft copy of the stage.
   /** Make a fresh draft of the stage as it is now (again, if one is running). */
   z.object({ type: z.literal('blindStart') }),

@@ -148,7 +148,6 @@ function setConnected(on) {
   }
   if (!on && pendingEdit !== null) {
     pendingEdit = null;
-    pendingEditNext = [];
     $('feSave').disabled = false;
     $('feCopy').disabled = false;
     renderEditor();
@@ -2169,9 +2168,8 @@ let colourEdit = null;
 let deleteArmed = 0;
 // The ref of an edit or delete the server hasn't answered yet.
 let pendingEdit = null;
-// What to say when the answer is yes, and the commands still to send after it (an effect's name, then its settings).
+// What to say when the answer is yes.
 let pendingEditToast = 'Colour saved';
-let pendingEditNext = [];
 /** The effect the editor is open on: { id (null for a new one), name, effect, original, choices }. */
 let effectEdit = null;
 /** The editor's moving strip (see startEffectStrip). */
@@ -2591,8 +2589,7 @@ $('ceSave').addEventListener('click', () => {
     const cmd = { type: 'addColour', group: group.id, colour: colourEdit.hex ?? '#000000', ...editLevels(), name, allGroups: colourEdit.all, fade: colourEdit.fade };
     if (colourEdit.level !== null && colourEdit.level < 1) cmd.level = editLevel();
     pendingEditToast = 'Added to colours';
-    pendingEditNext = [];
-    pendingEdit = send(cmd);
+      pendingEdit = send(cmd);
     renderEditor();
     return;
   }
@@ -2618,7 +2615,6 @@ $('ceSave').addEventListener('click', () => {
     return;
   }
   pendingEditToast = 'Colour saved';
-  pendingEditNext = [];
   pendingEdit = send(cmd);
   renderEditor();
 });
@@ -2633,25 +2629,17 @@ $('ceDelete').addEventListener('click', () => {
     return;
   }
   pendingEditToast = 'Colour deleted';
-  pendingEditNext = [];
   pendingEdit = send({ type: 'deleteColour', preset: colourEdit.id });
   disarmDelete();
   renderEditor();
 });
 
-/** The server's answer to a Save or Delete in either editor: the next command if one is waiting, else done. */
+/** The server's answer to a Save or Delete in either editor: done (back to the picker), or kept open to fix. */
 function finishEdit(error) {
   pendingEdit = null;
-  let failed = !!error;
-  if (!failed && pendingEditNext.length) {
-    pendingEdit = send(pendingEditNext.shift());
-    if (pendingEdit !== null) return;
-    failed = true;
-  }
-  pendingEditNext = [];
   $('feSave').disabled = false;
   $('feCopy').disabled = false;
-  if (!failed) {
+  if (!error) {
     closeEditor();
     toast(pendingEditToast, true);
   } else {
@@ -2740,7 +2728,6 @@ function openEffectEditor(preset, from = null) {
   const effect = opened ?? newEffectLayer(choices);
   effectEdit = { id: preset?.id ?? null, name: preset?.name ?? '', effect, original: effectSig(saved ?? effect), choices };
   pendingEdit = null;
-  pendingEditNext = [];
   disarmDelete();
   fineOpen = false;
   feTray = null;
@@ -3336,31 +3323,32 @@ $('feName').addEventListener('keydown', (ev) => {
 });
 $('feName').addEventListener('input', disarmDelete);
 
-/** Sends the commands one after the other: the next goes when the server has said yes to the one before. */
-function sendEffectEdit(cmds, doneText) {
+/** Sends the editor's one command; `doneText` is the toast when the server says yes. */
+function sendEffectEdit(cmd, doneText) {
   pendingEditToast = doneText;
-  pendingEditNext = cmds.slice(1);
-  pendingEdit = send(cmds[0]);
+  pendingEdit = send(cmd);
   $('feSave').disabled = $('feCopy').disabled = pendingEdit !== null;
 }
 
-// A plain tap. Only what changed is sent (the name, then the settings); the editor closes when the server says yes.
+// A plain tap. Only what changed is sent, in one command; the editor closes when the server says yes.
 $('feSave').addEventListener('click', () => {
   if (!effectEdit || pendingEdit !== null) return;
   const name = $('feName').value;
   const effect = liveLayer(effectEdit.effect);
   if (effectEdit.id === null) {
-    sendEffectEdit([{ type: 'addEffect', group: picker.group, name, effect }], 'Effect added');
+    sendEffectEdit({ type: 'addEffect', group: picker.group, name, effect }, 'Effect added');
     return;
   }
-  const cmds = [];
-  if (name.trim() !== effectEdit.name) cmds.push({ type: 'editColour', preset: effectEdit.id, name, sameName: false });
-  if (effectSig(effect) !== effectEdit.original) cmds.push({ type: 'editEffect', preset: effectEdit.id, effect });
-  if (!cmds.length) {
+  // One command, so one Undo step: new settings (with the new name, when there is one), or a new name alone.
+  const renamed = name.trim() !== effectEdit.name;
+  let cmd = null;
+  if (effectSig(effect) !== effectEdit.original) cmd = { type: 'editEffect', preset: effectEdit.id, effect, ...(renamed ? { name } : {}) };
+  else if (renamed) cmd = { type: 'editColour', preset: effectEdit.id, name, sameName: false };
+  if (!cmd) {
     closeEditor();
     return;
   }
-  sendEffectEdit(cmds, 'Effect saved');
+  sendEffectEdit(cmd, 'Effect saved');
 });
 
 // Save as a copy: a new effect with these settings; the original stays as it was. Under the same name it becomes "… copy".
@@ -3369,7 +3357,7 @@ $('feCopy').addEventListener('click', () => {
   let name = $('feName').value.trim();
   if (name === effectEdit.name) name = `${name} copy`;
   showEffectMenu(false);
-  sendEffectEdit([{ type: 'addEffect', group: picker.group, name, effect: liveLayer(effectEdit.effect) }], 'Saved as a copy');
+  sendEffectEdit({ type: 'addEffect', group: picker.group, name, effect: liveLayer(effectEdit.effect) }, 'Saved as a copy');
 });
 
 // First tap arms it ("Tap again to delete"), the second one deletes. A song or quick look that uses it refuses, and the toast names them.
@@ -3382,7 +3370,6 @@ $('feDelete').addEventListener('click', () => {
     return;
   }
   pendingEditToast = 'Effect deleted';
-  pendingEditNext = [];
   pendingEdit = send({ type: 'deleteColour', preset: effectEdit.id });
   disarmDelete();
   showEffectMenu(false);

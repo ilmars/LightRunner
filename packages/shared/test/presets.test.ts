@@ -574,6 +574,23 @@ test('an effect\'s settings are edited in place; a colour is not an effect', () 
   assert.throws(() => editEffect(hidden, { preset: id, effect: hard }), { message: "that effect can't be edited" });
 });
 
+test("an effect's name and settings change together in one edit, or not at all", () => {
+  const s = ready();
+  const { show, id } = addEffect(s, { group: 'background', name: 'Wave', effect: fx() });
+  const hard = fx({ edge: 'hard' });
+  const both = editEffect(show, { preset: id, effect: hard, name: '  Hard wave ' });
+  assert.equal(preset(both, id).name, 'Hard wave');
+  assert.deepEqual(preset(both, id).layers, [hard]);
+  // A new name alone (the same settings) is a change too.
+  const renamed = editEffect(show, { preset: id, effect: fx(), name: 'Soft wave' });
+  assert.equal(preset(renamed, id).name, 'Soft wave');
+  assert.deepEqual(preset(renamed, id).layers, [fx()]);
+  assert.throws(() => editEffect(show, { preset: id, effect: fx(), name: 'Wave' }), { message: 'nothing changed' });
+  // A refused name refuses the settings with it.
+  assert.throws(() => editEffect(show, { preset: id, effect: hard, name: '   ' }), { message: 'a name is needed' });
+  assert.deepEqual(preset(show, id).layers, [fx()]);
+});
+
 test('an effect keeps its base colour through add, edit and the show file', () => {
   const s = ready();
   const base = { colour: { hex: '#ffb46b', white: 0.4 }, level: 0.5 };

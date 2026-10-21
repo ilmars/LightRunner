@@ -347,19 +347,23 @@ export function addEffect(show: Show, input: AddEffect): { show: Show; id: strin
 export interface EditEffect {
   preset: string;
   effect: EffectLayer;
+  /** A new name too, in the same edit (one Undo step). A name alone can also be changed with editColour, like a colour's. */
+  name?: string | undefined;
 }
 
-/** New settings for an effect in a group's list. Its name is changed with editColour, like a colour's. */
+/** New settings for an effect in a group's list, and a new name when given: all of it, or (refused) none of it. */
 export function editEffect(show: Show, input: EditEffect): Show {
   const out = structuredClone(show);
   const target = out.presets.find((p) => p.id === input.preset);
   if (!target) throw new Error('that effect is not in the list');
   if (!isEffectPreset(target)) throw new Error('that is not an effect');
   if (target.custom) throw new Error("that effect can't be edited");
-  const before = JSON.stringify([target.layers, target.swatch]);
+  const name = input.name === undefined ? undefined : cleanName(input.name);
+  const before = JSON.stringify([target.name, target.layers, target.swatch]);
+  if (name !== undefined) target.name = name;
   target.layers = [structuredClone(input.effect)];
   target.swatch = effectSwatch(out, input.effect);
-  if (JSON.stringify([target.layers, target.swatch]) === before) throw new Error('nothing changed');
+  if (JSON.stringify([target.name, target.layers, target.swatch]) === before) throw new Error('nothing changed');
   return out;
 }
 
