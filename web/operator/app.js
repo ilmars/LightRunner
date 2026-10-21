@@ -134,8 +134,6 @@ function connect() {
 function setConnected(on) {
   connected = on;
   $('banner').hidden = on;
-  $('link').classList.toggle('down', !on);
-  $('linkText').textContent = on ? 'Connected' : 'Offline';
   if (!on) {
     // The server puts a flash out when it loses us; show the same here.
     for (const h of flashHeld.values()) h.button.classList.remove('down');
@@ -283,26 +281,24 @@ function buildPlainRows(order) {
   editRows = [];
   order.forEach((item, k) => {
     const basic = isBasic(item);
-    const b = el('button', basic ? 'item fixed' : 'item');
+    const b = el('button', 'item');
     // One small dot per group (smoke machines left out), in group order: the colour this item
     // gives it, whites drawn as whites. Basic lights' groups without a saved colour run the built-in warm light.
     const strip = el('span', 'dots');
     for (const { colour: c, name } of stripBlocks(item.colours)) {
       const colour = c ?? (basic ? layout.basicSwatch : null);
-      const dot = el('i', colour ? null : 'unset');
-      if (colour) dot.style.background = shown(colour);
+      // A group the item leaves alone is a faint dot; one it turns off is a ring.
+      const dot = el('i', colour === '#000000' ? 'off' : colour ? null : 'unset');
+      if (colour && colour !== '#000000') dot.style.background = tint(colour, 0.85);
       dot.title = name;
       strip.append(dot);
     }
-    const mark = el('span', 'mark', 'changed');
-    mark.hidden = true;
-    // In Prepare: "preparing" on the draft's item, "on stage" on the real stage's.
+    // "● changed", "next" or "safe look"; in Prepare "preparing" on the draft's item, "on stage" on the real stage's.
     const tag = el('span', 'tag');
-    tag.hidden = true;
-    b.append(strip, el('span', 'name', item.name), mark, tag);
+    b.append(strip, el('span', 'name', item.name), tag);
     b.addEventListener('click', () => start(item));
     nodes.push(b);
-    orderRows.push({ item, button: b, mark, tag });
+    orderRows.push({ item, button: b, tag });
     if (basic && k < order.length - 1) nodes.push(el('div', 'sep'));
   });
   replaceRows(nodes);
@@ -543,7 +539,7 @@ function setEditing(on) {
   editing = on;
   confirmDelete = null;
   revealedId = null;
-  $('editBtn').textContent = on ? 'Done' : 'Edit';
+  $('editBtn').textContent = on ? 'Done' : 'Edit list';
   $('editBtn').classList.toggle('on', on);
   $('editBtn').setAttribute('aria-pressed', String(on));
   if (layout) {
@@ -558,11 +554,12 @@ $('editBtn').addEventListener('click', () => setEditing(!editing));
 // A running-order tap starts the item in the draft: that is the item being prepared. Save to it keeps the
 // draft in it; Go sends the draft to the lights. Master, Flash, Blackout, Next, Fade and smoke stay on the real stage.
 
-// The stage view's "Draft · <name>" label: its font and colour, read from the page when Prepare turns on.
+// The stage view's label ("Live", "Off", "Draft · <name>"): its font and colours, read from the page once.
 let pictureLabel = null;
 function readPictureLabel() {
   const style = getComputedStyle(document.body);
-  pictureLabel = { font: `600 10px ${style.fontFamily}`, colour: style.getPropertyValue('--prep-text').trim() || '#B0A6F5' };
+  const v = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
+  pictureLabel = { font: `600 10px ${style.fontFamily}`, prep: v('--ds-violet', '#B0A6F5'), off: v('--ds-danger-text', '#EC8286'), live: v('--ds-muted', '#97A4BA') };
 }
 
 /**
@@ -581,7 +578,6 @@ function setPrepare(on, tell = true) {
     if (r === null) return;
     prep.startRef = r;
     prep.starting = true;
-    readPictureLabel();
   } else {
     // Off before the server made the draft is fine too: a start still on its way then makes none.
     if (tell && connected) send({ type: 'blindEnd' });
@@ -687,6 +683,8 @@ $('next').addEventListener('click', () => {
 });
 // In Prepare, Undo takes back the draft's last change; otherwise the stage's.
 $('undo').addEventListener('click', () => sendStage({ type: 'undo' }));
+// Basic lights (safe): starts it on the stage; in Prepare it becomes the item being prepared, like a running-order tap.
+$('basicBtn').addEventListener('click', () => sendStage({ type: 'safe' }));
 
 // ---- Fade time for every look and preset change; shared by all devices ----
 
@@ -847,10 +845,62 @@ function lookName(id) {
   return layout.runningOrder.find((i) => i.id === id)?.name ?? layout.looks.find((l) => l.id === id)?.name ?? (id ? 'Deleted item' : '—');
 }
 
-/** The full explanation behind the short status label in the top bar. */
-let outputDetail = '';
-$('outputNote').addEventListener('click', () => toast(outputDetail, true));
+// ---- The problem pill: tap it for what is wrong, who to call and what still works ----
 
+const problemBox = $('problemBox');
+function showProblem(open) {
+  problemBox.hidden = !open;
+  $('outputNote').setAttribute('aria-expanded', String(open));
+}
+$('outputNote').addEventListener('click', () => showProblem(problemBox.hidden));
+$('problemOk').addEventListener('click', () => showProblem(false));
+document.addEventListener('pointerdown', (ev) => {
+  if (!problemBox.hidden && !problemBox.parentElement.contains(ev.target)) showProblem(false);
+}, true);
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && !problemBox.hidden) showProblem(false);
+});
+
+/** A sentence ends with a full stop. */
+const sentence = (text) => (/[.!?]$/.test(text) ? text : `${text}.`);
+
+/** What the pill and its explanation say: `{ pill, title, text }`, or null when nothing is wrong. */
+function problemWords(s) {
+  const notYou = 'It isn\'t something you did.';
+  if (s.output === 'off') {
+    return {
+      pill: 'Not sending to the lights',
+      title: 'The lights aren\'t getting any commands',
+      text: `Light Runner is working, but Send DMX is switched off in Settings (another desk, such as Lightkey, may have the lights), so the stage won't follow your taps. ${notYou}`,
+    };
+  }
+  if (s.output !== 'lost') return null;
+  if (s.outputProblemKind === 'other-desk') {
+    return {
+      pill: 'Another desk is sending',
+      title: 'Another desk is also sending to the lights',
+      text: `${sentence(s.outputProblem ?? 'Another desk is also sending')} The lights may follow it instead of your taps. ${notYou}`,
+    };
+  }
+  return {
+    pill: 'Lights not answering',
+    title: 'The lights aren\'t answering',
+    text: `${sentence(s.outputProblem ?? 'The lighting network box is not answering')} Light Runner keeps sending, but the stage may not follow your taps. ${notYou}`,
+  };
+}
+
+/** "Name · phone" from Settings > Who to call, or '' when nobody is set. */
+const contactText = () => [layout?.contact?.name, layout?.contact?.phone].filter(Boolean).join(' · ');
+
+/** A colour as a see-through tint (the stage colours are mixed down like this everywhere on the page). */
+function tint(hex, alpha) {
+  const c = shown(hex);
+  if (!/^#[0-9a-f]{6}$/i.test(c ?? '')) return c;
+  const n = parseInt(c.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+let lastBlackedOut = false;
 function render() {
   if (!state || !layout) return;
   const blackedOut = state.look === 'blackout';
@@ -862,8 +912,9 @@ function render() {
   const onStage = fading && from && from !== name ? `${from} → ${name}` : name;
   $('nowName').textContent = onStage;
   $('nowChanged').hidden = !state.lookChanged || blackedOut;
-  // In Prepare: what is being prepared (the draft's item), over what the real stage runs.
-  $('liveHead').hidden = prep.on;
+  // In Prepare: what is being prepared (the draft's item), over what the real stage runs. Blackout has its own head.
+  $('liveHead').hidden = prep.on || blackedOut;
+  $('blackHead').hidden = prep.on || !blackedOut;
   $('prepHead').hidden = !prep.on;
   if (prep.on) {
     const draft = shownState();
@@ -871,21 +922,21 @@ function render() {
     $('prepStage').textContent = `On stage: ${onStage}`;
   }
 
-  // Only the state that matters takes room. A problem with the lights replaces the quiet items.
-  const lost = state.output === 'lost';
-  const off = state.output === 'off';
+  // A problem with the lights: the amber pill (left out during Blackout, when the bar says the lights are off).
+  const problem = problemWords(state);
   const note = $('outputNote');
-  note.hidden = !(lost || off);
-  note.classList.toggle('problem', lost);
-  note.classList.toggle('off', off);
-  // A short label; the full explanation on hover (title) or tap (a message).
-  const otherDesk = lost && state.outputProblemKind === 'other-desk';
-  $('outputText').textContent = !lost ? 'DMX output inactive' : otherDesk ? 'Another desk is sending' : 'Lights not answering';
-  outputDetail = lost
-    ? state.outputProblem ?? 'Lights not answering. Check the lighting network box.'
-    : 'Light Runner is not sending to the lights (Lightkey has them). Turn Send DMX on in Settings.';
-  note.title = outputDetail;
-  $('quiet').hidden = lost || off;
+  note.hidden = !problem || (blackedOut && !prep.on);
+  if (note.hidden) showProblem(false);
+  if (problem) {
+    // While preparing the bar is busier: the pill just says there is a problem.
+    $('outputText').textContent = prep.on ? 'Problem' : problem.pill;
+    note.setAttribute('aria-label', `${problem.pill}: what it means`);
+    $('problemTitle').textContent = problem.title;
+    $('problemText').textContent = problem.text;
+    const who = contactText();
+    $('contactBox').hidden = !who;
+    $('contactText').textContent = who;
+  }
 
   $('fading').hidden = !fading;
   if (fading) {
@@ -897,7 +948,8 @@ function render() {
   const held = blackedOut ? [] : state.flashing ?? [];
   const flashing = held.filter((id) => !isSmoke(groupOf(id)));
   $('flashNote').hidden = !flashing.length;
-  $('flashNote').textContent = `Flash: ${flashing.map((id) => groupOf(id)?.name ?? id).join(', ')}`;
+  const allLights = lightGroups().every((g) => flashing.includes(g.id));
+  $('flashNote').textContent = `Flash: ${allLights ? 'all lights' : flashing.map((id) => groupOf(id)?.name ?? id).join(', ')}`;
   // A quiet readout while any smoke machine is running (the highest, if there are several).
   let smoke = 0;
   for (const g of layout.groups) {
@@ -905,39 +957,38 @@ function render() {
   }
   $('smokeNote').hidden = smoke <= 0;
   $('smokeNote').textContent = `Smoke: ${Math.round(smoke * 100)} %`;
-  const top = $('topBar');
-  top.classList.toggle('problem', lost);
-  top.classList.toggle('off', off);
-  top.classList.toggle('flash', flashing.length > 0 && !lost && !off);
   // Blackout is the most important state on the page: the whole bar says so.
-  top.classList.toggle('blackout', blackedOut);
+  $('topBar').classList.toggle('blackout', blackedOut);
 
   renderTempo();
   const fade = state.fadeTime ?? null;
   $('fadeValue').textContent = fade === null ? 'Auto' : fade === 0 ? 'Instant' : `${fade} s`;
-  $('fadeButton').classList.toggle('fixed', fade !== null);
   for (const b of fadeMenu.querySelectorAll('button')) {
     const v = b.dataset.fade === 'auto' ? null : Number(b.dataset.fade);
     b.classList.toggle('on', v === fade);
     b.setAttribute('aria-checked', String(v === fade));
   }
 
-  // Running order: the item on stage is marked, and "changed" while it has live changes.
-  // In Prepare the draft's item is the violet "preparing" one, and the item on the real stage
-  // (when it is another) keeps a dashed outline with "on stage".
+  // Running order: the item on stage is blue, with "● changed" while it has live changes; "next" on the item Next
+  // starts; "safe look" on Basic lights otherwise. In Prepare the draft's item is the violet "preparing" one, and the
+  // item on the real stage (when it is another) keeps a dashed outline with "on stage".
   const shownStage = shownState();
   const on = stageIndex(shownStage);
   const live = prep.on ? stageIndex(state) : -1;
+  const next = nextItem();
   orderRows.forEach((row, k) => {
     const active = k === on;
     const staged = k === live && !active;
-    row.button.classList.toggle('on', active && !prep.on);
+    row.button.classList.toggle('on', active && !prep.on && !blackedOut);
     row.button.classList.toggle('prep', active && prep.on);
     row.button.classList.toggle('live', staged);
     row.button.setAttribute('aria-current', active ? 'true' : 'false');
-    row.mark.hidden = !(active && !prep.on && shownStage.lookChanged);
-    row.tag.hidden = !(prep.on && (active || staged));
-    row.tag.textContent = active ? 'preparing' : 'on stage';
+    const changed = active && !prep.on && !blackedOut && shownStage.lookChanged;
+    const isNext = !editing && !prep.on && !active && !!next && row.item.id === next.id;
+    const tag = active && prep.on ? 'preparing' : staged ? 'on stage' : changed ? '● changed' : isNext ? 'next' : isBasic(row.item) && !active ? 'safe look' : '';
+    row.tag.textContent = tag;
+    row.tag.hidden = !tag;
+    row.tag.classList.toggle('changed-tag', changed);
   });
   // Keep what is on stage (in Prepare, what is being prepared) in view when it changes (and when editing ends).
   const onId = on >= 0 ? layout.runningOrder[on].id : null;
@@ -946,13 +997,16 @@ function render() {
     if (onId) reveal(orderRows[on].button);
   }
 
-  // Bottom bar (and a quiet "next" mark on the item Next will start; not in Prepare, where the tags say enough).
-  const next = nextItem();
-  orderRows.forEach((row) => row.button.classList.toggle('is-next', !editing && !prep.on && !!next && row.item.id === next.id));
+  // Bottom bar.
   $('nextName').textContent = next ? next.name : 'End of list';
   $('next').disabled = !next || editing;
   $('undo').disabled = !shownStage.canUndo;
   $('blackout').classList.toggle('on', blackedOut);
+  // Blackout's stage view says "Off".
+  if (blackedOut !== lastBlackedOut) {
+    lastBlackedOut = blackedOut;
+    drawStage();
+  }
   if (!master.dragging) master.set(state.master);
 
   renderDetails();
@@ -972,7 +1026,7 @@ const master = (() => {
     dragging: false, v: 1,
     set(v) {
       m.v = Math.min(1, Math.max(0, v));
-      const pct = `${Math.round(m.v * 100)}%`;
+      const pct = `${Math.round(m.v * 100)} %`;
       $('masterValue').textContent = pct;
       box.classList.toggle('dimmed', m.v < 0.995);
       $('masterFill').style.width = `${m.v * 100}%`;
@@ -1165,16 +1219,23 @@ function buildDetails() {
       const puff = el('button', 'puff', 'Puff');
       puff.setAttribute('aria-label', `Puff ${group.name} (hold)`);
       wireHold(puff, [group.id]);
-      box.append(el('span', 'g', group.name), el('span', 'smoke-tag', 'Smoke'), pct, puff, dim);
+      const cell = el('span', 'smoke-cell');
+      cell.append(el('span', 'smoke-tag', 'Smoke'), puff);
+      box.append(el('span', 'g', group.name), cell, dim, pct);
     } else {
       const sw = el('i');
       const chipName = el('span');
       const chip = el('button', 'chip');
-      chip.append(sw, chipName);
-      chip.setAttribute('aria-label', `${group.name}: choose colour`);
+      const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      chevron.setAttribute('width', '14');
+      chevron.setAttribute('height', '14');
+      chevron.setAttribute('viewBox', '0 0 24 24');
+      chevron.setAttribute('aria-hidden', 'true');
+      chevron.innerHTML = '<path d="M9 6l6 6-6 6" fill="none" stroke="#97A4BA" stroke-width="2"/>';
+      chip.append(sw, chipName, chevron);
       chip.addEventListener('click', () => openPicker(group.id));
       Object.assign(row, { chip, sw, chipName });
-      box.append(el('span', 'g', group.name), chip, pct, dim);
+      box.append(el('span', 'g', group.name), chip, dim, pct);
     }
     root.append(box);
     detailRows.push(row);
@@ -1233,19 +1294,15 @@ function wireDimmer(row) {
 function renderDetails() {
   // The item on stage (in Prepare, the one being prepared: Save keeps the draft in it).
   const item = stageItem();
-  if (prep.on) {
-    $('dTitle').textContent = 'Groups';
-    $('dSub').textContent = `${item ? item.name : lookName(shownState().look)} · draft`;
-  } else {
-    $('dTitle').textContent = item ? item.name : shownState().look === 'blackout' ? 'Blackout' : 'Details';
-  }
-  $('dSub').hidden = !prep.on;
+  $('dSub').textContent = prep.on ? `${item ? item.name : lookName(shownState().look)} · draft` : 'drag to dim';
   // Without an item on stage there is nothing to save into or go back to.
-  $('backBtn').hidden = !item || !shownState().lookChanged;
+  const changed = !!item && shownState().lookChanged;
+  $('backBtn').hidden = !changed;
   $('saveBtn').hidden = !item;
+  $('saveBtn').classList.toggle('dirty', changed && !prep.on);
   if (item) {
-    $('backBtn').textContent = `Back to ${item.name}`;
-    $('saveBtn').querySelector('.label').replaceChildren(`Save to ${item.name} `, el('small', null, 'hold'));
+    $('backBtn').setAttribute('aria-label', `Back to ${item.name} as saved`);
+    $('saveBtn').querySelector('.label').replaceChildren(el('span', null, `Save to ${item.name}`), el('small', null, 'hold'));
   }
   const now = performance.now();
   for (const row of detailRows) {
@@ -1257,8 +1314,12 @@ function renderDetails() {
     }
     const s = groupStatus(row.group);
     const info = presetInfo(row.group, s);
-    row.sw.style.background = swatchFill(info);
+    // Off is a ring; a colour or an effect a soft disc.
+    const off = !info.effect && (!info.colour || info.colour === '#000000');
+    row.sw.classList.toggle('off', off);
+    row.sw.style.background = off ? 'transparent' : info.effect ? swatchFill(info) : tint(info.colour, 0.85);
     row.chipName.textContent = info.name;
+    row.chip.setAttribute('aria-label', `${row.group.name} colour: ${info.name}. Change colour`);
     // The slider carries a little of the group's colour.
     row.dim.style.setProperty('--c', info.colour && info.colour !== '#000000' ? shown(info.colour) : '#5a6478');
     if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
@@ -3112,8 +3173,9 @@ function buildQuick() {
     // A thin strip along the bottom: one block per group, the colour this quick look gives it.
     const strip = el('span', 'qstrip');
     for (const { colour, name } of stripBlocks(q.colours)) {
-      const block = el('i');
-      if (colour) block.style.background = shown(colour);
+      // Faint for a group the quick look leaves alone, grey for one it turns off.
+      const block = el('i', colour === '#000000' ? 'off' : null);
+      if (colour && colour !== '#000000') block.style.background = tint(colour, 0.8);
       block.title = name;
       strip.append(block);
     }
@@ -3134,7 +3196,8 @@ function buildQuick() {
     grid.append(b);
   });
   if (!mine.length) grid.append(el('span', 'qnone', 'None yet.'));
-  const add = el('button', 'ql newq', '＋ Save stage as quick look');
+  const add = el('button', 'ql newq');
+  add.append('＋ Save stage', el('br'), 'as a look');
   add.addEventListener('click', () => openSheet());
   grid.append(add);
 }
@@ -3143,7 +3206,7 @@ function buildQuick() {
 function setQuickEditing(on) {
   if (on === quickEditing) return;
   quickEditing = on;
-  $('qEditBtn').textContent = on ? 'Done' : 'Edit';
+  $('qEditBtn').textContent = on ? 'Done' : 'Edit looks';
   $('qEditBtn').classList.toggle('on', on);
   $('qEditBtn').setAttribute('aria-pressed', String(on));
   if (!on && qs.look) closeSheet();
@@ -3491,7 +3554,7 @@ function wireHold(b, groups) {
 function buildFlash() {
   flashAllOff();
   const root = $('flashArea');
-  root.replaceChildren(el('span', 'flash-label', 'Flash'));
+  root.replaceChildren(el('span', 'flash-label ds-caps', 'Flash'));
   // Smoke machines have Puff in the details instead, and "All" never includes them.
   const lights = lightGroups();
   const labels = flashLabels(lights);
@@ -3589,19 +3652,20 @@ function drawStage() {
     ctx.strokeStyle = '#3a3f48';
     ctx.stroke();
   }
-  if (prep.on && pictureLabel) {
-    // "Draft · <name>" in small violet capitals at the bottom right, so the picture can't be mistaken for the real stage.
-    const draft = shownState();
-    const text = `Draft · ${draft?.look ? lookName(draft.look) : '—'}`.toUpperCase();
-    ctx.font = pictureLabel.font;
-    if ('letterSpacing' in ctx) ctx.letterSpacing = '0.9px';
-    ctx.fillStyle = pictureLabel.colour;
-    ctx.textBaseline = 'bottom';
-    ctx.textAlign = 'right';
-    ctx.fillText(text, w - 8, h - 6, w - 16);
-    ctx.textAlign = 'start';
-    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
-  }
+  // A small label at the bottom right, so the picture can't be mistaken for something else: "Live", "Off" during
+  // Blackout, or in violet "Draft · <name>" while preparing.
+  if (!pictureLabel) readPictureLabel();
+  const draft = prep.on ? shownState() : null;
+  const off = !prep.on && state?.look === 'blackout';
+  const text = (prep.on ? `Draft · ${draft?.look ? lookName(draft.look) : '—'}` : off ? 'Off' : 'Live').toUpperCase();
+  ctx.font = pictureLabel.font;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0.9px';
+  ctx.fillStyle = prep.on ? pictureLabel.prep : off ? pictureLabel.off : pictureLabel.live;
+  ctx.textBaseline = 'bottom';
+  ctx.textAlign = 'right';
+  ctx.fillText(text, w - 8, h - 6, w - 16);
+  ctx.textAlign = 'start';
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 }
 
 window.addEventListener('resize', drawStage);

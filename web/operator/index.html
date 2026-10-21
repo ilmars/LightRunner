@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="theme-color" content="#0F1626">
+  <meta name="theme-color" content="#090F1C">
   <title>Light Runner</title>
   <link rel="stylesheet" href="/shared/theme.css">
   <link rel="stylesheet" href="style.css">
@@ -14,26 +14,48 @@
 <body>
   <div id="banner" class="banner" hidden>Connection lost. Lights keep running. Reconnecting…</div>
 
-  <!-- Top bar: what is on stage, then only the state that matters right now. -->
+  <!-- Top bar: what is on stage (or being prepared, or Blackout), a problem pill when something is wrong, then Fade, Tempo, Tap, Live / Prepare, Go, the clock and Settings. -->
   <header id="topBar" class="topbar">
-    <span class="now">
-      <span id="liveHead" class="live-head">
-        <span id="nowName" class="now-name">—</span>
-        <span id="nowChanged" class="changed" hidden>changed</span>
-      </span>
+    <div class="now">
+      <div id="liveHead" class="head">
+        <span class="ds-caps">On stage</span>
+        <span class="head-line"><span id="nowName" class="head-name">—</span><span id="nowChanged" class="changed" hidden>● changed</span></span>
+      </div>
       <!-- Prepare only: what is being prepared, over what the real stage runs. -->
-      <span id="prepHead" class="prep-head" hidden>
-        <span class="prep-label">Preparing · the lights don't change</span>
-        <span class="prep-line"><span id="prepName" class="prep-name"></span><span id="prepStage" class="prep-stage"></span></span>
+      <div id="prepHead" class="head prep-head" hidden>
+        <span class="ds-caps prep-label">Preparing · the lights don't change</span>
+        <span class="head-line"><span id="prepName" class="head-name"></span><span id="prepStage" class="head-note"></span></span>
+      </div>
+      <div id="blackHead" class="head black-head" hidden>
+        <span class="ds-caps black-label">Blackout</span>
+        <span class="head-line"><span class="head-name">Lights are off</span><span class="head-note">Tap a song or Basic lights to bring them back</span></span>
+      </div>
+      <!-- Quiet notes about the real stage: a fade running, a Flash held, smoke running. -->
+      <span id="notes" class="notes">
+        <span id="fading" class="q" hidden>fading<span class="fade-bar"><span id="fadeFill"></span></span><b id="fadeLeft"></b></span>
+        <span id="flashNote" class="q" hidden></span>
+        <span id="smokeNote" class="q" hidden></span>
       </span>
-    </span>
+    </div>
+    <!-- Only when something is wrong with the lights: tap for what it means and who to call. -->
+    <div class="problem">
+      <button id="outputNote" class="problem-pill" type="button" aria-expanded="false" aria-controls="problemBox" hidden>● <span id="outputText"></span></button>
+      <div id="problemBox" class="problem-box" role="dialog" aria-labelledby="problemTitle" hidden>
+        <span id="problemTitle" class="pb-title"></span>
+        <span id="problemText" class="pb-text"></span>
+        <div id="contactBox" class="pb-contact" hidden>
+          <span class="ds-caps">Who to call</span>
+          <span id="contactText" class="pb-contact-text"></span>
+        </div>
+        <span class="pb-note">The stage view keeps showing what the lights would do, so you can carry on with the running order.</span>
+        <div class="pb-foot"><button id="problemOk" class="pb-ok" type="button">Got it</button></div>
+      </div>
+    </div>
+    <span class="grow"></span>
     <span id="quiet" class="quiet">
-      <span id="fading" class="q" hidden>fading<span class="fade-bar"><span id="fadeFill"></span></span><b id="fadeLeft"></b></span>
-      <span id="flashNote" class="q flash-note" hidden></span>
       <div class="fadepick">
         <button id="fadeButton" class="fade-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="fadeMenu">
-          Fade <b id="fadeValue">Auto</b>
-          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+          <span class="lv-label">Fade</span><b id="fadeValue">Auto</b>
         </button>
         <div id="fadeMenu" class="fade-menu" role="menu" hidden>
           <button role="menuitemradio" data-fade="auto">Auto <small>each look's own</small></button>
@@ -44,12 +66,11 @@
           <button role="menuitemradio" data-fade="10">10 s</button>
         </div>
       </div>
-      <!-- Tempo: a quiet readout that opens a few steps, and a Tap button. On the phone this moves to the top of Groups. -->
+      <!-- Tempo: a readout that opens a few steps, and a Tap button. On the phone this moves to the top of Groups. -->
       <div id="tempoCtl" class="tempo">
         <div class="fadepick">
           <button id="tempoButton" class="fade-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="tempoMenu" title="Beats per minute">
-            Tempo <b id="tempoValue">120</b>
-            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+            <span class="lv-label">Tempo</span><b><span id="tempoValue">120</span> bpm</b>
           </button>
           <div id="tempoMenu" class="fade-menu tempo-menu" role="menu" hidden>
             <button role="menuitem" data-step="double" aria-label="Double the tempo">×2</button>
@@ -60,11 +81,7 @@
         </div>
         <button id="tapBtn" class="tap-btn" type="button" title="Tap along with the band">Tap</button>
       </div>
-      <span class="q link" id="link"><span class="dot"></span><span id="linkText">Connecting</span></span>
     </span>
-    <!-- Outside the quiet items: the DMX box holds its last frame, so smoke can still be running during a problem. -->
-    <span id="smokeNote" class="q" hidden></span>
-    <button id="outputNote" class="output-note" type="button" hidden><span class="dot"></span><span id="outputText"></span><span class="info" aria-hidden="true">ⓘ</span></button>
     <!-- Live / Prepare: Prepare works on a draft of the stage for this tablet; Live throws the draft away. -->
     <div id="modeSwitch" class="mode-seg" role="group" aria-label="Live or Prepare">
       <button id="liveBtn" type="button" aria-pressed="true" title="Work on the lights">Live</button>
@@ -74,7 +91,7 @@
     <button id="goBtn" class="go-btn" type="button" hidden title="Send what you prepared to the lights">Go ▸</button>
     <span class="clock" id="clock"></span>
     <a class="gear" href="/settings/" aria-label="Settings" title="Settings (PIN)">
-      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.3 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.3-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
     </a>
   </header>
 
@@ -87,11 +104,13 @@
 
   <!-- Left column: the stage view (a picture of the lights; the draft while preparing), then the running order. -->
   <aside class="left">
-    <canvas id="stage" class="stage" aria-label="Stage view"></canvas>
+    <section class="stage-box" aria-label="Stage view">
+      <canvas id="stage" class="stage"></canvas>
+    </section>
     <nav class="order" aria-label="Running order">
       <div id="orderHead" class="order-head">
-        <span class="order-title">Running order</span>
-        <button id="editBtn" class="ebtn" aria-pressed="false">Edit</button>
+        <span class="order-title">Running Order</span>
+        <button id="editBtn" class="ebtn" aria-pressed="false">Edit list</button>
       </div>
       <div id="runningOrder" class="order-list"></div>
       <div id="orderFoot" class="order-foot">
@@ -102,29 +121,29 @@
 
   <!-- Right column. -->
   <main class="right">
-    <!-- Quick looks: three tabs and a grid; the last tile opens the "new quick look" sheet over the details. -->
+    <!-- Quick looks: three tabs and a grid; the last tile opens the "new quick look" sheet over the groups. -->
     <section id="quickLooks" class="block quick-looks" aria-label="Quick looks">
       <div class="qhead">
-      <span class="sec-title">Quick looks</span>
-      <div class="qright">
+        <span class="sec-title">Quick Looks</span>
+        <span class="sec-sub">change only the groups they set</span>
+        <span class="grow"></span>
         <div class="qtabs" role="tablist" aria-label="Quick look tabs">
           <button class="tab on" data-qt="plain" role="tab" aria-selected="true">Plain</button>
           <button class="tab" data-qt="colours" role="tab" aria-selected="false">Colours</button>
           <button class="tab" data-qt="effects" role="tab" aria-selected="false">Effects</button>
         </div>
-        <button id="qEditBtn" class="ebtn" aria-pressed="false">Edit</button>
-      </div>
+        <button id="qEditBtn" class="ebtn" aria-pressed="false">Edit looks</button>
       </div>
       <div id="qGrid" class="qgrid"></div>
     </section>
-    <!-- Details: the item on stage with Back / Save, one row per group, and the colour picker over the top. -->
-    <section id="details" class="block details" aria-label="Details">
+    <!-- Groups: Back to saved and Save (hold) for the item on stage, one row per group, and the colour picker over the top. -->
+    <section id="details" class="block details" aria-label="Groups">
       <div class="dhead">
-        <h2 id="dTitle">Details</h2>
-        <!-- Prepare only: "<item> · draft". -->
-        <span id="dSub" class="dsub" hidden></span>
-        <button id="backBtn" class="ghost" hidden>Back</button>
-        <button id="saveBtn" class="save" hidden><span class="fill"></span><span class="label">Save <small>hold</small></span></button>
+        <h2 id="dTitle">Groups</h2>
+        <!-- "drag to dim"; in Prepare "<item> · draft". -->
+        <span id="dSub" class="dsub">drag to dim</span>
+        <button id="backBtn" class="hbtn" hidden>Back to saved</button>
+        <button id="saveBtn" class="save" hidden><span class="fill"></span><span class="label"></span></button>
       </div>
       <div id="groupRows" class="rows"></div>
       <div id="picker" class="picker" hidden>
@@ -281,26 +300,29 @@
     </section>
   </main>
 
-  <!-- Bottom bar. -->
+  <!-- Bottom bar: Master, Flash, Undo, Basic lights, Next and Blackout. -->
   <footer class="bottom">
     <div id="masterFader" class="master" aria-label="Master">
-      <div class="master-label"><span>Master</span><b id="masterValue">100%</b></div>
+      <div class="master-label"><span class="ds-caps">Master</span><b id="masterValue">100 %</b></div>
       <div id="masterTrack" class="master-track" role="slider" aria-label="Master" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" tabindex="0">
         <div id="masterFill" class="master-fill"></div>
         <div id="masterHandle" class="master-handle"></div>
       </div>
     </div>
+    <span class="bdiv" aria-hidden="true"></span>
     <!-- Flash: hold a button and the group goes to full white; let go and it drops back. Built from the groups. -->
     <div id="flashArea" class="flash-area" role="group" aria-label="Flash (hold)"></div>
+    <span class="grow"></span>
     <button id="undo" class="action undo" disabled>
-      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg>
-      Undo
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>Undo
     </button>
+    <!-- Basic lights, the safe look: starts it (in Prepare, prepares it). -->
+    <button id="basicBtn" class="action basic" aria-label="Basic lights (safe)"><small>Safe</small>Basic lights</button>
     <button id="next" class="action next" aria-label="Next">
       <small>Next ▸</small>
       <span id="nextName" class="next-name">—</span>
     </button>
-    <button id="blackout" class="action blackout"><span class="hold"></span><span class="label">Blackout<small>hold 1 s</small></span></button>
+    <button id="blackout" class="action blackout-btn"><span class="hold"></span><span class="label">Blackout<small>hold 1 s</small></span></button>
   </footer>
 
   <div id="toast" class="toast" hidden></div>

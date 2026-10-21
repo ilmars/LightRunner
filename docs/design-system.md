@@ -8,26 +8,29 @@ How the direction was agreed with Ilmārs (19 Oct 2026):
 
 1. A first "dark neumorphic" pass, with the palette adjusted for the dark room (see Brightness).
 2. A refinement pass: two surface levels, an integrated bottom strip, and running-order states.
-3. The current direction: **modern dark soft glass** (flat glassmorphism, bento layout), from a dark dashboard reference. Neumorphism, bevels, metallic controls and slider thumbs were dropped.
+3. **Modern dark soft glass** (flat glassmorphism, bento layout), from a dark dashboard reference. Neumorphism, bevels, metallic controls and slider thumbs were dropped.
+4. The designer's restyle (20 Oct 2026, [restyle design](superpowers/specs/2026-10-20-restyle-design.md)): the same direction with the designer's values. Flat panels with a 1 px edge on a darker ground, four colours with fixed meanings (blue, amber, red, violet), small spaced capitals over values.
 
 ## Colours
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `--ds-bg` / `--ds-bg-deep` | `#0F1625` / `#0C121F` | Page background, close to the panels' tone so the page reads as one surface; soft radial glow from the top (`#18233b`) |
-| `--ds-surface` / `--ds-surface-hi` | `#121A2B` / `#162034` | Solid surface tones |
-| `--ds-panel-fill` | translucent `rgba(27,37,60,.78)` to `rgba(17,24,40,.78)` | Panels (glass) |
-| `--ds-tile-fill` | `rgba(148,170,210,.055)` | Tiles and buttons at rest |
-| `--ds-elevated` | `rgba(148,170,210,.10)` | Pressed |
-| `--ds-tile-fill-on` + `--ds-edge-on` | blue tint `rgba(84,146,236,.17–.26)`, edge `rgba(98,155,240,.45)` | Selected: running-order item on stage, tabs, Save, Done, the current swatch |
-| `--ds-selected` | `rgba(84,146,236,.24)` | Held (Flash) |
-| `--ds-glass` | `rgba(14,20,34,.86)` + 16 px blur | Surfaces that overlap others: picker, new-quick-look sheet, Fade menu, toast |
+| `--ds-bg` / `--ds-bg-deep` | `#090F1C` / `#070C17` | The ground (flat on the operator page) |
+| `--ds-surface` / `--ds-surface-hi` | `#141D30` / `#18233A` | Solid surface tones (a panel over the ground) |
+| `--ds-panel-fill` + `--ds-shadow-raise` | `rgba(28,39,62,.58)`, 1 px edge `rgba(148,163,184,.14)` drawn inside | Panels, the top bar and the bottom bar |
+| `--ds-edge` | `rgba(148,163,184,.14)` | The 1 px edge of panels, tiles and buttons |
+| `--ds-tile-fill` | `rgba(255,255,255,.035)` | Tiles and buttons at rest |
+| `--ds-elevated` | `rgba(148,163,184,.10)` | Pressed |
+| `--ds-tile-fill-on` + `--ds-edge-on` | blue `rgba(67,137,232,.16)`, edge `.5` | **Blue = selected / on stage**: the item on stage, tabs, Live, Go |
+| `--ds-selected` | `rgba(67,137,232,.22)` | Held (Flash, Puff) |
+| `--ds-warn`, `--ds-warn-text`, `-tint`, `-edge` | `#E3A646`, tint `.13`, edge `.38` | **Amber = changed, Master below full, problems** |
+| `--ds-danger` (`227,106,111`) + `-text` `#EC8286`, `-fill` `.12`, `-edge` `.35` | red glass | **Red = Blackout, delete**, error toast |
+| `--ds-violet`, `-tint`, `-edge` | `#B0A6F5`, `rgba(161,147,242,.13)`, `rgba(171,160,244,.5)` | **Violet = Prepare**, nothing else |
+| `--ds-glass` | `rgba(20,28,46,.94)` + 16 px blur | Surfaces that overlap others: picker, quick-look sheet, Fade and Tempo menus, toast |
 | `--ds-accent` | `#4389E8` | Thin lines only: focus edge, Save while held |
-| `--ds-accent-fill` | `#3A6FB8` | Save's hold fill, at 45 % |
-| `--ds-text` / `--ds-muted` / `--ds-muted-on` | `#E6EAF2` / `#8F9AB0` / `#B4BDCF` | Text, labels, labels on tinted areas |
-| `--ds-warn`, `--ds-warn-text` | `#c98a2a`, `#e0b46a` | "changed", Master below full, problems with the lights |
-| `--ds-danger` (`224,90,104`) + `-text`, `-fill`, `-edge` | red glass | Blackout, delete, error toast |
-| `--ds-ok` | `#2f9e5b` | Connected dot |
+| `--ds-accent-fill` | `#3A6FB8` | Save's hold fill, at 35 % |
+| `--ds-text` / `--ds-muted` / `--ds-muted-on` | `#E3E8F0` / `#97A4BA` / `#B7C1D1` | Text, labels, labels on tinted areas |
+| `--ds-ok` | `#2f9e5b` | Settings: Send DMX on |
 
 ### Brightness
 
@@ -42,12 +45,11 @@ The first suggested palette was measured at about 4× the old screen's average b
 
 | Token | Value |
 | --- | --- |
-| `--ds-r-panel` / `--ds-r-tile` / `--ds-r-small` / `--ds-r-pill` | 18 / 12 / 10 / 999 px |
+| `--ds-r-panel` / `--ds-r-bar` / `--ds-r-tile` / `--ds-r-small` / `--ds-r-pill` | 18 / 16 (top and bottom bars) / 12 / 10 / 999 px |
 | `--ds-gap` / `--ds-gap-tight` | 10 / 8 px |
-| `--ds-target` | 44 px minimum touch target |
-| `--ds-shadow-raise` | Panels: faint edge plus a very soft far shadow |
-| `--ds-shadow-low`, `--ds-shadow-inset` | Controls: faint edge only |
-| Type | System font. Panel titles semibold 15 px in title case ("Running order", "Quick looks"). Control labels in small spaced capitals (Master, Flash, Next). Group names 13 px muted. Levels 20 px with numbers that keep their width. Current item 500. |
+| `--ds-target` | 44 px minimum touch target; 52 px in the operator page's bottom bar |
+| `--ds-shadow-raise`, `--ds-shadow-low` | The 1 px edge, drawn inside (no far shadow) |
+| Type | System font (Inter comes with the restyle's last step). Panel titles 14 px semibold, as the designer wrote them ("Running Order", "Quick Looks", "Groups") with a muted 12–13 px subtitle beside them. Small labels (`ds-caps`): 11 px, 600, `.09em` spacing, upper case, muted ("On stage", "Master", "Flash", "Who to call"); 10 px over a value inside a button (Fade, Tempo, Safe, Next). The name on stage 20 px semibold. Levels 17 px semibold with numbers that keep their width. |
 
 ## Components
 
@@ -55,11 +57,12 @@ The first suggested palette was measured at about 4× the old screen's average b
 | --- | --- | --- |
 | `ds-panel` | Glass panel of the bento layout | Faint edge; translucent fill |
 | `ds-tile` (+ `ds-on`) | Flat tile inside a panel | Selected = blue tint and blue edge |
+| `ds-caps` | Small spaced capitals over a value | "ON STAGE" over the name, "MASTER", "WHO TO CALL" |
 | `ds-label` | Muted small label above a value | "Key lights" over "Vēsi balts" |
 | `ds-btn`, `ds-btn--text`, `ds-btn--pill` | Button, quiet text button, pill | Pressed = lighter tint; disabled = 40 % opacity |
 | `ds-hold` + `ds-hold-fill` | Button that fills while held | Save (blue), Blackout (red) |
-| `ds-fill` + `-slab`, `-val` | Fill slider | A smooth filled bar on a faint track, no thumb; the fill carries a little of the group's colour (`--c`); the value is shown beside it; `ds-disabled` = 40 % opacity and it doesn't react to a finger (no page uses it since Preview went; kept for a control that can't move) |
-| `ds-seg` | Segmented control and tabs | Faint track; selected = blue tint and edge |
+| `ds-fill` + `-slab`, `-val` | Fill slider | A filled bar on a faint track with a 1 px edge, no thumb; the fill is the control's colour (`--c`) at 22 % with a 2 px line of it (70 %) at the level; the value is shown beside it; `ds-disabled` = 40 % opacity and it doesn't react to a finger (no page uses it since Preview went; kept for a control that can't move) |
+| `ds-seg` | Segmented control and tabs | A dark track (`rgba(0,0,0,.2)`) with the edge; selected = blue tint and edge |
 | `ds-field` | Text field | Flat; focus = accent edge |
 | `ds-sheet` | Glass sheet over one panel | The only place blur is used |
 | `ds-swatch` | Colour square | Dimmed |
@@ -68,35 +71,35 @@ The first suggested palette was measured at about 4× the old screen's average b
 
 | Area | State |
 | --- | --- |
-| Operator page: everything (frame, top bar, running order and edit mode, quick looks, details, colour picker, new-quick-look sheet, bottom bar) | Done |
+| Operator page | The designer's restyle (20 Oct): tokens, top bar, running order, quick looks, Groups and bottom bar done; the colour picker, editors, quick-look sheet, Individual lights, phone, font and icon follow |
 | Operator page on a phone (the remote) | Done: Order, Groups and Looks tabs; Master and the dock always visible; no saving or editing; side by side when the phone is on its side |
 | Settings | Done: glass panels in a two-column bento grid on wide screens (DMX output, Show and Compare span both), tinted segmented choices and switches (Send DMX on is green), flat fields, status pills, glass top bar and save bar |
 | Patch | Done: the fixture table has no cell borders, faint row dividers and flat fields; group cards are flat glass tiles with pill chips and turn blue-tinted while one of their fields has focus; the DMX map, universe tabs, library list and Open Fixture Library search use the same glass and tinted states. Fixture blocks keep their own per-type colours and the red overlap striping; the stage plan keeps its grid and marks inside a glass frame |
 
 ### Operator page rules
 
-- **Surfaces:** glass panels on the background. Group zones in Details are flat and divided by a faint line, not cards inside a card. The bottom bar is one strip whose groups are divided by faint lines.
-- **Levels:** a clear number on the right of the group's header line, never drawn over the slider. 0 % is muted.
-- **Running order colours:** one small dot per group, in group order (Basic lights' unsaved groups show the built-in warm light).
-- **Whites are drawn as whites everywhere** (running order, colour chips, picker swatches, quick-look strips, the stage preview, the warm-to-cool strip): a light colour with little colour in it (chroma under 65 %, e.g. warm white `#ffb46b`, cool white `#dcebff`) is mixed 60 % towards cream `#f1ece4`, keeping its brightness. Saturated colours are unchanged, and nothing changes in what is sent to the lights.
-- **Details adapt to the rig:** with few groups each zone grows into the spare room (up to 124 px, the slider up to 64 px tall); with many groups they shrink back to their content (slider 44 px) and the list scrolls, so capacity isn't lost.
+The designer's mockup (`Main.dc.html`, kept with the restyle plan) is the reference for sizes and wording.
+
+- **Frame:** 10 px around and between; a 60 px top bar and a 76 px bottom bar (radius 16), a 292 px left column (the stage view in its own panel, 124 px, on `#04070D`, then the running order) and the right column (Quick Looks, then Groups).
+- **Add tiles** have a dashed edge (`rgba(148,163,184,.28)`): ＋ Add song, ＋ Save stage as a look.
+- **Header buttons** (Edit list, Edit looks) are quiet: muted text, the edge, no fill, 44 px, radius 10. Back to saved and Save have the tile fill.
+- **Levels:** a clear number on the right of the row, never drawn over the slider. 0 % is muted.
+- **Groups:** one row per group, 64 px, divided by a faint line: name (14 px semibold) · a colour button (a round swatch, the colour's name, a chevron; Off is a ring) · a 48 px fill slider with two grip marks at its left · the level. The rows scroll when there are many groups.
+- **Running order colours:** one 7 px dot per group, in group order; a group the item leaves alone is faint, one it turns off is a ring (Basic lights' unsaved groups show the built-in warm light).
+- **Whites are drawn as whites everywhere** (running order, colour chips, picker swatches, quick-look strips, the stage view, the warm-to-cool strip): a light colour with little colour in it (chroma under 65 %, e.g. warm white `#ffb46b`, cool white `#dcebff`) is mixed 60 % towards cream `#f1ece4`, keeping its brightness. Saturated colours are unchanged, and nothing changes in what is sent to the lights. Dots, swatches and strips are drawn at 80–85 % opacity.
 - **White, Amber and UV** (colour picker, groups that have them): fill sliders side by side under Any colour, name and level on the header line, the fill carrying a little white, amber or violet.
-- **Smoke groups** (smoke or haze machines) in Details: a muted "Smoke" label where the colour chip would be, a neutral grey fill (no colour tint), and a **Puff** pill at the right of the header line, tinted while held like Flash. The top bar's "Smoke: N %" is plain muted text, not a warning.
-- **Tempo** (top bar, next to Fade): a quiet "Tempo 120" readout that opens a small glass menu in the same style as Fade's (×2, ÷2, − and +, 44 px high, a row instead of a column), and a 44 px **Tap** button with no fill that lights with the tinted edge for a moment on each tap. On the phone the same two controls become tiles sharing a row at the top of Groups.
-- **Quick looks** keep a fixed two rows (12 looks before scrolling), so the layout doesn't jump when switching tabs.
-- **Running order:**
-  - on stage: blue-tinted glass with a blue edge
-  - changed: an amber dot and "changed"
-  - the item Next will start: a quiet "next"
-- **Header actions** (Edit, Back to …, Save, Done) are pills.
+- **Smoke groups** (smoke or haze machines) in Groups: a muted "Smoke" label and a **Puff** button where the colour button would be, and a grey fill (no colour). Puff held is tinted like Flash. The top bar's "Smoke: N %" is plain muted text, not a warning.
+- **Fade and Tempo** (top bar): buttons with a 10 px label over the value ("Fade" over "Auto", "Tempo" over "120 bpm"), each opening a small glass menu (Tempo's: ×2, ÷2, − and +, in a row). **Tap** beside them lights with the blue tint for a moment on each tap. On the phone they share a row at the top of Groups.
+- **Quick looks:** six to a row, 56 px tiles with the name and a strip of 3 px blocks, one per group (faint for a group it leaves alone, grey for one it turns off); two rows show, more scroll.
+- **Running order tags** (12 px, at the right of the row): "● changed" in amber on the item on stage; "next" on the item Next starts; a quiet "safe look" on Basic lights, with a divider under it. In Prepare: "preparing" and "on stage".
+- **Bottom bar:** Master (190 px: "MASTER" and the value over a 32 px track), a divider, "FLASH" with All and a short name per group (the first word of its name), then Undo (icon and word), **Safe · Basic lights** (a faint warm edge), Next ▸ over the next item's name, and Blackout (hold 1 s). 52 px high.
 - **Operational states**, each different:
-  - Flash held: blue tint and edge.
+  - On stage: blue tint and edge (running order); "On stage" over the name in the top bar, "● changed" in amber.
+  - Flash held: blue tint and edge; the top bar notes "Flash: …".
   - Master below 100 %: amber value and an amber fill.
-  - Blackout: faint red at rest, filling red while held. While it's on, strong red glass on the button and the whole top bar.
-  - Problems with the lights: an amber strip on the top bar.
-  - Send DMX off: an amber pill, **DMX output inactive**, with a faint amber strip on the top bar. Hover or tap the pill for the full explanation.
-  - Lights not answering, or another desk is sending: the same amber pill with that short label; the full message on hover or tap.
-  - Live / Prepare: one segmented switch in the top bar (Live on: blue tint and edge; Prepare on: violet). Prepare's violet is the designer's (`--prep-text` #B0A6F5, `--prep-tint` 161 147 242 at 11–16 %, `--prep-edge` 171 160 244 at 38–50 %, in the operator page's styles) and is used only for Prepare. Prepare on: the whole top bar violet (11 % fill, 38 % edge) with "Preparing · the lights don't change" (11 px upper case, violet) over the prepared item's name and a muted "On stage: <name>"; it wins over the problem, Flash and Blackout strips, whose own pills and buttons still show. **Go ▸** sits right after the switch and is the one blue control in the bar (blue tint and edge, 44 px, radius 10). In the running order the prepared item is a violet tile (14 % fill, 50 % edge) with a violet "preparing", and the item on the real stage a dashed grey outline with "on stage". The stage view says "Draft · <name>" in small violet capitals at the bottom right. The Groups header says "<name> · draft", and Save is violet.
+  - Blackout: red tint at rest, filling red while held, stronger red while it's on. The top bar turns red: "Blackout" over "Lights are off" and "Tap a song or Basic lights to bring them back". The stage view says "Off".
+  - Problems with the lights (Send DMX off, lights not answering, another desk sending): an amber pill in the top bar with a short label ("Problem" while preparing). A tap opens the explanation: what is wrong in plain words, that it isn't the volunteer's fault, **Who to call** (Settings; left out when empty), what still works, and Got it.
+  - Live / Prepare: one segmented switch in the top bar (Live on: blue; Prepare on: violet). Prepare on: the whole top bar violet (11 % fill, 38 % edge) with "Preparing · the lights don't change" (violet small capitals) over the prepared item's name and a muted "On stage: <name>"; it wins over Blackout's red bar. **Go ▸** sits right after the switch and is the one blue control in the bar (blue tint, 70 % edge, 44 px). In the running order the prepared item is a violet tile (14 % fill, 50 % edge) with a violet "preparing", and the item on the real stage a dashed grey outline with "on stage". The stage view says "Draft · <name>" in small violet capitals at the bottom right ("Live" in muted capitals otherwise). The Groups subtitle says "<name> · draft", and Save is violet.
 
   Colour is only used where it says something.
 
