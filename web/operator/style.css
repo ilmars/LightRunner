@@ -64,8 +64,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .black-label { color: var(--ds-danger-text); }
 .head-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; white-space: nowrap; overflow: hidden; }
 .head-name { min-width: 0; font-size: 20px; line-height: 1.15; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
-/* A long note ("On stage: <name>") gives way first, so the name keeps its room. */
-.head-note { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--ds-muted); }
+/* A long note ("On stage: <name>") gives way first, so the name keeps its room (up to the whole line). */
+.head-line:has(> .head-note) > .head-name { flex: 0 0 auto; max-width: 100%; }
+.head-note { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--ds-muted); }
 .changed { flex: none; color: var(--warn); font-size: 13px; }
 .notes { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .q { display: inline-flex; align-items: center; color: var(--dim); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
