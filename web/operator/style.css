@@ -851,7 +851,11 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   .phone-only { display: revert; }
   .not-phone { display: none; }
   /* The explanation: the whole width, under the header. */
-  .problem-box { position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 74px); left: 12px; right: 12px; width: auto; max-width: none; }
+  .problem-box {
+    --box-top: calc(max(12px, env(safe-area-inset-top)) + 74px);
+    position: fixed; top: var(--box-top); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right));
+    width: auto; max-width: none; max-height: calc(100dvh - var(--box-top) - max(12px, env(safe-area-inset-bottom))); overflow-y: auto;
+  }
 
   .phone-tabs {
     display: flex; gap: 2px; padding: 2px; border-radius: 12px;
@@ -897,7 +901,7 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   .row .ds-fill { grid-column: 1 / -1; grid-row: 2; height: 44px; }
   .row .ds-fill::after { display: none; }
   .row .pct { font-size: 14px; }
-  .chip { justify-self: end; max-width: 200px; gap: 8px; padding: 0 2px 0 8px; border: 0; background: transparent; color: var(--ds-muted); font-size: 13px; }
+  .chip { justify-self: end; max-width: 150px; gap: 8px; padding: 0 2px 0 8px; border: 0; background: transparent; color: var(--ds-muted); font-size: 13px; }
   .chip i { width: 12px; height: 12px; }
   .chip span { flex: 0 1 auto; }
   .row .smoke-cell { justify-self: end; }
@@ -907,10 +911,10 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   #details .tempo .tap-btn { flex: 1 1 0; font-size: 14px; }
   #details .tempo-menu { left: 0; right: auto; }
   #details .tempo-menu button { flex: 1 1 0; min-width: 64px; }
-  /* The Flash buttons share the width, so All and every group fit without scrolling. */
-  #details .flash-area { flex: none; justify-content: stretch; gap: 6px; padding: 0 2px 4px; }
+  /* The Flash buttons share the width, so All and every group fit without scrolling; never under 44 px, they take a second line first. */
+  #details .flash-area { flex: none; flex-wrap: wrap; justify-content: stretch; gap: 6px; padding: 0 2px 4px; }
   #details .flash-area .flash-label { display: none; }
-  #details .flash-area button { flex: 1 1 0; width: auto; min-width: 0; min-height: 44px; }
+  #details .flash-area button { flex: 1 1 44px; width: auto; min-width: 44px; min-height: 44px; }
   .pgrid, .pgrid.fxgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .pextras { grid-auto-flow: row; }
   /* The picker's header on two lines: ‹ Groups, the group and Done, then what it runs and the tabs. */
@@ -946,29 +950,40 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   .next .next-name { max-width: 100%; font-size: 14px; }
   .blackout-btn .label { font-size: 13px; }
   .blackout-btn small { font-size: 10px; }
-  .toast { bottom: 156px; max-width: calc(100vw - 24px); }
+  .toast { bottom: calc(144px + max(12px, env(safe-area-inset-bottom))); max-width: calc(100vw - 24px); }
 }
 /* A phone on its side: too short for the header, tabs, the list and the footer stacked. The tab's panel
    goes on the left; Master (its label over the slider) and the four buttons, two by two, on the right. */
 @media (max-height: 500px) and (orientation: landscape) {
   body { grid-template-columns: minmax(0, 1fr) 240px; grid-template-rows: auto auto minmax(0, 1fr); gap: 8px; }
   .topbar { grid-column: 1 / -1; min-height: 60px; padding-top: 8px; padding-bottom: 8px; }
-  .problem-box { top: calc(max(12px, env(safe-area-inset-top)) + 68px); }
+  .problem-box { --box-top: calc(max(12px, env(safe-area-inset-top)) + 68px); }
   .phone-tabs { grid-column: 1; grid-row: 2; }
   .left, .right { grid-column: 1; grid-row: 3; }
   .bottom { grid-column: 2; grid-row: 2 / 4; grid-template-columns: 1fr 1fr; grid-template-rows: auto minmax(52px, 1fr) minmax(52px, 1fr); align-content: stretch; gap: 8px 6px; }
   /* Groups: the tempo row and Flash share a line, and each group is one line (name, colour, slider, level). */
-  #details { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); grid-template-rows: auto auto minmax(0, 1fr); column-gap: 8px; }
+  #details { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); column-gap: 8px; }
   #details > .dhead { grid-column: 1 / -1; }
   #details > .tempo { grid-column: 1; grid-row: 2; }
   #details > .flash-area { grid-column: 2; grid-row: 2; }
+  /* Too short for a second line: Flash stays on one, and scrolls sideways when 44 px buttons don't fit. */
+  #details .flash-area { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  #details .flash-area::-webkit-scrollbar { display: none; }
+  #details .flash-area button { flex: 1 0 44px; }
+  #details .tempo .fadepick { flex: none; }
   #details > .rows { grid-column: 1 / -1; grid-row: 3; }
-  .row { grid-template-columns: minmax(0, 120px) minmax(0, 150px) minmax(0, 1fr) 48px; padding: 6px; }
+  /* On a small phone the name and the colour give way first; the slider keeps at least 80 px. */
+  .row { grid-template-columns: minmax(60px, 120px) minmax(90px, 150px) minmax(80px, 1fr) 48px; padding: 6px; }
   .row .ds-fill { grid-column: auto; grid-row: auto; }
   .chip, .row .smoke-cell { justify-self: start; }
+  .chip { max-width: min(150px, 100%); }
   .qgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .master { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; }
   .master-label b { grid-column: 2; }
   .master-track { grid-column: 1 / -1; grid-row: 2; }
-  .toast { bottom: 16px; }
+  .toast { bottom: calc(4px + max(12px, env(safe-area-inset-bottom))); }
+}
+/* The smallest phones on their side (568 × 320): a narrower right column leaves the group rows their room. */
+@media (max-height: 500px) and (orientation: landscape) and (max-width: 600px) {
+  body { grid-template-columns: minmax(0, 1fr) 200px; }
 }
