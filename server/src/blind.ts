@@ -73,6 +73,7 @@ export class BlindSession {
       groups: Object.fromEntries(Object.entries(own.groups).map(([id, g]) => [id, isSmoke(id) ? live.groups[id] ?? g : g])),
       fadeTime: live.fadeTime,
       fixturesManual: live.fixturesManual,
+      held: live.held,
       flashing: live.flashing,
       master: live.master,
       speed: live.speed,

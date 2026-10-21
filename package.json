@@ -17,7 +17,7 @@
     "dev": "node --watch server/src/main.ts",
     "test": "node --test \"packages/*/test/*.test.ts\" \"server/test/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "jump-check": "node tools/jump-check.ts",
+    "jump-check": "node tools/jump-check.ts && node tools/jump-check.ts --show shows/stage-l1.json",
     "timing-probe": "node tools/timing-probe.ts"
   },
   "dependencies": {

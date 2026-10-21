@@ -6,12 +6,12 @@ import {
   BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, LiveEffectLayer, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, displayColour, effectKey, findProfile,
   liveEffectId, livePresetId, parseLiveEffect, parseLivePreset, resolveColour, resolveEffect,
   type StageCommand, type EffectLayer, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
-  type GroupStatus, type Layer, type Palette, type Preset, type RuntimeState, type Show, type StageState,
+  type GroupStatus, type HeldLight, type Layer, type Palette, type Preset, type RuntimeState, type Show, type StageState,
 } from '../../shared/src/index.ts';
 import { SafeRates, cyclesPerSecond, safeRate } from './effects.ts';
 import { Crossfade, Ramp } from './fade.ts';
 import { advancePhases, compilePreset, fixedPreset, moves, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
-import { copy, dark, fromHex, mix, mix2, withoutUv, type Light } from './light.ts';
+import { copy, dark, fromHex, mix, mix2, toHex, withoutUv, type Light } from './light.ts';
 import { hasWideColour, planChannels, visibleCells, visibleLevel, visualOf, writeCells, writeSmoke, type ChannelPlan } from './output.ts';
 
 /** Safe's fixed warm white stage wash. */
@@ -111,6 +111,11 @@ class ManualRun {
   }
 }
 
+/** Something manual control can hold: a group, a fixture, or one segment of a fixture. */
+interface ManualHolder {
+  manual: ManualRun | null;
+}
+
 class GroupRun {
   readonly id: string;
   /** Fixture indices, in group order. */
@@ -162,6 +167,8 @@ class FixtureRun {
   /** Which group drives this fixture. The most recent change wins, and the handover fades. */
   owners = new Crossfade<string>();
   manual: ManualRun | null = null;
+  /** Manual control of each segment on its own, on top of the fixture's (one per segment). */
+  segmentHolds: ManualHolder[] = [];
   /** Smoke groups this fixture is in. When there are any, only they drive it. */
   smokeGroups: GroupRun[] = [];
   /** Hung the other way round: its segments run backwards along a group's line. */
@@ -190,6 +197,8 @@ class FixtureRun {
     this.plan = plan;
     while (this.cells.length < plan.cells) this.cells.push(dark());
     this.cells.length = plan.cells;
+    while (this.segmentHolds.length < plan.cells) this.segmentHolds.push({ manual: null });
+    this.segmentHolds.length = plan.cells;
     this.motion = new Array<number>(plan.cells).fill(0);
     this.wide = hasWideColour(plan);
   }
@@ -378,6 +387,7 @@ export class Engine {
         if (g.smoke) {
           run.smokeGroups.push(g);
           run.manual = null;
+          for (const h of run.segmentHolds) h.manual = null;
         }
       }
     }
@@ -707,7 +717,7 @@ export class Engine {
         this.updateFlashed();
         return null;
       }
-      case 'manual': return this.setManual(cmd.target, cmd.colour, cmd.intensity, now);
+      case 'manual': return this.setManual(cmd, now);
       case 'release': return this.release(cmd.target, now);
       case 'releaseAll': this.releaseAll(now); return null;
       case 'backToLook': return this.backToLook(now);
@@ -943,8 +953,19 @@ export class Engine {
     }
   }
 
-  private setManual(target: ManualTarget, colour: string | undefined, intensity: number | undefined, now: number): string | null {
-    let holder: { manual: ManualRun | null };
+  /** The fixture (and segment) a manual target names, or why there is none. */
+  private fixtureTarget(target: Exclude<ManualTarget, { group: string }>): { run: FixtureRun; segment: number | null } | string {
+    const index = this.fixtureIndex.get(target.fixture);
+    if (index === undefined) return `unknown fixture "${target.fixture}"`;
+    const run = this.fixtures[index];
+    const segment = 'segment' in target ? target.segment : null;
+    if (segment !== null && segment >= run.cells.length) return `fixture "${target.fixture}" has no segment ${segment + 1}`;
+    return { run, segment };
+  }
+
+  private setManual(cmd: Extract<StageCommand, { type: 'manual' }>, now: number): string | null {
+    const { target, colour, intensity } = cmd;
+    let holder: ManualHolder;
     let showing: Light;
     if ('group' in target) {
       const group = this.groups.get(target.group);
@@ -954,11 +975,12 @@ export class Engine {
       showing = group.out[0] ?? dark();
       this.takeOwnership(group, now, MANUAL_IN);
     } else {
-      const index = this.fixtureIndex.get(target.fixture);
-      if (index === undefined) return `unknown fixture "${target.fixture}"`;
-      if (this.fixtures[index].smokeGroups.length) return smokeRefusal(target.fixture);
-      holder = this.fixtures[index];
-      showing = this.fixtures[index].light;
+      const found = this.fixtureTarget(target);
+      if (typeof found === 'string') return found;
+      if (found.run.smokeGroups.length) return smokeRefusal(target.fixture);
+      // A segment's hold sits on top of the fixture's: it starts from what that segment shows.
+      holder = found.segment === null ? found.run : found.run.segmentHolds[found.segment]!;
+      showing = found.run.cells[found.segment ?? 0]!;
     }
     let m = holder.manual;
     if (!m || m.releasing) {
@@ -970,7 +992,7 @@ export class Engine {
       holder.manual = m;
     }
     if (colour) {
-      const c = fromHex(colour);
+      const c = fromHex(colour, { white: cmd.white, amber: cmd.amber, uv: cmd.uv });
       m.target.r = c.r; m.target.g = c.g; m.target.b = c.b; m.target.w = c.w; m.target.a = c.a; m.target.u = c.u;
       if (intensity === undefined && c.i < 1) m.target.i = c.i;
     }
@@ -979,11 +1001,12 @@ export class Engine {
   }
 
   private release(target: ManualTarget, now: number): string | null {
-    let holder: { manual: ManualRun | null } | undefined;
+    let holder: ManualHolder | undefined;
     if ('group' in target) holder = this.groups.get(target.group);
     else {
-      const index = this.fixtureIndex.get(target.fixture);
-      holder = index === undefined ? undefined : this.fixtures[index];
+      const found = this.fixtureTarget(target);
+      if (typeof found === 'string') return found.startsWith('unknown') ? 'unknown target' : found;
+      holder = found.segment === null ? found.run : found.run.segmentHolds[found.segment];
     }
     if (!holder) return `unknown target`;
     if (holder.manual && !holder.manual.releasing) {
@@ -995,7 +1018,12 @@ export class Engine {
 
   private releaseAll(now: number): void {
     for (const g of this.groups.values()) if (g.manual) this.release({ group: g.id }, now);
-    for (const f of this.fixtures) if (f.manual) this.release({ fixture: f.id }, now);
+    for (const f of this.fixtures) {
+      if (f.manual) this.release({ fixture: f.id }, now);
+      f.segmentHolds.forEach((h, segment) => {
+        if (h.manual) this.release({ fixture: f.id, segment }, now);
+      });
+    }
   }
 
   /** Render one frame at time `now`. */
@@ -1119,6 +1147,8 @@ export class Engine {
           mix(light, parts, ownerWeights);
         }
         if (manual) mix2(light, light, manual.current, manualWeight);
+        const held = this.liveManual(run.segmentHolds[c]!, now, dt);
+        if (held) mix2(light, light, held.current, held.weight.value(now));
         if (!run.plan.hasUv) withoutUv(light);
         light.i *= master;
         if (flash) copy(light, FLASH_LIGHT);
@@ -1255,6 +1285,7 @@ export class Engine {
       fadeTime: this.fadeTime,
       groups,
       fixturesManual: this.fixtures.filter((f) => f.manual && !f.manual.releasing).map((f) => f.id),
+      held: this.heldLights(),
       flashing: [...this.flash],
       master: this.master.target,
       speed: this.speed.target,
@@ -1263,6 +1294,22 @@ export class Engine {
       outputProblem: null,
       outputProblemKind: null,
     };
+  }
+
+  /** Every fixture and segment manual control holds (not ones being released), fixtures in show order. */
+  private heldLights(): HeldLight[] {
+    const out: HeldLight[] = [];
+    const view = (m: ManualRun) => ({
+      colour: displayColour(toHex(m.target), { white: m.target.w, amber: m.target.a, uv: m.target.u }),
+      level: m.target.i,
+    });
+    for (const f of this.fixtures) {
+      if (f.manual && !f.manual.releasing) out.push({ fixture: f.id, segment: null, ...view(f.manual) });
+      f.segmentHolds.forEach((h, segment) => {
+        if (h.manual && !h.manual.releasing) out.push({ fixture: f.id, segment, ...view(h.manual) });
+      });
+    }
+    return out;
   }
 
   /**

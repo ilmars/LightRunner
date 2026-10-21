@@ -180,6 +180,26 @@ test('Blind refuses what works on the real stage only, and needs Blind on', () =
   assert.deepEqual(t.state().flashing, []);
 }));
 
+test("a draft shows the stage's held lights (manual control stays live)", () => withApp(async (app) => {
+  const show = (await api(app, 'GET', '/api/show')).body;
+  show.operator.manualForOperators = true;
+  assert.equal((await api(app, 'PUT', '/api/show', show)).status, 200);
+  const t = await onWorship(app);
+  assert.equal(await t.send({ type: 'blindStart' }), null);
+  await waitFor(() => t.draft(), 2000, 'the draft');
+  assert.equal(await t.send({ type: 'manual', target: { fixture: 'back-1' }, colour: '#ff0000', intensity: 0.5 }), null);
+  assert.equal(await t.send({ type: 'manual', target: { fixture: 'back-2', segment: 0 }, colour: '#00ff00', intensity: 1 }), null);
+  const held = [
+    { fixture: 'back-1', segment: null, colour: '#ff0000', level: 0.5 },
+    { fixture: 'back-2', segment: 0, colour: '#00ff00', level: 1 },
+  ];
+  await waitFor(() => t.state()?.held?.length === 2, 2000, 'the stage to hold both');
+  assert.deepEqual(t.state().held, held);
+  await waitFor(() => t.draft()?.held?.length === 2, 2000, 'the draft to show them');
+  assert.deepEqual(t.draft().held, held);
+  assert.deepEqual(t.draft().fixturesManual, ['back-1']);
+}));
+
 test('Save, Add song and Save as quick look in Blind store the draft, not the stage', () => withApp(async (app, dir) => {
   const t = await tablet(app);
   await waitFor(t.layout);

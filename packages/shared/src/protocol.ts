@@ -38,8 +38,13 @@ export const StageState = z.object({
 });
 export type StageState = z.infer<typeof StageState>;
 
+/**
+ * What manual control holds: a group, a fixture, or one segment of a fixture (in its channel order, as the
+ * visualiser's frames have them; 0 is the first). The segment form comes first, so a plain fixture never loses it.
+ */
 export const ManualTarget = z.union([
   z.object({ group: id }),
+  z.object({ fixture: id, segment: z.number().int().min(0).max(511) }),
   z.object({ fixture: id }),
 ]);
 export type ManualTarget = z.infer<typeof ManualTarget>;
@@ -66,7 +71,11 @@ const STAGE_COMMANDS = [
   z.object({ type: z.literal('groupEffect'), group: id, effect: LiveEffectLayer, fade, continues: z.boolean().optional() }),
   /** Hold the groups at full white while `on`; snaps, and is not saved or undone. */
   z.object({ type: z.literal('flash'), groups: z.array(id).max(64), on: z.boolean() }),
-  z.object({ type: z.literal('manual'), target: ManualTarget, colour: hex.optional(), intensity: unit.optional() }),
+  /** Hold a group, fixture or segment at this colour (with White, Amber and UV when given) and/or intensity until released. */
+  z.object({
+    type: z.literal('manual'), target: ManualTarget, colour: hex.optional(), intensity: unit.optional(),
+    white: unit.optional(), amber: unit.optional(), uv: unit.optional(),
+  }),
   z.object({ type: z.literal('release'), target: ManualTarget }),
   z.object({ type: z.literal('releaseAll') }),
   z.object({ type: z.literal('backToLook') }),
@@ -201,6 +210,17 @@ export interface GroupStatus {
   round: number | null;
 }
 
+/** A fixture, or one segment of it, held by manual control. */
+export interface HeldLight {
+  fixture: string;
+  /** The segment (as in ManualTarget), or null for the whole fixture. */
+  segment: number | null;
+  /** The colour it is held at, White, Amber and UV mixed in as displayColour() does. */
+  colour: string;
+  /** Its intensity 0..1 (before Master). */
+  level: number;
+}
+
 export type OutputStatus = 'ok' | 'lost' | 'off';
 
 export interface LiveState {
@@ -219,7 +239,10 @@ export interface LiveState {
   /** Fade time chosen on the operator page, or null for each look's own fade. */
   fadeTime: number | null;
   groups: Record<string, GroupStatus>;
+  /** Fixtures held as a whole by manual control (not ones only some segments of which are held). */
   fixturesManual: string[];
+  /** Every fixture and segment held by manual control (not groups: see GroupStatus.manual), fixtures in show order. */
+  held: HeldLight[];
   /** Groups being flashed (full white) right now. */
   flashing: string[];
   master: number;
