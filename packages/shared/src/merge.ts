@@ -2,6 +2,7 @@
 // and merging only the changes someone picked. Items are matched by id.
 
 import { presetsUsingPaletteEntry, swatchOf } from './presets.ts';
+import { uniqueId } from './runningorder.ts';
 import { isEffectPreset, layerColours, parseShow, type ColourSpec, type Fixture, type Group, type Look, type Palette, type Preset, type Profile, type Show } from './schema.ts';
 
 /** `palette`: the shared colours (from Lightkey) that colours in every group can point to. */
@@ -160,9 +161,12 @@ function describe(kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show):
 /** Everything that differs between the current show and an incoming one. */
 export function diffShows(current: Show, incoming: Show, scope: Scope = 'all'): DiffItem[] {
   const items: DiffItem[] = [];
+  // Hidden colours and effects (Any colour's Custom, a changed effect's, the copies Prepare keeps) are never listed:
+  // nobody can pick them by name, and a look taken from the file brings its own (applyPicks).
+  const shown = (kind: ItemKind) => (x: Item) => kind !== 'preset' || !(x as Preset).custom;
   for (const kind of kindsFor(scope)) {
-    const now = new Map(list(current, kind).map((x) => [x.id, x]));
-    const next = new Map(list(incoming, kind).map((x) => [x.id, x]));
+    const now = new Map(list(current, kind).filter(shown(kind)).map((x) => [x.id, x]));
+    const next = new Map(list(incoming, kind).filter(shown(kind)).map((x) => [x.id, x]));
     // Presets share names across groups ("Zils"), so they are shown with their group.
     const label = (x: Item, s: Show) => {
       if (kind !== 'preset') return x.name;
@@ -215,6 +219,23 @@ export function applyPicks(current: Show, incoming: Show, picks: Pick[]): Show {
       // New groups and looks show up on the operator page too.
       if (p.kind === 'group' && out.operator.groups.length) out.operator.groups.push(p.id);
       if (p.kind === 'look' && out.operator.looks.length) out.operator.looks.push(p.id);
+    }
+  }
+  // A taken look brings the file's hidden colours it uses (they aren't listed); one here with the same id but another
+  // light stays as it is, and the look gets its own copy.
+  for (const pick of sorted) {
+    if (pick.kind !== 'look' || pick.change === 'removed') continue;
+    const look = out.looks.find((l) => l.id === pick.id);
+    for (const e of look?.groups ?? []) {
+      const theirs = incoming.presets.find((x) => x.id === e.preset);
+      if (!theirs?.custom) continue;
+      const ours = out.presets.find((x) => x.id === e.preset);
+      if (!ours) out.presets.push(structuredClone(theirs));
+      else if (!same(ours, theirs)) {
+        const id = uniqueId(theirs.id, out.presets.map((x) => x.id));
+        out.presets.push({ ...structuredClone(theirs), id });
+        e.preset = id;
+      }
     }
   }
   // Swatches agree with the shared colours they end up pointing to (the same rule as the colour editor).
