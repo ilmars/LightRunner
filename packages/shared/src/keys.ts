@@ -56,15 +56,18 @@ export function isOperatorKeyTarget(does: KeyTarget): boolean {
 /**
  * The show an Undo goes back to, with the controller settings that aren't Undo steps as they are now: the
  * programmer's keys and the switches. Its own song and quick-look keys stay, unless a key of the programmer's uses the same key.
+ * A song or quick-look key the programmer has moved onto a fixed job's key since (no Undo step either) stays as it is now.
  */
 export function keepControllerKeys(restored: Show, current: Show): Show {
   const cur = current.operator.controller;
   const had = restored.operator.controller;
   if (!cur && !had) return restored;
   const fixed = (cur?.keys ?? []).filter((b) => !isOperatorKeyTarget(b.does));
-  const own = (had?.keys ?? []).filter((b) => isOperatorKeyTarget(b.does) && !fixed.some((f) => sameKey(f.key, b.key)));
+  const wasFixed = (had?.keys ?? []).filter((b) => !isOperatorKeyTarget(b.does));
+  const moved = (cur?.keys ?? []).filter((b) => isOperatorKeyTarget(b.does) && wasFixed.some((f) => sameKey(f.key, b.key)) && !keyTargetProblem(restored, b.does));
+  const own = (had?.keys ?? []).filter((b) => isOperatorKeyTarget(b.does) && ![...fixed, ...moved].some((f) => sameKey(f.key, b.key) || sameTarget(f.does, b.does)));
   const out = structuredClone(restored);
-  const controller: ControllerSettings = { keys: structuredClone([...fixed, ...own]) };
+  const controller: ControllerSettings = { keys: structuredClone([...fixed, ...moved, ...own]) };
   if (cur?.apcLayout !== undefined) controller.apcLayout = cur.apcLayout;
   if (cur?.ignored) controller.ignored = [...cur.ignored];
   out.operator.controller = controller;

@@ -220,3 +220,19 @@ test("Undo goes back to a show with the programmer's keys and switches as they a
   assert.equal(keyOf(keepControllerKeys(before, taken), song(s, 1)), null);
   assert.ok(isOperatorKeyTarget(song(s, 1)) && !isOperatorKeyTarget({ kind: 'master' }));
 });
+
+test("Undo keeps a song key the programmer moved onto a fixed key's place since (it was no Undo step)", () => {
+  const s = ready();
+  // Before an operator edit: pad 112 is Next, and song 2 has pad 50.
+  const before = assignKey(assignKey(s, pad(112), { kind: 'next' }).show, pad(50), song(s, 2)).show;
+  // The operator's edit (a song key elsewhere), then the programmer gives Next's pad to song 2.
+  const edited = assignKey(before, pad(51), song(s, 1)).show;
+  const now = assignKey(edited, pad(112), song(s, 2)).show;
+  assert.equal(keyOf(now, { kind: 'next' }), null);
+  // Undo of the operator's edit: song 1's key goes, song 2 keeps the pad the programmer gave it.
+  const back = keepControllerKeys(before, now);
+  assert.equal(keyOf(back, song(s, 1)), null);
+  assert.deepEqual(keyOf(back, song(s, 2)), pad(112));
+  assert.equal(keyOf(back, { kind: 'next' }), null);
+  assert.equal(controllerOf(back).keys.filter((b) => b.does.kind === 'song' && b.does.id === song(s, 2).id).length, 1, 'one key for the song');
+});
