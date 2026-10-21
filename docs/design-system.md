@@ -49,7 +49,7 @@ The first suggested palette was measured at about 4× the old screen's average b
 | `--ds-gap` / `--ds-gap-tight` | 10 / 8 px |
 | `--ds-target` | 44 px minimum touch target; 52 px in the operator page's bottom bar |
 | `--ds-shadow-raise`, `--ds-shadow-low` | The 1 px edge, drawn inside (no far shadow) |
-| Type | System font (Inter comes with the restyle's last step). Panel titles 14 px semibold, as the designer wrote them ("Running Order", "Quick Looks", "Groups") with a muted 12–13 px subtitle beside them. Small labels (`ds-caps`): 11 px, 600, `.09em` spacing, upper case, muted ("On stage", "Master", "Flash", "Who to call"); 10 px over a value inside a button (Fade, Tempo, Safe, Next). The name on stage 20 px semibold. Levels 17 px semibold with numbers that keep their width. |
+| Type | System font (Inter comes with the restyle's last step). Panel titles 14 px semibold in sentence case ("Running order", "Quick looks", "Groups") with a muted 12–13 px subtitle beside them. Small labels (`ds-caps`): 11 px, 600, `.09em` spacing, upper case, muted ("On stage", "Master", "Flash", "Who to call"); 10 px over a value inside a button (Fade, Tempo, Safe, Next). The name on stage 20 px semibold. Levels 17 px semibold with numbers that keep their width. |
 
 ## Components
 
@@ -80,7 +80,7 @@ The first suggested palette was measured at about 4× the old screen's average b
 
 The designer's mockup (`Main.dc.html`, kept with the restyle plan) is the reference for sizes and wording.
 
-- **Frame:** 10 px around and between; a 60 px top bar and a 76 px bottom bar (radius 16), a 292 px left column (the stage view in its own panel, 124 px, on `#04070D`, then the running order) and the right column (Quick Looks, then Groups).
+- **Frame:** 10 px around and between; a 60 px top bar and a 76 px bottom bar (radius 16), a 292 px left column (the stage view in its own panel, 124 px, on `#04070D`, then the running order) and the right column (Quick looks, then Groups).
 - **Add tiles** have a dashed edge (`rgba(148,163,184,.28)`): ＋ Add song, ＋ Save stage as a look.
 - **Header buttons** (Edit list, Edit looks) are quiet: muted text, the edge, no fill, 44 px, radius 10. Back to saved and Save have the tile fill.
 - **Levels:** a clear number on the right of the row, never drawn over the slider. 0 % is muted.

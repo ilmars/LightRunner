@@ -683,8 +683,9 @@ $('next').addEventListener('click', () => {
 });
 // In Prepare, Undo takes back the draft's last change; otherwise the stage's.
 $('undo').addEventListener('click', () => sendStage({ type: 'undo' }));
-// Basic lights (safe): starts it on the stage; in Prepare it becomes the item being prepared, like a running-order tap.
-$('basicBtn').addEventListener('click', () => sendStage({ type: 'safe' }));
+// Basic lights (safe): always starts it on the real stage, in Prepare too (the draft stays), like Next.
+// A safety button never goes into a draft; to prepare Basic lights, tap it in the running order.
+$('basicBtn').addEventListener('click', () => send({ type: 'safe' }));
 
 // ---- Fade time for every look and preset change; shared by all devices ----
 
