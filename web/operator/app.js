@@ -2031,6 +2031,7 @@ function openPicker(groupId) {
 }
 
 function closePicker() {
+  anyColour.cancel();
   pendingColour = null;
   $('paAddBtn').disabled = false;
   $('pAdd').hidden = true;
@@ -2379,8 +2380,9 @@ let colourToolsMade = 0;
 function colourTools({ strip, handle, sat, fold, exact, row = false, whiteOnly, onColour, onStart }) {
   const st = { hex: null, p: null, s: 1, v: 1 };
   let dragging = false, holdUntil = 0;
-  // A typed change under way: `began` once onStart has gone; `timer` for an R, G or B still being typed; `skip`: Escape.
-  const typed = { began: false, timer: 0, skip: false };
+  // A typed change under way: `began` once onStart has gone; `timer` for an R, G or B still being typed (`chan` says
+  // which); `skip`: Escape, or the change was already finished by flush or cancel.
+  const typed = { began: false, timer: 0, chan: -1, skip: false };
 
   // Saturation: a fill slider carrying the full colour of the strip's place.
   const satRow = { dim: el('div', 'ds-fill'), slab: el('span', 'ds-fill-slab'), pct: el('span', 'pct'), value: 1, dragging: false };
@@ -2575,6 +2577,7 @@ function colourTools({ strip, handle, sat, fold, exact, row = false, whiteOnly, 
   chans.forEach((f, i) => f.addEventListener('input', () => {
     note.hidden = true;
     clearTimeout(typed.timer);
+    typed.chan = i;
     typed.timer = setTimeout(() => {
       typed.timer = 0;
       takeChannel(i);
@@ -2629,6 +2632,42 @@ function colourTools({ strip, handle, sat, fold, exact, row = false, whiteOnly, 
     });
   }
 
+  /**
+   * Ends a typed change now: with `take`, an R, G or B still waiting is taken (and a field that can't be used says
+   * why), else it is dropped; either way the change ends (`onColour(hex, true)`) and the field is left. On iPad Safari
+   * a tap on a button doesn't take the focus from a field, so Save, Done, a tile and the like call this first.
+   */
+  function endTyping(take) {
+    const f = fields.includes(document.activeElement) ? document.activeElement : null;
+    if (!f && !typed.timer && !typed.began) return;
+    const waiting = typed.timer ? typed.chan : -1;
+    clearTimeout(typed.timer);
+    typed.timer = 0;
+    if (take && f && !typed.skip && f.value.trim() !== '') {
+      if (f === hexField) {
+        const hex = parseHex(f.value.trim());
+        if (hex) apply(hex);
+        else refuse('Type a colour as # and six digits or letters A to F, like #FF8800.');
+      } else if (!takeChannel(chans.indexOf(f))) {
+        refuse('R, G and B are whole numbers from 0 to 255.');
+      }
+    } else if (take && waiting >= 0) {
+      takeChannel(waiting);
+    }
+    if (typed.began) {
+      typed.began = false;
+      holdUntil = performance.now() + COLOUR_HOLD;
+      onColour(st.hex, true);
+    }
+    if (f) {
+      // Its blur has nothing more to do.
+      typed.skip = true;
+      f.blur();
+    }
+    typed.skip = false;
+    render();
+  }
+
   const showFold = (open) => {
     if (!open) blurFields();
     exact.hidden = !open;
@@ -2661,6 +2700,10 @@ function colourTools({ strip, handle, sat, fold, exact, row = false, whiteOnly, 
     },
     /** Folds Exact values (or opens it). */
     fold: (open = false) => showFold(open),
+    /** Takes what is being typed now (an R, G or B still waiting too) and ends the change. */
+    flush: () => endTyping(true),
+    /** Drops an R, G or B still waiting (the picker or editor is closing) and ends the change. */
+    cancel: () => endTyping(false),
     /** A finger or a field is changing it, or did a moment ago: what the stage says must wait. */
     busy: () => dragging || satRow.dragging || fields.includes(document.activeElement) || performance.now() < holdUntil,
     render,
@@ -2925,6 +2968,7 @@ function openColourEditor(preset) {
 /** Back to the picker (the colour editor only); `keepPending` keeps waiting for a Save or Delete already sent. */
 function closeColourEditor(keepPending = false) {
   colourEdit = null;
+  ceColour.cancel();
   if (!keepPending) pendingEdit = null;
   disarmDelete();
   $('ceName').blur();
@@ -3666,6 +3710,7 @@ function openOwnStrip(id) {
 /** Closes the own colour boxes; the colour a box made stays in the effect. */
 function closeOwnStrips() {
   Object.assign(ownPick, { strip: null, key: null, made: null });
+  for (const t of Object.values(ownTools)) t.cancel();
   for (const id of ['feOwn', 'feBaseOwn']) $(`${id}Box`).hidden = true;
 }
 
@@ -3799,6 +3844,19 @@ function putOwnColour(stripId, hex, last) {
   disarmDelete();
   return true;
 }
+
+/** Every colour field's typing is taken now (see colourTools' flush), before a button acts on what the colour is. */
+function flushColours() {
+  anyColour.flush();
+  ceColour.flush();
+  for (const t of Object.values(ownTools)) t.flush();
+}
+
+// On iPad Safari a tap on a button leaves the focus in a field, so an R, G or B being typed would land after the tap
+// (or never, behind a closed editor): every button tap first takes what is typed (Save, Done, Back, Cancel, a tile).
+document.addEventListener('click', (ev) => {
+  if (ev.target instanceof Element && ev.target.closest('button, a, [role="button"], [role="tab"]')) flushColours();
+}, true);
 
 const ownTools = {};
 for (const stripId of ['feOwn', 'feBaseOwn']) {
