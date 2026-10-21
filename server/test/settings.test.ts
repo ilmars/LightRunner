@@ -124,6 +124,40 @@ test('output settings save, switch off, and reach the live state', async () => {
   });
 });
 
+test('Who to call: the contact saves, reaches the operator page, and empty fields are left out', async () => {
+  await withApp(async (call, app) => {
+    // Nothing set: two empty fields on the Settings page, nothing on the operator page.
+    assert.deepEqual((await call('GET', '/api/settings')).body.contact, { name: '', phone: '' });
+    let r = await call('PUT', '/api/settings', { contact: { name: '  Jānis Bērziņš ', phone: '' } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.contact, { name: 'Jānis Bērziņš', phone: '' });
+    let saved = JSON.parse(readFileSync(join(app.store.dir, 'show.json'), 'utf8'));
+    assert.deepEqual(saved.settings.contact, { name: 'Jānis Bērziņš' });
+    // The operator page gets it with its layout (the layout comes once the engine has started).
+    const layout = async () => {
+      for (let i = 0; i < 50; i++) {
+        const l = (await call('GET', '/api/layout')).body;
+        if (l) return l;
+        await sleep(20);
+      }
+      throw new Error('no layout');
+    };
+    assert.deepEqual((await layout()).contact, { name: 'Jānis Bērziņš' });
+    r = await call('PUT', '/api/settings', { contact: { name: 'Jānis Bērziņš', phone: '+371 2000 0000' } });
+    assert.deepEqual((await layout()).contact, { name: 'Jānis Bērziņš', phone: '+371 2000 0000' });
+    // Both emptied: no contact at all, in the file and on the page.
+    r = await call('PUT', '/api/settings', { contact: { name: ' ', phone: '' } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.contact, { name: '', phone: '' });
+    saved = JSON.parse(readFileSync(join(app.store.dir, 'show.json'), 'utf8'));
+    assert.equal(saved.settings.contact, undefined);
+    assert.equal((await layout()).contact, null);
+    // A long or wrong value is refused.
+    assert.equal((await call('PUT', '/api/settings', { contact: { name: 'x'.repeat(200) } })).status, 400);
+    assert.equal((await call('PUT', '/api/settings', { contact: 'Jānis' })).status, 400);
+  });
+});
+
 async function receiver(): Promise<{ socket: Socket; port: number; universes: Set<number> }> {
   const socket = createSocket('udp4');
   await new Promise<void>((r) => socket.bind(0, '127.0.0.1', r));

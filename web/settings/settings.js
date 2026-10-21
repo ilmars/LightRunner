@@ -170,6 +170,8 @@ function render() {
   renderRoutes();
 
   $('manualForOperators').checked = s.manualForOperators;
+  $('contactName').value = s.contact.name;
+  $('contactPhone').value = s.contact.phone;
 
   $('oscEnabled').checked = s.osc.enabled;
   $('oscPort').value = String(s.osc.port);
@@ -226,7 +228,7 @@ setInterval(async () => {
 
 function changedFields() {
   const out = {};
-  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators', 'osc'];
+  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators', 'osc', 'contact'];
   for (const k of keys) if (JSON.stringify(draft[k]) !== JSON.stringify(saved[k])) out[k] = draft[k];
   if (draft.universe !== undefined && draft.universe !== saved.universes[0]) out.universe = draft.universe;
   return out;
@@ -260,6 +262,8 @@ $('sacnPriority').addEventListener('input', (e) => { draft.output.priority = Num
 $('enttecPort').addEventListener('change', (e) => { draft.output.port = e.target.value; markDirty(); });
 $('universe').addEventListener('input', (e) => { draft.universe = Number(e.target.value); markDirty(); });
 $('manualForOperators').addEventListener('change', (e) => { draft.manualForOperators = e.target.checked; markDirty(); });
+$('contactName').addEventListener('input', (e) => { draft.contact.name = e.target.value; markDirty(); });
+$('contactPhone').addEventListener('input', (e) => { draft.contact.phone = e.target.value; markDirty(); });
 $('oscEnabled').addEventListener('change', (e) => edit((s) => { s.osc.enabled = e.target.checked; }));
 $('oscPort').addEventListener('input', (e) => { draft.osc.port = Number(e.target.value); markDirty(); });
 $('frameRate').addEventListener('change', (e) => { draft.frameRate = Number(e.target.value); markDirty(); });

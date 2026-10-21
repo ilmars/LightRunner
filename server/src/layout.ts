@@ -101,6 +101,8 @@ export interface OperatorLayout {
   /** Fixture ids of each group, for tapping a group on the mini visualiser. */
   members: Record<string, string[]>;
   manualForOperators: boolean;
+  /** Who to call when the lights have a problem (Settings), or null when nobody is set. */
+  contact: { name?: string; phone?: string } | null;
 }
 
 export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayout {
@@ -176,6 +178,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     }),
     members: Object.fromEntries(show.groups.map((g) => [g.id, g.fixtures])),
     manualForOperators: show.operator.manualForOperators,
+    contact: show.settings.contact ?? null,
   };
 }
 

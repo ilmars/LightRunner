@@ -13,7 +13,7 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OscSettings, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
+  BUILT_IN_PROFILES, Command, OscSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
   applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,
   type OflFixture, type Pick, type Scope,
   BLACKOUT, LiveEffectLayer, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type RuntimeState, type Show, type ShowEdit, type StageCommand,
@@ -1018,6 +1018,8 @@ export class App {
       frameRate: s.frameRate,
       gamma: s.gamma,
       manualForOperators: this.show.operator.manualForOperators,
+      /** Who to call: the Settings page edits two plain fields, so an absent one is empty here. */
+      contact: { name: s.contact?.name ?? '', phone: s.contact?.phone ?? '' },
       looks: this.show.looks.map((l) => ({ id: l.id, name: l.name })),
       universes: [...new Set(this.show.fixtures.map((f) => f.universe))].sort((a, b) => a - b),
       fixtures: this.show.fixtures.length,
@@ -1328,6 +1330,7 @@ export class App {
       if (body.frameRate !== undefined) show.settings.frameRate = Number(body.frameRate);
       if (body.gamma !== undefined) show.settings.gamma = Number(body.gamma);
       if (body.osc !== undefined) show.settings.osc = OscSettings.parse(body.osc);
+      if (body.contact !== undefined) show.settings.contact = contactOf(body.contact);
       if (typeof body.manualForOperators === 'boolean') show.operator.manualForOperators = body.manualForOperators;
       if (body.universe !== undefined) {
         // Move the whole rig to one universe (only for single-universe shows).

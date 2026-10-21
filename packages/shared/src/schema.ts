@@ -255,6 +255,20 @@ export const OscSettings = z.object({
 });
 export type OscSettings = z.infer<typeof OscSettings>;
 
+/** Who to call when the lights have a problem (Settings > Who to call). An empty field is left out. */
+export const Contact = z.object({
+  name: z.string().trim().min(1).max(60).optional(),
+  phone: z.string().trim().min(1).max(40).optional(),
+});
+export type Contact = z.infer<typeof Contact>;
+
+/** The contact from the Settings form: fields trimmed, an empty one left out, nothing at all when both are empty. Throws on bad input. */
+export function contactOf(input: unknown): Contact | undefined {
+  const raw = z.object({ name: z.string().optional(), phone: z.string().optional() }).parse(input);
+  const contact = Contact.parse({ name: raw.name?.trim() || undefined, phone: raw.phone?.trim() || undefined });
+  return contact.name || contact.phone ? contact : undefined;
+}
+
 export const Settings = z.object({
   /** The default output: every universe goes here unless a route says otherwise. */
   output: OutputSettings.default({ kind: 'artnet', host: '2.255.255.255' }),
@@ -267,6 +281,8 @@ export const Settings = z.object({
   pinHash: z.string().optional(),
   /** Absent in older shows: OSC is off. */
   osc: OscSettings.optional(),
+  /** Who to call, shown in the operator page's problem explanation. Absent when nobody is set. */
+  contact: Contact.optional(),
 }).superRefine((s, ctx) => {
   for (const message of routeProblems(s.output, s.routes)) ctx.addIssue({ code: 'custom', message, path: ['routes'] });
 });
