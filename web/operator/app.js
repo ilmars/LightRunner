@@ -1368,7 +1368,7 @@ saveBtn.addEventListener('click', (ev) => ev.preventDefault());
 
 // ---- Colour picker (covers the details panel only) ----
 
-const picker = { group: null, edit: false, tab: 'col' };
+const picker = { group: null, tab: 'col' };
 
 const HUE_STOPS = ['#ff0000', '#ffc800', '#00ff00', '#00ffc8', '#0000ff', '#8c00ff', '#ff008c', '#ff0000'];
 const WHITE_STOPS = ['#ffb46b', '#f4f8ff'];
@@ -1390,73 +1390,71 @@ function buildPickerGrid() {
   if (!row) return;
   const grid = $('pGrid');
   grid.replaceChildren();
-  // The Colours tab lists colours only; effects have their own tab.
+  // The Colours tab lists colours only; effects have their own tab. A tap fades the group to the colour
+  // (in Prepare, the draft's group); the editors open from Edit this colour and ＋ New colour.
   for (const p of row.group.presets.filter((x) => !x.effect)) {
     const b = el('button', 'pc');
     b.dataset.preset = p.id;
     const sw = el('i');
-    sw.style.background = shown(p.swatch) ?? NEUTRAL;
+    // Off has no light: a dark bar with a faint edge.
+    if (!p.swatch || p.swatch === '#000000') sw.classList.add('off');
+    else sw.style.background = shown(p.swatch) ?? NEUTRAL;
     b.append(sw, el('span', null, p.name));
-    b.classList.toggle('editable', picker.edit);
     b.classList.toggle('editing', colourEdit?.id === p.id);
-    // While editing, a tap opens the colour's editor and leaves the stage alone.
-    b.addEventListener('click', () => {
-      if (picker.edit) openEditor(row.group.presets.find((x) => x.id === p.id) ?? p);
-      else sendStage({ type: 'groupPreset', group: row.group.id, preset: p.id });
-    });
+    b.addEventListener('click', () => sendStage({ type: 'groupPreset', group: row.group.id, preset: p.id }));
     grid.append(b);
   }
-  if (picker.edit) {
-    const add = el('button', 'pc newfx', '＋ New colour');
-    add.dataset.newColour = '1';
-    add.classList.toggle('editing', !!newColour);
-    add.addEventListener('click', openNewColour);
-    grid.append(add);
-  }
+  // ＋ New colour: always the last tile.
+  const add = el('button', 'pc newfx', '＋ New colour');
+  add.dataset.newColour = '1';
+  add.classList.toggle('editing', !!newColour);
+  add.addEventListener('click', openNewColour);
+  grid.append(add);
   $('pTitle').textContent = row.group.name;
-  $('pAnyLab').textContent = row.group.whiteOnly ? 'Any white, warm to cool' : 'Any colour';
+  $('pAnyLab').textContent = row.group.whiteOnly ? 'Any white · drag to try it live' : 'Any colour · drag to try it live';
   $('pAny').className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'}`;
-  $('pAny').setAttribute('aria-label', $('pAnyLab').textContent);
+  $('pAny').setAttribute('aria-label', row.group.whiteOnly ? 'Any white, warm to cool' : 'Any colour');
   buildExtras(row.group);
   buildEffectGrid(row.group);
-  // A group that is a single light has nowhere for an effect to move: no Effects tab.
-  $('pTabs').hidden = !hasLine(row.group);
-  if ($('pTabs').hidden && picker.tab === 'fx') showPickerTab('col');
 }
 
-/** The Effects tab: one tile per effect in the group's list, with a small moving swatch of its colours. */
+/** "Background, Drum cage and Side bar". */
+const listNames = (names) => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] ?? '');
+
+/**
+ * The Effects tab: one tile per effect in the group's list, with a small moving swatch of its colours, and
+ * ＋ New effect last. A group that isn't a line of lights says so instead, and names the groups that take effects.
+ */
 function buildEffectGrid(group) {
+  const line = hasLine(group);
+  $('fxNotLine').hidden = line;
+  $('fxLab').hidden = $('fxGrid').hidden = !line;
   const grid = $('fxGrid');
   grid.replaceChildren();
-  const effects = group.presets.filter((p) => p.effect);
-  for (const p of effects) {
+  if (!line) {
+    const lines = lightGroups().filter(hasLine).map((g) => g.name);
+    const others = lightGroups().filter((g) => !hasLine(g)).map((g) => g.name);
+    $('fxNotLineText').textContent = lines.length
+      ? `They run on ${listNames(lines)}. ${listNames(others)} ${others.length === 1 ? 'takes' : 'take'} colours only.`
+      : 'No group here is a line of lights, so every group takes colours only.';
+    return;
+  }
+  $('fxLab').textContent = `Effects · tap to run on ${group.name}`;
+  for (const p of group.presets.filter((x) => x.effect)) {
     const b = el('button', 'pc fx');
     b.dataset.preset = p.id;
     const sw = el('i', 'fxsw');
     sw.style.setProperty('--g', effectGradient(p.effect, true));
     b.append(sw, el('span', null, p.name));
-    b.classList.toggle('editable', picker.edit);
     b.classList.toggle('editing', effectEdit?.id === p.id);
-    // While editing, a tap opens the effect's editor and leaves the stage alone; otherwise it goes on stage (or in the draft).
-    b.addEventListener('click', () => {
-      if (picker.edit) openEffectEditor(group.presets.find((x) => x.id === p.id) ?? p);
-      else sendStage({ type: 'groupPreset', group: group.id, preset: p.id });
-    });
+    // On stage, or in the draft in Prepare; All settings (on the running effect's card) opens its editor.
+    b.addEventListener('click', () => sendStage({ type: 'groupPreset', group: group.id, preset: p.id }));
     grid.append(b);
   }
-  if (picker.edit) {
-    const add = el('button', 'pc newfx', '＋ New effect');
-    add.classList.toggle('editing', effectEdit?.id === null);
-    add.addEventListener('click', () => openEffectEditor(null));
-    grid.append(add);
-  }
-  showNoEffects();
-}
-
-/** "No effects for this group yet" when the group has none (not while editing, where ＋ New effect is). */
-function showNoEffects() {
-  const row = pickerRow();
-  $('fxNone').hidden = picker.edit || !!row?.group.presets.some((p) => p.effect);
+  const add = el('button', 'pc newfx', '＋ New effect');
+  add.classList.toggle('editing', effectEdit?.id === null);
+  add.addEventListener('click', () => openEffectEditor(null));
+  grid.append(add);
 }
 
 // White, Amber and UV under the Any colour strip, for groups whose fixtures have them.
@@ -1575,13 +1573,23 @@ function renderPicker() {
   if (!row) return;
   const s = groupStatus(row.group);
   const info = presetInfo(row.group, s);
-  $('pCurSw').style.background = swatchFill(info);
-  $('pCurText').textContent = `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
+  // Off is a ring, as on the group's colour button.
+  const off = !info.effect && (!info.colour || info.colour === '#000000');
+  $('pCurSw').classList.toggle('off', off);
+  $('pCurSw').style.background = off ? 'transparent' : info.effect ? swatchFill(info) : tint(info.colour, 0.85);
+  $('pCurText').textContent = `${info.name} · ${Math.round((s?.level ?? 0) * 100)} %`;
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
   for (const b of $('fxGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
-  // The settings of the effect the group runs, under the list.
-  $('fxSet').hidden = !info.effect;
-  showNoEffects();
+  $('pEditCur').disabled = !currentColour(row.group, s);
+  // The effect the group runs: its card under the list (the round's length, Speed, All settings).
+  $('fxCard').hidden = !info.effect || !hasLine(row.group);
+  if (info.effect) {
+    // A listed effect by its name; one that isn't listed (a Speed change makes a live copy) by its kind: "Chase is running".
+    const listed = row.group.presets.some((p) => p.id === s?.preset && p.effect);
+    const kind = EFFECT_NAMES.find(([k]) => k === info.effect.effect)?.[1] ?? info.name;
+    $('fxRunning').textContent = `${listed ? info.name : kind} is running`;
+    $('fxNote').textContent = roundText(info.effect, s);
+  }
   effectSettings.show(info.effect, shownState()?.tempo ?? 120);
   const running = runningLight(row.group, s);
   pickerColour = running.colour;
@@ -1593,7 +1601,28 @@ function renderPicker() {
   renderEffectEditor();
 }
 
-// ---- Keep a strip colour: "＋ Add to colours" ----
+/** The listed colour a group runs, for Edit this colour; null for a strip pick, an effect, Basic light or Off by Blackout. */
+function currentColour(group, s) {
+  if (!s?.preset || s.live || runningEffect(group, s)) return null;
+  return group.presets.find((p) => p.id === s.preset && !p.effect) ?? null;
+}
+
+/**
+ * How long one round of a running effect takes, as the stage runs it: "one round = 2 s at 120 bpm" (or
+ * "one round = 10 s" for Free), with the speed dial; and "· slowed to stay safe" when light safety slows it.
+ */
+function roundText(effect, s) {
+  const st = shownState();
+  const speed = st?.speed ?? 1;
+  const bpm = st?.tempo ?? 120;
+  const beats = 'beats' in effect.speed;
+  const secs = beats ? (effect.speed.beats * 60) / (bpm * speed) : effect.speed.seconds / speed;
+  const n = secs >= 10 ? Math.round(secs) : Math.round(secs * 10) / 10;
+  const text = beats ? `one round = ${n} s at ${Math.round(bpm)} bpm` : `one round = ${n} s`;
+  return s?.slowed ? `${text} · slowed to stay safe` : text;
+}
+
+// ---- Keep a strip colour: "＋ Keep as a colour" ----
 
 /** The colour the picker's group runs live from the strip (with its White, Amber and UV), or null. */
 function liveOfPicker() {
@@ -1601,13 +1630,16 @@ function liveOfPicker() {
   return row ? liveColour(shownState()?.groups?.[row.group.id]) : null;
 }
 
-/** Shows the pill while the group runs a strip colour that isn't a swatch yet; keeps the form in step. */
+/**
+ * ＋ Keep as a colour is always there; it works while the group runs a strip colour that isn't a swatch yet and
+ * no form is open. Keeps the form in step.
+ */
 function renderAddColour() {
   const row = pickerRow();
   if (row) $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
   // ＋ New colour has its own colour: the stage has nothing to do with it.
   if (newColour) {
-    $('pAddOpen').hidden = true;
+    $('pAddOpen').disabled = true;
     return;
   }
   const pick = liveOfPicker();
@@ -1616,7 +1648,7 @@ function renderAddColour() {
   const open = !$('pAdd').hidden;
   // The form follows the colour: it goes when the group no longer runs a new strip colour.
   if (open && (!pick || listed)) $('pAdd').hidden = true;
-  $('pAddOpen').hidden = !pick || listed || !$('pAdd').hidden || picker.edit;
+  $('pAddOpen').disabled = !pick || listed || !$('pAdd').hidden;
   if (pick) $('paSw').style.background = shown(pick.display) ?? pick.display;
 }
 
@@ -1638,7 +1670,7 @@ function closeAddColour() {
   if (picker.group) renderAddColour();
 }
 
-// ---- ＋ New colour (Edit mode): a colour for the list, picked on the form's own strip ----
+// ---- ＋ New colour: a colour for the list, picked on the form's own strip ----
 
 /** The New colour form while it is open: `{ hex }`, hex null until a colour is picked. Picking never touches the stage. */
 let newColour = null;
@@ -1647,7 +1679,7 @@ let newExtraRows = [];
 
 function openNewColour() {
   const row = pickerRow();
-  if (!row || !picker.edit) return;
+  if (!row) return;
   closeEditor();
   pendingColour = null;
   newColour = { hex: null };
@@ -1664,6 +1696,7 @@ function openNewColour() {
   $('pAdd').hidden = false;
   renderAddColour();
   for (const b of $('pGrid').children) b.classList.toggle('editing', !!b.dataset.newColour);
+  markEditing();
   $('pAdd').scrollIntoView({ block: 'nearest' });
 }
 
@@ -1680,6 +1713,13 @@ function closeNewColour() {
   $('paAddBtn').textContent = 'Add';
   $('paAddBtn').disabled = pendingColour !== null;
   for (const b of $('pGrid').children) if (b.dataset.newColour) b.classList.remove('editing');
+  markEditing();
+}
+
+/** While an editor is open, its tab's other controls give way (Any colour and its sliders; the running effect's card). */
+function markEditing() {
+  $('pCol').classList.toggle('editing', !!colourEdit || !!newColour);
+  $('pFx').classList.toggle('editing', !!effectEdit);
 }
 
 /** White, Amber and UV sliders for the new colour, as Any colour has them; they change only the form. */
@@ -1815,18 +1855,16 @@ function openPicker(groupId) {
   }
   $('pAdd').hidden = true;
   picker.group = groupId;
-  picker.edit = false;
-  $('pEditBtn').classList.remove('on');
-  $('pEditBtn').setAttribute('aria-pressed', 'false');
-  $('pCol').classList.remove('editing');
-  $('pFx').classList.remove('editing');
   closeEditor();
   extrasMoved = false;
   buildPickerGrid();
   // A group that runs an effect opens on its Effects tab.
   const group = pickerRow()?.group;
   showPickerTab(group && hasLine(group) && runningEffect(group, groupStatus(group)) ? 'fx' : 'col');
+  // The picker takes the Groups panel's place.
+  $('details').classList.add('picking');
   $('picker').hidden = false;
+  $('picker').scrollTop = 0;
   renderPicker();
 }
 
@@ -1834,10 +1872,10 @@ function closePicker() {
   pendingColour = null;
   $('paAddBtn').disabled = false;
   $('pAdd').hidden = true;
-  picker.edit = false;
   closeEditor();
   picker.group = null;
   $('picker').hidden = true;
+  $('details').classList.remove('picking');
 }
 
 function showPickerTab(name) {
@@ -1850,12 +1888,33 @@ function showPickerTab(name) {
   }
   $('pCol').hidden = name !== 'col';
   $('pFx').hidden = name !== 'fx';
-  // Edit works on the tab it was turned on in.
-  if (changed && picker.edit) setEditMode(false);
+  // An editor belongs to the tab it was opened on.
+  if (changed) closeEditor();
 }
 
 $('pDone').addEventListener('click', closePicker);
+$('pBack').addEventListener('click', closePicker);
 for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('click', () => showPickerTab(t.dataset.pt));
+
+// Edit this colour: the editor, on the colour the group runs (the stage's, or the draft's in Prepare).
+$('pEditCur').addEventListener('click', () => {
+  const row = pickerRow();
+  const preset = row && currentColour(row.group, groupStatus(row.group));
+  if (preset) openEditor(preset);
+});
+
+// All settings: the effect editor, on the effect the group runs. A listed effect is edited in place; one that
+// isn't in the list (a live change, or one a Save kept in a song) opens as a new effect with its settings.
+$('fxAll').addEventListener('click', () => {
+  const row = pickerRow();
+  if (!row) return;
+  const s = groupStatus(row.group);
+  const effect = runningEffect(row.group, s);
+  if (!effect) return;
+  const listed = !s.effect ? row.group.presets.find((p) => p.id === s.preset && p.effect) : null;
+  if (listed) openEffectEditor(listed);
+  else openEffectEditor(null, effect);
+});
 
 // ---- Effect settings: speed, direction, waves, size and edges ----
 
@@ -1908,9 +1967,10 @@ function liveLayer(fx) {
  * caller hides the box when there is none). Every change calls `onChange(effect, how)` with the
  * whole effect: `how` is 'tap' for a choice, and 'start', 'move' and 'end' for a Size drag.
  * `current()`, when given, is the effect a change starts from (the caller's own, which may have
- * changed since it was shown here); otherwise the one last shown.
+ * changed since it was shown here); otherwise the one last shown. `speedOnly`: just the Speed line,
+ * its unit after the choices (the picker's running-effect card; All settings has the rest).
  */
-function effectControls(root, onChange, current = null) {
+function effectControls(root, onChange, current = null, { speedOnly = false } = {}) {
   let fx = null, tempo = 120;
   const now = () => (current ? current() : fx);
   const seg = (label) => {
@@ -1951,9 +2011,10 @@ function effectControls(root, onChange, current = null) {
   });
   const secondsBox = seg('Seconds for one round');
   const secondButtons = SPEED_SECONDS.map((n) => [n, choice(secondsBox, `${n} s`, `One round every ${n} seconds`, () => change({ speed: { seconds: n } }))]);
-  const speedUnit = el('span', 'lab-note');
+  const speedUnit = el('span', speedOnly ? 'fxunit' : 'lab-note');
   const speed = item('Speed', beatsBox, secondsBox);
-  speed.lab.append(' ', speedUnit);
+  if (speedOnly) speed.box.append(speedUnit);
+  else speed.lab.append(' ', speedUnit);
 
   const dirBox = seg('Direction');
   const dirButtons = DIRECTIONS.map(([d, text]) => [d, choice(dirBox, text, null, () => change({ direction: d }))]);
@@ -2017,7 +2078,7 @@ function effectControls(root, onChange, current = null) {
     row.append(...items.map((i) => i.box));
     return row;
   };
-  root.replaceChildren(line(speed), line(direction, edges), line(waves, size));
+  root.replaceChildren(...(speedOnly ? [line(speed)] : [line(speed), line(direction, edges), line(waves, size)]));
 
   const mark = (pairs, value) => {
     for (const [v, b] of pairs) {
@@ -2036,7 +2097,8 @@ function effectControls(root, onChange, current = null) {
       freeButton.setAttribute('aria-checked', String(free));
       secondsBox.hidden = !free;
       mark(secondButtons, free ? fx.speed.seconds : null);
-      speedUnit.textContent = free ? '· seconds a round' : '· beats a round';
+      const unit = free ? 'seconds a round' : 'beats a round';
+      speedUnit.textContent = speedOnly ? unit : `· ${unit}`;
       mark(dirButtons, fx.direction);
       mark(edgeButtons, fx.edge);
       count.textContent = String(fx.waves);
@@ -2054,9 +2116,8 @@ function effectControls(root, onChange, current = null) {
 }
 
 /**
- * The picker's effect settings. A change goes on stage, or in the draft in Prepare (a Size drag is one
- * Undo step: its later sends continue it, in 0.2 s each, like Any colour). The group is the one the
- * finger started on.
+ * The running effect's Speed, on the picker's card: a tap goes on stage, or in the draft in Prepare, for the
+ * group the finger started on. (The drag path is effectControls' Size, which the card leaves out.)
  */
 const effectSettings = (() => {
   let target = null;
@@ -2079,7 +2140,7 @@ const effectSettings = (() => {
     if (!target?.group) return;
     if (how === 'move') out.push(effect);
     else out.end(effect);
-  });
+  }, null, { speedOnly: true });
 })();
 
 /**
@@ -2180,18 +2241,6 @@ const FX_STRIP_ALPHA = 0.85;
 
 const editedPreset = () => (colourEdit ? pickerRow()?.group.presets.find((p) => p.id === colourEdit.id) : undefined);
 
-function setEditMode(on) {
-  picker.edit = on;
-  closeEditor();
-  $('pEditBtn').classList.toggle('on', on);
-  $('pEditBtn').setAttribute('aria-pressed', String(on));
-  $('pCol').classList.toggle('editing', on);
-  $('pFx').classList.toggle('editing', on);
-  if (on) $('pAdd').hidden = true;
-  buildPickerGrid();
-  renderPicker();
-}
-
 /** The fades the editor offers, in seconds. A colour with another fade gets one more button, selected. */
 const COLOUR_FADES = [0, 1, 2, 3, 5, 10];
 const fadeText = (s) => (s === 0 ? 'Instant' : `${s} s`);
@@ -2257,6 +2306,7 @@ function openEditor(preset) {
   $('pEdit').hidden = false;
   renderEditor();
   for (const b of $('pGrid').children) b.classList.toggle('editing', b.dataset.preset === preset.id);
+  markEditing();
   $('pEdit').scrollIntoView({ block: 'nearest' });
 }
 
@@ -2269,6 +2319,7 @@ function closeEditor(keepPending = false) {
   $('pEdit').hidden = true;
   for (const b of $('pGrid').children) b.classList.remove('editing');
   closeEffectEditor();
+  markEditing();
 }
 
 /** "Used in …" for the songs and quick looks that use any of these presets. */
@@ -2312,7 +2363,6 @@ function disarmDelete() {
   }
 }
 
-$('pEditBtn').addEventListener('click', () => setEditMode(!picker.edit));
 $('peCancel').addEventListener('click', () => closeEditor());
 $('peName').addEventListener('keydown', (ev) => {
   ev.stopPropagation();
@@ -2474,11 +2524,11 @@ function newEffectLayer(choices) {
   return liveLayer({ effect: 'wave', colours, speed: { beats: 4 }, direction: 'ltr', waves: 1, size: 0.5, edge: 'soft', intensity: 1 });
 }
 
-/** Opens the editor on a listed effect, or empty (preset null) for a new one. */
-function openEffectEditor(preset) {
+/** Opens the editor on a listed effect, or (preset null) on a new one: a new wave, or `from`'s settings when given. */
+function openEffectEditor(preset, from = null) {
   const row = pickerRow();
   if (!row) return;
-  const saved = preset ? liveLayer(preset.effect) : null;
+  const saved = preset ? liveLayer(preset.effect) : from ? liveLayer(from) : null;
   // Yo-yo and meteor run in their first colour only (a ready-made one may list more): the editor shows that one,
   // and Save keeps just it, so `original` is the effect as saved.
   const opened = saved && ONE_COLOUR.has(saved.effect) ? { ...saved, colours: saved.colours.slice(0, 1) } : saved;
@@ -2498,7 +2548,8 @@ function openEffectEditor(preset) {
   drawEffectEditor();
   startEffectStrip(picker.group);
   renderEffectEditor();
-  for (const b of $('fxGrid').children) b.classList.toggle('editing', preset ? b.dataset.preset === preset.id : b.classList.contains('newfx'));
+  for (const b of $('fxGrid').children) b.classList.toggle('editing', preset ? b.dataset.preset === preset.id : !from && b.classList.contains('newfx'));
+  markEditing();
   $('fxEdit').scrollIntoView({ block: 'nearest' });
 }
 
@@ -2510,6 +2561,7 @@ function closeEffectEditor() {
   $('feName').blur();
   $('fxEdit').hidden = true;
   for (const b of $('fxGrid').children) b.classList.remove('editing');
+  markEditing();
 }
 
 /** Keeps "Used in …" true as the show changes; closes the editor if the effect is gone. */
@@ -3772,13 +3824,12 @@ function applyPhone() {
   if (phone) {
     $('details').insertBefore(tempo, $('groupRows'));
     $('details').insertBefore(flash, $('groupRows'));
-    // Editing belongs to the iPad: the running order's, and the colour list's (its buttons are hidden here,
-    // and in Edit a swatch tap opens the editor instead of setting the colour).
+    // Editing belongs to the iPad: the running order's, and the colour picker's editors (their buttons are hidden here).
     if (editing) setEditing(false);
     if (quickEditing) setQuickEditing(false);
     // No Prepare on the phone: it stays a remote for the live stage.
     setPrepare(false);
-    if (picker.edit) setEditMode(false);
+    if (picker.group) closeEditor();
     closeSheet();
   } else {
     if (flash.parentElement !== $('masterFader').parentElement) $('masterFader').after(flash);

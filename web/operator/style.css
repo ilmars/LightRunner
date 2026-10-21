@@ -307,7 +307,6 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .chip i.off { box-shadow: inset 0 0 0 1.5px rgba(148, 163, 184, 0.5); }
 .chip span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chip svg { flex: none; color: var(--ds-muted); }
-.cur i { flex: none; width: 16px; height: 16px; border-radius: 5px; opacity: 0.85; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
 /* The level: a clear number on the right, never on top of the slider. */
 .row .pct { font-size: 17px; font-weight: 600; color: var(--ds-text); font-variant-numeric: tabular-nums; text-align: right; }
 .row .pct.zero { color: var(--ds-muted); }
@@ -330,7 +329,7 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .puff.down { background: var(--ds-selected); border-color: var(--ds-edge-held); }
 
 
-/* ---- Colour picker: covers the details panel only ---- */
+/* ---- Sheets over the Groups panel (the quick-look sheet; the colour picker below) ---- */
 .picker {
   position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; gap: 8px;
   background: var(--ds-glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
@@ -338,22 +337,42 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 }
 .phead { display: flex; align-items: center; gap: 10px; flex: none; }
 .phead h2 { margin: 0 0 0 2px; font-size: var(--ds-fs-value); font-weight: 400; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cur { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 15px; white-space: nowrap; }
-.cur i { width: 18px; height: 18px; border-radius: 5px; }
+
+/* ---- Colour picker: takes the Groups panel's place (its rows hide; the panel stays), Quick looks stay ---- */
+.details.picking > :not(#picker) { visibility: hidden; }
+.cpick {
+  gap: 10px; padding: 10px 16px 14px; background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none;
+  overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--ds-elevated) transparent;
+}
+/* Header: ‹ Groups, the group, what it runs and its level, Colours / Effects, Done. */
+.cpick .phead { gap: 12px; min-width: 0; }
+.cpick .phead h2 { flex: none; margin: 0; max-width: 200px; font-size: 17px; font-weight: 600; }
+.cur { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--ds-muted); font-size: 13px; white-space: nowrap; }
+.cur span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cur i { flex: none; width: 14px; height: 14px; border-radius: 50%; }
+.cur i.off { box-shadow: inset 0 0 0 1.5px rgba(148, 163, 184, 0.5); }
+.cpick .phead .grow { flex: 1 1 0; }
+.pdone { padding: 0 16px; font-size: 14px; font-weight: 600; }
 .done { min-width: 96px; min-height: 40px; padding: 0 20px; border: 0; border-radius: var(--ds-r-pill); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); font-size: 15px; font-weight: 500; }
 .done:active { background: var(--ds-selected); }
 .tab { min-height: 38px; padding: 0 16px; border: 0; border-radius: var(--ds-r-small); background: transparent; color: var(--ds-muted); font-size: 15px; }
 .tab.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.ptabs { display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; border-radius: var(--ds-r-tile); background: rgba(148, 170, 210, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05); }
-.pcol { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.pcol { display: flex; flex-direction: column; gap: 10px; flex: none; }
+/* Colour tiles: a bar of the colour over its name; six to a row (five for effects), ＋ New colour / ＋ New effect last. */
 .pgrid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.pgrid.fxgrid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.pgrid[hidden] { display: none; }
 .pc {
-  display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 6px; min-height: 76px; padding: 10px;
-  background: var(--ds-tile-fill); border: 0; border-radius: var(--ds-r-tile); box-shadow: var(--ds-shadow-low); font-size: 14px; text-align: left;
+  position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 7px; min-width: 0; min-height: 58px; padding: 8px;
+  background: var(--ds-tile-fill); border: 1px solid var(--ds-edge); border-radius: var(--ds-r-tile); color: var(--ds-text); font-size: 13px; text-align: left;
 }
-.pc i { flex: none; width: 100%; height: 26px; border-radius: 8px; opacity: 0.8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
-.pc span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pc.on { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.pc:active { background: var(--ds-elevated); }
+.pc i { flex: none; height: 22px; border-radius: 7px; opacity: 0.82; }
+.pc i.off { background: #05080E; opacity: 1; box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.3); }
+.pc span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc.on { background: var(--ds-tile-fill-on); border-color: rgba(67, 137, 232, 0.55); }
+.pc.fx { min-height: 62px; }
+.pc i.fxsw { height: 20px; border-radius: 6px; background: #05080E; opacity: 1; }
 .lab2 { margin: 4px 2px 0; font-size: var(--ds-fs-label); color: var(--ds-muted); font-weight: 400; }
 .strip2 { position: relative; height: 44px; border-radius: var(--ds-r-tile); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); cursor: crosshair; touch-action: none; flex: none; overflow: hidden; }
 /* The colour is dimmed on the strip (the handle and border are not); the colour sent is the true one. */
@@ -361,22 +380,20 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .strip2.hue { --grad: linear-gradient(90deg, #ff0000, #ffc800, #00ff00, #00ffc8, #0000ff, #8c00ff, #ff008c, #ff0000); }
 .strip2.cct { --grad: linear-gradient(90deg, #f7d6b4, #f4f8ff); }
 .strip2.cct::before { opacity: 0.7; }
-/* Keep a strip colour: a quiet pill beside the strip's label, and a small form under the strip. */
+/* A small-capitals label over a list or the strip, with its button at the right (Edit this colour, ＋ Keep as a colour). */
 .labrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; }
 .labrow .lab2 { margin: 4px 2px 0; }
+.labrow .ds-caps { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.labrow .ebtn:disabled, .labrow .hbtn:disabled { opacity: 0.4; }
 .pill-add { flex: none; min-height: 40px; }
-#pEditBtn { min-height: 40px; padding: 0 18px; }
 .padd {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 14px; flex: none; padding: 6px 12px;
   border-radius: var(--ds-r-tile); background: var(--ds-tile-fill); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 .padd[hidden], .pill-add[hidden], .pswitch[hidden] { display: none; }
-/* Edit mode: the strip row and the Add form give way to the editor. */
-.pcol.editing .labrow, .pcol.editing #pAny { display: none; }
-.pc { position: relative; }
-.pc.editable::after { content: "✎"; position: absolute; bottom: 10px; right: 10px; font-size: 14px; line-height: 1; color: var(--ds-muted-on); opacity: 0.8; }
-.pc.editable span { max-width: calc(100% - 16px); }
-.pc.editing { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+/* The colour editor or ＋ New colour open: Any colour gives way to it. */
+.pcol.editing #pAnyRow, .pcol.editing #pAny { display: none; }
+.pc.editing { border-color: var(--ds-accent); }
 .ghost.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
 .pedit .pe-strip { grid-column: 1 / -1; height: 40px; }
 .pe-strip[hidden] { display: none; }
@@ -412,6 +429,15 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 /* Editing a colour: the White, Amber and UV sliders give way to the editor too. */
 .pcol.editing #pExtras { display: none; }
 .strip-handle { position: absolute; top: 4px; bottom: 4px; left: 0; width: 4px; background: #c9ccd2; border-radius: 2px; box-shadow: 0 0 0 1px #000; }
+/* The picker's Any colour strip: 40 px, its colours dimmed, a light line for the handle that stands out above and below. */
+#pAny { height: 40px; border-radius: 12px; box-shadow: none; overflow: visible; }
+#pAny::before { border-radius: 12px; }
+#pAny .strip-handle { top: -3px; bottom: -3px; width: 3px; background: #E3E8F0; box-shadow: none; }
+/* White, Amber and UV under it: "White 0 %" over a 44 px fill slider, three to a row. */
+#pExtras { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 0; }
+#pExtras .xcell { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+#pExtras .lab2, #pExtras .pct, #pExtras .pct.zero { margin: 0; padding: 0; font-size: 12px; color: var(--ds-muted); }
+#pExtras .ds-fill { flex: 1 0 100%; height: 44px; }
 /* ---- New quick look sheet (same cover as the colour picker) ---- */
 .lab-note { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .qs-name {
@@ -441,10 +467,24 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .qs-stage { flex: none; display: flex; flex-direction: column; gap: 0; }
 .qs-stage[hidden] { display: none; }
 .qs-stage .lab-note { margin: -4px 0 0 60px; font-size: var(--ds-fs-label); color: var(--ds-muted); }
-.soon { margin: 0; padding: 24px 4px; color: var(--dim); font-size: 15px; }
 
-/* ---- Effects tab: the group's effects, then the running effect's settings ---- */
-.pfx { display: flex; flex-direction: column; gap: 8px; flex: none; }
+/* ---- Effects tab: the group's effects, then the running effect's card ---- */
+.pfx { display: flex; flex-direction: column; gap: 10px; flex: 1 0 auto; }
+.pfx > .ds-caps[hidden] { display: none; }
+/* A group that isn't a line of lights: why there are no effects, and which groups take them. */
+.fx-notline { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px 0; text-align: center; color: var(--ds-muted); font-size: 13px; line-height: 1.5; }
+.fx-notline > span:last-child { max-width: 380px; }
+.fx-notline-title { color: var(--ds-text); font-size: 15px; }
+/* While an effect runs: "<effect> is running", the round's length, All settings, then Speed. */
+.fxcard { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 14px; background: rgba(0, 0, 0, 0.16); border: 1px solid var(--ds-edge); }
+.fxcard-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.fxcard-top b { flex: none; font-size: 14px; font-weight: 600; }
+.fxnote { min-width: 0; color: var(--ds-muted); font-size: 12px; }
+.fxcard .fxset { padding-top: 0; border-top: 0; }
+.fxspeed .fxitem { gap: 10px; }
+.fxspeed .fxitem > .lab2 { width: 64px; margin: 0; font-size: 12px; }
+.fxspeed .ds-seg > button { min-width: 40px; font-size: 13px; }
+.fxunit { color: var(--ds-muted); font-size: 12px; white-space: nowrap; }
 /* An effect's swatch: its colours side by side, drifting slowly to one side (twice as wide, moved by its own width, so it loops). */
 .pc .fxsw { position: relative; overflow: hidden; }
 .pc .fxsw::before {
@@ -467,10 +507,11 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .fxsize .ds-fill { flex: 1; min-width: 120px; }
 .fxsize .pct { min-width: 52px; text-align: right; font-size: var(--ds-fs-value); font-variant-numeric: tabular-nums; }
 .fxsize .pct.zero { color: var(--ds-muted); }
-/* Edit mode on the Effects tab: the running effect's settings give way to the editor, as the Any colour strip does on Colours. */
-.pfx.editing #fxSet { display: none; }
-.pc.newfx { align-items: center; justify-content: center; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-muted); }
-.pc.newfx.editing { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+/* The effect editor open: the running effect's card gives way to it, as Any colour does on Colours. */
+.pfx.editing #fxCard { display: none; }
+/* ＋ New colour and ＋ New effect: dashed "add" tiles. */
+.pc.newfx { align-items: center; justify-content: center; background: transparent; border: 1px dashed rgba(148, 163, 184, 0.3); color: var(--ds-muted); text-align: center; }
+.pc.newfx.editing { border: 1px solid var(--ds-accent); }
 .fxedit > * { grid-column: 1 / -1; }
 .fxedit .lab2 { margin: 4px 2px 0; }
 .fxedit .padd-btns { justify-self: end; }
@@ -637,9 +678,9 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   body[data-tab="groups"] #quickLooks, body[data-tab="looks"] #details { display: none; }
 
   /* A remote doesn't change the prepared show. */
-  #editBtn, #qEditBtn, #orderFoot, #saveBtn, #pEditBtn, #pAddOpen, #pAdd, #pEdit, #fxEdit, .ql.newq { display: none !important; }
+  #editBtn, #qEditBtn, #orderFoot, #saveBtn, #pEditCur, #pAddOpen, #pAdd, #pEdit, #fxEdit, .pc.newfx, .ql.newq { display: none !important; }
   /* Effects can be picked here, but their settings stay on the iPad. */
-  #fxSet { display: none !important; }
+  #fxCard { display: none !important; }
 
   /* Order: big rows. */
   .order { padding: 6px; }
@@ -661,8 +702,14 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   #details .flash-area { flex: none; justify-content: stretch; gap: 6px; }
   #details .flash-area .flash-label { display: none; }
   #details .flash-area button { flex: 1 1 0; width: auto; min-width: 0; min-height: 44px; }
-  .pgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pgrid, .pgrid.fxgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .pextras { grid-auto-flow: row; }
+  /* The picker's header on two lines: ‹ Groups, the group and Done, then what it runs and the tabs. */
+  .cpick { padding: 10px 12px 12px; }
+  .cpick .phead { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "back name done" "cur cur tabs"; align-items: center; gap: 8px 10px; }
+  #pBack { grid-area: back; } .cpick .phead h2 { grid-area: name; max-width: none; } #pDone { grid-area: done; justify-self: end; }
+  .cpick .cur { grid-area: cur; } .cpick #pTabs { grid-area: tabs; }
+  #pExtras { grid-template-columns: minmax(0, 1fr); }
 
   /* Looks: two columns. */
   .quick-looks { padding: 10px 12px 12px; }
