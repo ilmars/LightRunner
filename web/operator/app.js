@@ -4098,7 +4098,10 @@ function pickManualColour(c) {
   renderManual();
 }
 
-/** The level for every picked target; a whole light's held segments follow it, so the whole bar dims. */
+/**
+ * The level for every picked target; a whole light's held segments follow it, so the whole bar dims. A level never
+ * changes a light's colour: one not held yet is held at the colour it shows now (one command per colour, usually one).
+ */
 function sendManualLevel(v) {
   if (blackedOut()) return;
   const intensity = Math.round(clamp01(v) * 1000) / 1000;
@@ -4106,8 +4109,25 @@ function sendManualLevel(v) {
   for (const t of manualTargets()) {
     if (t.segment === undefined) for (const h of heldSegmentsOf(t.fixture)) targets.push({ fixture: h.fixture, segment: h.segment });
   }
-  // One command for them all, changed in one frame.
-  if (targets.length) sendManual({ type: 'manual', targets, intensity });
+  if (!targets.length) return;
+  // Held ones keep their colour by themselves; the rest take the colour they show (an effect's first colour).
+  const held = [];
+  const byColour = new Map();
+  for (const t of targets) {
+    const now = lightNow(t.fixture, t.segment ?? null);
+    if (now.held || !now.light) {
+      held.push(t);
+      continue;
+    }
+    const c = now.light;
+    const extras = Object.fromEntries(['white', 'amber', 'uv'].filter((k) => c[k] > 0.001).map((k) => [k, Math.round(c[k] * 1000) / 1000]));
+    const key = JSON.stringify([c.hex, extras]);
+    if (!byColour.has(key)) byColour.set(key, { colour: c.hex, extras, targets: [] });
+    byColour.get(key).targets.push(t);
+  }
+  // Usually one command for them all, changed in one frame.
+  if (held.length) sendManual({ type: 'manual', targets: held, intensity });
+  for (const { colour, extras, targets: list } of byColour.values()) sendManual({ type: 'manual', targets: list, colour, ...extras, intensity });
 }
 
 function showManualLevel(v) {

@@ -250,3 +250,19 @@ test('a held segment of a shared, reversed bar holds while its groups, its owner
   assert.deepEqual(rgbOf(e, 11.5, 1, 6), [0, Math.round(0.7 * 255), 0]);
   assert.ok(worst <= 0.05, `largest step ${worst}`);
 });
+
+test('a level for a whole light that is not held keeps its colour: it starts from the light under its held segments', () => {
+  const e = onWhite();
+  e.apply({ type: 'manual', target: { fixture: 'bar1', segment: 0 }, colour: '#ff0000', intensity: 1 }, 1);
+  for (let t = 1; t < 2; t += 0.025) e.frame(t);
+  // Level 50 % on the whole bar (its held segment too, as the page sends it): no colour, only a level.
+  assert.equal(e.apply({ type: 'manual', targets: [{ fixture: 'bar1' }, { fixture: 'bar1', segment: 0 }], intensity: 0.5 }, 2), null);
+  for (let t = 2; t < 3; t += 0.025) e.frame(t);
+  const [r, g, b] = rgbOf(e, 3, 0, 0);
+  assert.ok(Math.abs(r! - 128) <= 1 && g === 0 && b === 0, `segment 1 stays red, at half: ${[r, g, b]}`);
+  for (let c = 1; c < 8; c++) {
+    const [x, y, z] = rgbOf(e, 3, 0, c);
+    assert.ok(x === y && y === z && Math.abs(x! - 128) <= 1, `segment ${c + 1} stays white, at half: ${[x, y, z]}`);
+  }
+  assert.deepEqual(e.liveState(3, 'ok').held.find((h) => h.segment === null), { fixture: 'bar1', segment: null, colour: '#ffffff', level: 0.5 });
+});

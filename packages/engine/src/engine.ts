@@ -185,6 +185,8 @@ class FixtureRun {
   visualAt = 0;
   /** Final light of each segment after manual and master, before gamma. */
   cells: Light[] = [];
+  /** The first segment's light under its own hold (its groups and the fixture's hold), where a take of the whole fixture starts. */
+  under: Light = dark();
   /** Each segment's own motion this frame: the most a preset running there changed it by itself. */
   motion: number[] = [];
   /** It has a colour channel shared by all its segments, so one segment's motion shows on all of them. */
@@ -1001,7 +1003,8 @@ export class Engine {
     if (typeof found === 'string') return forRelease && found.startsWith('unknown') ? 'unknown target' : found;
     if (found.run.smokeGroups.length && !forRelease) return smokeRefusal(target.fixture);
     // A segment's hold sits on top of the fixture's: it starts from what that segment shows.
-    if (found.segment === null) return { holder: found.run, showing: found.run.cells[0]!, whole: found.run };
+    // A whole fixture's starts from what is under its held segments, so a level alone never takes a held segment's colour.
+    if (found.segment === null) return { holder: found.run, showing: found.run.under, whole: found.run };
     return { holder: found.run.segmentHolds[found.segment]!, showing: found.run.cells[found.segment]! };
   }
 
@@ -1193,6 +1196,7 @@ export class Engine {
           mix(light, parts, ownerWeights);
         }
         if (manual) mix2(light, light, manual.current, manualWeight);
+        if (c === 0) copy(run.under, light);
         const held = this.liveManual(run.segmentHolds[c]!, now, dt);
         if (held) mix2(light, light, held.current, held.weight.value(now));
         if (!run.plan.hasUv) withoutUv(light);
