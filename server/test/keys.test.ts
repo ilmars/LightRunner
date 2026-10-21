@@ -102,13 +102,13 @@ interface Rig {
   url: string;
 }
 
-async function withKeys(fn: (rig: Rig) => Promise<void>, opts: { midi?: (log: (m: string) => void) => Promise<MidiPorts | null> } = {}) {
+async function withKeys(fn: (rig: Rig) => Promise<void>, opts: { midi?: (log: (m: string) => void) => Promise<MidiPorts | null>; keysChangedMs?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'light-runner-'));
   const midi = new FakeMidi();
   const lines: string[] = [];
   const app = new App({
     port: 0, host: '127.0.0.1', dataDir: dir, seedPath, webDir: join(root, 'web'), output: { kind: 'none' },
-    log: (m) => lines.push(m), midi: opts.midi ?? (async () => midi), apcPollMs: 20, apcHoldMs: 150, apcResendPolls: 1e9, learnMs: 400,
+    log: (m) => lines.push(m), midi: opts.midi ?? (async () => midi), apcPollMs: 20, apcHoldMs: 150, apcResendPolls: 1e9, learnMs: 400, keysChangedMs: opts.keysChangedMs ?? 20,
   });
   try {
     await app.start();
@@ -723,3 +723,38 @@ test("importing a show file keeps this computer's Listen switches; the APC mini 
   assert.deepEqual(show.operator.controller.ignored, ['nanoKONTROL2']);
   assert.equal(show.operator.controller.apcLayout, undefined);
 }));
+
+test('controllers coming and going rebuild the pages only when Key chips come or go, and a moment later', () => withKeys(async (rig) => {
+  const { midi, url } = rig;
+  const ws = new WebSocket(`${url.replace('http', 'ws')}/ws`);
+  const layouts: any[] = [];
+  ws.on('message', (data, binary) => {
+    if (binary) return;
+    const msg = JSON.parse(String(data));
+    if (msg.type === 'layout') layouts.push(msg.layout);
+  });
+  await new Promise((r) => ws.once('open', r));
+  try {
+    await waitFor(() => layouts.length === 1, 1000, 'the first layout');
+    // Plugged in and out again within the moment (a flaky hub): nothing is sent.
+    midi.plug('nanoKONTROL2');
+    const port = await portNamed(midi, 'nanoKONTROL2');
+    midi.unplug('nanoKONTROL2');
+    await waitFor(() => port.closed, 1000, 'the port to close');
+    await sleep(400);
+    assert.equal(layouts.length, 1, 'no layout for a controller that came and went');
+    // Plugged in to stay: one layout, a moment later.
+    midi.plug('nanoKONTROL2');
+    await portNamed(midi, 'nanoKONTROL2');
+    await waitFor(() => layouts.length === 2, 1500, 'the layout with a controller');
+    assert.equal(layouts[1].keys.connected, 1);
+    // A second controller changes nothing on the pages (the chips are there already); the layout still counts it.
+    midi.plug('APC mini mk2');
+    await portNamed(midi, 'APC mini mk2');
+    await sleep(500);
+    assert.equal(layouts.length, 2);
+    assert.equal((await (await fetch(`${url}/api/layout`)).json()).keys.connected, 2);
+  } finally {
+    ws.close();
+  }
+}, { keysChangedMs: 250 }));

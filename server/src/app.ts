@@ -63,6 +63,8 @@ export interface AppOptions {
   apcResendPolls?: number;
   /** How long a learn waits for a key (ms); 10 s. Tests make it short. */
   learnMs?: number;
+  /** How long after a controller comes or goes the pages hear of it (ms); 1 s, so one that comes and goes at once (a flaky hub) is passed over. */
+  keysChangedMs?: number;
   /**
    * Test only (`LIGHT_RUNNER_FAKE_MIDI=1`, for checking the pages without a controller): the simulated ports `midi`
    * gives, and `POST /api/test/midi` to press their keys. Never set otherwise.
@@ -149,6 +151,7 @@ export class App {
    * programmer's backups out.
    */
   private operatorBackedUp = false;
+  private keysTimer: NodeJS.Timeout | undefined;
   /** Groups each tablet is holding a Flash on, so they go out if it disconnects. */
   private readonly flashes = new Map<WebSocket, Set<string>>();
   /** Groups each device source ('http', 'osc', 'midi:<port>') is holding a Flash on, so they go out when it goes away. */
@@ -258,6 +261,7 @@ export class App {
     // The APC mini's LEDs go out and every controller's port closes.
     this.midi?.stop();
     this.midi = null;
+    clearTimeout(this.keysTimer);
     this.nodeWatch.stop();
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.blind.clear();
@@ -354,9 +358,7 @@ export class App {
       device: (action, source) => this.device(action, source),
       release: (source) => this.releaseDevice(source),
       // The pages show Key chips while a controller is listened to.
-      changed: () => {
-        if (this.layout && !this.stopping) this.refreshLayout();
-      },
+      changed: () => this.controllersChanged(),
       log: this.log,
     }, { pollMs: this.opts.apcPollMs, holdMs: this.opts.apcHoldMs, resendPolls: this.opts.apcResendPolls });
     this.midi.configure(controllerOf(this.show));
@@ -364,6 +366,24 @@ export class App {
     if (this.layout) this.refreshLayout();
     this.midi.update(this.layout, this.latestState);
     this.midi.start();
+  }
+
+  /**
+   * A controller was opened or let go of: a moment later (so one that comes and goes at once is passed over), the
+   * layout counts the controllers again. The pages are sent it only when Key chips come or go (none listened to, or
+   * some); otherwise the count changes in place, for `GET /api/layout`.
+   */
+  private controllersChanged(): void {
+    clearTimeout(this.keysTimer);
+    this.keysTimer = setTimeout(() => {
+      if (!this.layout || this.stopping) return;
+      const listening = this.midi?.listening ?? 0;
+      const was = this.layout.keys.connected;
+      if (listening === was) return;
+      if ((listening > 0) === (was > 0)) this.layout.keys.connected = listening;
+      else this.refreshLayout();
+    }, this.opts.keysChangedMs ?? 1000);
+    this.keysTimer.unref();
   }
 
   private apcStatus(): ApcStatus {
