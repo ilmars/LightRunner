@@ -147,7 +147,8 @@
       </div>
       <div id="groupRows" class="rows"></div>
       <!-- The colour picker: replaces the Groups panel (Quick looks stay). No Edit mode: Edit this colour and ＋ New colour
-           open the colour editor (below, the whole column); ＋ Keep as a colour, ＋ New effect and All settings open forms here. -->
+           open the colour editor, and a held effect, ＋ New effect and All settings the effect editor (below, the whole column);
+           ＋ Keep as a colour opens a form here. -->
       <div id="picker" class="picker cpick" hidden>
         <div class="phead">
           <button id="pBack" class="ebtn">‹ Groups</button>
@@ -208,38 +209,6 @@
               <button id="fxAll" class="hbtn">All settings ›</button>
             </div>
             <div id="fxSet" class="fxset fxspeed" aria-label="Speed"></div>
-          </div>
-          <!-- ＋ New effect and All settings open this. Built by app.js; hidden on the phone. -->
-          <div id="fxEdit" class="padd pedit fxedit" hidden>
-            <div class="padd-top">
-              <i id="feSw" class="padd-sw"></i>
-              <input id="feName" class="qs-name" type="text" maxlength="40" placeholder="Name" aria-label="Name" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
-            </div>
-            <!-- The effect as it is being edited, moving along the group's lights (drawn from the server's engine; nothing goes to the lights). -->
-            <canvas id="feStrip" class="fe-strip" role="img" aria-label="How the effect moves along the group"></canvas>
-            <div id="feKind" class="ds-seg fe-kind" role="radiogroup" aria-label="Kind of effect"></div>
-            <p class="lab2"><span id="feColLab">Colours</span> <span id="feColNote" class="lab-note">· tap to add or remove, hold and drag to change the order, 1 to 6</span></p>
-            <div id="feColours" class="fe-colours"></div>
-            <!-- ＋ Own colour opens this: a colour picked here joins the effect's colours (not the group's list). -->
-            <div id="feOwn" class="strip2 hue fe-own" aria-label="Pick an own colour" hidden><span id="feOwnH" class="strip-handle" hidden></span></div>
-            <p class="lab2">Base <span class="lab-note">· a colour under the effect, where it is dark</span></p>
-            <div id="feBase" class="fe-colours" role="radiogroup" aria-label="Base colour"></div>
-            <div id="feBaseOwn" class="strip2 hue fe-own" aria-label="Pick an own colour for the base" hidden><span id="feBaseOwnH" class="strip-handle" hidden></span></div>
-            <div id="feBaseRow" class="fxrow fe-base-row" hidden>
-              <span class="fxitem fxsize">
-                <span class="lab2">Base brightness</span>
-                <div id="feBaseLevel" class="ds-fill" role="slider" aria-label="Base brightness" aria-valuemin="0" aria-valuemax="100"><span id="feBaseLevelSlab" class="ds-fill-slab"></span></div>
-                <span id="feBaseLevelPct" class="pct"></span>
-              </span>
-            </div>
-            <div id="feSet" class="fxset" aria-label="Effect settings"></div>
-            <p id="feUsed" class="pe-used"></p>
-            <div class="padd-btns">
-              <button id="feDelete" class="ghost danger">Delete</button>
-              <button id="feCopy" class="ghost">Save as a copy</button>
-              <button id="feCancel" class="ghost">Cancel</button>
-              <button id="feSave" class="done">Save</button>
-            </div>
           </div>
         </div>
       </div>
@@ -328,6 +297,81 @@
         <button id="ceDelete" class="ce-delete">Delete colour</button>
         <span id="ceDelNote" class="ce-delnote"></span>
       </div>
+    </section>
+    <!-- The effect editor, for a listed effect (held, or All settings), a new one (＋ New effect) or a copy of the running
+         effect that isn't in the list (All settings): the whole column, as the colour editor. Nothing here changes the stage
+         until Save; the strip shows the effect moving along the group (drawn from the server's engine). -->
+    <section id="fxEdit" class="block cedit fedit" aria-label="Effect editor" hidden>
+      <div class="ce-head">
+        <button id="feBack" class="ebtn ce-back">‹</button>
+        <label class="ce-name">
+          <span>Name</span>
+          <input id="feName" type="text" maxlength="40" placeholder="Name this effect" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" spellcheck="false">
+        </label>
+        <!-- ⋯: Save as a copy and Delete (a second tap deletes). Only for a listed effect. -->
+        <div id="feMoreWrap" class="fe-more">
+          <button id="feMore" class="fe-more-btn" aria-label="More: save as a copy, delete" aria-haspopup="menu" aria-expanded="false" aria-controls="feMenu">⋯</button>
+          <div id="feMenu" class="fade-menu fe-menu" role="menu" hidden>
+            <button id="feCopy" role="menuitem">Save as a copy</button>
+            <button id="feDelete" role="menuitem" class="fe-delete">Delete</button>
+          </div>
+        </div>
+        <button id="feCancel" class="ce-cancel">Cancel</button>
+        <button id="feSave" class="ce-save">Save</button>
+      </div>
+      <div class="fe-preview">
+        <div class="fe-prev-lab"><span id="fePrevLab" class="ds-caps">Preview</span><span class="fe-note">only here — the stage doesn't change until Save</span></div>
+        <canvas id="feStrip" class="fe-strip" role="img" aria-label="How the effect moves along the group"></canvas>
+      </div>
+      <div class="ce-rows">
+        <div class="ce-row">
+          <span class="ce-lab">Effect</span>
+          <div id="feKind" class="fe-kind" role="radiogroup" aria-label="Kind of effect"></div>
+        </div>
+        <!-- The colours in the order they play (hold one and drag it onto another to change it), and ＋ Colour for the list. -->
+        <div class="ce-row">
+          <span id="feColLab" class="ce-lab">Colours</span>
+          <div id="feColours" class="fe-order"></div>
+        </div>
+        <!-- ＋ Colour opens this: the group's colours and the effect's own (tap to add or remove), and ＋ Own colour's strip. -->
+        <div id="feTray" class="ce-row" hidden>
+          <span></span>
+          <div class="fe-tray">
+            <span id="feTrayLab" class="fe-note"></span>
+            <div id="feChoices" class="fe-colours"></div>
+            <div id="feOwn" class="strip2 hue fe-own" aria-label="Pick an own colour" hidden><span id="feOwnH" class="strip-handle" hidden></span></div>
+          </div>
+        </div>
+        <!-- Base: a colour under the effect, where it is dark, at its own brightness. -->
+        <div class="ce-row">
+          <span class="ce-lab">Base</span>
+          <div class="fe-base">
+            <div id="feBase" class="ds-seg ce-seg" role="radiogroup" aria-label="Base colour"></div>
+            <div id="feBaseLevel" class="ds-fill" role="slider" aria-label="Base brightness" aria-valuemin="0" aria-valuemax="100"><span id="feBaseLevelSlab" class="ds-fill-slab"></span><span id="feBaseLevelLab" class="ce-range">Base brightness <span id="feBaseLevelPct"></span></span><span id="feBaseNone" class="ce-range">Dark where the effect is dark</span></div>
+          </div>
+        </div>
+        <div id="feBaseTray" class="ce-row" hidden>
+          <span></span>
+          <div class="fe-tray">
+            <span class="fe-note">Tap a colour for the base</span>
+            <div id="feBaseChoices" class="fe-colours" role="radiogroup" aria-label="Base colour"></div>
+            <div id="feBaseOwn" class="strip2 hue fe-own" aria-label="Pick an own colour for the base" hidden><span id="feBaseOwnH" class="strip-handle" hidden></span></div>
+          </div>
+        </div>
+        <div class="ce-row">
+          <span class="ce-lab">Speed</span>
+          <div class="fe-speed"><div id="feSpeed" class="fe-speed-seg"></div><span id="feSpeedNote" class="fe-note"></span></div>
+        </div>
+        <div id="feDirRow" class="ce-row">
+          <span class="ce-lab">Direction</span>
+          <div id="feDir" class="fe-dir"></div>
+        </div>
+      </div>
+      <!-- Fine-tune: folded, with a one-line summary; only the settings this effect uses (Waves, Size, Edges). -->
+      <button id="feFine" class="fe-fine" aria-expanded="false" aria-controls="feFineBox"><b>Fine-tune</b><span id="feFineSum"></span><span id="feFineArrow" aria-hidden="true">▾</span></button>
+      <div id="feFineBox" class="fe-fine-box" hidden></div>
+      <span class="grow"></span>
+      <p id="feUsed" class="fe-used"></p>
     </section>
   </main>
 

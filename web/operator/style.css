@@ -391,8 +391,6 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 }
 .padd[hidden], .pswitch[hidden] { display: none; }
 .ghost.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.pe-used { grid-column: 1 / -1; margin: 0 2px; font-size: var(--ds-fs-label); color: var(--ds-muted); }
-.pedit .padd-btns { grid-column: 2; justify-self: end; }
 .ghost.danger.armed { color: var(--ds-danger-text); background: var(--ds-danger-fill); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
 .padd-top { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }
 .padd-top .qs-name { flex: 1; min-width: 0; }
@@ -424,7 +422,7 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 #pExtras .xcell { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
 #pExtras .lab2, #pExtras .pct, #pExtras .pct.zero { margin: 0; padding: 0; font-size: 12px; color: var(--ds-muted); }
 #pExtras .ds-fill { flex: 1 0 100%; height: 44px; }
-/* ---- Colour editor: the whole right column (Quick looks and Groups give way), as the mockup's colour editor ---- */
+/* ---- Colour editor: the whole right column (Quick looks and Groups give way; the effect editor too), as the mockup's colour editor ---- */
 .right.ce-open { grid-template-rows: minmax(0, 1fr); }
 .right.ce-open > #quickLooks, .right.ce-open > #details { display: none; }
 .cedit {
@@ -491,6 +489,105 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .ce-delete.armed { background: var(--ds-danger-fill); border-color: var(--ds-danger-edge); }
 .ce-delete:disabled { opacity: 0.4; }
 .ce-delnote { min-width: 0; color: var(--ds-muted); font-size: 12px; }
+/* ---- Effect editor: the whole right column, as the colour editor (the mockup's effect editor) ---- */
+.fe-note { color: var(--ds-muted); font-size: 12px; }
+/* ⋯ in the header: Save as a copy and Delete, in a small glass menu under it. */
+.fe-more { position: relative; flex: none; }
+.fe-more[hidden] { display: none; }
+.fe-more-btn { width: 44px; height: 44px; padding: 0; border: 1px solid var(--ds-edge); border-radius: 10px; background: transparent; color: var(--ds-muted); font-size: 18px; }
+.fe-more-btn:active, .fe-more-btn.open { background: var(--ds-elevated); }
+.fe-menu { top: calc(100% + 6px); min-width: 220px; }
+.fe-menu[hidden] { display: none; }
+.fe-menu button { font-size: 14px; color: var(--ds-text); }
+.fe-menu button:disabled { opacity: 0.4; }
+.fe-menu .fe-delete { color: var(--ds-danger-text); }
+.fe-menu .fe-delete.armed { background: var(--ds-danger-fill); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
+/* "PREVIEW ON <group>" and its note over the moving strip (on the stage picture's darkest ground). */
+.fe-preview { flex: none; display: flex; flex-direction: column; gap: 6px; }
+.fe-prev-lab { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; min-width: 0; }
+.fe-prev-lab .ds-caps { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fe-prev-lab .fe-note { flex: none; }
+.fe-strip { display: block; width: 100%; height: 34px; border-radius: 12px; background: #04070D; }
+/* Effect: one chip per kind, the chosen one blue. */
+.fe-kind { display: flex; flex-wrap: wrap; gap: 6px; }
+.fe-kind > button {
+  min-height: 44px; padding: 0 12px; border: 1px solid var(--ds-edge); border-radius: 10px;
+  background: var(--ds-tile-fill); color: var(--ds-muted); font-size: 13px;
+}
+.fe-kind > button.on { color: var(--ds-text); background: var(--ds-tile-fill-on); border-color: rgba(67, 137, 232, 0.5); }
+/* Colours: the chosen ones as numbered pills in the order they play, then ＋ Colour and the note. */
+.fe-order { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.fechip {
+  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px 0 6px; max-width: 100%;
+  border: 1px solid var(--ds-edge); border-radius: 22px; background: var(--ds-tile-fill); color: var(--ds-text); font-size: 13px;
+}
+.fechip:not(:has(.fechip-n)) { padding-left: 10px; }
+.fechip.movable { cursor: grab; }
+.fechip-n { width: 18px; text-align: center; color: var(--ds-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.fechip i { flex: none; width: 16px; height: 16px; border-radius: 50%; opacity: 0.85; }
+.fechip i.off { opacity: 1; box-shadow: inset 0 0 0 1.5px rgba(148, 163, 184, 0.5); }
+.fechip-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fechip.lifted { opacity: 0.45; }
+.fechip.drop { border-color: var(--ds-accent); }
+.fe-add { min-height: 44px; padding: 0 14px; border: 1px dashed rgba(148, 163, 184, 0.3); border-radius: 22px; background: transparent; color: var(--ds-muted); font-size: 13px; white-space: nowrap; }
+.fe-add.open { border-style: solid; border-color: var(--ds-edge-on); color: var(--ds-muted-on); }
+.fe-order .fe-note { margin-left: 4px; }
+.fe-ghost { position: fixed; z-index: 50; margin: 0; pointer-events: none; opacity: 0.9; background: var(--ds-popover); }
+/* The list ＋ Colour (or a base colour) opens under its row: the colours to tap, and ＋ Own colour's strip. */
+.ce-row[hidden] { display: none; }
+.fe-tray { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 8px; margin-top: -4px; border-radius: 12px; background: rgba(0, 0, 0, 0.14); border: 1px solid var(--ds-edge); }
+.fe-colours { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 6px; }
+.fecol {
+  position: relative; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 28px 0 8px; min-width: 0;
+  border: 1px solid var(--ds-edge); border-radius: 10px; background: var(--ds-tile-fill); color: var(--ds-muted-on); font-size: 13px; text-align: left;
+}
+.fecol i { flex: none; width: 16px; height: 16px; border-radius: 50%; opacity: 0.85; }
+.fecol span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fecol.on { color: var(--ds-text); background: var(--ds-tile-fill-on); border-color: rgba(67, 137, 232, 0.5); }
+.fecol .fenum { position: absolute; right: 8px; font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; color: var(--ds-muted); }
+/* ＋ Own colour: dashed like the other add buttons; unavailable (40 %) when an effect has six colours. */
+.fecol.add { justify-content: center; padding: 0 8px; background: transparent; border-style: dashed; border-color: rgba(148, 163, 184, 0.3); color: var(--ds-muted); }
+.fecol.add.open { border-style: solid; border-color: var(--ds-edge-on); color: var(--ds-muted-on); }
+.fecol.add:disabled { opacity: 0.4; cursor: default; }
+.fe-own { height: 44px; border-radius: 12px; box-shadow: none; overflow: visible; }
+.fe-own::before { border-radius: 12px; }
+.fe-own .strip-handle { top: -3px; bottom: -3px; width: 3px; background: #E3E8F0; box-shadow: none; }
+.fe-own[hidden] { display: none; }
+/* Base: None | a colour | Own colour, and its brightness (the fill carries the base colour). */
+.fe-base { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.fe-base .ce-seg { flex: none; flex-wrap: nowrap; }
+.fe-base .ce-seg > button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.fe-base .ds-fill { flex: 1; min-width: 120px; }
+.fe-base .ds-fill.fe-off { pointer-events: none; cursor: default; }
+.fe-base .ce-range[hidden] { display: none; }
+.fe-base .ce-range .pct { font: inherit; color: inherit; }
+/* Speed: 1 … 32 beats and Free (then its seconds), with the round's length. */
+.fe-speed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; }
+.fe-speed-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.fe-speed-seg .ce-seg > button { min-width: 40px; font-variant-numeric: tabular-nums; }
+.fe-speed-seg .ce-seg[hidden] { display: none; }
+/* Fine-tune: a quiet bar with its summary; open, its settings three to a row. */
+.fe-fine {
+  flex: none; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; text-align: left;
+  border: 1px solid var(--ds-edge); border-radius: 12px; background: rgba(0, 0, 0, 0.14); color: var(--ds-text); font-size: 13px;
+}
+.fe-fine b { flex: none; font-weight: 600; }
+.fe-fine span { color: var(--ds-muted); }
+.fe-fine span:nth-child(2) { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fe-fine-box { flex: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: -4px; }
+.fe-fine-box[hidden] { display: none; }
+.fe-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fe-cell[hidden] { display: none; }
+.fe-cell-lab { color: var(--ds-muted); font-size: 12px; white-space: nowrap; }
+.fe-cell-lab .pct, .fe-cell-lab .pct.zero { font: inherit; color: inherit; }
+.fe-step { display: flex; align-items: center; justify-content: space-between; height: 44px; box-sizing: border-box; border-radius: 12px; border: 1px solid var(--ds-edge); background: rgba(255, 255, 255, 0.025); }
+.fe-stepb { width: 44px; height: 42px; padding: 0; border: 0; background: transparent; color: var(--ds-text); font-size: 18px; }
+.fe-stepb:disabled { opacity: 0.4; }
+.fe-count { font-weight: 600; font-variant-numeric: tabular-nums; }
+.fe-edges { display: flex; flex-wrap: nowrap; }
+.fe-edges > button { flex: 1; min-height: 40px; }
+.fe-used { flex: none; margin: 0; color: var(--ds-muted); font-size: 12px; }
+.fe-used[hidden] { display: none; }
 /* ---- New quick look sheet (same cover as the colour picker) ---- */
 .lab-note { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .qs-name {
@@ -554,49 +651,10 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .fxitem .lab2 { margin: 0 2px; white-space: nowrap; }
 .fxset .ds-seg { flex-wrap: wrap; }
 .fxset .ds-seg > button { min-height: 44px; min-width: 44px; padding: 0 12px; font-size: 15px; font-variant-numeric: tabular-nums; }
-.fxstep { width: 44px; padding: 0; font-size: 20px; color: var(--ds-muted-on); }
-.fxcount { min-width: 28px; text-align: center; font-size: var(--ds-fs-value); font-weight: 400; font-variant-numeric: tabular-nums; }
-.fxsize { flex: 1; min-width: 220px; }
-.fxsize .ds-fill { flex: 1; min-width: 120px; }
-.fxsize .pct { min-width: 52px; text-align: right; font-size: var(--ds-fs-value); font-variant-numeric: tabular-nums; }
-.fxsize .pct.zero { color: var(--ds-muted); }
-/* The effect editor open: the running effect's card gives way to it. */
-.pfx.editing #fxCard { display: none; }
 /* ＋ New colour and ＋ New effect: dashed "add" tiles. */
 .pc.newfx { align-items: center; justify-content: center; background: transparent; border: 1px dashed rgba(148, 163, 184, 0.3); color: var(--ds-muted); text-align: center; }
-/* The effect (or ＋ New effect) open in the effect editor: an accent edge. */
-.pc.editing { border-color: var(--ds-accent); }
-.pc.newfx.editing { border: 1px solid var(--ds-accent); }
-.fxedit > * { grid-column: 1 / -1; }
-.fxedit .lab2 { margin: 4px 2px 0; }
-.fxedit .padd-btns { justify-self: end; }
-.padd-btns [hidden] { display: none; }
-.fxedit .fxset { padding-top: 4px; border-top: 0; }
-/* The effect moving along the group's lights, on the stage picture's dark ground; app.js draws it mixed down like a swatch. */
-.fe-strip { display: block; width: 100%; height: 32px; margin: 6px 0 2px; border-radius: var(--ds-r-tile); background: #06080c; box-shadow: var(--ds-shadow-inset); }
-.fe-kind { flex-wrap: wrap; justify-self: start; }
-.fe-kind > button { min-height: 44px; }
-/* The group's colours to choose from: a tapped one shows its place in the order. */
-.fe-colours { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
-.fecol {
-  position: relative; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 28px 0 8px; min-width: 0;
-  border: 0; border-radius: var(--ds-r-small); background: rgba(148, 170, 210, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-  color: var(--ds-muted-on); font-size: 14px; text-align: left;
-}
-.fecol i { flex: none; width: 22px; height: 22px; border-radius: 6px; opacity: 0.8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
-.fecol span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fecol.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.fecol .fenum { position: absolute; right: 8px; font-size: 13px; font-weight: 400; font-variant-numeric: tabular-nums; color: var(--ds-muted-on); }
-/* ＋ Own colour: a quiet outline like ＋ New effect; unavailable (dimmer still) when an effect has six colours. */
-.fecol.add { justify-content: center; padding: 0 8px; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-muted); }
-.fecol.add.open { box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-muted-on); }
-.fecol.add:disabled { opacity: 0.4; cursor: default; }
-/* Hold and drag (effect colours, quick looks): a tile that can be held does not select or open a menu. A held colour lifts (its place dims), a quiet copy follows the finger, and the colour under it is outlined. */
+/* Hold and drag (effect colours, quick looks): a tile that can be held does not select or open a menu. A held tile lifts (its place dims), a quiet copy follows the finger, and the tile under it is outlined. */
 .movable { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.fecol.lifted { opacity: 0.45; }
-.fecol.drop { box-shadow: inset 0 0 0 1px var(--ds-accent); }
-.fe-ghost { position: fixed; z-index: 50; margin: 0; pointer-events: none; opacity: 0.85; box-shadow: var(--ds-shadow-raise); }
-.fe-own[hidden], .fe-base-row[hidden] { display: none; }
 
 /* ---- Bottom bar: Master, Flash, then Undo, Basic lights, Next and Blackout (52 px targets) ---- */
 .bottom {
