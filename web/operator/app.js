@@ -2695,7 +2695,7 @@ $('ceSave').addEventListener('click', () => {
     const cmd = { type: 'addColour', group: group.id, colour: colourEdit.hex ?? '#000000', ...editLevels(), name, allGroups: colourEdit.all, fade: colourEdit.fade };
     if (colourEdit.level !== null && colourEdit.level < 1) cmd.level = editLevel();
     pendingEditToast = 'Added to colours';
-      pendingEdit = send(cmd);
+    pendingEdit = send(cmd);
     renderEditor();
     return;
   }

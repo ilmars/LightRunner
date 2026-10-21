@@ -255,12 +255,12 @@ export const OscSettings = z.object({
 });
 export type OscSettings = z.infer<typeof OscSettings>;
 
-/** Who to call when the lights have a problem (Settings > Who to call). An empty field is left out. */
 /** A contact field: trimmed; blank (as a hand-edited show file may have it) is left out. */
 const contactField = (max: number) => z.preprocess(
   (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
   z.string().trim().max(max).optional(),
 );
+/** Who to call when the lights have a problem (Settings > Who to call). An empty field is left out. */
 export const Contact = z.object({ name: contactField(60), phone: contactField(40) });
 export type Contact = z.infer<typeof Contact>;
 

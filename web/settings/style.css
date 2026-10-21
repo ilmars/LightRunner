@@ -32,7 +32,7 @@ a { color: #8fb8f2; }
 .top {
   position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 14px;
   max-width: 980px; margin: 0 auto; padding: 12px 4px;
-  background: linear-gradient(180deg, rgba(15, 22, 37, 0.92), rgba(15, 22, 37, 0.78));
+  background: linear-gradient(180deg, rgba(var(--ds-bg-rgb), 0.92), rgba(var(--ds-bg-rgb), 0.78));
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05);
 }

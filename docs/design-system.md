@@ -16,6 +16,7 @@ How the direction was agreed with Ilmārs (19 Oct 2026):
 | Token | Value | Use |
 | --- | --- | --- |
 | `--ds-bg` / `--ds-bg-deep` | `#090F1C` / `#070C17` | The ground (flat on the operator page) |
+| `--ds-bg-rgb` | `9, 15, 28` | The ground for `rgba()`: a bar the page scrolls under (the Settings top bar) |
 | `--ds-surface` / `--ds-surface-hi` | `#141D30` / `#18233A` | Solid surface tones (a panel over the ground) |
 | `--ds-panel-fill` + `--ds-shadow-raise` | `rgba(28,39,62,.58)`, 1 px edge `rgba(148,163,184,.14)` drawn inside | Panels, the top bar and the bottom bar |
 | `--ds-edge` | `rgba(148,163,184,.14)` | The 1 px edge of panels, tiles and buttons |
@@ -73,7 +74,7 @@ The designer's icon (`Icon.dc.html`, kept with the restyle plan): a run of six s
 | `ds-btn`, `ds-btn--text`, `ds-btn--pill` | Button, quiet text button, pill | Pressed = lighter tint; disabled = 40 % opacity |
 | `ds-hold` + `ds-hold-fill` | Button that fills while held | Save (blue), Blackout (red) |
 | `ds-fill` + `-slab`, `-val` | Fill slider | A filled bar on a faint track with a 1 px edge, no thumb; the fill is the control's colour (`--c`) at 22 % with a 2 px line of it (70 %) at the level; the value is shown beside it; `ds-disabled` = 40 % opacity and it doesn't react to a finger (no page uses it since Preview went; kept for a control that can't move) |
-| `ds-seg` | Segmented control and tabs | A dark track (`rgba(0,0,0,.2)`) with the edge; selected = blue tint and edge |
+| `ds-seg` | Segmented control and tabs | A dark track (`rgba(0,0,0,.2)`) with the edge; selected = blue tint and edge; 44 px buttons |
 | `ds-field` | Text field | Flat; focus = accent edge |
 | `ds-sheet` | Glass sheet over one panel | The only place blur is used |
 | `ds-swatch` | Colour square | Dimmed |
@@ -82,7 +83,7 @@ The designer's icon (`Icon.dc.html`, kept with the restyle plan): a run of six s
 
 | Area | State |
 | --- | --- |
-| Operator page | The designer's restyle (20 Oct): tokens, top bar, running order, quick looks, Groups, bottom bar, colour picker, colour editor, effect editor, Individual lights, the phone, Inter and the icon done; the quick-look sheet follows |
+| Operator page | The designer's restyle (20 Oct): tokens, top bar, running order, quick looks, Groups, bottom bar, colour picker, colour editor, effect editor, Individual lights, the phone, Inter and the icon done; the quick-look sheet (Edit looks) still has the earlier look (STATUS, Not built yet) |
 | Operator page on a phone (the remote) | Done, in the restyle's look (the designer's phone artboard, 390 × 844): a 16 px-radius header ("On stage", the name, "● changed", the problem pill in short words), Order / Groups / Looks as a segmented control (44 px, blue tint when picked), one 18 px-radius panel for the tab, and a footer panel with Master on one line (label, 44 px slider, level) over Undo · Basic lights · Next · Blackout (52 px). Page text only the phone shows has the class `phone-only`, text it leaves out `not-phone` (or `hold-hint` for ", hold to edit"). No saving or editing; side by side when the phone is on its side |
 | Settings | Done: glass panels in a two-column bento grid on wide screens (DMX output, Show and Compare span both), tinted segmented choices and switches (Send DMX on is green), flat fields, status pills, glass top bar and save bar |
 | Patch | Done: the fixture table has no cell borders, faint row dividers and flat fields; group cards are flat glass tiles with pill chips and turn blue-tinted while one of their fields has focus; the DMX map, universe tabs, library list and Open Fixture Library search use the same glass and tinted states. Fixture blocks keep their own per-type colours and the red overlap striping; the stage plan keeps its grid and marks inside a glass frame |

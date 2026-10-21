@@ -30,6 +30,8 @@
 :root {
   /* Page and panels, darkest to lightest (the designer's restyle, 20 Oct 2026). */
   --ds-bg: #090F1C;
+  /* The ground as r, g, b, for rgba() (a bar the page scrolls under). */
+  --ds-bg-rgb: 9, 15, 28;
   --ds-bg-deep: #070C17;
   /* A panel's colour over the ground, for places that need it solid. */
   --ds-surface: #141D30;
@@ -208,7 +210,7 @@
   box-shadow: inset 0 0 0 1px var(--ds-edge);
 }
 .ds-seg > button {
-  min-height: 38px; padding: 0 16px; border: 0; border-radius: 9px;
+  min-height: var(--ds-target); padding: 0 16px; border: 0; border-radius: 9px;
   background: transparent; color: var(--ds-muted); font: inherit; font-size: 15px; cursor: pointer;
 }
 .ds-seg > button.on, .ds-seg > button[aria-selected="true"], .ds-seg > button[aria-checked="true"] {
