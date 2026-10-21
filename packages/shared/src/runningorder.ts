@@ -4,6 +4,7 @@
 
 import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, liveEffectId, livePresetId, parseLiveEffect, parseLivePreset } from './protocol.ts';
 import { effectKey, isEffectPreset, resolveColour } from './schema.ts';
+import { followQuickLook } from './keys.ts';
 import type { EffectLayer, Layer, Look, LookEntry, Preset, QuickLook, QuickTab, Show } from './schema.ts';
 
 /** Where the stage is going: preset ids (possibly live ones) and level targets, as in RuntimeState. */
@@ -353,6 +354,8 @@ export function editQuickLook(
     if (target.swatch !== undefined) copy.swatch = target.swatch;
     if (target.section !== undefined) copy.section = target.section;
     if (target.tempo !== undefined) copy.tempo = target.tempo;
+    // Its controller key goes with it: the key belongs to the quick look, not to the song.
+    followQuickLook(out, quick.look, id);
     quick.look = id;
     target = copy;
   }

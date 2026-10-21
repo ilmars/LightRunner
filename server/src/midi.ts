@@ -1,5 +1,5 @@
 // MIDI ports on the server computer: the real ones through the optional @julusian/midi add-on, and a
-// simulated set for tests. Light Runner runs without the add-on; it just can't use an APC mini then.
+// simulated set for tests. Light Runner runs without the add-on; it just can't use a MIDI controller then.
 
 /** One open MIDI device: what goes out to it and what comes in from it. */
 export interface MidiPort {
@@ -11,8 +11,11 @@ export interface MidiPort {
 export interface MidiPorts {
   /** The names of the MIDI inputs there are now. */
   list(): string[];
-  /** Open the input with this name, and the output that goes with it. Throws when it can't. */
-  open(name: string): MidiPort;
+  /**
+   * Open the input with this name, and the output that goes with it (`output: false` for a controller that
+   * is never sent anything). Throws when it can't.
+   */
+  open(name: string, opts?: { output?: boolean }): MidiPort;
 }
 
 /** The part of @julusian/midi used here. */
@@ -75,7 +78,7 @@ function names(port: MidiInput | MidiOutput): string[] {
 function realPorts(mod: MidiModule, lister: MidiInput, log: (msg: string) => void): MidiPorts {
   return {
     list: () => names(lister),
-    open(name) {
+    open(name, opts = {}) {
       // The native port objects made here are destroyed again when opening fails and when the port closes.
       const input = new mod.Input();
       let output: MidiOutput | null = null;
@@ -104,11 +107,13 @@ function realPorts(mod: MidiModule, lister: MidiInput, log: (msg: string) => voi
         // The output with the same name, or with the same device in its name (Windows: "MIDIOUT2 (...)").
         // If it can't be opened, the input is closed again: on Windows another try couldn't open it while held.
         output = new mod.Output();
-        const outs = names(output);
-        let to = outs.indexOf(name);
-        if (to < 0) to = outs.findIndex((n) => n.includes(name) || name.includes(n));
-        if (to >= 0) output.openPort(to);
-        else log(`MIDI: no output found for "${name}", so its lights can't be set`);
+        if (opts.output !== false) {
+          const outs = names(output);
+          let to = outs.indexOf(name);
+          if (to < 0) to = outs.findIndex((n) => n.includes(name) || name.includes(n));
+          if (to >= 0) output.openPort(to);
+          else log(`MIDI: no output found for "${name}", so its lights can't be set`);
+        }
       } catch (err) {
         free();
         throw err;

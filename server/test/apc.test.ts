@@ -9,7 +9,7 @@ import {
   Pickup, apcAllOff, apcIntro, apcLeds, apcModel, buttonIntent, faderAction, ledChanges, parseApc, pickApcPort, rgbSysex,
   type ApcLayout, type ApcState,
 } from '../src/apc.ts';
-import { ApcDriver } from '../src/apcdriver.ts';
+import { MidiDriver } from '../src/controllers.ts';
 import { FakeMidi, loadMidi, type MidiPorts } from '../src/midi.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -615,7 +615,7 @@ test('a fader moved before its group is known still counts as where it was', () 
   assert.equal(await app.device({ kind: 'groupLevel', group: 1, value: 0.5 }, 'test'), null);
   await waitFor(() => app.state!.groups[layout.groups[0].id]!.level === 0.5, 2000, 'group 1 at 50 %');
   const actions: unknown[] = [];
-  const driver = new ApcDriver(midi, { device: async (a) => { actions.push(a); return null; }, release() {}, log() {} }, { pollMs: 20 });
+  const driver = new MidiDriver(midi, { device: async (a) => { actions.push(a); return null; }, release() {}, log() {} }, { pollMs: 20 });
   driver.start();
   try {
     const port = await waitFor(() => midi.opened.at(-1), 1000, 'the driver to open the APC');

@@ -2,7 +2,7 @@
 // state every device receives back. The server is the single source of truth.
 
 import { z } from 'zod';
-import { EffectLayer, PaletteColour, QuickTab } from './schema.ts';
+import { ControlKey, EffectLayer, KeyTarget, PaletteColour, QuickTab } from './schema.ts';
 
 const id = z.string().min(1).max(64);
 /** A #rrggbb colour. */
@@ -173,6 +173,12 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('addEffect'), group: id, name: z.string(), effect: LiveEffectLayer }),
   /** New settings for an effect in a group's list, with a new name when given (one Undo step); a name alone can go with editColour. */
   z.object({ type: z.literal('editEffect'), preset: id, effect: LiveEffectLayer, name: z.string().optional() }),
+  // Controller keys (the server's learn sends setKey once a key is pressed): one key, one job.
+  /** Give `does` this key; a key that did something else moves to it. */
+  z.object({ type: z.literal('setKey'), key: ControlKey, does: KeyTarget }),
+  z.object({ type: z.literal('clearKey'), does: KeyTarget }),
+  /** Every key on an APC mini goes and the standard APC mini layout is on again. */
+  z.object({ type: z.literal('resetKeys') }),
   // Blind, from a tablet's WebSocket only: the server keeps that tablet a draft copy of the stage.
   /** Make a fresh draft of the stage as it is now (again, if one is running). */
   z.object({ type: z.literal('blindStart') }),
@@ -187,7 +193,7 @@ export type Command = z.infer<typeof Command>;
 
 const SHOW_EDITS = [
   'saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemQuickLook',
-  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect',
+  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'setKey', 'clearKey', 'resetKeys',
 ] as const;
 /** Commands that change the show rather than the stage. */
 export type ShowEdit = Extract<Command, { type: (typeof SHOW_EDITS)[number] }>;

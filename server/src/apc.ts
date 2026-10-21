@@ -11,15 +11,14 @@
 // 5 yellow, 6 yellow blink.
 
 import { colourList, lightGroups, nextItemId, stageIndexOf, type DeviceAction } from '../../packages/shared/src/devices.ts';
+import { isApcMini } from '../../packages/shared/src/keys.ts';
+import type { KeyTarget } from '../../packages/shared/src/schema.ts';
 
 export type ApcModel = 'mk2' | 'mk1';
 
-/** "APC mini" or "APC MINI", alone or with "mk2", but not the APC40 or the APC Key 25. */
-const APC_MINI = /\bapc\s*mini\b/i;
-
-/** The model a MIDI port belongs to, or null when it is not an APC mini. */
+/** The model a MIDI port belongs to, or null when it is not an APC mini (not the APC40 or the APC Key 25). */
 export function apcModel(name: string): ApcModel | null {
-  if (!APC_MINI.test(name)) return null;
+  if (!isApcMini(name)) return null;
   return /mk\s*2|mkii/i.test(name) ? 'mk2' : 'mk1';
 }
 
@@ -38,6 +37,23 @@ const BUTTONS: Record<ApcModel, { track: number; scene: number }> = {
 };
 const FADER_CC = 48;
 const PADS = 64;
+
+/**
+ * Where a note or a control change (on channel 1) is on the APC mini, as a person reads it: pads by row and
+ * column from the top left ("pad 1,1" is the top-left pad, where the running order starts), the buttons
+ * under the pads and on the right counted from the left and from the top, faders 1-9. Null for anything else.
+ */
+export function apcPlace(model: ApcModel, type: 'note' | 'cc', number: number): string | null {
+  if (type === 'cc') return number >= FADER_CC && number <= FADER_CC + 8 ? `fader ${number - FADER_CC + 1}` : null;
+  const b = BUTTONS[model];
+  if (number < PADS) return `pad ${8 - Math.floor(number / 8)},${(number % 8) + 1}`;
+  if (number >= b.track && number < b.track + 8) return `lower button ${number - b.track + 1}`;
+  if (number >= b.scene && number < b.scene + 8) return `side button ${number - b.scene + 1}`;
+  return null;
+}
+
+/** The control change of fader 1-9. */
+export const apcFaderCc = (fader: number) => FADER_CC + fader - 1;
 
 /** Row 1 is the bottom row, column 1 the left one. */
 export type ApcControl =
@@ -136,22 +152,35 @@ const SAME = 0.00005;
  * by more than 2 %, or another look starts, and then waits for the fader to reach it again. Times are in seconds.
  */
 export class Pickup {
-  private readonly faders = new Map<number, { caught: boolean; pos: number | null; sent: { value: number; at: number }[] }>();
+  private readonly faders = new Map<number | string, { caught: boolean; pos: number | null; sent: { value: number; at: number }[] }>();
 
-  private fader(n: number) {
+  /** Is this fader following its level now? */
+  caught(n: number | string): boolean {
+    return this.faders.get(n)?.caught ?? false;
+  }
+
+  /** The fader now controls something else: it waits to reach that level (where it is is kept). */
+  forget(n: number | string): void {
+    const f = this.faders.get(n);
+    if (!f) return;
+    f.caught = false;
+    f.sent = [];
+  }
+
+  private fader(n: number | string) {
     let f = this.faders.get(n);
     if (!f) this.faders.set(n, (f = { caught: false, pos: null, sent: [] }));
     return f;
   }
 
   /** Where a fader is, as the APC reported it, without moving anything. */
-  place(n: number, value: number): void {
+  place(n: number | string, value: number): void {
     const f = this.fader(n);
     if (!f.caught) f.pos = value;
   }
 
   /** The fader moved to `value`; `level` is what it controls now. The level to send, or null while it waits. */
-  move(n: number, value: number, level: number, now: number): number | null {
+  move(n: number | string, value: number, level: number, now: number): number | null {
     const f = this.fader(n);
     if (!f.caught) {
       const near = Math.abs(value - level) <= NEAR;
@@ -171,7 +200,7 @@ export class Pickup {
    * levels come back in the order it sent them, so one coming back means the ones sent before it are done:
    * a look that later sets a level the fader passed on its way is still a change from elsewhere.
    */
-  level(n: number, level: number, now: number): void {
+  level(n: number | string, level: number, now: number): void {
     const f = this.faders.get(n);
     if (!f?.caught) return;
     f.sent = f.sent.filter((s) => now - s.at <= SENT_KEPT);
@@ -203,6 +232,31 @@ export interface ApcLayout {
   basicSwatch: string;
   runningOrder: { id: string; swatch: string | null }[];
   groups: { id: string; kind?: string; presets: { id: string; swatch: string | null; effect?: unknown }[] }[];
+  /** The quick looks: the groups each sets and what it gives them (`entries` in the order of `groups` above). */
+  quickLooks?: { id: string; swatch: string | null; groups: string[]; entries: ({ preset: string } | null)[] }[];
+}
+
+/**
+ * What the LEDs show besides the stage: the standard layout (on unless switched off), and the keys assigned
+ * on this APC (notes on channel 1), which win over the standard layout for their pad or button.
+ */
+export interface ApcLedOptions {
+  standard?: boolean;
+  keys?: { number: number; does: KeyTarget }[];
+}
+
+/** The stage runs what this quick look gives every group it sets (not during Blackout). */
+export function quickLookShown(layout: Pick<ApcLayout, 'groups' | 'quickLooks'>, state: Pick<ApcState, 'look' | 'groups'>, id: string): boolean {
+  const q = layout.quickLooks?.find((x) => x.id === id);
+  if (!q || state.look === 'blackout') return false;
+  let any = false;
+  for (const g of q.groups) {
+    const entry = q.entries[layout.groups.findIndex((x) => x.id === g)];
+    if (!entry) continue;
+    if (state.groups[g]?.preset !== entry.preset) return false;
+    any = true;
+  }
+  return any;
 }
 
 /** The part of the live state the LEDs show. */
@@ -258,8 +312,9 @@ export function rgbSysex(pad: number, r: number, g: number, b: number): number[]
 const note = (n: number, velocity: number) => [0x90, n, velocity];
 
 /** Every LED for this layout and stage. */
-export function apcLeds(model: ApcModel, layout: ApcLayout, state: ApcState): ApcLeds {
+export function apcLeds(model: ApcModel, layout: ApcLayout, state: ApcState, opts: ApcLedOptions = {}): ApcLeds {
   const leds: ApcLeds = new Map();
+  const standard = opts.standard ?? true;
   /** A pad: off, or (mk2) its swatch at a brightness, or (older model) green or yellow. */
   const pad = (n: number, lit: { swatch: string | null; level: number; mk1: number } | null) => {
     if (model === 'mk1') return leds.set(n, note(n, lit?.mk1 ?? OFF));
@@ -268,21 +323,29 @@ export function apcLeds(model: ApcModel, layout: ApcLayout, state: ApcState): Ap
     return leds.set(n, rgbSysex(n, r, g, b));
   };
 
-  // Running order: the top row, then the row below.
+  // A running-order item: bright on stage, dim when next, low otherwise.
   const onStage = stageIndexOf(layout, state);
   const nextId = nextItemId(layout, state);
-  for (let k = 0; k < 16; k++) {
-    const n = k < 8 ? 56 + k : 48 + (k - 8);
+  const songPad = (n: number, k: number) => {
     const item = layout.runningOrder[k];
-    if (!item) {
-      pad(n, null);
-      continue;
-    }
+    if (!item) return pad(n, null);
     const swatch = item.swatch ?? (item.id === layout.basicLights ? layout.basicSwatch : null);
-    if (k === onStage) pad(n, { swatch, level: STAGE, mk1: GREEN });
-    else if (item.id === nextId) pad(n, { swatch, level: NEXT, mk1: YELLOW });
-    else pad(n, { swatch, level: ITEM, mk1: OFF });
+    if (k === onStage) return pad(n, { swatch, level: STAGE, mk1: GREEN });
+    if (item.id === nextId) return pad(n, { swatch, level: NEXT, mk1: YELLOW });
+    return pad(n, { swatch, level: ITEM, mk1: OFF });
+  };
+
+  // Without the standard layout, every pad and button is dark unless a key is assigned to it.
+  if (!standard) {
+    for (const msg of apcAllOff(model)) {
+      if (model === 'mk2' && msg[1]! < PADS) pad(msg[1]!, null);
+      else leds.set(msg[1]!, msg);
+    }
+    return assignedLeds(model, layout, state, opts.keys ?? [], leds, pad, songPad);
   }
+
+  // Running order: the top row, then the row below.
+  for (let k = 0; k < 16; k++) songPad(k < 8 ? 56 + k : 48 + (k - 8), k);
 
   // Colours: column N is group N, colour 1 at the top of the block.
   const groups = lightGroups(layout);
@@ -318,6 +381,48 @@ export function apcLeds(model: ApcModel, layout: ApcLayout, state: ApcState): Ap
     OFF,
   ];
   scene.forEach((v, k) => leds.set(b.scene + k, note(b.scene + k, v)));
+  return assignedLeds(model, layout, state, opts.keys ?? [], leds, pad, songPad);
+}
+
+type PadLit = { swatch: string | null; level: number; mk1: number } | null;
+
+/**
+ * The pads and buttons that have keys of their own. A song lights like a running-order pad, a quick look when
+ * the stage matches it; anything else on a pad is a low neutral. A button lights for a song on stage, a quick
+ * look on stage, a group flashing, or (blinking) Blackout.
+ */
+function assignedLeds(
+  model: ApcModel, layout: ApcLayout, state: ApcState, keys: { number: number; does: KeyTarget }[], leds: ApcLeds,
+  pad: (n: number, lit: PadLit) => unknown, songPad: (n: number, k: number) => unknown,
+): ApcLeds {
+  const b = BUTTONS[model];
+  const blackedOut = state.look === 'blackout';
+  const onStage = stageIndexOf(layout, state);
+  for (const { number: n, does } of keys) {
+    const isPad = n < PADS;
+    const isButton = (n >= b.track && n < b.track + 8) || (n >= b.scene && n < b.scene + 8);
+    if (!isPad && !isButton) continue;
+    const songAt = does.kind === 'song' ? layout.runningOrder.findIndex((i) => i.id === does.id) : -1;
+    if (isPad) {
+      if (does.kind === 'song') songPad(n, songAt < 0 ? layout.runningOrder.length : songAt);
+      else if (does.kind === 'quickLook') {
+        const q = layout.quickLooks?.find((x) => x.id === does.id);
+        if (!q) pad(n, null);
+        else if (quickLookShown(layout, state, q.id)) pad(n, { swatch: q.swatch, level: STAGE, mk1: GREEN });
+        else pad(n, { swatch: q.swatch, level: ITEM, mk1: OFF });
+      } else pad(n, { swatch: NEUTRAL, level: ITEM, mk1: OFF });
+      continue;
+    }
+    let v = OFF;
+    if (does.kind === 'song') v = songAt >= 0 && songAt === onStage ? ON : OFF;
+    else if (does.kind === 'quickLook') v = quickLookShown(layout, state, does.id) ? ON : OFF;
+    else if (does.kind === 'flash') v = !blackedOut && state.flashing.includes(does.group) ? ON : OFF;
+    else if (does.kind === 'flashAll') {
+      const groups = lightGroups(layout);
+      v = !blackedOut && groups.length > 0 && groups.every((g) => state.flashing.includes(g.id)) ? ON : OFF;
+    } else if (does.kind === 'blackout') v = blackedOut ? BLINK : OFF;
+    leds.set(n, note(n, v));
+  }
   return leds;
 }
 

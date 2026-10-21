@@ -7,6 +7,8 @@ import type { Command } from './protocol.ts';
 export interface DeviceLayout {
   runningOrder: { id: string }[];
   basicLights: string | null;
+  /** The quick looks, for a key that starts one by id. */
+  quickLooks?: { id: string }[];
   groups?: { id: string; kind?: string; presets: { id: string; effect?: unknown }[] }[];
 }
 
@@ -16,12 +18,15 @@ export interface DeviceState {
   lastLook: string | null;
   /** Master, 0 to 1 (only Master up and down read it; 1 when missing). */
   master?: number;
+  /** The stage tempo (only the tempo steps read it; 120 when missing). */
+  tempo?: number;
 }
 
 /**
  * Positions count from 1 (what a person reads on a pad or a button): `n` is the item in the running order,
  * `group` the group among the light groups (smoke is left out), `colour` the colour in that group's list
- * (effects are not in it).
+ * (effects are not in it). A group can also be named by its id (a controller key does: it follows the group),
+ * and songs and quick looks by their look id.
  */
 export type DeviceAction =
   | { kind: 'item'; n: number }
@@ -30,13 +35,25 @@ export type DeviceAction =
   | { kind: 'undo' }
   | { kind: 'basic' }
   | { kind: 'blackout' }
-  | { kind: 'groupLevel'; group: number; value: number }
+  | { kind: 'groupLevel'; group: number | string; value: number }
   | { kind: 'groupColour'; group: number; colour: number }
-  | { kind: 'flash'; group: number | 'all'; on: boolean }
+  | { kind: 'flash'; group: number | string | 'all'; on: boolean }
   | { kind: 'master'; value: number }
-  | { kind: 'masterStep'; by: number };
+  | { kind: 'masterStep'; by: number }
+  /** A running-order item (Basic lights too) by its look id. */
+  | { kind: 'song'; id: string }
+  | { kind: 'quickLook'; id: string }
+  /** null is Auto: each look's own fade. */
+  | { kind: 'fadeTime'; value: number | null }
+  | { kind: 'tempo'; bpm: number }
+  /** Tempo ×2 or ÷2. */
+  | { kind: 'tempoStep'; times: number }
+  /** Tap tempo: the server counts the taps of each device (App.device). */
+  | { kind: 'tap' };
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+/** The tempo limits of the `tempo` command; the page rounds to whole beats a minute too. */
+const clampBpm = (v: number) => Math.min(240, Math.max(40, Math.round(v)));
 
 /** The groups a device can reach: the light groups, in the operator page's order. */
 export function lightGroups<G extends { kind?: string }>(layout: { groups?: G[] }): G[] {
@@ -75,7 +92,8 @@ export function startCommand(layout: Pick<DeviceLayout, 'basicLights'>, id: stri
 
 /** The command for a device action, or a plain-words reason it can't be done. */
 export function commandFor(action: DeviceAction, layout: DeviceLayout, state: DeviceState): Command | { error: string } {
-  const group = (n: number) => {
+  const group = (n: number | string) => {
+    if (typeof n === 'string') return lightGroups(layout).find((g) => g.id === n) ?? { error: 'That group is no longer in the show.' };
     const g = Number.isInteger(n) && n >= 1 ? lightGroups(layout)[n - 1] : undefined;
     return g ?? { error: `There is no group ${n}.` };
   };
@@ -111,5 +129,13 @@ export function commandFor(action: DeviceAction, layout: DeviceLayout, state: De
     }
     case 'master': return { type: 'master', value: clamp01(action.value) };
     case 'masterStep': return { type: 'master', value: clamp01(Math.round(((state.master ?? 1) + action.by) * 1000) / 1000) };
+    case 'song':
+      return layout.runningOrder.some((i) => i.id === action.id) ? startCommand(layout, action.id) : { error: 'That song is no longer in the running order.' };
+    case 'quickLook':
+      return layout.quickLooks?.some((q) => q.id === action.id) ? { type: 'quickLook', id: action.id } : { error: 'That quick look is no longer there.' };
+    case 'fadeTime': return { type: 'fadeTime', value: action.value };
+    case 'tempo': return { type: 'tempo', bpm: clampBpm(action.bpm) };
+    case 'tempoStep': return { type: 'tempo', bpm: clampBpm((state.tempo ?? 120) * action.times) };
+    case 'tap': return { error: 'Tap is counted by the server.' };
   }
 }
