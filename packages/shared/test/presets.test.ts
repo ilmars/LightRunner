@@ -74,6 +74,31 @@ test('a colour of Amber alone (black with amber) is a lit colour, not Off; black
   assert.equal(isOff({ id: 'x', name: 'x', group: 'key-lights', fade: 3, layers: [{ kind: 'static', colour: { hex: '#000000', uv: 0.2 }, intensity: 1 }] }), false);
 });
 
+test('a new colour can have its own brightness and fade (the colour editor sets them for ＋ New colour)', () => {
+  const before = rig();
+  const { show, ids } = addColour(before, { group: 'key-lights', colour: '#2a4b9c', name: 'Soft blue', allGroups: true, level: 0.456, fade: 1 });
+  assert.equal(ids.length, COLOUR_GROUPS.length);
+  for (const id of ids) {
+    const made = show.presets.find((p) => p.id === id)!;
+    // Whole percent, like the editor's Brightness; the swatch is the colour itself, as an edited brightness leaves it.
+    assert.deepEqual(made.layers, [{ kind: 'static', colour: { hex: '#2a4b9c' }, intensity: 0.46 }]);
+    assert.equal(made.fade, 1);
+    assert.equal(made.swatch, '#2a4b9c');
+  }
+  // Left out: full brightness and 3 s, as before.
+  const plain = addColour(before, { group: 'key-lights', colour: '#2a4b9c', name: 'x', allGroups: false });
+  const made = plain.show.presets.find((p) => p.id === plain.ids[0])!;
+  assert.equal((made.layers[0] as StaticLayer).intensity, 1);
+  assert.equal(made.fade, 3);
+  // The same colour at another brightness is another colour; the same one again is refused.
+  assert.equal(addColour(plain.show, { group: 'key-lights', colour: '#2a4b9c', name: 'y', allGroups: false, level: 0.5 }).ids.length, 1);
+  assert.throws(() => addColour(plain.show, { group: 'key-lights', colour: '#2a4b9c', name: 'y', allGroups: false, level: 1 }), /already in the list/);
+  // Out of range is refused, as in the editor.
+  assert.throws(() => addColour(before, { group: 'key-lights', colour: '#2a4b9c', name: 'x', allGroups: false, level: 0.01 }), { message: 'the brightness is between 5 % and 100 %' });
+  assert.throws(() => addColour(before, { group: 'key-lights', colour: '#2a4b9c', name: 'x', allGroups: false, fade: 601 }), { message: 'the fade is between 0 and 600 seconds' });
+  parseShow(JSON.parse(JSON.stringify(show)));
+});
+
 test('an empty name becomes Colour N with the next free number in the group', () => {
   let s = rig();
   const added: string[] = [];

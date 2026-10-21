@@ -33,6 +33,10 @@ export interface AddColour {
   white?: number;
   amber?: number;
   uv?: number;
+  /** Its brightness, 0.05 to 1, kept to whole percent (missing is full). */
+  level?: number;
+  /** Its own fade in seconds, 0 to 600 (missing is 3 s). */
+  fade?: number;
 }
 
 /** The light (hex, white, amber, UV, intensity) a preset's only layer makes, palette colours looked up; null for anything else (an effect, say). */
@@ -80,8 +84,12 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
     const level = Math.round(v * 100) / 100;
     if (level > 0) extras[k] = level;
   }
-  const layer: StaticLayer = { kind: 'static', colour: { hex: colour, ...extras }, intensity: 1 };
-  const wanted = JSON.stringify([colour, extras.white ?? 0, extras.amber ?? 0, extras.uv ?? 0, 1]);
+  if (input.level !== undefined && !(input.level >= 0.05 && input.level <= 1)) throw new Error('the brightness is between 5 % and 100 %');
+  if (input.fade !== undefined && !(input.fade >= 0 && input.fade <= 600)) throw new Error('the fade is between 0 and 600 seconds');
+  const level = input.level === undefined ? 1 : Math.round(input.level * 100) / 100;
+  const fade = input.fade ?? 3;
+  const layer: StaticLayer = { kind: 'static', colour: { hex: colour, ...extras }, intensity: level };
+  const wanted = JSON.stringify([colour, extras.white ?? 0, extras.amber ?? 0, extras.uv ?? 0, level]);
   // The swatch shows the white, amber and UV in it, as a saved Any colour pick's does.
   const swatch = Object.keys(extras).length ? displayColour(colour, extras) : colour;
   // A black colour is a light only with White, Amber or UV in it.
@@ -93,7 +101,7 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
     const own = out.presets.filter((p) => p.group === group);
     if (own.some((p) => !p.custom && plainLight(out, p) === wanted)) continue;
     const id = uniqueId(`${group} ${name}`, out.presets.map((p) => p.id));
-    out.presets.push({ id, name, group, layers: [structuredClone(layer)], fade: 3, swatch });
+    out.presets.push({ id, name, group, layers: [structuredClone(layer)], fade, swatch });
     ids.push(id);
   }
   if (!ids.length) throw new Error(input.allGroups ? 'every group already has that colour' : 'that colour is already in the list');

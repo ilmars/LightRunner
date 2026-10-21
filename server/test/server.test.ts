@@ -600,6 +600,12 @@ test("Add to colours keeps an Any colour pick's white, amber and UV, and the gro
   assert.equal(amber.swatch, '#ffbf00');
   assert.equal(amber.canRecolour, true);
   assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: '#000000', name: 'Dark', allGroups: false }), 'that colour has no light: pick a colour, or add White, Amber or UV');
+  // ＋ New colour's Brightness and Fade come with it.
+  assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: '#123456', name: 'Dim navy', allGroups: false, level: 0.4, fade: 1 }), null);
+  const dim = presetsOf(t.layout(), 'back-wall').find((p) => p.name === 'Dim navy') as any;
+  assert.equal(dim.level, 0.4);
+  assert.equal(dim.fade, 1);
+  assert.match((await t.send({ type: 'addColour', group: 'back-wall', colour: '#123457', name: 'x', allGroups: false, level: 0.01 }))!, /^invalid command/);
 }));
 
 test('Add to colours: names, every group, duplicates, Blackout and the PIN', () => withApp(async (app, dir) => {
