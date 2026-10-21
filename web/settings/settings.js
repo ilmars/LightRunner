@@ -407,7 +407,7 @@ $('apcReset').addEventListener('click', async () => {
   disarmReset();
   try {
     showKeys(await call('POST', '/api/keys/reset'));
-    $('keysNote').textContent = 'The APC mini has its standard layout again.';
+    $('keysNote').textContent = 'The APC mini has its standard layout again. The keys it had are in a backup (Backups).';
   } catch (err) {
     toast(err.message, true);
   }

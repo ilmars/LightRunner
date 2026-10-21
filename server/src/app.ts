@@ -617,7 +617,9 @@ export class App {
     }
     try {
       const next = cmd.type === 'setKey' ? assignKey(this.show, cmd.key, cmd.does).show : cmd.type === 'clearKey' ? clearKey(this.show, cmd.does) : resetApcKeys(this.show);
-      await this.controllerSave(next);
+      // Reset (it takes every key on the APC mini, songs' too) and Clear can't be undone: the show before them is kept
+      // as a backup (Settings › Backups) each time.
+      await this.controllerSave(next, cmd.type !== 'setKey');
     } catch (err) {
       return { error: (err as Error).message, recorded: false };
     }
@@ -650,10 +652,10 @@ export class App {
 
   /**
    * A change to the controller settings that isn't an Undo step (Settings' keys and switches): saved like an operator
-   * edit, so the Undo list stays and only the first one after a programmer save keeps a backup.
+   * edit, so the Undo list stays and only the first one after a programmer save keeps a backup (or each, with `backup`).
    */
-  private async controllerSave(show: Show): Promise<void> {
-    await this.putShow(show, !this.operatorBackedUp);
+  private async controllerSave(show: Show, backup = false): Promise<void> {
+    await this.putShow(show, backup || !this.operatorBackedUp);
     this.operatorBackedUp = true;
   }
 

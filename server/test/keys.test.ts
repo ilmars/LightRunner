@@ -683,3 +683,24 @@ test('an operator is refused a key that already does a fixed job, and told which
     prog.close();
   }
 }));
+
+test('Reset to the APC mini layout and Clear of a fixed key each keep a backup first', () => withKeys(async (rig) => {
+  const { url, layout } = rig;
+  const apc = (number: number) => ({ device: 'APC mini mk2', type: 'note', channel: 1, number });
+  const prog = await tablet(url);
+  const backups = async () => (await call(url, 'GET', '/api/backups')).body.length;
+  try {
+    assert.equal(await prog.command({ type: 'setKey', key: apc(50), does: { kind: 'song', id: layout.runningOrder[2].id } }), null);
+    assert.equal(await prog.command({ type: 'setKey', key: apc(51), does: { kind: 'next' } }), null);
+    assert.equal(await prog.command({ type: 'setKey', key: apc(52), does: { kind: 'undo' } }), null);
+    const before = await backups();
+    assert.equal(await prog.command({ type: 'resetKeys' }), null);
+    assert.equal(await backups(), before + 1, 'Reset keeps a backup');
+    assert.equal(await prog.command({ type: 'setKey', key: apc(51), does: { kind: 'next' } }), null);
+    assert.equal(await backups(), before + 1, 'an assign keeps none');
+    assert.equal(await prog.command({ type: 'clearKey', does: { kind: 'next' } }), null);
+    assert.equal(await backups(), before + 2, 'Clear keeps a backup');
+  } finally {
+    prog.close();
+  }
+}));
