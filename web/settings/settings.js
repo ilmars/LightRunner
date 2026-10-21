@@ -1,7 +1,7 @@
 // Settings page for the programmer. Talks to the server's /api/settings
 // routes; nothing here changes the stage except the Send DMX switch.
 
-import { NOT_ANSWERING, request, showProblem, startClock, watchState } from '../shared/appbar.js';
+import { NOT_ANSWERING, getJson, request, showProblem, startClock, watchState } from '../shared/appbar.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -419,9 +419,12 @@ function disarmReset() {
   $('apcReset').classList.remove('ds-btn--danger');
 }
 
+/** The live state's reads (watchState), to read again at once after Send DMX changes. */
+let stateWatch = null;
+
 // Keep the status pill and the controller card live (the pill also before the PIN is entered, as on Patch).
 function watch() {
-  watchState({
+  stateWatch = watchState({
     pill: $('status'),
     offline: $('offline'),
     onState: async (state) => {
@@ -429,12 +432,16 @@ function watch() {
       renderStatus();
       if ($('main').hidden || keyLearn.does) return;
       try {
-        showKeys(await (await request('/api/controller', {}, 4000)).json());
+        showKeys(await getJson('/api/controller', 4000));
       } catch {
         // the next read tries again
       }
     },
-    onLost: () => { lastState = null; },
+    // "Not connected" says it all: the DMX card's line (from the last answer) goes too.
+    onLost: () => {
+      lastState = null;
+      $('outputProblem').textContent = '';
+    },
     // The page couldn't load while the server was down: load it now.
     onBack: () => { if (!saved) start().catch((err) => toast(err.message, true)); },
   });
@@ -510,7 +517,11 @@ $('outputEnabled').addEventListener('change', async (e) => {
     const next = await call('PUT', '/api/settings', { outputEnabled: on });
     saved.outputEnabled = next.outputEnabled;
     draft.outputEnabled = next.outputEnabled;
-    renderStatus();
+    // The pill from the last read (up to 2 s old) would say "Not sending" just after it was turned on: it waits
+    // for a fresh read, a moment from now, once the lights have the change.
+    if (on && lastState?.output === 'off') showProblem($('status'), null);
+    else renderStatus();
+    setTimeout(() => stateWatch?.refresh(), 150);
     toast(on ? 'Sending DMX' : 'DMX output off');
   } catch (err) {
     e.target.checked = !on;
