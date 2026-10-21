@@ -4,7 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BAR_LENGTH, BAR_THICKNESS, MIN_THICKNESS, aimBeam, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setShape, shapeOf, turnBar,
+  BAR_LENGTH, BAR_THICKNESS, MIN_THICKNESS, aimBeam, alignFixtures, boundsOf, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness,
+  setBarAngle, setShape, shapeOf, spaceEvenly, touches, turnBar,
 } from '../../web/patch/plan.js';
 import { BEAM_REACH, barAxis, barEnds, beamCone, outlineCells } from '../../web/shared/stage.js';
 
@@ -187,4 +188,80 @@ test('new fixtures go in a row from the spot, kept on the plan', () => {
   assert.equal(placeRow({ x: 0.02, y: 0.4 }, 1, 'bar')[0]!.x, BAR_LENGTH / 2);
   const many = placeRow({ x: 0.5, y: 0.4 }, 40, 'dot');
   assert.ok(many.every((p) => p.x >= 0 && p.x <= 1));
+});
+
+// ---- Several fixtures at once ----
+
+test('a fixture\'s bounds: a point for a dot, the space a bar or outline takes up on screen', () => {
+  assert.deepEqual(boundsOf({ x: 0.3, y: 0.4 }), { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4 });
+  const across = boundsOf({ x: 0.5, y: 0.5, w: 0.2, h: 0.04 });
+  near(across.left, 0.4); near(across.right, 0.6); near(across.top, 0.48); near(across.bottom, 0.52);
+  // Upright: as long on screen, so 0.2 of the width is 0.48 of the height.
+  const upright = boundsOf({ x: 0.5, y: 0.5, w: 0.2, h: 0.03, angle: 90 });
+  near(upright.top, 0.26); near(upright.bottom, 0.74);
+  near(upright.right - upright.left, 0.03 / 2.4);
+  const box = boundsOf({ x: 0.5, y: 0.5, shape: 'outline', w: 0.1, h: 0.2 });
+  near(box.left, 0.45); near(box.bottom, 0.6);
+  // A beam is where its lamp is; its cone is light, not the fixture.
+  assert.deepEqual(boundsOf({ x: 0.5, y: 0.9, shape: 'beam', angle: -90, reach: 0.2 }), { left: 0.5, right: 0.5, top: 0.9, bottom: 0.9 });
+});
+
+test('align lines fixtures up by their edges or middles', () => {
+  const make = () => [
+    { x: 0.2, y: 0.3 } as any,
+    { x: 0.5, y: 0.5, w: 0.2, h: 0.04 } as any,
+    { x: 0.7, y: 0.8 } as any,
+  ];
+  let fs = make();
+  alignFixtures(fs, 'left');
+  near(fs[0].x, 0.2); near(fs[1].x - fs[1].w / 2, 0.2); near(fs[2].x, 0.2);
+  fs = make();
+  alignFixtures(fs, 'right');
+  near(fs[2].x, 0.7); near(fs[1].x + fs[1].w / 2, 0.7);
+  fs = make();
+  alignFixtures(fs, 'centre');
+  // The middle of the group: from 0.2 to 0.7.
+  for (const f of fs) near(f.x, 0.45);
+  fs = make();
+  alignFixtures(fs, 'top');
+  near(fs[0].y, 0.3); near(fs[1].y - 0.02, 0.3); near(fs[2].y, 0.3);
+  fs = make();
+  alignFixtures(fs, 'bottom');
+  for (const f of fs) assert.ok(f.y <= 0.8 + 1e-9);
+  near(fs[1].y + 0.02, 0.8);
+  fs = make();
+  alignFixtures(fs, 'middle');
+  for (const f of fs) near(f.y, 0.55);
+  // Only what was asked moves.
+  fs = make();
+  alignFixtures(fs, 'left');
+  assert.deepEqual(fs.map((f) => f.y), [0.3, 0.5, 0.8]);
+});
+
+test('space evenly keeps the outermost two and spaces the rest between them', () => {
+  const fs: any[] = [{ x: 0.554, y: 0.892 }, { x: 0.47, y: 0.9 }, { x: 0.449, y: 0.892 }, { x: 0.397, y: 0.892 }];
+  spaceEvenly(fs, 'x');
+  // In order across: 0.397, then even steps, to 0.554; the list's own order doesn't matter.
+  assert.deepEqual(fs.map((f) => f.x), [0.554, 0.502, 0.449, 0.397]);
+  assert.deepEqual(fs.map((f) => f.y), [0.892, 0.9, 0.892, 0.892], 'only across');
+  const down: any[] = [{ x: 0.1, y: 0.1 }, { x: 0.1, y: 0.2 }, { x: 0.1, y: 0.9 }];
+  spaceEvenly(down, 'y');
+  assert.deepEqual(down.map((f) => f.y), [0.1, 0.5, 0.9]);
+});
+
+test('several fixtures move together and all stay on the plan', () => {
+  const fs: any[] = [{ x: 0.1, y: 0.5 }, { x: 0.3, y: 0.6 }];
+  const starts = fs.map((f) => ({ x: f.x, y: f.y }));
+  moveTogether(fs, starts, -0.3, 0.1);
+  // The first can only go 0.1 to the left, so both do.
+  assert.deepEqual(fs.map((f) => [f.x, f.y]), [[0, 0.6], [0.2, 0.7]]);
+});
+
+test('a box selects every fixture it touches', () => {
+  const box = { left: 0.3, top: 0.3, right: 0.6, bottom: 0.6 };
+  assert.equal(touches({ x: 0.4, y: 0.4 }, box), true);
+  assert.equal(touches({ x: 0.7, y: 0.4 }, box), false);
+  // A bar whose end reaches into the box.
+  assert.equal(touches({ x: 0.75, y: 0.5, w: 0.4, h: 0.03 }, box), true);
+  assert.equal(touches({ x: 0.85, y: 0.5, w: 0.4, h: 0.03 }, box), false);
 });

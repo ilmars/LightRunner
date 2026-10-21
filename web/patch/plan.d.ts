@@ -19,3 +19,10 @@ export function resizeThickness(f: PlanFixture, p: Point): void;
 export function aimBeam(f: PlanFixture, p: Point, free: boolean): void;
 export function resizeOutline(f: PlanFixture, p: Point): void;
 export function placeRow(spot: Point, count: number, shape: Shape): Point[];
+
+export interface Bounds { left: number; right: number; top: number; bottom: number }
+export function boundsOf(f: PlanFixture, inSmoke?: boolean): Bounds;
+export function alignFixtures(list: PlanFixture[], how: 'left' | 'centre' | 'right' | 'top' | 'middle' | 'bottom', inSmoke?: (f: PlanFixture) => boolean): void;
+export function spaceEvenly(list: PlanFixture[], axis: 'x' | 'y'): void;
+export function moveTogether(list: PlanFixture[], starts: Point[], dx: number, dy: number): void;
+export function touches(f: PlanFixture, box: Bounds, inSmoke?: boolean): boolean;

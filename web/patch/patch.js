@@ -1,7 +1,9 @@
 // Patch page: fixtures, groups and the stage plan. Edits a copy of the show
 // and saves it whole; the server checks it and keeps a backup of the old one.
 
-import { aimBeam, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setShape, shapeOf, turnBar } from './plan.js';
+import {
+  aimBeam, alignFixtures, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setShape, shapeOf, spaceEvenly, touches, turnBar,
+} from './plan.js';
 import { PLAN_ASPECT, barAxis, beamCone } from '../shared/stage.js';
 
 const $ = (id) => document.getElementById(id);
@@ -397,8 +399,10 @@ function universeList() {
   return [...set].sort((a, b) => a - b);
 }
 
-function selectFixture(id, scroll) {
+/** Select a fixture in the table, the DMX map and the stage plan; `several` selects more on the plan (Shift or a box). */
+function selectFixture(id, scroll, several = null) {
   selectedId = id;
+  planSelection = several ?? new Set(id ? [id] : []);
   const f = show.fixtures.find((x) => x.id === id);
   if (f) viewUniverse = f.universe;
   if (id) planSpot = null;
@@ -822,6 +826,10 @@ $('newGroupForm').addEventListener('submit', (ev) => {
 
 /** Where "Add fixture here" was asked for, as fractions of the plan; null when not shown. */
 let planSpot = null;
+/** The fixtures selected on the stage plan: several with Shift-click or a box, else just the selected one. */
+let planSelection = new Set();
+/** The selected fixtures, in show order. */
+const chosenFixtures = () => show.fixtures.filter((f) => planSelection.has(f.id));
 
 /** A pointer position as fractions of the plan, kept on it. */
 function planPoint(e, rect) {
@@ -927,9 +935,12 @@ function renderStage() {
   cones.setAttribute('viewBox', '0 0 100 100');
   cones.setAttribute('preserveAspectRatio', 'none');
   root.append(cones);
+  planSelection = new Set(chosenFixtures().map((f) => f.id));
+  // Handles only when one fixture is selected.
+  const one = planSelection.size === 1;
   for (const f of show.fixtures) {
     const shape = shapeOf(f, inSmokeGroup(f));
-    const selected = f.id === selectedId;
+    const selected = planSelection.has(f.id);
     const body = el('div', ['plan-item', shape, selected && 'sel'].filter(Boolean).join(' '));
     if (shape === 'smoke') body.innerHTML = CLOUD;
     else body.append(el('div', 'shape'));
@@ -946,21 +957,32 @@ function renderStage() {
     planParts.set(f.id, parts);
     body.addEventListener('pointerdown', (ev) => {
       if (ev.button !== 0) return;
-      // The fixture keeps where it was grabbed under the pointer, so a bar doesn't jump to centre on it.
+      if (ev.shiftKey) {
+        // Shift-click adds the fixture to the selection, or takes it out.
+        ev.preventDefault();
+        const next = new Set(planSelection);
+        if (next.has(f.id)) next.delete(f.id);
+        else next.add(f.id);
+        selectFixture(next.has(f.id) ? f.id : [...next].at(-1) ?? null, false, next);
+        return;
+      }
+      // Dragging one of several selected moves them all; any other fixture moves on its own.
+      // Each keeps where it was grabbed under the pointer, so a bar doesn't jump to centre on it.
+      const group = planSelection.has(f.id) && planSelection.size > 1 ? chosenFixtures() : [f];
+      const starts = group.map((x) => ({ x: x.x, y: x.y }));
       const grab = planPoint(ev, root.getBoundingClientRect());
-      const dx = f.x - grab.x, dy = f.y - grab.y;
-      body.classList.add('dragging');
+      for (const x of group) planParts.get(x.id)?.body.classList.add('dragging');
       followPointer(ev, body, (p) => {
-        f.x = Math.round(Math.min(1, Math.max(0, p.x + dx)) * 1000) / 1000;
-        f.y = Math.round(Math.min(1, Math.max(0, p.y + dy)) * 1000) / 1000;
-        placeFixture(f);
+        moveTogether(group, starts, p.x - grab.x, p.y - grab.y);
+        for (const x of group) placeFixture(x);
       }, (moved) => {
-        body.classList.remove('dragging');
-        selectFixture(f.id, false);
+        for (const x of group) planParts.get(x.id)?.body.classList.remove('dragging');
+        // A click picks just this one; a drag keeps what was selected.
+        if (!moved || group.length === 1) selectFixture(f.id, false);
         if (moved) changed();
       });
     });
-    if (selected && shape === 'bar') {
+    if (one && selected && shape === 'bar') {
       // One handle at each end for the length, one on a long side for the thickness, and one past the end to turn it.
       const angle = barAxis(f).angle;
       body.append(
@@ -970,10 +992,10 @@ function renderStage() {
         handle('turn', 'Drag to turn it (hold Shift to turn freely)', 'grab', f, (p, e) => turnBar(f, p, e.shiftKey)),
       );
     }
-    if (selected && shape === 'outline') {
+    if (one && selected && shape === 'outline') {
       body.append(handle('corner', 'Drag to change its size', 'nwse-resize', f, (p) => resizeOutline(f, p)));
     }
-    if (selected && shape === 'beam') {
+    if (one && selected && shape === 'beam') {
       parts.tip = handle('tip', 'Drag to aim it and set how far it reaches (hold Shift to aim freely)', 'grab', f, (p, e) => aimBeam(f, p, e.shiftKey));
       root.append(parts.tip);
     }
@@ -992,12 +1014,26 @@ function renderStage() {
   renderPlanTools();
 }
 
-// A click on an empty spot clears the selection and offers to add a fixture there.
+// A click on an empty spot clears the selection and offers to add a fixture there;
+// a drag from an empty spot draws a box and selects every fixture it touches (with Shift, adds them).
 $('stage').addEventListener('pointerdown', (ev) => {
   if (ev.button !== 0 || !(ev.target === $('stage') || ev.target.closest('.plan-cones'))) return;
-  const spot = planPoint(ev, $('stage').getBoundingClientRect());
-  followPointer(ev, $('stage'), () => {}, (moved) => {
-    if (moved) return;
+  const root = $('stage');
+  const spot = planPoint(ev, root.getBoundingClientRect());
+  const adding = ev.shiftKey;
+  let box = null, area = null;
+  followPointer(ev, root, (p) => {
+    area = { left: Math.min(spot.x, p.x), right: Math.max(spot.x, p.x), top: Math.min(spot.y, p.y), bottom: Math.max(spot.y, p.y) };
+    if (!box) root.append((box = el('div', 'plan-box')));
+    Object.assign(box.style, { left: pct(area.left), top: pct(area.top), width: pct(area.right - area.left), height: pct(area.bottom - area.top) });
+  }, (moved) => {
+    if (moved) {
+      const touched = show.fixtures.filter((f) => touches(f, area, inSmokeGroup(f))).map((f) => f.id);
+      const next = new Set(adding ? [...planSelection, ...touched] : touched);
+      planSpot = null;
+      selectFixture(touched.at(-1) ?? [...next].at(-1) ?? null, false, next);
+      return;
+    }
     planSpot = { x: Math.round(spot.x * 1000) / 1000, y: Math.round(spot.y * 1000) / 1000 };
     if (!$('planAdd').hidden) {
       // The form is open: it now adds at the new spot.
@@ -1016,34 +1052,64 @@ const SHAPE_HINTS = {
   smoke: 'For a smoke or haze machine.',
 };
 
-/** The shape row under the plan, for the selected fixture. */
+/** The rows under the plan: the shape of what is selected, and with several, Align and Space evenly. */
 function renderPlanTools() {
-  const f = show.fixtures.find((x) => x.id === selectedId);
-  $('planTools').hidden = !f;
-  if (!f) return;
-  const shape = shapeOf(f, inSmokeGroup(f));
-  $('planName').textContent = f.name;
+  const chosen = chosenFixtures();
+  $('planTools').hidden = !chosen.length;
+  $('planHelp').hidden = chosen.length > 0;
+  $('planArrange').hidden = chosen.length < 2;
+  if (!chosen.length) return;
+  const shapes = new Set(chosen.map((f) => shapeOf(f, inSmokeGroup(f))));
+  // A shape is marked only when every selected fixture has it.
+  const shape = shapes.size === 1 ? [...shapes][0] : null;
+  $('planName').textContent = chosen.length === 1 ? chosen[0].name : `${chosen.length} fixtures`;
   for (const b of $('planShape').children) b.setAttribute('aria-checked', String(b.dataset.shape === shape));
-  const angle = shape === 'bar' ? Math.round(barAxis(f).angle) : null;
+  const angles = new Set(shape === 'bar' ? chosen.map((f) => Math.round(barAxis(f).angle)) : []);
   $('planTurn').hidden = shape !== 'bar';
-  $('planAngle').textContent = angle === null ? '' : `${angle}°`;
-  $('planToolsHint').textContent = SHAPE_HINTS[shape];
+  $('planAngle').textContent = angles.size === 1 ? `${[...angles][0]}°` : '';
+  $('planToolsHint').textContent = chosen.length === 1 ? SHAPE_HINTS[shape] : '';
+  for (const b of $('planSpace').children) {
+    b.disabled = chosen.length < 3;
+    b.title = b.disabled ? 'Select three or more to space them evenly' : '';
+  }
 }
 
 $('planShape').addEventListener('click', (ev) => {
   const b = ev.target.closest('button[data-shape]');
-  const f = show.fixtures.find((x) => x.id === selectedId);
-  if (!b || !f) return;
-  setShape(f, b.dataset.shape, inSmokeGroup(f));
+  const chosen = chosenFixtures();
+  if (!b || !chosen.length) return;
+  for (const f of chosen) setShape(f, b.dataset.shape, inSmokeGroup(f));
   changed();
 });
 
 $('planTurn').addEventListener('click', (ev) => {
   const b = ev.target.closest('button[data-angle]');
-  const f = show.fixtures.find((x) => x.id === selectedId);
-  if (!b || !f) return;
-  setBarAngle(f, Number(b.dataset.angle));
+  const chosen = chosenFixtures();
+  if (!b || !chosen.length) return;
+  for (const f of chosen) setBarAngle(f, Number(b.dataset.angle));
   changed();
+});
+
+$('planAlign').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-align]');
+  if (!b) return;
+  alignFixtures(chosenFixtures(), b.dataset.align, inSmokeGroup);
+  changed();
+});
+
+$('planSpace').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-space]');
+  if (!b || b.disabled) return;
+  spaceEvenly(chosenFixtures(), b.dataset.space);
+  changed();
+});
+
+// Escape lets go of what is selected on the plan (and the "+ Add fixture here" offer), unless typing.
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape' || ev.target.closest?.('input, select, textarea, form')) return;
+  if (!planSelection.size && !planSpot) return;
+  planSpot = null;
+  selectFixture(null, false);
 });
 
 function openPlanAdd() {

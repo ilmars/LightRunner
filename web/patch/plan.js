@@ -147,3 +147,67 @@ export function placeRow(spot, count, shape) {
   const y = round(clamp(spot.y, 0, 1));
   return Array.from({ length: count }, (_, k) => ({ x: round(clamp(first + k * step, 0, 1)), y }));
 }
+
+// ---- Several fixtures at once ----
+
+/**
+ * The space a fixture takes up on the plan, as fractions: a point for a dot, a beam (its lamp) or smoke;
+ * a bar's or outline's edges as they are on screen.
+ */
+export function boundsOf(f, inSmoke = false) {
+  const shape = shapeOf(f, inSmoke);
+  let ex = 0, ey = 0;
+  if (shape === 'bar') {
+    const { length, thickness, angle } = barAxis(f);
+    const r = (angle * Math.PI) / 180, cos = Math.abs(Math.cos(r)), sin = Math.abs(Math.sin(r));
+    ex = (length / 2) * cos + (thickness / (2 * PLAN_ASPECT)) * sin;
+    ey = (length / 2) * sin * PLAN_ASPECT + (thickness / 2) * cos;
+  } else if (shape === 'outline') {
+    ex = (f.w ?? 0) / 2;
+    ey = (f.h ?? 0) / 2;
+  }
+  return { left: f.x - ex, right: f.x + ex, top: f.y - ey, bottom: f.y + ey };
+}
+
+/**
+ * Line fixtures up: 'left', 'right', 'top' or 'bottom' edges with the outermost one,
+ * or their middles with the group's middle ('centre' across, 'middle' up and down).
+ */
+export function alignFixtures(list, how, inSmoke = () => false) {
+  const boxes = list.map((f) => boundsOf(f, inSmoke(f)));
+  const across = ['left', 'centre', 'right'].includes(how);
+  const lo = Math.min(...boxes.map((b) => (across ? b.left : b.top)));
+  const hi = Math.max(...boxes.map((b) => (across ? b.right : b.bottom)));
+  list.forEach((f, k) => {
+    const b = boxes[k];
+    const [start, end] = across ? [b.left, b.right] : [b.top, b.bottom];
+    const shift = how === 'left' || how === 'top' ? lo - start : how === 'right' || how === 'bottom' ? hi - end : (lo + hi) / 2 - (start + end) / 2;
+    if (across) f.x = round(clamp(f.x + shift, 0, 1));
+    else f.y = round(clamp(f.y + shift, 0, 1));
+  });
+}
+
+/** Space fixtures evenly across ('x') or down ('y') by their middles; the outermost two stay where they are. */
+export function spaceEvenly(list, axis) {
+  if (list.length < 3) return;
+  const order = [...list].sort((a, b) => a[axis] - b[axis]);
+  const first = order[0][axis], last = order[order.length - 1][axis];
+  const step = (last - first) / (order.length - 1);
+  order.forEach((f, k) => { f[axis] = round(first + k * step); });
+}
+
+/** Move fixtures together from where they started by dx and dy, only as far as all of them stay on the plan. */
+export function moveTogether(list, starts, dx, dy) {
+  const room = (key, d) => clamp(d, Math.max(...starts.map((s) => -s[key])), Math.min(...starts.map((s) => 1 - s[key])));
+  const mx = room('x', dx), my = room('y', dy);
+  list.forEach((f, k) => {
+    f.x = round(starts[k].x + mx);
+    f.y = round(starts[k].y + my);
+  });
+}
+
+/** Whether a fixture is touched by a box drawn on the plan (left, top, right, bottom as fractions). */
+export function touches(f, box, inSmoke = false) {
+  const b = boundsOf(f, inSmoke);
+  return b.right >= box.left && b.left <= box.right && b.bottom >= box.top && b.top <= box.bottom;
+}
