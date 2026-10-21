@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   FADE_STEPS, Command, assignKey, clearKey, commandFor, controllerOf, deleteItem, deleteQuickLook, deviceName, editQuickLook, ensureRunningOrder,
-  TapTempo, fadeStepAt, fadeStepIndex, isApcMini, keyOf, moveItem, parseShow, pruneKeys, resetApcKeys, targetName,
+  TapTempo, fadeStepAt, fadeStepIndex, isApcMini, isOperatorKeyTarget, keepControllerKeys, keyOf, moveItem, parseShow, pruneKeys, resetApcKeys, targetName,
   type ControlKey, type DeviceLayout, type Show,
 } from '../src/index.ts';
 
@@ -202,4 +202,21 @@ test('tap tempo: the average of the last gaps, starting over after 2 s', () => {
   assert.equal(t.tap(1000), 120);
   assert.equal(t.tap(4000), null, 'a long gap starts over');
   assert.equal(t.tap(4250), 240);
+});
+
+test("Undo goes back to a show with the programmer's keys and switches as they are now", () => {
+  const s = ready();
+  const before = assignKey(s, pad(56), song(s, 1)).show;
+  let now = assignKey(before, pad(57), song(s, 2)).show;
+  now = assignKey(now, pad(112), { kind: 'next' }).show;
+  now.operator.controller!.apcLayout = false;
+  const back = keepControllerKeys(before, now);
+  assert.deepEqual(keyOf(back, song(s, 1)), pad(56));
+  assert.equal(keyOf(back, song(s, 2)), null);
+  assert.deepEqual(keyOf(back, { kind: 'next' }), pad(112));
+  assert.equal(controllerOf(back).apcLayout, false);
+  // A song key that the programmer's key has taken since stays with the programmer's.
+  const taken = assignKey(now, pad(56), { kind: 'undo' }).show;
+  assert.equal(keyOf(keepControllerKeys(before, taken), song(s, 1)), null);
+  assert.ok(isOperatorKeyTarget(song(s, 1)) && !isOperatorKeyTarget({ kind: 'master' }));
 });

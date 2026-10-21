@@ -3,7 +3,7 @@
 import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupSegments, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect } from '../../packages/shared/src/index.ts';
 import type { ChannelRole, FixtureShape, GroupKind, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
-import { keyLabel, keyPlace } from './keynames.ts';
+import { keyLabel, keyPlace, keyShort } from './keynames.ts';
 
 export interface OperatorLook {
   id: string;
@@ -125,16 +125,18 @@ export interface OperatorLayout {
    * Controller keys: whether the server can use MIDI controllers at all, and the key of each song and quick
    * look (by look id): its place on the controller ("pad 1,3") and its whole name ("APC mini mk2 · pad 1,3").
    */
-  keys: { midi: boolean; songs: Record<string, KeyName>; quickLooks: Record<string, KeyName> };
+  keys: { midi: boolean; connected: number; songs: Record<string, KeyName>; quickLooks: Record<string, KeyName> };
 }
 
 export interface KeyName {
   place: string;
+  /** The place shortened for a small chip ("1,3"). */
+  short: string;
   name: string;
 }
 
-/** `midi`: the server has MIDI support (the add-on loaded), so keys can be assigned. */
-export function operatorLayout(show: Show, fixtureOrder: string[], midi = false): OperatorLayout {
+/** `midi`: the server has MIDI support (the add-on loaded), so keys can be assigned; `connected`: controllers listened to now. */
+export function operatorLayout(show: Show, fixtureOrder: string[], midi = false, connected = 0): OperatorLayout {
   const lookIds = show.operator.looks.length ? show.operator.looks : show.looks.map((l) => l.id);
   const groupIds = show.operator.groups.length ? show.operator.groups : show.groups.map((g) => g.id);
   const byId = new Map(show.fixtures.map((f) => [f.id, f]));
@@ -214,19 +216,19 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false)
     members: Object.fromEntries(show.groups.map((g) => [g.id, g.fixtures])),
     manualForOperators: show.operator.manualForOperators,
     contact: show.settings.contact ?? null,
-    keys: layoutKeys(show, midi),
+    keys: layoutKeys(show, midi, connected),
   };
 }
 
-function layoutKeys(show: Show, midi: boolean): OperatorLayout['keys'] {
+function layoutKeys(show: Show, midi: boolean, connected: number): OperatorLayout['keys'] {
   const songs: Record<string, KeyName> = {};
   const quickLooks: Record<string, KeyName> = {};
   for (const { key, does } of show.operator.controller?.keys ?? []) {
-    const name = { place: keyPlace(key), name: keyLabel(key) };
+    const name = { place: keyPlace(key), short: keyShort(key), name: keyLabel(key) };
     if (does.kind === 'song') songs[does.id] = name;
     else if (does.kind === 'quickLook') quickLooks[does.id] = name;
   }
-  return { midi, songs, quickLooks };
+  return { midi, connected, songs, quickLooks };
 }
 
 /** The plain light a preset shows; null for an effect (it moves, so it has no one light). */

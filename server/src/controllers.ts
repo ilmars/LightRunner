@@ -18,6 +18,8 @@ export interface MidiHooks {
   device(action: DeviceAction, source: string): Promise<string | null>;
   /** A controller went away: put out the Flash it holds. */
   release(source: string): void;
+  /** A controller was opened or let go of (the pages show Key chips while one is listened to). */
+  changed?(): void;
   log(msg: string): void;
 }
 
@@ -51,6 +53,8 @@ const RESEND_POLLS = 5;
 const LOG_EVERY_MS = 60000;
 /** A fader or knob that was just learned is ignored this long (ms), or until its new job is known. */
 const LEARNED_CC_MS = 1000;
+/** A note that was just learned is ignored until it is let go, or this long (ms) at most. */
+const LEARNED_NOTE_MS = 2000;
 /** A control change at or above this (0 to 1) is a button held down. */
 const CC_DOWN = 0.5;
 
@@ -102,7 +106,7 @@ export class MidiDriver {
   private state: LiveState | null = null;
   /** Actions run one after another, in the order they came. */
   private queue: Promise<void> = Promise.resolve();
-  private learning: { resolve: (key: ControlKey | null) => void; timer: NodeJS.Timeout } | null = null;
+  private learning: { resolve: (key: ControlKey | null) => void; timer: NodeJS.Timeout; levels: boolean } | null = null;
   /** The last problem with each port (or listing them), so it is logged once rather than every 2 s. */
   private readonly problems = new Map<string, string>();
   private readonly logged = new Map<string, number>();
@@ -167,7 +171,7 @@ export class MidiDriver {
     }
     for (const conn of this.conns.values()) {
       // A fader that was just learned now has its job: it works at once.
-      for (const [id, until] of conn.swallow) if (id.startsWith('cc:') && until !== Infinity) conn.swallow.delete(id);
+      for (const id of conn.swallow.keys()) if (id.startsWith('cc:')) conn.swallow.delete(id);
       this.sendLeds(conn);
     }
     // A device switched off or on in Settings is let go of or opened now, not at the next look.
@@ -199,16 +203,17 @@ export class MidiDriver {
   // ---- Learn ----
 
   /**
-   * The next key pressed (a note, or a fader or knob moved) on a controller listened to, or null after `ms`
-   * or when `cancel` is called. One at a time: throws while another is waiting.
+   * The next key pressed on a controller listened to, or null after `ms` or when `cancel` is called: a fresh press
+   * (a note on, or a control change above 0; releases are passed over), and with `levels` only a fader or knob moved.
+   * One at a time: throws while another is waiting.
    */
-  learn(ms: number): { key: Promise<ControlKey | null>; cancel: () => void } {
+  learn(ms: number, opts: { levels?: boolean } = {}): { key: Promise<ControlKey | null>; cancel: () => void } {
     if (this.learning) throw new Error('Another page is waiting for a key. Try again in a moment.');
     let entry!: NonNullable<MidiDriver['learning']>;
     const key = new Promise<ControlKey | null>((resolve) => {
       const timer = setTimeout(() => this.endLearn(entry), ms);
       timer.unref();
-      entry = { resolve, timer };
+      entry = { resolve, timer, levels: !!opts.levels };
     });
     this.learning = entry;
     return { key, cancel: () => this.endLearn(entry) };
@@ -295,6 +300,7 @@ export class MidiDriver {
     } else {
       this.hooks.log(`MIDI: connected "${name}"`);
     }
+    this.hooks.changed?.();
   }
 
   /** The controller went away (unplugged, or it stopped taking messages): its Flash goes out. */
@@ -325,6 +331,7 @@ export class MidiDriver {
     } catch {
       // already gone
     }
+    if (this.poller) this.hooks.changed?.();
   }
 
   private report(what: string, problem: string): void {
@@ -339,18 +346,20 @@ export class MidiDriver {
     const msg = parseMidi(bytes);
     if (msg) {
       const id = keyId(msg);
-      if (this.learning && (msg.type === 'cc' || msg.on)) {
-        this.learned(conn, msg, id);
+      const learning = this.learning;
+      // Only a fresh press is learned (never a release, which may be another controller's Flash let go of).
+      const fresh = msg.type === 'cc' ? msg.value > 0 : msg.on;
+      if (learning && fresh) {
+        // Waiting for a fader or knob: a pad or button pressed meanwhile does nothing.
+        if (msg.type === 'cc' || !learning.levels) this.learned(conn, msg, id);
         return;
       }
       const until = conn.swallow.get(id);
       if (until !== undefined) {
-        // The key just learned: its release (or the rest of its move) isn't a press.
-        if (msg.type === 'note') {
-          if (!msg.on) conn.swallow.delete(id);
-          return;
-        }
-        if (performance.now() < until) return;
+        // The key just learned: its release (or the rest of its move) isn't a press, for a moment.
+        const over = performance.now() >= until;
+        if (msg.type === 'note' && !msg.on) conn.swallow.delete(id);
+        if (!over) return;
         conn.swallow.delete(id);
       }
       const binding = this.bindings.get(conn.device)?.get(id);
@@ -366,7 +375,7 @@ export class MidiDriver {
     const l = this.learning!;
     this.learning = null;
     clearTimeout(l.timer);
-    conn.swallow.set(id, msg.type === 'note' ? Infinity : performance.now() + LEARNED_CC_MS);
+    conn.swallow.set(id, performance.now() + (msg.type === 'note' ? LEARNED_NOTE_MS : LEARNED_CC_MS));
     l.resolve({ device: conn.device, type: msg.type, channel: msg.channel, number: msg.number });
   }
 

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import { App } from '../src/app.ts';
 import { apcLeds, type ApcLayout, type ApcState } from '../src/apc.ts';
-import { keyLabel, keyPlace, parseMidi } from '../src/keynames.ts';
+import { keyLabel, keyPlace, keyShort, parseMidi } from '../src/keynames.ts';
 import { FakeMidi, loadMidi, type FakeMidiPort, type MidiPorts } from '../src/midi.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -51,6 +51,10 @@ test('a key is named by its device and its place', () => {
   assert.equal(keyPlace(k('nanoKONTROL2', 'cc', 16)), 'control 16');
   assert.equal(keyPlace(k('nanoKONTROL2', 'note', 36, 10)), 'button 36 (channel 10)');
   assert.equal(keyLabel(k('APC mini mk2', 'note', 56)), 'APC mini mk2 · pad 1,1');
+  assert.equal(keyShort(k('APC mini mk2', 'note', 50)), '2,3');
+  assert.equal(keyShort(k('APC mini mk2', 'note', 112)), 'side 1');
+  assert.equal(keyShort(k('APC mini mk2', 'cc', 56)), 'fader 9');
+  assert.equal(keyShort(k('nanoKONTROL2', 'note', 36, 10)), '36/10');
 });
 
 // ---- Pad lights ----
@@ -117,15 +121,18 @@ async function withKeys(fn: (rig: Rig) => Promise<void>, opts: { midi?: (log: (m
   }
 }
 
-const call = async (url: string, method: string, path: string, body?: unknown) => {
-  const res = await fetch(`${url}${path}`, { method, headers: body === undefined ? undefined : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+const call = async (url: string, method: string, path: string, body?: unknown, cookie?: string) => {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  if (cookie) headers.cookie = cookie;
+  const res = await fetch(`${url}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   return { status: res.status, body: (await res.json()) as any };
 };
 const portNamed = (midi: FakeMidi, name: string) => waitFor(() => midi.opened.find((p) => p.name === name && !p.closed), 1000, `${name} to be opened`);
 
 /** Starts a learn, presses the key once the server is waiting, and gives the answer. */
-async function learn(rig: Rig, does: unknown, press: (() => void) | null): Promise<{ status: number; body: any }> {
-  const answer = call(rig.url, 'POST', '/api/keys/learn', { does });
+async function learn(rig: Rig, does: unknown, press: (() => void) | null, cookie?: string): Promise<{ status: number; body: any }> {
+  const answer = call(rig.url, 'POST', '/api/keys/learn', { does }, cookie);
   if (press) {
     await waitFor(() => rig.app.learning, 1000, 'the server to wait for a key');
     press();
@@ -148,7 +155,8 @@ test('learn: the next key pressed is taken, and then it starts the song', () => 
   // The press that was learned didn't do anything else.
   assert.notEqual(app.state?.look, song.id);
   const fresh = await (await fetch(`${url}/api/layout`)).json();
-  assert.deepEqual(fresh.keys.songs[song.id], { place: 'button 41', name: 'nanoKONTROL2 · button 41' });
+  assert.deepEqual(fresh.keys.songs[song.id], { place: 'button 41', short: '41', name: 'nanoKONTROL2 · button 41' });
+  assert.equal(fresh.keys.connected, 1);
   tap(port, 41);
   await waitFor(() => app.state?.look === song.id, 2000, 'the song to start from its key');
   // The show file keeps it.
@@ -194,7 +202,7 @@ test('learn without the MIDI add-on says so plainly, and the layout says there a
   assert.equal(layout.keys.midi, false);
 }, { midi: (log) => loadMidi(log, async () => { throw new Error('missing'); }) }));
 
-test('a key already used moves, with a quiet note; a level needs a fader or a knob', () => withKeys(async (rig) => {
+test('a key already used moves, with a quiet note; a level waits for a fader or a knob', () => withKeys(async (rig) => {
   const { midi, layout } = rig;
   midi.plug('APC mini mk2');
   const port = await portNamed(midi, 'APC mini mk2');
@@ -204,8 +212,12 @@ test('a key already used moves, with a quiet note; a level needs a fader or a kn
   assert.equal(r.body.note, `Pad 2,3 was ${a.name}; it is now ${b.name}.`);
   const view = (await call(rig.url, 'GET', '/api/controller')).body;
   assert.equal(view.keys.length, 1);
-  const lvl = await learn(rig, { kind: 'master' }, () => tap(port, 51));
-  assert.deepEqual(lvl.body, { ok: false, message: 'Master needs a fader or a knob.' });
+  // Master: a pad pressed meanwhile is passed over, and the fader moved next is taken.
+  const lvl = learn(rig, { kind: 'master' }, () => tap(port, 51));
+  await sleep(50);
+  assert.ok(rig.app.learning, 'still waiting after a pad');
+  port.receive([0xb0, 56, 20]);
+  assert.deepEqual((await lvl).body, { ok: true, key: 'APC mini mk2 · fader 9', place: 'fader 9', note: null });
 }));
 
 test('an explicit key on the APC mini wins over the standard layout for that key only', () => withKeys(async (rig) => {
@@ -313,7 +325,7 @@ test('Master on a knob picks up; tempo keys; Blackout held 1 s; Flash while held
   const { app, midi, layout } = rig;
   midi.plug('nanoKONTROL2');
   const port = await portNamed(midi, 'nanoKONTROL2');
-  await learn(rig, { kind: 'master' }, () => port.receive([0xb0, 7, 0]));
+  await learn(rig, { kind: 'master' }, () => port.receive([0xb0, 7, 5]));
   port.receive([0xb0, 7, 30]);
   await sleep(100);
   assert.equal(app.state?.master, 1, 'the knob waits until it reaches Master');
@@ -400,11 +412,19 @@ test('Settings lists the actions with their keys, and the APC mini layout where 
   assert.equal(row(view, `${layout.groups[0].name} level`).standard, 'fader 1');
   assert.ok(row(view, 'Fade 2 s'));
   assert.ok(row(view, 'Tempo ×2'));
-  // Assign side button 1 to Undo: Next loses its standard key, Undo has it explicitly.
+  // Assign side button 1 to Undo: Next loses its standard key, Undo has it explicitly (and side button 3 still).
   await learn(rig, { kind: 'undo' }, () => tap(port, 112));
   view = (await call(url, 'GET', '/api/controller')).body;
   assert.equal(row(view, 'Undo').key, 'APC mini mk2 · side button 1');
+  assert.equal(row(view, 'Undo').standard, 'side button 3');
   assert.equal(row(view, 'Next').standard, null);
+  // A key on another controller: the APC mini layout still does it too.
+  midi.plug('nanoKONTROL2');
+  const nano = await portNamed(midi, 'nanoKONTROL2');
+  await learn(rig, { kind: 'basic' }, () => tap(nano, 12));
+  view = (await call(url, 'GET', '/api/controller')).body;
+  assert.equal(row(view, 'Basic lights').key, 'nanoKONTROL2 · button 12');
+  assert.equal(row(view, 'Basic lights').standard, 'side button 4');
   // Clear puts it back.
   assert.equal((await call(url, 'POST', '/api/keys/clear', { does: { kind: 'undo' } })).status, 200);
   view = (await call(url, 'GET', '/api/controller')).body;
@@ -421,4 +441,167 @@ test('Patch saving an old copy of the show keeps the keys', () => withKeys(async
   const res = await fetch(`${url}/api/show?source=patch`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(old) });
   assert.equal(res.status, 200);
   assert.equal((await call(url, 'GET', '/api/controller')).body.keys.length, 1);
+}));
+
+// ---- Fix round 1 ----
+
+/** A WebSocket to the app (with the programmer's cookie, or none) that sends commands and gives each answer. */
+async function tablet(url: string, cookie?: string) {
+  const ws = new WebSocket(`${url.replace('http', 'ws')}/ws`, cookie ? { headers: { cookie } } : {});
+  await new Promise((r) => ws.once('open', r));
+  let ref = 0;
+  const command = (cmd: unknown) => new Promise<string | null>((resolve) => {
+    const mine = ++ref;
+    ws.on('message', function on(data) {
+      const msg = JSON.parse(String(data));
+      if (msg.type === 'result' && msg.ref === mine) {
+        ws.off('message', on);
+        resolve(msg.error);
+      }
+    });
+    ws.send(JSON.stringify({ type: 'command', ref: mine, cmd }));
+  });
+  return { command, close: () => ws.close() };
+}
+
+async function waitForAsync(get: () => Promise<boolean>, ms = 2000): Promise<boolean> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (await get()) return true;
+    await sleep(20);
+  }
+  return false;
+}
+
+const PROGRAMMER_ONLY = 'Only the programmer can change that key. Enter the PIN in Settings.';
+
+test('with a PIN, operators give keys to songs and quick looks only; the programmer to everything', () => withKeys(async (rig) => {
+  const { midi, url, layout } = rig;
+  midi.plug('nanoKONTROL2');
+  const port = await portNamed(midi, 'nanoKONTROL2');
+  const pin = await fetch(`${url}/api/pin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ next: '2468' }) });
+  assert.equal(pin.status, 200);
+  const cookie = pin.headers.get('set-cookie')!.split(';')[0]!;
+  const key = { device: 'nanoKONTROL2', type: 'note', channel: 1, number: 70 };
+  const song = { kind: 'song', id: layout.runningOrder[2].id };
+
+  // Over HTTP: a fixed action is refused before any waiting; a song is fine.
+  const refused = await call(url, 'POST', '/api/keys/learn', { does: { kind: 'blackout' } });
+  assert.equal(refused.status, 401);
+  assert.equal(refused.body.error, PROGRAMMER_ONLY);
+  assert.equal(rig.app.learning, false);
+  assert.equal((await learn(rig, song, () => tap(port, 71))).body.ok, true);
+  // The switches and Reset need the PIN.
+  assert.equal((await call(url, 'PUT', '/api/controller', { apcLayout: false })).status, 401);
+  assert.equal((await call(url, 'POST', '/api/keys/reset')).status, 401);
+
+  // Over the WebSocket, as an operator.
+  const op = await tablet(url);
+  try {
+    assert.equal(await op.command({ type: 'setKey', key, does: { kind: 'blackout' } }), PROGRAMMER_ONLY);
+    assert.equal(await op.command({ type: 'resetKeys' }), PROGRAMMER_ONLY);
+    assert.equal(await op.command({ type: 'setKey', key, does: { kind: 'quickLook', id: layout.quickLooks[0].id } }), null);
+    assert.equal(await op.command({ type: 'clearKey', does: song }), null);
+  } finally {
+    op.close();
+  }
+
+  // The programmer (with the PIN's cookie) can do all of it.
+  const prog = await tablet(url, cookie);
+  try {
+    assert.equal(await prog.command({ type: 'setKey', key, does: { kind: 'blackout' } }), null);
+    // An operator can't clear it.
+    assert.equal((await call(url, 'POST', '/api/keys/clear', { does: { kind: 'blackout' } })).status, 401);
+    assert.equal((await call(url, 'POST', '/api/keys/clear', { does: { kind: 'blackout' } }, cookie)).status, 200);
+    assert.equal((await learn(rig, { kind: 'next' }, () => tap(port, 72), cookie)).body.ok, true);
+    assert.equal(await prog.command({ type: 'resetKeys' }), null);
+    assert.equal((await call(url, 'PUT', '/api/controller', { apcLayout: false }, cookie)).status, 200);
+  } finally {
+    prog.close();
+  }
+}));
+
+test('keys from Settings are no Undo steps; song keys are; the switches keep Undo and write no backup each time', () => withKeys(async (rig) => {
+  const { midi, url, layout } = rig;
+  midi.plug('nanoKONTROL2');
+  const port = await portNamed(midi, 'nanoKONTROL2');
+  const op = await tablet(url);
+  try {
+    const song = layout.runningOrder[3];
+    assert.equal(await op.command({ type: 'renameItem', id: song.id, name: 'Psalm' }), null);
+    await learn(rig, { kind: 'next' }, () => tap(port, 50));
+    const backups = (await call(url, 'GET', '/api/backups')).body.length;
+    for (const on of [false, true, false]) assert.equal((await call(url, 'PUT', '/api/controller', { apcLayout: on })).status, 200);
+    assert.equal((await call(url, 'PUT', '/api/controller', { ignored: ['Nothing here'] })).status, 200);
+    assert.ok((await call(url, 'GET', '/api/backups')).body.length <= backups + 1, 'at most one backup for the switches');
+    // Undo takes back the rename, not the Next key or the switches.
+    assert.equal(await op.command({ type: 'undo' }), null);
+    let view = (await call(url, 'GET', '/api/controller')).body;
+    assert.equal(view.actions.find((a: any) => a.label === 'Next').key, 'nanoKONTROL2 · button 50');
+    assert.equal(view.apcLayout, false);
+    const name = (await (await fetch(`${url}/api/layout`)).json()).runningOrder[3].name;
+    assert.equal(name, song.name);
+    // A song's key is an Undo step.
+    await learn(rig, { kind: 'song', id: song.id }, () => tap(port, 51));
+    assert.equal(await op.command({ type: 'undo' }), null);
+    view = (await call(url, 'GET', '/api/controller')).body;
+    assert.equal(view.keys.some((k: any) => k.does.kind === 'song'), false);
+    assert.equal(view.actions.find((a: any) => a.label === 'Next').key, 'nanoKONTROL2 · button 50');
+  } finally {
+    op.close();
+  }
+}));
+
+test('a learn takes only a fresh press: releases and controls at zero are passed over', () => withKeys(async (rig) => {
+  const { midi } = rig;
+  midi.plug('nanoKONTROL2');
+  const port = await portNamed(midi, 'nanoKONTROL2');
+  const answer = learn(rig, { kind: 'next' }, () => {
+    port.receive([0x80, 40, 0]);
+    port.receive([0x90, 41, 0]);
+    port.receive([0xb0, 42, 0]);
+  });
+  await sleep(50);
+  assert.ok(rig.app.learning, 'still waiting');
+  port.receive([0x90, 43, 100]);
+  assert.equal((await answer).body.key, 'nanoKONTROL2 · button 43');
+}));
+
+test('the release of a learned key is passed over for at most 2 s', () => withKeys(async (rig) => {
+  const { app, midi, layout } = rig;
+  midi.plug('nanoKONTROL2');
+  const port = await portNamed(midi, 'nanoKONTROL2');
+  const order: string[] = layout.runningOrder.map((l: any) => l.id);
+  // Held down while it is learned, and its release never comes.
+  await learn(rig, { kind: 'song', id: order[2] }, () => port.receive([0x90, 44, 127]));
+  await sleep(2100);
+  port.receive([0x90, 44, 127]);
+  await waitFor(() => app.state?.look === order[2], 2000, 'the key to work after 2 s');
+}));
+
+test('learn when every device is switched off says so; the layout counts the controllers listened to', () => withKeys(async (rig) => {
+  const { midi, url } = rig;
+  const connected = async () => (await (await fetch(`${url}/api/layout`)).json()).keys.connected;
+  assert.equal(await connected(), 0);
+  midi.plug('nanoKONTROL2');
+  await portNamed(midi, 'nanoKONTROL2');
+  assert.ok(await waitForAsync(async () => (await connected()) === 1), 'one controller connected');
+  assert.equal((await call(url, 'PUT', '/api/controller', { ignored: ['nanoKONTROL2'] })).status, 200);
+  const r = await call(url, 'POST', '/api/keys/learn', { does: { kind: 'next' } });
+  assert.equal(r.status, 409);
+  assert.equal(r.body.error, 'No controller is being listened to.');
+  assert.ok(await waitForAsync(async () => (await connected()) === 0), 'none listened to');
+}));
+
+test("unplugging a controller that isn't an APC puts out the Flash it holds", () => withKeys(async (rig) => {
+  const { app, midi, layout } = rig;
+  midi.plug('nanoKONTROL2');
+  const port = await portNamed(midi, 'nanoKONTROL2');
+  const g = layout.groups[0].id;
+  await learn(rig, { kind: 'flash', group: g }, () => tap(port, 45));
+  port.receive([0x90, 45, 127]);
+  await waitFor(() => app.state?.flashing.includes(g), 2000, 'the flash');
+  midi.unplug('nanoKONTROL2');
+  await waitFor(() => port.closed, 1000, 'the port to close');
+  await waitFor(() => app.state?.flashing.length === 0, 2000, 'the flash to go out');
 }));

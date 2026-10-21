@@ -16,7 +16,8 @@ import {
   BUILT_IN_PROFILES, Command, OscSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
   applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,  type OflFixture, type Pick, type Scope,
   BLACKOUT, LiveEffectLayer, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand,
-  FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, keyOf, keyTargetProblem, pruneKeys, resetApcKeys, sameTarget, targetName,
+  FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
+  pruneKeys, resetApcKeys, sameTarget, targetName,
 } from '../../packages/shared/src/index.ts';
 import { effectFrames, settledVisual, type StageClock } from '../../packages/engine/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
@@ -93,6 +94,8 @@ const TEMPO_RUN_MS = 3000;
 
 /** A Master step this soon (ms) after another carries on from it instead of from the state. */
 const DEVICE_MASTER_MS = 300;
+/** What an operator is told for a key only the programmer may change (Settings, behind the PIN). */
+const PROGRAMMER_KEYS = 'Only the programmer can change that key. Enter the PIN in Settings.';
 /** The key of a device Flash's time limit. */
 const flashKey = (source: string, group: string) => JSON.stringify([source, group]);
 
@@ -350,6 +353,10 @@ export class App {
     this.midi = new MidiDriver(ports, {
       device: (action, source) => this.device(action, source),
       release: (source) => this.releaseDevice(source),
+      // The pages show Key chips while a controller is listened to.
+      changed: () => {
+        if (this.layout && !this.stopping) this.refreshLayout();
+      },
       log: this.log,
     }, { pollMs: this.opts.apcPollMs, holdMs: this.opts.apcHoldMs, resendPolls: this.opts.apcResendPolls });
     this.midi.configure(controllerOf(this.show));
@@ -370,7 +377,7 @@ export class App {
 
   /** The operator layout for the show as it is now, sent to every page. */
   private refreshLayout(fixtures = this.show.fixtures.map((f) => f.id)): void {
-    this.layout = operatorLayout(this.show, fixtures, this.midi !== null);
+    this.layout = operatorLayout(this.show, fixtures, this.midi !== null, this.midi?.listening ?? 0);
     this.broadcast(JSON.stringify({ type: 'layout', layout: this.layout }));
   }
 
@@ -378,14 +385,19 @@ export class App {
    * Wait for the next key pressed on a controller and give it to `does` (through the setKey command). Throws an
    * HttpError in plain words when it can't start; `stop` is handed the way to stop waiting (the page went away).
    */
-  private async learnKey(does: KeyTarget, stop: (cancel: () => void) => void): Promise<{ ok: true; key: string; place: string; note: string | null } | { ok: false; message: string }> {
+  private async learnKey(does: KeyTarget, role: Role, stop: (cancel: () => void) => void): Promise<{ ok: true; key: string; place: string; note: string | null } | { ok: false; message: string }> {
+    // Refused before any waiting: an operator gives keys to songs and quick looks only.
+    if (role !== 'programmer' && !isOperatorKeyTarget(does)) throw new HttpError(401, PROGRAMMER_KEYS);
     const problem = keyTargetProblem(this.show, does);
     if (problem) throw new HttpError(400, problem);
     if (!this.midi) throw new HttpError(409, "MIDI support isn't installed on this computer, so controller keys can't be used.");
-    if (!this.midi.listening) throw new HttpError(409, 'No controller is connected. Plug one in, then try again.');
+    if (!this.midi.listening) {
+      throw new HttpError(409, this.midi.devices.length ? 'No controller is being listened to.' : 'No controller is connected. Plug one in, then try again.');
+    }
     let learn: ReturnType<MidiDriver['learn']>;
     try {
-      learn = this.midi.learn(this.opts.learnMs ?? 10000);
+      // Master, a group's level and the fade knob wait for a fader or a knob.
+      learn = this.midi.learn(this.opts.learnMs ?? 10000, { levels: isLevelTarget(does) });
     } catch (err) {
       throw new HttpError(409, (err as Error).message);
     }
@@ -394,7 +406,7 @@ export class App {
     if (!key) return { ok: false, message: 'No key was pressed. Try again.' };
     const before = this.show;
     const was = bindingOf(before, key);
-    const error = await this.command({ type: 'setKey', key, does }, 'operator');
+    const error = await this.command({ type: 'setKey', key, does }, role);
     if (error) return { ok: false, message: error };
     const place = keyPlace(key);
     const note = was && !sameTarget(was.does, does)
@@ -533,6 +545,7 @@ export class App {
       return { error: 'manual control is not enabled for operators', recorded: false };
     }
     if (isBlindCommand(cmd)) return this.blindCommand(cmd, tablet);
+    if (cmd.type === 'setKey' || cmd.type === 'clearKey' || cmd.type === 'resetKeys') return this.keyCommand(cmd, role, tablet);
     // Only Go sends a whole stage, from a tablet's draft.
     if (cmd.type === 'applyStage') return { error: 'Use Prepare and Go to send a whole stage.', recorded: false };
     if (isShowEdit(cmd)) {
@@ -558,7 +571,8 @@ export class App {
           // next Save or a restart would find it gone.
           // Groups an edit in Prepare moved onto copies go back onto their own colours, which look the same again.
           const pins = this.undoKeep.get(last);
-          await this.operatorSave(keepCustomPresets(last, this.show), pins && { pins });
+          // The programmer's keys and the controller switches aren't Undo steps: they stay as they are.
+          await this.operatorSave(keepControllerKeys(keepCustomPresets(last, this.show), this.show), pins && { pins });
         } catch (err) {
           this.undoLog.push(last); // still there to try again
           return { error: (err as Error).message, recorded: false };
@@ -572,6 +586,46 @@ export class App {
     const reply = await this.request<{ error: string | null; recorded?: boolean }>((id) => ({ type: 'command', id, cmd }));
     if (reply.recorded) this.remember('stage');
     return { error: reply.error, recorded: !!reply.recorded };
+  }
+
+  /**
+   * Controller keys. Songs' and quick looks' keys are operator edits and Undo steps, like a rename. Every other key,
+   * a key that does another of those now, and Reset are the programmer's (Settings) and no Undo steps.
+   */
+  private async keyCommand(cmd: Extract<Command, { type: 'setKey' | 'clearKey' | 'resetKeys' }>, role: Role, tablet?: WebSocket): Promise<{ error: string | null; recorded: boolean }> {
+    const was = cmd.type === 'setKey' ? bindingOf(this.show, cmd.key) : null;
+    const operators = cmd.type !== 'resetKeys' && isOperatorKeyTarget(cmd.does) && (!was || isOperatorKeyTarget(was.does));
+    if (!operators && role !== 'programmer') {
+      // A song's key that is another job's key now: say which.
+      if (cmd.type === 'setKey' && was && isOperatorKeyTarget(cmd.does)) {
+        return { error: `That key is ${targetName(this.show, was.does)}. Only the programmer can give it another job: enter the PIN in Settings.`, recorded: false };
+      }
+      return { error: PROGRAMMER_KEYS, recorded: false };
+    }
+    if (operators) {
+      try {
+        await this.editShow(cmd, tablet ? this.blind.get(tablet) : undefined);
+      } catch (err) {
+        return { error: (err as Error).message, recorded: false };
+      }
+      return { error: null, recorded: true };
+    }
+    try {
+      const next = cmd.type === 'setKey' ? assignKey(this.show, cmd.key, cmd.does).show : cmd.type === 'clearKey' ? clearKey(this.show, cmd.does) : resetApcKeys(this.show);
+      await this.controllerSave(next);
+    } catch (err) {
+      return { error: (err as Error).message, recorded: false };
+    }
+    return { error: null, recorded: false };
+  }
+
+  /**
+   * A change to the controller settings that isn't an Undo step (Settings' keys and switches): saved like an operator
+   * edit, so the Undo list stays and only the first one after a programmer save keeps a backup.
+   */
+  private async controllerSave(show: Show): Promise<void> {
+    await this.putShow(show, !this.operatorBackedUp);
+    this.operatorBackedUp = true;
   }
 
   private remember(step: Show | 'stage'): void {
@@ -1392,12 +1446,13 @@ export class App {
           if (list.length) c.ignored = [...new Set(list as string[])];
           else delete c.ignored;
         }
-        await this.setShow(parseShow(show));
+        // Not an Undo step, and the show's Undo list stays.
+        await this.controllerSave(parseShow(show));
         json(res, 200, this.controllerView());
         return true;
       }
       case 'POST /api/keys/reset': {
-        const error = await this.command({ type: 'resetKeys' }, 'operator');
+        const error = await this.command({ type: 'resetKeys' }, 'programmer');
         if (error) throw new HttpError(400, error);
         json(res, 200, this.controllerView());
         return true;
@@ -1546,21 +1601,27 @@ export class App {
         const body = (await readJson(req)) as { does?: unknown };
         const does = KeyTarget.safeParse(body.does);
         if (!does.success) throw new HttpError(400, 'What should the key do?');
-        // A page that stops waiting (Cancel, or it went away) ends the learn at once.
-        const answer = await this.learnKey(does.data, (cancel) => res.on('close', () => {
-          if (!res.writableEnded) cancel();
-        }));
+        // A page that stops waiting (Cancel, or it went away) ends the learn at once; watched before the learn
+        // starts, so a page that went away in between is noticed too.
+        let gone = false;
+        let cancel: (() => void) | null = null;
+        res.on('close', () => {
+          if (res.writableEnded) return;
+          gone = true;
+          cancel?.();
+        });
+        const answer = await this.learnKey(does.data, this.isProgrammer(req) ? 'programmer' : 'operator', (stop) => {
+          if (gone) stop();
+          else cancel = stop;
+        });
         return json(res, 200, answer);
       }
-      case 'POST /keys/learn/cancel':
-        this.midi?.cancelLearn();
-        return json(res, 200, { ok: true });
       case 'POST /keys/clear': {
         const body = (await readJson(req)) as { does?: unknown };
         const does = KeyTarget.safeParse(body.does);
         if (!does.success) throw new HttpError(400, 'Which key?');
-        const error = await this.command({ type: 'clearKey', does: does.data }, 'operator');
-        if (error) throw new HttpError(400, error);
+        const error = await this.command({ type: 'clearKey', does: does.data }, this.isProgrammer(req) ? 'programmer' : 'operator');
+        if (error) throw new HttpError(error === PROGRAMMER_KEYS ? 401 : 400, error);
         return json(res, 200, { ok: true });
       }
       case 'POST /test/midi': {

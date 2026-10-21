@@ -45,3 +45,13 @@ export function keyPlace(key: ControlKey): string {
 export function keyLabel(key: ControlKey): string {
   return `${key.device} · ${keyPlace(key)}`;
 }
+
+/** A key's place in as few characters as a small chip needs: "1,3" for an APC mini pad, "side 1", "fader 9", "36" for button 36. */
+export function keyShort(key: ControlKey): string {
+  const place = keyPlace(key);
+  const pad = /^pad (\d,\d)$/.exec(place);
+  if (pad) return pad[1]!;
+  const button = /^(side|lower) button (\d)$/.exec(place);
+  if (button) return `${button[1]} ${button[2]}`;
+  return place.replace(/^(button|control) /, '').replace(/ \(channel (\d+)\)$/, '/$1');
+}

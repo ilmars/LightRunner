@@ -45,6 +45,32 @@ export function isLevelTarget(does: KeyTarget): boolean {
   return does.kind === 'master' || does.kind === 'groupLevel' || does.kind === 'fadeKnob';
 }
 
+/**
+ * Keys an operator may give or take (songs and quick looks, where they are edited on the operator page); every
+ * other key, and Reset, is the programmer's (Settings). These are Undo steps; the programmer's are not.
+ */
+export function isOperatorKeyTarget(does: KeyTarget): boolean {
+  return does.kind === 'song' || does.kind === 'quickLook';
+}
+
+/**
+ * The show an Undo goes back to, with the controller settings that aren't Undo steps as they are now: the
+ * programmer's keys and the switches. Its own song and quick-look keys stay, unless a key of the programmer's uses the same key.
+ */
+export function keepControllerKeys(restored: Show, current: Show): Show {
+  const cur = current.operator.controller;
+  const had = restored.operator.controller;
+  if (!cur && !had) return restored;
+  const fixed = (cur?.keys ?? []).filter((b) => !isOperatorKeyTarget(b.does));
+  const own = (had?.keys ?? []).filter((b) => isOperatorKeyTarget(b.does) && !fixed.some((f) => sameKey(f.key, b.key)));
+  const out = structuredClone(restored);
+  const controller: ControllerSettings = { keys: structuredClone([...fixed, ...own]) };
+  if (cur?.apcLayout !== undefined) controller.apcLayout = cur.apcLayout;
+  if (cur?.ignored) controller.ignored = [...cur.ignored];
+  out.operator.controller = controller;
+  return out;
+}
+
 /** The same key: device, note or control change, channel and number. */
 export function sameKey(a: ControlKey, b: ControlKey): boolean {
   return a.device === b.device && a.type === b.type && a.channel === b.channel && a.number === b.number;
