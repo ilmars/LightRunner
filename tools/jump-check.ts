@@ -147,7 +147,13 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
     if (rand() < 0.33) return { cmd: { ...cmd, fade: 0.2, continues: true }, fast: true };
     return { cmd, fast: false };
   }
-  if (r < 0.68) return { cmd: { type: 'manual', ...manualTargets(), colour: hex(), intensity: rand() }, fast: true };
+  if (r < 0.68) {
+    // As on the page: half the held colours carry white, amber or UV, and some sends are a level alone (Level on held lights).
+    if (rand() < 0.2) return { cmd: { type: 'manual', ...manualTargets(), intensity: rand() }, fast: true };
+    const extra = () => (rand() < 0.5 ? rand() : undefined);
+    const extras = rand() < 0.5 ? { white: extra(), amber: extra(), uv: extra() } : {};
+    return { cmd: { type: 'manual', ...manualTargets(), colour: hex(), ...extras, intensity: rand() }, fast: true };
+  }
   if (r < 0.76) return { cmd: { type: 'release', ...manualTargets() }, fast: false };
   if (r < 0.8) return { cmd: { type: 'releaseAll' }, fast: false };
   if (r < 0.85) return { cmd: { type: 'backToLook' }, fast: false };

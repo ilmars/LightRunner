@@ -310,6 +310,8 @@ export class Engine {
   private scratch: Light[] = [];
   private scratchWeights: number[] = [];
   private scratchLights: Light[] = [];
+  /** A hold's light as a fixture without UV shows it (see held()). */
+  private scratchHold: Light = dark();
   /** A fixture's owning groups this frame, where its segments start in each, and their weights. */
   private scratchOwners: GroupRun[] = [];
   private scratchStarts: number[] = [];
@@ -1146,7 +1148,7 @@ export class Engine {
           }
           mix(out, parts, weights);
         }
-        if (manual) mix2(out, out, manual.current, manual.weight.value(now));
+        if (manual) mix2(out, out, this.held(manual, noUv), manual.weight.value(now));
         out.i *= level;
       }
     }
@@ -1195,10 +1197,10 @@ export class Engine {
           for (let j = 0; j < from.length; j++) parts.push(from[j].out[starts[j] + slot]);
           mix(light, parts, ownerWeights);
         }
-        if (manual) mix2(light, light, manual.current, manualWeight);
+        if (manual) mix2(light, light, this.held(manual, !run.plan.hasUv), manualWeight);
         if (c === 0) copy(run.under, light);
         const held = this.liveManual(run.segmentHolds[c]!, now, dt);
-        if (held) mix2(light, light, held.current, held.weight.value(now));
+        if (held) mix2(light, light, this.held(held, !run.plan.hasUv), held.weight.value(now));
         if (!run.plan.hasUv) withoutUv(light);
         light.i *= master;
         if (flash) copy(light, FLASH_LIGHT);
@@ -1229,6 +1231,15 @@ export class Engine {
     if (buf) writeSmoke(buf, run.plan, level);
     const grey = Math.round(level * 140);
     this.visual.fill(grey, run.visualAt * 3, (run.visualAt + run.cells.length) * 3);
+  }
+
+  /**
+   * A hold's light to mix in. On a fixture without UV, the UV is taken out first (as for presets), so the mix
+   * scales by the light it can make: otherwise the UV it can't show sets the brightness, and it steps when another
+   * channel overtakes it.
+   */
+  private held(m: ManualRun, noUv: boolean): Light {
+    return noUv && m.current.u > 0 ? withoutUv(copy(this.scratchHold, m.current)) : m.current;
   }
 
   /** The holder's manual override if it still has weight; clears it once released. */

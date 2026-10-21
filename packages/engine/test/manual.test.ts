@@ -266,3 +266,24 @@ test('a level for a whole light that is not held keeps its colour: it starts fro
   }
   assert.deepEqual(e.liveState(3, 'ok').held.find((h) => h.segment === null), { fixture: 'bar1', segment: null, colour: '#ffffff', level: 0.5 });
 });
+
+test('a hold with UV on a light that has none takes and lets go smoothly: the UV it cannot make is left out of the mix', () => {
+  // The B8 side bar has no UV; the sermon look gives it blue.
+  const e = new Engine(stage(), 0);
+  e.apply({ type: 'look', id: 'sermon', fade: 0 }, 0);
+  for (let t = 0; t <= 1; t += 0.025) e.frame(t);
+  e.apply({ type: 'manual', targets: [{ group: 'b8-side-bar' }], colour: '#52532d', white: 0.8, uv: 0.96, intensity: 0.87 }, 1);
+  // A take follows the finger for its first 0.2 s (the jump check leaves those frames out too).
+  for (let t = 1; t < 1.25; t += 0.025) e.frame(t);
+  const take = beyondOwnMotion(e, 1.25, 3);
+  assert.ok(take.worst <= 0.05, `taking hold: largest step ${take.worst}`);
+  e.apply({ type: 'backToLook' }, 3);
+  const release = beyondOwnMotion(e, 3, 5);
+  assert.ok(release.worst <= 0.05, `letting go: largest step ${release.worst}`);
+  // The same for a light held on its own, and for one segment.
+  e.apply({ type: 'manual', targets: [{ fixture: 'b8' }, { fixture: 'b3', segment: 2 }], colour: '#202020', white: 0.3, uv: 1, intensity: 1 }, 5);
+  for (let t = 5; t < 5.25; t += 0.025) e.frame(t);
+  assert.ok(beyondOwnMotion(e, 5.25, 7).worst <= 0.05);
+  e.apply({ type: 'releaseAll' }, 7);
+  assert.ok(beyondOwnMotion(e, 7, 9).worst <= 0.05);
+});
