@@ -839,6 +839,9 @@ test('the live state says when light safety slows the effect a group runs', () =
   // A live effect (groupEffect) the same way.
   e.apply({ type: 'groupEffect', group: BG, effect: LiveEffectLayer.parse({ kind: 'effect', effect: 'sparkle', colours: [RED], speed: { beats: 1 } }), fade: 0 }, 5);
   assert.equal(slowed(5), true);
+  // … with the length of a round as it really runs: longer than the half second asked for, by halving.
+  const round = e.liveState(5, 'off').groups[BG]!.round!;
+  assert.ok(round > 0.5 && Number.isInteger(Math.log2(round / 0.5)), `round ${round}`);
   // A plain colour, or a group that runs nothing: false.
   assert.equal(e.liveState(5, 'off').groups['key-lights']!.slowed, false);
 });

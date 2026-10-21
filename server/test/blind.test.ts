@@ -383,6 +383,26 @@ test('a draft picks up the live stage clock, so an effect on stage looks the sam
   assert.ok(diff / live.length < 8, `mean difference ${diff / live.length}`);
 }));
 
+test("a draft's live state gives the round of the effect it runs, slowed by light safety as on stage", () => withApp(async (app) => {
+  const t = await onWorship(app);
+  assert.equal(await t.send({ type: 'blindStart' }), null);
+  await waitFor(() => t.draft(), 2000, 'the draft');
+  const effect = (kind: string, beats: number) => ({
+    kind: 'effect', effect: kind, colours: [{ hex: '#ff0000' }], speed: { beats }, direction: 'ltr', waves: 1, size: 0.5, edge: 'hard', intensity: 1,
+  });
+  // A wave of 16 beats runs as asked: 16 beats at the draft's tempo.
+  assert.equal(await t.send({ type: 'draft', cmd: { type: 'groupEffect', group: 'back-wall', effect: effect('wave', 16), fade: 0 } }), null);
+  await waitFor(() => t.draft()?.groups['back-wall'].round !== null, 2000, 'the draft to run the wave');
+  const tempo = t.draft().tempo;
+  assert.ok(Math.abs(t.draft().groups['back-wall'].round - (16 * 60) / tempo) < 1e-9);
+  assert.equal(t.draft().groups['back-wall'].slowed, false);
+  // A sparkle of 1 beat is slowed: longer than the beat asked for. The stage runs no effect at all.
+  assert.equal(await t.send({ type: 'draft', cmd: { type: 'groupEffect', group: 'back-wall', effect: effect('sparkle', 1), fade: 0 } }), null);
+  await waitFor(() => t.draft()?.groups['back-wall'].slowed === true, 2000, 'the draft to run the slowed sparkle');
+  assert.ok(t.draft().groups['back-wall'].round > 60 / tempo);
+  assert.equal(t.state().groups['back-wall'].round, null);
+}));
+
 test('Save in Blind works for a draft made during Blackout: lit groups keep their colours, the rest are Off', () => withApp(async (app, dir) => {
   const t = await tablet(app);
   await waitFor(t.layout);
