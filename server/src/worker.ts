@@ -4,7 +4,7 @@
 
 import { parentPort } from 'node:worker_threads';
 import { Engine } from '../../packages/engine/src/index.ts';
-import { planRoutes, type LiveState, type Show } from '../../packages/shared/src/index.ts';
+import { planRoutes, type LiveState, type PresetPin, type Show } from '../../packages/shared/src/index.ts';
 import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from './messages.ts';
 import { ArtNetOutput, ARTNET_PORT } from './output/artnet.ts';
 import { createOutput, OutputSet } from './output/index.ts';
@@ -41,10 +41,10 @@ function freshTiming(): TimingStats & { startedAt: number } {
   return { frames: 0, period, minInterval: Infinity, maxInterval: 0, late: 0, seconds: 0, startedAt: clock() };
 }
 
-function applyShow(next: Show): void {
+function applyShow(next: Show, keep?: { pins: PresetPin[] }): void {
   period = 1000 / next.settings.frameRate;
   if (!engine) engine = new Engine(next, clock() / 1000);
-  else engine.setShow(next, clock() / 1000);
+  else engine.setShow(next, clock() / 1000, keep);
   // One output per box; outputs whose box didn't change keep running untouched.
   outputs.update(planRoutes(next.settings, next.fixtures.map((f) => f.universe)).destinations);
 }
@@ -127,7 +127,7 @@ port.on('message', (msg: ToWorker) => {
       break;
     }
     case 'show':
-      applyShow(msg.show);
+      applyShow(msg.show, msg.keep);
       stateDue = true;
       break;
     case 'command': {

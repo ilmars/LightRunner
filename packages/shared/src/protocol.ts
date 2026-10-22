@@ -2,7 +2,7 @@
 // state every device receives back. The server is the single source of truth.
 
 import { z } from 'zod';
-import { EffectLayer, PaletteColour, QuickTab } from './schema.ts';
+import { ControlKey, EffectLayer, KeyTarget, PaletteColour, QuickTab } from './schema.ts';
 
 const id = z.string().min(1).max(64);
 /** A #rrggbb colour. */
@@ -38,11 +38,29 @@ export const StageState = z.object({
 });
 export type StageState = z.infer<typeof StageState>;
 
+/**
+ * What manual control holds: a group, a fixture, or one segment of a fixture (in its channel order, as the
+ * visualiser's frames have them; 0 is the first). Strict: a target with anything else in it (a segment that
+ * isn't a whole number from 0 to 511, a misspelt key) is refused, never taken for the whole fixture.
+ */
 export const ManualTarget = z.union([
-  z.object({ group: id }),
-  z.object({ fixture: id }),
+  z.strictObject({ group: id }),
+  z.strictObject({ fixture: id, segment: z.number().int().min(0).max(511) }),
+  z.strictObject({ fixture: id }),
 ]);
 export type ManualTarget = z.infer<typeof ManualTarget>;
+
+/** At most this many targets in one manual or release command (every segment of a large rig). */
+export const MANUAL_TARGETS_MAX = 512;
+const manualTargets = {
+  target: ManualTarget.optional(),
+  /** Several targets, changed together in one frame: the whole command is refused if any of them can't be. */
+  targets: z.array(ManualTarget).min(1).max(MANUAL_TARGETS_MAX).optional(),
+  /** For each whole-fixture target: also let go of the fixture's held segments, in the same change. */
+  releaseSegments: z.boolean().optional(),
+};
+const oneOrMany = (c: { target?: unknown; targets?: unknown }) => (c.target === undefined) !== (c.targets === undefined);
+const ONE_OR_MANY = { message: 'give a target or a list of targets', path: ['targets'] };
 
 /** Commands the engine runs (a Blind draft runs them too). */
 const STAGE_COMMANDS = [
@@ -66,8 +84,18 @@ const STAGE_COMMANDS = [
   z.object({ type: z.literal('groupEffect'), group: id, effect: LiveEffectLayer, fade, continues: z.boolean().optional() }),
   /** Hold the groups at full white while `on`; snaps, and is not saved or undone. */
   z.object({ type: z.literal('flash'), groups: z.array(id).max(64), on: z.boolean() }),
-  z.object({ type: z.literal('manual'), target: ManualTarget, colour: hex.optional(), intensity: unit.optional() }),
-  z.object({ type: z.literal('release'), target: ManualTarget }),
+  /**
+   * Hold groups, fixtures or segments at this colour (with White, Amber and UV, which only go with a colour)
+   * and/or intensity until released.
+   */
+  z.object({
+    type: z.literal('manual'), ...manualTargets, colour: hex.optional(), intensity: unit.optional(),
+    white: unit.optional(), amber: unit.optional(), uv: unit.optional(),
+  })
+    .refine(oneOrMany, ONE_OR_MANY)
+    .refine((c) => c.colour !== undefined || (c.white === undefined && c.amber === undefined && c.uv === undefined),
+      { message: 'White, Amber and UV go with a colour', path: ['colour'] }),
+  z.object({ type: z.literal('release'), ...manualTargets }).refine(oneOrMany, ONE_OR_MANY),
   z.object({ type: z.literal('releaseAll') }),
   z.object({ type: z.literal('backToLook') }),
   z.object({ type: z.literal('safe') }),
@@ -125,25 +153,32 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('itemTempo'), item: id, bpm }),
   /** Copy a quick look's groups into a running-order item without touching the stage. */
   z.object({ type: z.literal('itemQuickLook'), item: id, look: id }),
-  /** Keep an Any colour pick: add it to a group's colour list, or to every group of its kind. */
+  /** Keep an Any colour pick, or ＋ New colour: add it to a group's colour list, or to every group of its kind (`level` and `fade`: its brightness and fade, full and 3 s when left out). */
   z.object({
     type: z.literal('addColour'), group: id, colour: hex, name: z.string(), allGroups: z.boolean(),
-    white: unit.optional(), amber: unit.optional(), uv: unit.optional(),
+    white: unit.optional(), amber: unit.optional(), uv: unit.optional(), level: unit.min(0.05).optional(), fade,
   }),
   /**
-   * Change the name, colour, brightness (`level`) and/or fade of a colour in a group's list; `sameName` also changes the
+   * Change the name, colour, White, Amber and UV, brightness (`level`) and/or fade of a colour in a group's list; `sameName` also changes the
    * same-named ones of other groups. `shared`: a new colour changes the palette entry the colour points to, for every colour that uses it.
    */
   z.object({
     type: z.literal('editColour'), preset: id, name: z.string().optional(), colour: hex.optional(),
-    level: unit.min(0.05).optional(), fade, shared: z.boolean().optional(), sameName: z.boolean(),
+    level: unit.min(0.05).optional(), fade, white: unit.optional(), amber: unit.optional(), uv: unit.optional(),
+    shared: z.boolean().optional(), sameName: z.boolean(),
   }),
   /** Remove a colour (or an effect) from a group's list (refused while a look uses it). */
   z.object({ type: z.literal('deleteColour'), preset: id }),
   /** A new effect in a group's effects list; an empty name becomes "Effect N". */
   z.object({ type: z.literal('addEffect'), group: id, name: z.string(), effect: LiveEffectLayer }),
-  /** New settings for an effect in a group's list (its name is changed with editColour). */
-  z.object({ type: z.literal('editEffect'), preset: id, effect: LiveEffectLayer }),
+  /** New settings for an effect in a group's list, with a new name when given (one Undo step); a name alone can go with editColour. */
+  z.object({ type: z.literal('editEffect'), preset: id, effect: LiveEffectLayer, name: z.string().optional() }),
+  // Controller keys (the server's learn sends setKey once a key is pressed): one key, one job.
+  /** Give `does` this key; a key that did something else moves to it. */
+  z.object({ type: z.literal('setKey'), key: ControlKey, does: KeyTarget }),
+  z.object({ type: z.literal('clearKey'), does: KeyTarget }),
+  /** Every key on an APC mini goes and the standard APC mini layout is on again. */
+  z.object({ type: z.literal('resetKeys') }),
   // Blind, from a tablet's WebSocket only: the server keeps that tablet a draft copy of the stage.
   /** Make a fresh draft of the stage as it is now (again, if one is running). */
   z.object({ type: z.literal('blindStart') }),
@@ -158,7 +193,7 @@ export type Command = z.infer<typeof Command>;
 
 const SHOW_EDITS = [
   'saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemQuickLook',
-  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect',
+  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'setKey', 'clearKey', 'resetKeys',
 ] as const;
 /** Commands that change the show rather than the stage. */
 export type ShowEdit = Extract<Command, { type: (typeof SHOW_EDITS)[number] }>;
@@ -187,6 +222,8 @@ export interface GroupStatus {
   changed: boolean;
   /** Under manual control. */
   manual: boolean;
+  /** While under manual control: the colour it is held at (as HeldLight's) and its level 0..1; null otherwise. */
+  hold: { colour: string; level: number } | null;
   /** Fade progress 0..1, 1 when settled. */
   progress: number;
   level: number;
@@ -194,6 +231,21 @@ export interface GroupStatus {
   live: { colour: string; white: number; amber: number; uv: number; display: string } | null;
   /** When the group runs a live effect (groupEffect): the effect. */
   effect: EffectLayer | null;
+  /** The effect the group runs is slowed by light safety (it would flash too fast at the tempo and speed asked for). */
+  slowed: boolean;
+  /** How long one round of that effect really takes, in seconds (light safety's slowing included); null when the group runs no effect. */
+  round: number | null;
+}
+
+/** A fixture, or one segment of it, held by manual control. */
+export interface HeldLight {
+  fixture: string;
+  /** The segment (as in ManualTarget), or null for the whole fixture. */
+  segment: number | null;
+  /** The colour it is held at, White, Amber and UV mixed in as displayColour() does. */
+  colour: string;
+  /** Its intensity 0..1 (before Master). */
+  level: number;
 }
 
 export type OutputStatus = 'ok' | 'lost' | 'off';
@@ -214,7 +266,10 @@ export interface LiveState {
   /** Fade time chosen on the operator page, or null for each look's own fade. */
   fadeTime: number | null;
   groups: Record<string, GroupStatus>;
+  /** Fixtures held as a whole by manual control (not ones only some segments of which are held). */
   fixturesManual: string[];
+  /** Every fixture and segment held by manual control (not groups: see GroupStatus.manual), fixtures in show order. */
+  held: HeldLight[];
   /** Groups being flashed (full white) right now. */
   flashing: string[];
   master: number;

@@ -3,63 +3,78 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0F1625">
+  <meta name="theme-color" content="#090F1C">
   <title>Light Runner Patch</title>
+  <link rel="icon" href="/shared/icon-16.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/shared/icon-180.png">
   <link rel="stylesheet" href="/shared/theme.css">
-  <link rel="stylesheet" href="/settings/style.css">
+  <link rel="stylesheet" href="/shared/programmer.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="top">
-    <a class="back" href="/operator/">← Operator</a>
-    <h1>Patch</h1>
-    <nav class="nav"><a href="/patch/" aria-current="page">Patch</a><a href="/settings/">Settings</a></nav>
-  </header>
+  <div class="appbar-wrap">
+    <header class="appbar">
+      <h1 class="appbar-title"><img src="/shared/icon.svg" alt="" width="26" height="26"><span class="appbar-name"><span class="ds-caps">Light Runner</span><b>Patch</b></span></h1>
+      <span class="grow"></span>
+      <!-- Only while something is wrong with the lights. -->
+      <span id="status" class="ds-pill ds-pill--warn" role="status" hidden>● <span class="long"></span><span class="short"></span></span>
+      <!-- While the server doesn't answer: the page keeps trying by itself. -->
+      <span id="offline" class="ds-pill offline" role="status" title="Light Runner isn't answering. The page keeps trying and carries on by itself." hidden>● Not connected</span>
+      <nav class="applinks" aria-label="Pages"><a href="/operator/">Operator</a><a href="/patch/" aria-current="page">Patch</a><a href="/settings/">Settings</a></nav>
+      <span id="clock" class="clock"></span>
+    </header>
+  </div>
 
-  <section id="login" class="login" hidden>
-    <h2>Programmer PIN</h2>
-    <p class="hint">The patch changes how the whole rig works, so it is behind a PIN.</p>
+  <section id="login" class="login ds-panel" hidden>
+    <h2 class="ds-caps">Programmer PIN</h2>
+    <p class="card-desc">The patch changes how the whole rig works, so it is behind a PIN.</p>
     <form id="loginForm">
-      <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="6" placeholder="••••" required>
-      <button class="primary">Unlock</button>
+      <input id="pin" class="ds-field" type="password" inputmode="numeric" autocomplete="current-password" maxlength="6" placeholder="••••" required>
+      <button class="ds-btn ds-btn--primary">Unlock</button>
     </form>
     <p id="loginError" class="error"></p>
   </section>
 
-  <main id="main" class="wide" hidden>
-    <section class="card">
+  <main id="main" class="page patch-page" hidden>
+    <section class="card ds-panel">
       <div class="card-head">
-        <h2>DMX patch</h2>
-        <div id="universeTabs" class="utabs" role="tablist" aria-label="Universes"></div>
+        <div class="card-title">
+          <h2 class="ds-caps">DMX patch</h2>
+          <p class="card-desc">Where each fixture's channels are on a universe.</p>
+        </div>
+        <div id="universeTabs" class="ds-seg utabs" role="tablist" aria-label="Universes"></div>
       </div>
       <div class="patch-layout">
         <div class="map-wrap">
           <div id="dmxMap" class="dmx-map" aria-label="DMX channels"></div>
           <p class="hint" id="mapInfo"></p>
         </div>
-        <aside class="library" aria-label="Fixture library">
-          <h3>Fixture library</h3>
-          <input id="libSearch" type="text" placeholder="Search types">
+        <aside class="library sub" aria-label="Fixture library">
+          <h3 class="ds-caps">Fixture library</h3>
+          <input id="libSearch" class="ds-field" type="text" placeholder="Search types">
           <div id="libList" class="lib-list"></div>
           <p class="hint">Drag a type onto a free channel, or tap it to use it in "Add fixtures".</p>
           <div class="ofl">
-            <h3>Open Fixture Library</h3>
+            <h3 class="ds-caps">Open Fixture Library</h3>
             <p class="hint" id="oflSource"></p>
-            <select id="oflBrowse" aria-label="Browse by manufacturer"><option value="">Browse by manufacturer…</option></select>
+            <select id="oflBrowse" class="ds-field" aria-label="Browse by manufacturer"><option value="">Browse by manufacturer…</option></select>
             <form id="oflForm" class="row">
-              <input id="oflQuery" type="search" placeholder="SonicPulse, Elation…" aria-label="Search the Open Fixture Library">
-              <button class="ghost small">Search</button>
+              <input id="oflQuery" class="ds-field" type="search" placeholder="SonicPulse, Elation…" aria-label="Search the Open Fixture Library">
+              <button class="ds-btn">Search</button>
             </form>
             <div id="oflResults" class="ofl-results"></div>
-            <label class="ghost button small">Import fixture file…<input id="oflFile" type="file" accept=".json,application/json" hidden></label>
+            <label class="ds-btn ds-btn--quiet">Import fixture file…<input id="oflFile" type="file" accept=".json,application/json" hidden></label>
           </div>
         </aside>
       </div>
     </section>
 
-    <section class="card">
+    <section class="card ds-panel">
       <div class="card-head">
-        <h2>Fixtures <span id="fixtureCount" class="count"></span></h2>
+        <div class="card-title">
+          <h2 class="ds-caps">Fixtures <span id="fixtureCount" class="count"></span></h2>
+          <p class="card-desc">Every light: its name, type and DMX address.</p>
+        </div>
         <span id="overlapSummary" class="warn"></span>
       </div>
       <div class="table-wrap">
@@ -71,38 +86,45 @@
         </table>
       </div>
 
-      <form id="addForm" class="add">
-        <h3>Add fixtures</h3>
+      <form id="addForm" class="add sub">
+        <h3 class="ds-caps">Add fixtures</h3>
         <div class="add-grid">
-          <div class="field"><label for="addProfile">Type</label><select id="addProfile" required></select></div>
-          <div class="field"><label for="addName">Name</label><input id="addName" type="text" placeholder="Bar" required></div>
-          <div class="field"><label for="addCount">How many</label><input id="addCount" type="number" min="1" max="64" value="1" required></div>
-          <div class="field"><label for="addUniverse">Universe</label><input id="addUniverse" type="number" min="0" max="32767" required></div>
-          <div class="field"><label for="addAddress">Start address</label><input id="addAddress" type="number" min="1" max="512" required></div>
-          <button class="primary">Add</button>
+          <div class="field"><label for="addProfile">Type</label><select id="addProfile" class="ds-field" required></select></div>
+          <div class="field"><label for="addName">Name</label><input id="addName" class="ds-field" type="text" placeholder="Bar" required></div>
+          <div class="field"><label for="addCount">How many</label><input id="addCount" class="ds-field" type="number" min="1" max="64" value="1" required></div>
+          <div class="field"><label for="addUniverse">Universe</label><input id="addUniverse" class="ds-field" type="number" min="0" max="32767" required></div>
+          <div class="field"><label for="addAddress">Start address</label><input id="addAddress" class="ds-field" type="number" min="1" max="512" required></div>
+          <button class="ds-btn ds-btn--primary">Add</button>
         </div>
         <p class="hint" id="addHint"></p>
       </form>
     </section>
 
-    <section class="card">
+    <section class="card ds-panel">
       <div class="card-head">
-        <h2>Groups</h2>
-        <form id="newGroupForm" class="row">
-          <input id="newGroupName" type="text" placeholder="New group name" required>
-          <button class="ghost">Add group</button>
+        <div class="card-title">
+          <h2 class="ds-caps">Groups</h2>
+          <p class="card-desc">A fixture can be in several groups. Order matters: waves and chases run along it, left to right.</p>
+        </div>
+        <form id="newGroupForm" class="row new-group">
+          <input id="newGroupName" class="ds-field" type="text" placeholder="New group name" aria-label="New group name" required>
+          <button class="ds-add">＋ Add group</button>
         </form>
       </div>
-      <p class="hint">A fixture can be in several groups. Order matters: waves and chases run along it, left to right.</p>
       <div id="groupList" class="groups"></div>
     </section>
 
-    <section class="card">
+    <section class="card ds-panel">
       <div class="card-head">
-        <h2>Stage plan</h2>
-        <span class="hint">The back of the stage is at the top.</span>
+        <div class="card-title">
+          <h2 class="ds-caps">Stage plan</h2>
+          <p class="card-desc">Where each light hangs, as the operator page draws it. The back of the stage is at the top.</p>
+        </div>
       </div>
-      <div id="stage" class="stage-plan" aria-label="Stage plan"></div>
+      <div class="plan-frame">
+        <div id="stage" class="stage-plan" aria-label="Stage plan"></div>
+        <span class="plan-back ds-caps" aria-hidden="true">Back of stage</span>
+      </div>
       <p id="planHelp" class="hint plan-help">Drag fixtures to where they hang. Click one to change its shape, size or angle; Shift-click, or drag a box round several, to line them up; click an empty spot to add one.</p>
       <div id="planTools" class="plan-tools" hidden>
         <span id="planName" class="plan-name"></span>
@@ -115,13 +137,13 @@
         </div>
         <span id="planTurn" class="plan-turn" hidden>
           <span id="planAngle" class="plan-angle"></span>
-          <button type="button" class="ghost small" data-angle="0">Across</button>
-          <button type="button" class="ghost small" data-angle="90">Upright</button>
+          <button type="button" class="ds-btn ds-btn--quiet" data-angle="0">Across</button>
+          <button type="button" class="ds-btn ds-btn--quiet" data-angle="90">Upright</button>
         </span>
         <span id="planToolsHint" class="hint"></span>
       </div>
       <div id="planArrange" class="plan-tools" hidden>
-        <span class="plan-label">Align</span>
+        <span class="ds-caps plan-label">Align</span>
         <div id="planAlign" class="ds-seg" role="group" aria-label="Align">
           <button type="button" data-align="left">Left</button>
           <button type="button" data-align="centre">Centre</button>
@@ -130,37 +152,37 @@
           <button type="button" data-align="middle">Middle</button>
           <button type="button" data-align="bottom">Bottom</button>
         </div>
-        <span class="plan-label">Space evenly</span>
+        <span class="ds-caps plan-label">Space evenly</span>
         <div id="planSpace" class="ds-seg" role="group" aria-label="Space evenly">
           <button type="button" data-space="x">Across</button>
           <button type="button" data-space="y">Down</button>
         </div>
       </div>
-      <form id="planAdd" class="add plan-sheet" hidden>
-        <h3>Add fixtures here</h3>
+      <form id="planAdd" class="add sub plan-sheet" hidden>
+        <h3 class="ds-caps">Add fixtures here</h3>
         <div class="add-grid">
-          <div class="field"><label for="planAddProfile">Type</label><select id="planAddProfile" required></select></div>
-          <div class="field"><label for="planAddName">Name</label><input id="planAddName" type="text" placeholder="Bar" required></div>
-          <div class="field"><label for="planAddCount">How many</label><input id="planAddCount" type="number" min="1" max="64" value="1" required></div>
-          <div class="field"><label for="planAddUniverse">Universe</label><input id="planAddUniverse" type="number" min="0" max="32767" required></div>
-          <div class="field"><label for="planAddAddress">Start address</label><input id="planAddAddress" type="number" min="1" max="512" required></div>
+          <div class="field"><label for="planAddProfile">Type</label><select id="planAddProfile" class="ds-field" required></select></div>
+          <div class="field"><label for="planAddName">Name</label><input id="planAddName" class="ds-field" type="text" placeholder="Bar" required></div>
+          <div class="field"><label for="planAddCount">How many</label><input id="planAddCount" class="ds-field" type="number" min="1" max="64" value="1" required></div>
+          <div class="field"><label for="planAddUniverse">Universe</label><input id="planAddUniverse" class="ds-field" type="number" min="0" max="32767" required></div>
+          <div class="field"><label for="planAddAddress">Start address</label><input id="planAddAddress" class="ds-field" type="number" min="1" max="512" required></div>
         </div>
         <div class="row plan-sheet-foot">
           <p class="hint" id="planAddHint"></p>
-          <button type="button" id="planAddCancel" class="ghost">Cancel</button>
-          <button class="primary">Add</button>
+          <button type="button" id="planAddCancel" class="ds-btn ds-btn--quiet">Cancel</button>
+          <button class="ds-btn ds-btn--primary">Add</button>
         </div>
       </form>
     </section>
   </main>
 
-  <footer id="saveBar" class="save-bar" hidden>
-    <span id="saveText">Unsaved changes</span>
-    <button id="discard" class="ghost">Discard</button>
-    <button id="save" class="primary">Save patch</button>
+  <footer id="saveBar" class="savebar" hidden>
+    <span id="saveText" class="unsaved">Unsaved changes</span>
+    <button id="discard" class="ds-btn ds-btn--quiet" type="button">Discard</button>
+    <button id="save" class="ds-btn ds-btn--primary" type="button">Save patch</button>
   </footer>
 
-  <div id="toast" class="toast" hidden></div>
+  <div id="toast" class="ds-toast" role="status" hidden></div>
   <script type="module" src="patch.js"></script>
 </body>
 </html>

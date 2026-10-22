@@ -13,10 +13,11 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OscSettings, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
-  applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,
-  type OflFixture, type Pick, type Scope,
-  BLACKOUT, LiveEffectLayer, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type RuntimeState, type Show, type ShowEdit, type StageCommand,
+  BUILT_IN_PROFILES, Command, OscSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
+  applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,  type OflFixture, type Pick, type Scope,
+  BLACKOUT, LiveEffectLayer, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand,
+  FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
+  pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
 } from '../../packages/shared/src/index.ts';
 import { effectFrames, settledVisual, type StageClock } from '../../packages/engine/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
@@ -25,8 +26,9 @@ import { discoverArtNet } from './discovery.ts';
 import { NodeWatch } from './nodewatch.ts';
 import { OflClient } from './ofl.ts';
 import { listenOsc, type OscServer } from './osc.ts';
-import { ApcDriver, type ApcStatus } from './apcdriver.ts';
-import type { MidiPorts } from './midi.ts';
+import { MidiDriver, type ApcStatus } from './controllers.ts';
+import { keyLabel, keyPlace } from './keynames.ts';
+import type { FakeMidi, MidiPorts } from './midi.ts';
 import { operatorLayout, type OperatorLayout } from './layout.ts';
 import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from './messages.ts';
 import { isLocalAddress } from './net.ts';
@@ -59,6 +61,15 @@ export interface AppOptions {
   apcHoldMs?: number;
   /** Every this many polls the APC gets its whole LED set again (default 5). Tests set it very high or low. */
   apcResendPolls?: number;
+  /** How long a learn waits for a key (ms); 10 s. Tests make it short. */
+  learnMs?: number;
+  /** How long after a controller comes or goes the pages hear of it (ms); 1 s, so one that comes and goes at once (a flaky hub) is passed over. */
+  keysChangedMs?: number;
+  /**
+   * Test only (`LIGHT_RUNNER_FAKE_MIDI=1`, for checking the pages without a controller): the simulated ports `midi`
+   * gives, and `POST /api/test/midi` to press their keys. Never set otherwise.
+   */
+  fakeMidi?: FakeMidi;
 }
 
 export type Role = 'operator' | 'programmer';
@@ -71,6 +82,8 @@ const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
 };
 
@@ -83,6 +96,8 @@ const TEMPO_RUN_MS = 3000;
 
 /** A Master step this soon (ms) after another carries on from it instead of from the state. */
 const DEVICE_MASTER_MS = 300;
+/** What an operator is told for a key only the programmer may change (Settings, behind the PIN). */
+const PROGRAMMER_KEYS = 'Only the programmer can change that key. Enter the PIN in Settings.';
 /** The key of a device Flash's time limit. */
 const flashKey = (source: string, group: string) => JSON.stringify([source, group]);
 
@@ -126,22 +141,30 @@ export class App {
   /** The last itemTempo edit, so a run of them joins one Undo step: its song, when, and the Undo entry it made. */
   private tempoEdit: { item: string; at: number; step: Show | 'stage' } | null = null;
   /**
+   * For an Undo step of an edit made in Prepare: the pins that put the groups it moved onto copies of their colours
+   * (keepLitPresets) back on their own colours. Its Undo never moves the lights either.
+   */
+  private readonly undoKeep = new WeakMap<Show, PresetPin[]>();
+  /**
    * The first operator edit after start or after a programmer save keeps a
    * backup; the rest of a rehearsal's edits don't, so they can't push the
    * programmer's backups out.
    */
   private operatorBackedUp = false;
+  private keysTimer: NodeJS.Timeout | undefined;
   /** Groups each tablet is holding a Flash on, so they go out if it disconnects. */
   private readonly flashes = new Map<WebSocket, Set<string>>();
-  /** Groups each device source ('http', 'osc', 'apc') is holding a Flash on, so they go out when it goes away. */
+  /** Groups each device source ('http', 'osc', 'midi:<port>') is holding a Flash on, so they go out when it goes away. */
   private readonly deviceFlashes = new Map<string, Set<string>>();
   /** The OSC listener while it is switched on in Settings, and why it isn't listening when it should be. */
   private osc: OscServer | null = null;
   private oscProblem: string | null = null;
   /** Starts and stops of the OSC listener, one after another. */
   private oscBusy: Promise<void> = Promise.resolve();
-  /** Runs the APC mini; null when the MIDI add-on isn't installed. */
-  private apc: ApcDriver | null = null;
+  /** Runs the MIDI controllers (the APC mini and any other); null when the MIDI add-on isn't installed. */
+  private midi: MidiDriver | null = null;
+  /** Tap tempo of each device source. */
+  private readonly taps = new Map<string, TapTempo>();
   /** The last Master a device sent, for steps pressed faster than the state arrives. */
   private deviceMaster: { value: number; at: number } | null = null;
   /** The time limit on each device Flash, by source and group. */
@@ -230,14 +253,15 @@ export class App {
     await new Promise<void>((resolve) => this.server!.listen(this.opts.port, this.opts.host ?? '0.0.0.0', resolve));
     this.log(`Light Runner on http://localhost:${this.port}/`);
     await this.syncOsc();
-    await this.startApc();
+    await this.startMidi();
   }
 
   async stop(): Promise<void> {
     this.stopping = true;
-    // The APC mini's LEDs go out and its port closes.
-    this.apc?.stop();
-    this.apc = null;
+    // The APC mini's LEDs go out and every controller's port closes.
+    this.midi?.stop();
+    this.midi = null;
+    clearTimeout(this.keysTimer);
     this.nodeWatch.stop();
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.blind.clear();
@@ -282,7 +306,7 @@ export class App {
     const merged: LiveState = { ...state, canUndo, output, outputProblem: problem, outputProblemKind: kind };
     this.latestState = merged;
     this.broadcast(JSON.stringify({ type: 'state', state: merged }));
-    this.apc?.update(this.layout, merged);
+    this.midi?.update(this.layout, merged);
   }
 
   /** Watch every Art-Net node the show sends to (the default output's and each route's). */
@@ -323,24 +347,130 @@ export class App {
     }
   }
 
-  // ---- APC mini ----
+  // ---- MIDI controllers: the APC mini and any other ----
 
-  /** Start looking for an APC mini, when MIDI ports were given and are there (`loadMidi` logs one line when they aren't). */
-  private async startApc(): Promise<void> {
+  /** Start looking for controllers, when MIDI ports were given and are there (`loadMidi` logs one line when they aren't). */
+  private async startMidi(): Promise<void> {
     if (!this.opts.midi) return;
     const ports = await this.opts.midi(this.log);
     if (!ports || this.stopping) return;
-    this.apc = new ApcDriver(ports, {
-      device: (action) => this.device(action, 'apc'),
-      release: () => this.releaseDevice('apc'),
+    this.midi = new MidiDriver(ports, {
+      device: (action, source) => this.device(action, source),
+      release: (source) => this.releaseDevice(source),
+      // The pages show Key chips while a controller is listened to.
+      changed: () => this.controllersChanged(),
       log: this.log,
     }, { pollMs: this.opts.apcPollMs, holdMs: this.opts.apcHoldMs, resendPolls: this.opts.apcResendPolls });
-    this.apc.update(this.layout, this.latestState);
-    this.apc.start();
+    this.midi.configure(controllerOf(this.show));
+    // The pages learn that keys can be assigned.
+    if (this.layout) this.refreshLayout();
+    this.midi.update(this.layout, this.latestState);
+    this.midi.start();
+  }
+
+  /**
+   * A controller was opened or let go of: a moment later (so one that comes and goes at once is passed over), the
+   * layout counts the controllers again. The pages are sent it only when Key chips come or go (none listened to, or
+   * some); otherwise the count changes in place, for `GET /api/layout`.
+   */
+  private controllersChanged(): void {
+    clearTimeout(this.keysTimer);
+    this.keysTimer = setTimeout(() => {
+      if (!this.layout || this.stopping) return;
+      const listening = this.midi?.listening ?? 0;
+      const was = this.layout.keys.connected;
+      if (listening === was) return;
+      if ((listening > 0) === (was > 0)) this.layout.keys.connected = listening;
+      else this.refreshLayout();
+    }, this.opts.keysChangedMs ?? 1000);
+    this.keysTimer.unref();
   }
 
   private apcStatus(): ApcStatus {
-    return this.apc?.status ?? { midi: false, connected: false, model: null };
+    return this.midi?.status ?? { midi: false, connected: false, model: null };
+  }
+
+  /** A learn is waiting for a key. */
+  get learning(): boolean {
+    return this.midi?.isLearning ?? false;
+  }
+
+  /** The operator layout for the show as it is now, sent to every page. */
+  private refreshLayout(fixtures = this.show.fixtures.map((f) => f.id)): void {
+    this.layout = operatorLayout(this.show, fixtures, this.midi !== null, this.midi?.listening ?? 0);
+    this.broadcast(JSON.stringify({ type: 'layout', layout: this.layout }));
+  }
+
+  /**
+   * Wait for the next key pressed on a controller and give it to `does` (through the setKey command). Throws an
+   * HttpError in plain words when it can't start; `stop` is handed the way to stop waiting (the page went away).
+   */
+  private async learnKey(does: KeyTarget, role: Role, stop: (cancel: () => void) => void): Promise<{ ok: true; key: string; place: string; note: string | null } | { ok: false; message: string }> {
+    // Refused before any waiting: an operator gives keys to songs and quick looks only.
+    if (role !== 'programmer' && !isOperatorKeyTarget(does)) throw new HttpError(401, PROGRAMMER_KEYS);
+    const problem = keyTargetProblem(this.show, does);
+    if (problem) throw new HttpError(400, problem);
+    if (!this.midi) throw new HttpError(409, "MIDI support isn't installed on this computer, so controller keys can't be used.");
+    if (!this.midi.listening) {
+      throw new HttpError(409, this.midi.devices.length ? 'No controller is being listened to.' : 'No controller is connected. Plug one in, then try again.');
+    }
+    let learn: ReturnType<MidiDriver['learn']>;
+    try {
+      // Master, a group's level and the fade knob wait for a fader or a knob.
+      learn = this.midi.learn(this.opts.learnMs ?? 10000, { levels: isLevelTarget(does) });
+    } catch (err) {
+      throw new HttpError(409, (err as Error).message);
+    }
+    stop(learn.cancel);
+    const key = await learn.key;
+    if (!key) return { ok: false, message: 'No key was pressed. Try again.' };
+    const before = this.show;
+    const was = bindingOf(before, key);
+    const error = await this.command({ type: 'setKey', key, does }, role);
+    if (error) return { ok: false, message: error };
+    const place = keyPlace(key);
+    const note = was && !sameTarget(was.does, does)
+      ? `${place[0]!.toUpperCase()}${place.slice(1)} was ${targetName(before, was.does)}; it is now ${targetName(this.show, does)}.`
+      : null;
+    this.log(`Controller key: ${keyLabel(key)} is now ${targetName(this.show, does)}`);
+    return { ok: true, key: keyLabel(key), place, note };
+  }
+
+  /** Settings › Controller keys: the devices, the switches, and every fixed action with its key. */
+  private controllerView() {
+    const c = controllerOf(this.show);
+    const groups = this.layout ? lightGroups(this.layout) : [];
+    // A place on the APC mini that has a key of its own no longer does its standard job.
+    const taken = new Set(c.keys.filter((b) => isApcMini(b.key.device)).map((b) => keyPlace(b.key)));
+    const standard = (place: string | null) => (place && c.apcLayout && !taken.has(place) ? place : null);
+    const actions: { section: string; label: string; hold: string | null; does: KeyTarget; key: string | null; standard: string | null }[] = [];
+    const add = (section: string, does: KeyTarget, hold: string | null, place: string | null) => {
+      const key = keyOf(this.show, does);
+      actions.push({ section, label: targetName(this.show, does), hold, does, key: key ? keyLabel(key) : null, standard: standard(place) });
+    };
+    const run = 'Running the service';
+    add(run, { kind: 'next' }, null, 'side button 1');
+    add(run, { kind: 'backToLook' }, null, 'side button 2');
+    add(run, { kind: 'undo' }, null, 'side button 3');
+    add(run, { kind: 'basic' }, null, 'side button 4');
+    add(run, { kind: 'blackout' }, 'hold 1 s', 'side button 6');
+    add(run, { kind: 'flashAll' }, 'hold', 'side button 5');
+    groups.forEach((g, k) => add(run, { kind: 'flash', group: g.id }, 'hold', k < 8 ? `lower button ${k + 1}` : null));
+    add('Levels', { kind: 'master' }, null, 'fader 9');
+    groups.forEach((g, k) => add('Levels', { kind: 'groupLevel', group: g.id }, null, k < 8 ? `fader ${k + 1}` : null));
+    add('Levels', { kind: 'fadeKnob' }, null, null);
+    for (const value of [...FADE_STEPS.slice(1), null]) add('Levels', { kind: 'fadeTime', value }, null, null);
+    add('Tempo', { kind: 'tap' }, null, null);
+    add('Tempo', { kind: 'tempoStep', times: 2 }, null, null);
+    add('Tempo', { kind: 'tempoStep', times: 0.5 }, null, null);
+    return {
+      midi: this.midi !== null,
+      devices: this.midi?.devices ?? [],
+      apcLayout: c.apcLayout,
+      learning: this.learning,
+      keys: c.keys.map((b) => ({ does: b.does, label: targetName(this.show, b.does), key: keyLabel(b.key) })),
+      actions,
+    };
   }
 
   // ---- Engine worker ----
@@ -372,9 +502,8 @@ export class App {
   private onWorker(msg: FromWorker, markReady: () => void): void {
     switch (msg.type) {
       case 'ready':
-        this.layout = operatorLayout(this.show, msg.fixtures);
-        this.broadcast(JSON.stringify({ type: 'layout', layout: this.layout }));
-        this.apc?.update(this.layout, this.latestState);
+        this.refreshLayout(msg.fixtures);
+        this.midi?.update(this.layout, this.latestState);
         markReady();
         break;
       case 'result':
@@ -436,8 +565,9 @@ export class App {
       return { error: 'manual control is not enabled for operators', recorded: false };
     }
     if (isBlindCommand(cmd)) return this.blindCommand(cmd, tablet);
+    if (cmd.type === 'setKey' || cmd.type === 'clearKey' || cmd.type === 'resetKeys') return this.keyCommand(cmd, role, tablet);
     // Only Go sends a whole stage, from a tablet's draft.
-    if (cmd.type === 'applyStage') return { error: 'Use Blind and Go to send a whole stage.', recorded: false };
+    if (cmd.type === 'applyStage') return { error: 'Use Prepare and Go to send a whole stage.', recorded: false };
     if (isShowEdit(cmd)) {
       try {
         await this.editShow(cmd, tablet ? this.blind.get(tablet) : undefined);
@@ -459,7 +589,10 @@ export class App {
         try {
           // The stage may be running a hidden preset that Save made; keep it, or the
           // next Save or a restart would find it gone.
-          await this.operatorSave(keepCustomPresets(last, this.show));
+          // Groups an edit in Prepare moved onto copies go back onto their own colours, which look the same again.
+          const pins = this.undoKeep.get(last);
+          // The programmer's keys and the controller switches aren't Undo steps: they stay as they are.
+          await this.operatorSave(keepControllerKeys(keepCustomPresets(last, this.show), this.show), pins && { pins });
         } catch (err) {
           this.undoLog.push(last); // still there to try again
           return { error: (err as Error).message, recorded: false };
@@ -475,6 +608,77 @@ export class App {
     return { error: reply.error, recorded: !!reply.recorded };
   }
 
+  /**
+   * Controller keys. Songs' and quick looks' keys are operator edits and Undo steps, like a rename. Every other key,
+   * a key that does another of those now, and Reset are the programmer's (Settings) and no Undo steps.
+   */
+  private async keyCommand(cmd: Extract<Command, { type: 'setKey' | 'clearKey' | 'resetKeys' }>, role: Role, tablet?: WebSocket): Promise<{ error: string | null; recorded: boolean }> {
+    const was = cmd.type === 'setKey' ? bindingOf(this.show, cmd.key) : null;
+    const operators = cmd.type !== 'resetKeys' && isOperatorKeyTarget(cmd.does) && (!was || isOperatorKeyTarget(was.does));
+    // On the APC mini a fader or button the standard layout uses (Master, Next, a group's Flash) is a fixed job too.
+    const standard = operators && role !== 'programmer' && cmd.type === 'setKey' && !was ? this.standardJob(cmd.key) : null;
+    if (standard) {
+      return { error: `That ${standard.what} is ${standard.job} on the APC mini. Only the programmer can give it another job: enter the PIN in Settings.`, recorded: false };
+    }
+    if (!operators && role !== 'programmer') {
+      // A song's key that is another job's key now: say which.
+      if (cmd.type === 'setKey' && was && isOperatorKeyTarget(cmd.does)) {
+        return { error: `That key is ${targetName(this.show, was.does)}. Only the programmer can give it another job: enter the PIN in Settings.`, recorded: false };
+      }
+      return { error: PROGRAMMER_KEYS, recorded: false };
+    }
+    if (operators) {
+      try {
+        await this.editShow(cmd, tablet ? this.blind.get(tablet) : undefined);
+      } catch (err) {
+        return { error: (err as Error).message, recorded: false };
+      }
+      return { error: null, recorded: true };
+    }
+    try {
+      const next = cmd.type === 'setKey' ? assignKey(this.show, cmd.key, cmd.does).show : cmd.type === 'clearKey' ? clearKey(this.show, cmd.does) : resetApcKeys(this.show);
+      // Reset (it takes every key on the APC mini, songs' too) and Clear can't be undone: the show before them is kept
+      // as a backup (Settings › Backups) each time.
+      await this.controllerSave(next, cmd.type !== 'setKey');
+    } catch (err) {
+      return { error: (err as Error).message, recorded: false };
+    }
+    return { error: null, recorded: false };
+  }
+
+  /**
+   * What a key does in the APC mini's standard layout while it is on: a fader (a group's level, Master), a side button
+   * (Next, Back to saved, Undo, Basic lights, Flash all, Blackout) or a button under the pads (a group's Flash). Null
+   * for anything else: a pad (songs and colours, which operators may give to songs), another controller, layout off.
+   */
+  private standardJob(key: ControlKey): { what: 'fader' | 'button'; job: string } | null {
+    if (!controllerOf(this.show).apcLayout || !isApcMini(key.device) || key.channel !== 1) return null;
+    const groups = this.layout ? lightGroups(this.layout) : [];
+    const m = /^(fader|side button|lower button) (\d)$/.exec(keyPlace(key));
+    if (!m) return null;
+    const n = Number(m[2]);
+    const group = groups[n - 1];
+    if (m[1] === 'fader') {
+      const job = n === 9 ? 'Master' : group ? targetName(this.show, { kind: 'groupLevel', group: group.id }) : `the level of group ${n}`;
+      return { what: 'fader', job };
+    }
+    if (m[1] === 'lower button') {
+      return { what: 'button', job: group ? targetName(this.show, { kind: 'flash', group: group.id }) : `Flash for group ${n}` };
+    }
+    const side: KeyTarget[] = [{ kind: 'next' }, { kind: 'backToLook' }, { kind: 'undo' }, { kind: 'basic' }, { kind: 'flashAll' }, { kind: 'blackout' }];
+    const does = side[n - 1];
+    return does ? { what: 'button', job: targetName(this.show, does) } : null;
+  }
+
+  /**
+   * A change to the controller settings that isn't an Undo step (Settings' keys and switches): saved like an operator
+   * edit, so the Undo list stays and only the first one after a programmer save keeps a backup (or each, with `backup`).
+   */
+  private async controllerSave(show: Show, backup = false): Promise<void> {
+    await this.putShow(show, backup || !this.operatorBackedUp);
+    this.operatorBackedUp = true;
+  }
+
   private remember(step: Show | 'stage'): void {
     this.undoLog.push(step);
     if (this.undoLog.length > UNDO_KEPT) this.undoLog.shift();
@@ -484,7 +688,7 @@ export class App {
 
   private async blindCommand(cmd: BlindCommand, tablet: WebSocket | undefined): Promise<{ error: string | null; recorded: boolean }> {
     const done = (error: string | null, recorded = false) => ({ error, recorded });
-    if (!tablet) return done('Blind works on a tablet only.');
+    if (!tablet) return done('Prepare works on a tablet only.');
     const session = this.blind.get(tablet);
     switch (cmd.type) {
       case 'blindStart': {
@@ -622,6 +826,15 @@ export class App {
     const usesStage = cmd.type === 'saveItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook' || (cmd.type === 'editQuickLook' && !!cmd.fromStage);
     // Deleting a colour only looks at the stage to keep a lit colour; it is fine during Blackout.
     const stage = usesStage && draft ? draft.engine.runtime() : usesStage || cmd.type === 'deleteColour' ? await this.stage() : null;
+    // In Prepare an edit never changes the lights: what the stage shows now (each group, and Blackout's memory), taken
+    // with the show it runs. A snapshot taken while another edit was on its way to the engine is taken again; the
+    // engine also refuses a pin for a group that moved on meanwhile.
+    let live: RuntimeState | null = null;
+    for (let tries = 0; draft && tries < 3; tries++) {
+      const shown = this.show;
+      live = await this.stage();
+      if (this.show === shown) break;
+    }
     // A draft made during Blackout is still saved: the groups it lit keep their colours, the rest are stored as Off,
     // which is what its picture shows.
     if (usesStage && !draft && stage?.look === BLACKOUT) throw new Error('Blackout is on. Bring the lights back, then save.');
@@ -653,6 +866,10 @@ export class App {
       // Effects are edited like colours: never from the stage, fine during Blackout.
       case 'addEffect': next = addEffect(before, cmd).show; break;
       case 'editEffect': next = editEffect(before, cmd); break;
+      // Controller keys don't look at the stage either.
+      case 'setKey': next = assignKey(before, cmd.key, cmd.does).show; break;
+      case 'clearKey': next = clearKey(before, cmd.does); break;
+      case 'resetKeys': next = resetApcKeys(before); break;
       case 'deleteColour': {
         // A colour that is lit (or was, before Blackout) stays: the group would name a preset that is gone.
         next = deleteColour(before, cmd.preset); // refuses while a look uses it
@@ -667,12 +884,15 @@ export class App {
         break;
       }
     }
-    await this.operatorSave(next);
+    // Groups on stage showing a colour or effect the edit changes carry on as a hidden copy of it, with no fade.
+    const kept = live ? keepLitPresets(before, next, live) : null;
+    await this.operatorSave(kept?.show ?? next, kept ? { pins: kept.pins } : undefined);
     // Tempo edits of one song within 3 s of each other (tapping along, a held + or −) are one Undo step.
     const at = Date.now();
     const joins = cmd.type === 'itemTempo' && this.tempoEdit !== null && this.tempoEdit.item === cmd.item
       && at - this.tempoEdit.at <= TEMPO_RUN_MS && this.undoLog.at(-1) === this.tempoEdit.step;
     if (!joins) this.remember(before);
+    if (kept) this.undoKeep.set(before, kept.pins.map((p) => ({ group: p.group, from: p.to, to: p.from })));
     this.tempoEdit = cmd.type === 'itemTempo' ? { item: cmd.item, at, step: this.undoLog.at(-1)! } : null;
     // Undo lights up at once, without waiting for the engine's next state.
     this.publishState();
@@ -711,19 +931,20 @@ export class App {
   }
 
   /** An operator edit or its Undo: saved like any change, but only the first one keeps a backup. */
-  private async operatorSave(show: Show): Promise<void> {
-    await this.putShow(show, !this.operatorBackedUp);
+  private async operatorSave(show: Show, keep?: { pins: PresetPin[] }): Promise<void> {
+    await this.putShow(show, !this.operatorBackedUp, keep);
     this.operatorBackedUp = true;
   }
 
   /** Save the show, hand it to the engine and send every device the new layout. */
-  private async putShow(show: Show, backup = true): Promise<void> {
+  private async putShow(show: Show, backup = true, keep?: { pins: PresetPin[] }): Promise<void> {
     // A show that arrives without a running order (import, restore, merge) gets one, as at start,
     // and Basic lights always exists and comes first, whatever Compare with a file took away.
     show = ensureShow(show);
     this.store.saveShow(show, { backup });
     this.show = show;
-    this.post({ type: 'show', show: this.engineShow() });
+    // Only the live engine takes the pins: the drafts show the edit.
+    this.post({ type: 'show', show: this.engineShow(), keep });
     // Drafts run the edited show too, so a colour added in Blind can be used there.
     const now = performance.now() / 1000;
     for (const [tablet, session] of this.blind) {
@@ -738,9 +959,10 @@ export class App {
     await this.syncOsc();
     // The fixtures come from the new show, in its order (as the engine takes them): a show with other
     // fixtures (an import) must not be drawn from the old ones, which would leave the stage view empty.
-    this.layout = this.layout ? operatorLayout(this.show, this.show.fixtures.map((f) => f.id)) : null;
-    this.broadcast(JSON.stringify({ type: 'layout', layout: this.layout }));
-    this.apc?.update(this.layout, this.latestState);
+    if (this.layout) this.refreshLayout();
+    else this.broadcast(JSON.stringify({ type: 'layout', layout: null }));
+    this.midi?.configure(controllerOf(this.show));
+    this.midi?.update(this.layout, this.latestState);
   }
 
   // ---- WebSocket ----
@@ -821,11 +1043,19 @@ export class App {
 
   /**
    * Run what a device asked for as the operator would, against the live stage. `source` names the device
-   * ('http', 'osc', 'apc'): a Flash it holds is put out when `releaseDevice(source)` is called, and after 15 s.
+   * ('http', 'osc', 'midi:<port>'): a Flash it holds is put out when `releaseDevice(source)` is called, and after 15 s.
    * Returns a plain-words reason when it can't be done, else null.
    */
   async device(action: DeviceAction, source: string): Promise<string | null> {
     if (!this.layout || !this.latestState) return 'Light Runner is still starting.';
+    // Tap tempo: each device counts its own taps; the second tap on sets the tempo.
+    if (action.kind === 'tap') {
+      let taps = this.taps.get(source);
+      if (!taps) this.taps.set(source, (taps = new TapTempo()));
+      const bpm = taps.tap(Date.now());
+      if (bpm === null) return null;
+      action = { kind: 'tempo', bpm };
+    }
     // Master up and down pressed faster than the state arrives step from the last Master a device sent.
     const now = Date.now();
     const recent = this.deviceMaster && now - this.deviceMaster.at < DEVICE_MASTER_MS ? this.deviceMaster.value : null;
@@ -1018,6 +1248,8 @@ export class App {
       frameRate: s.frameRate,
       gamma: s.gamma,
       manualForOperators: this.show.operator.manualForOperators,
+      /** Who to call: the Settings page edits two plain fields, so an absent one is empty here. */
+      contact: { name: s.contact?.name ?? '', phone: s.contact?.phone ?? '' },
       looks: this.show.looks.map((l) => ({ id: l.id, name: l.name })),
       universes: [...new Set(this.show.fixtures.map((f) => f.universe))].sort((a, b) => a - b),
       fixtures: this.show.fixtures.length,
@@ -1040,6 +1272,7 @@ export class App {
       'POST /api/import/preview', 'POST /api/import/apply',
       'GET /api/ofl/db', 'POST /api/ofl/db/download', 'POST /api/ofl/db/install', 'POST /api/ofl/db/discard',
       'GET /api/ofl/manufacturers', 'GET /api/ofl/manufacturer',
+      'PUT /api/controller', 'POST /api/keys/reset',
     ];
     if (!routes.includes(route)) return false;
     if (!open && !this.isProgrammer(req)) throw new HttpError(401, 'enter the programmer PIN');
@@ -1135,10 +1368,12 @@ export class App {
         const fromPatch = url.searchParams.get('source') === 'patch';
         // Patch never edits settings, and a Patch page left open holds an old copy of them: keep the live ones
         // (Send DMX, output, routes), or saving the patch could start sending DMX again.
-        // An imported file keeps this installation's PIN: it must not change who can log in.
+        // An imported file keeps this installation's PIN: it must not change who can log in. It keeps this computer's
+        // Listen switches too (they name the controllers plugged in here); its keys and APC mini layout switch are taken.
+        // Controller keys are assigned while Patch may be open, so its copy keeps the live ones too.
         show = fromPatch
-          ? { ...show, settings: this.show.settings }
-          : { ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash } };
+          ? { ...show, operator: { ...show.operator, controller: this.show.operator.controller }, settings: this.show.settings }
+          : withIgnored({ ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash } }, this.show.operator.controller?.ignored);
         await this.setShow(show);
         this.log(fromPatch ? 'Patch saved' : `Imported show "${show.name}"`);
         json(res, 200, this.settingsView());
@@ -1246,6 +1481,34 @@ export class App {
         }
         return true;
       }
+      case 'PUT /api/controller': {
+        // Settings › Controller keys: the standard APC mini layout, and which devices are listened to. At once, like Send DMX.
+        const body = (await readJson(req)) as { apcLayout?: unknown; ignored?: unknown };
+        const show: Show = structuredClone(this.show);
+        const c = (show.operator.controller ??= { keys: [] });
+        if (typeof body.apcLayout === 'boolean') {
+          if (body.apcLayout) delete c.apcLayout;
+          else c.apcLayout = false;
+        }
+        if (body.ignored !== undefined) {
+          const list = body.ignored;
+          if (!Array.isArray(list) || list.length > 64 || list.some((d) => typeof d !== 'string' || !d || d.length > 120)) {
+            throw new HttpError(400, 'which devices?');
+          }
+          if (list.length) c.ignored = [...new Set(list as string[])];
+          else delete c.ignored;
+        }
+        // Not an Undo step, and the show's Undo list stays.
+        await this.controllerSave(parseShow(show));
+        json(res, 200, this.controllerView());
+        return true;
+      }
+      case 'POST /api/keys/reset': {
+        const error = await this.command({ type: 'resetKeys' }, 'programmer');
+        if (error) throw new HttpError(400, error);
+        json(res, 200, this.controllerView());
+        return true;
+      }
       case 'POST /api/identify': {
         // Flash one fixture full white for 3 s so it can be found in the room.
         const { fixture } = (await readJson(req)) as { fixture?: unknown };
@@ -1328,6 +1591,7 @@ export class App {
       if (body.frameRate !== undefined) show.settings.frameRate = Number(body.frameRate);
       if (body.gamma !== undefined) show.settings.gamma = Number(body.gamma);
       if (body.osc !== undefined) show.settings.osc = OscSettings.parse(body.osc);
+      if (body.contact !== undefined) show.settings.contact = contactOf(body.contact);
       if (typeof body.manualForOperators === 'boolean') show.operator.manualForOperators = body.manualForOperators;
       if (body.universe !== undefined) {
         // Move the whole rig to one universe (only for single-universe shows).
@@ -1383,6 +1647,49 @@ export class App {
 
     let cmd: unknown;
     switch (route) {
+      case 'GET /controller':
+        return json(res, 200, this.controllerView());
+      case 'POST /keys/learn': {
+        const body = (await readJson(req)) as { does?: unknown };
+        const does = KeyTarget.safeParse(body.does);
+        if (!does.success) throw new HttpError(400, 'What should the key do?');
+        // A page that stops waiting (Cancel, or it went away) ends the learn at once; watched before the learn
+        // starts, so a page that went away in between is noticed too.
+        let gone = false;
+        let cancel: (() => void) | null = null;
+        res.on('close', () => {
+          if (res.writableEnded) return;
+          gone = true;
+          cancel?.();
+        });
+        const answer = await this.learnKey(does.data, this.isProgrammer(req) ? 'programmer' : 'operator', (stop) => {
+          if (gone) stop();
+          else cancel = stop;
+        });
+        return json(res, 200, answer);
+      }
+      case 'POST /keys/clear': {
+        const body = (await readJson(req)) as { does?: unknown };
+        const does = KeyTarget.safeParse(body.does);
+        if (!does.success) throw new HttpError(400, 'Which key?');
+        const error = await this.command({ type: 'clearKey', does: does.data }, this.isProgrammer(req) ? 'programmer' : 'operator');
+        if (error) throw new HttpError(error === PROGRAMMER_KEYS ? 401 : 400, error);
+        return json(res, 200, { ok: true });
+      }
+      case 'POST /test/midi': {
+        // Test only: press keys on the simulated controllers (LIGHT_RUNNER_FAKE_MIDI=1). Never there otherwise.
+        const fake = this.opts.fakeMidi;
+        if (!fake) throw new HttpError(404, `no such endpoint: ${req.method} ${url.pathname}`);
+        const body = (await readJson(req)) as { port?: unknown; bytes?: unknown; plug?: unknown; unplug?: unknown };
+        if (typeof body.plug === 'string') fake.plug(body.plug);
+        if (typeof body.unplug === 'string') fake.unplug(body.unplug);
+        if (typeof body.port === 'string' && Array.isArray(body.bytes)) {
+          const port = fake.opened.find((p) => p.name === body.port && !p.closed);
+          if (!port) throw new HttpError(404, `${body.port} isn't open`);
+          port.receive(body.bytes.map(Number));
+        }
+        return json(res, 200, { ok: true, ports: fake.list(), open: fake.opened.filter((p) => !p.closed).map((p) => p.name) });
+      }
       case 'GET /companion':
         return json(res, 200, this.companion());
       case 'GET /state':
@@ -1458,12 +1765,23 @@ export class App {
   }
 }
 
+/** The show with these controllers not listened to (Settings › Controller keys › Devices), and only these. */
+function withIgnored(show: Show, ignored: string[] | undefined): Show {
+  const c = show.operator.controller;
+  if (!c && !ignored?.length) return show;
+  const controller = { ...c, keys: c?.keys ?? [] };
+  if (ignored?.length) controller.ignored = [...ignored];
+  else delete controller.ignored;
+  return { ...show, operator: { ...show.operator, controller } };
+}
+
 /**
  * What every show gets on its way in (at start, import, restore, merge): a running order with
  * Basic lights first, and the ready-made effects the first time.
  */
 function ensureShow(show: Show): Show {
-  return ensureEffects(ensureBasicLights(ensureRunningOrder(show)));
+  // A key for a song, quick look or group that is gone is freed.
+  return pruneKeys(ensureEffects(ensureBasicLights(ensureRunningOrder(show))));
 }
 
 /**

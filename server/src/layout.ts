@@ -3,6 +3,7 @@
 import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupSegments, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect } from '../../packages/shared/src/index.ts';
 import type { ChannelRole, FixtureShape, GroupKind, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
+import { keyLabel, keyPlace, keyShort } from './keynames.ts';
 
 export interface OperatorLook {
   id: string;
@@ -43,6 +44,19 @@ export interface OperatorGroup {
   /** The length of the group's line: the segments of all its fixtures. */
   segments: number;
   presets: OperatorPreset[];
+  /**
+   * The group's hidden presets (an Any colour Save kept, a copy an edit in Prepare left on stage), never listed as colours:
+   * only so the page can show one the stage runs by its name and colour.
+   */
+  hidden: OperatorHidden[];
+}
+
+export interface OperatorHidden {
+  id: string;
+  name: string;
+  swatch: string | null;
+  light: LiveLight | null;
+  effect: LiveEffectLayer | null;
 }
 
 export interface OperatorPreset {
@@ -67,6 +81,11 @@ export interface OperatorPreset {
    * white, amber and UV, scaled by the layer's intensity (null if it has no layers, or is an effect).
    */
   light: LiveLight | null;
+  /**
+   * A plain colour's own #rrggbb, before its brightness (`light` has it scaled), so the colour editor shows exactly
+   * the colour that was typed or picked; null for an effect.
+   */
+  colour: string | null;
   /** When the preset is an effect: its settings, colours as plain colours (as groupEffect takes them). */
   effect: LiveEffectLayer | null;
 }
@@ -105,9 +124,24 @@ export interface OperatorLayout {
   /** Fixture ids of each group, for tapping a group on the mini visualiser. */
   members: Record<string, string[]>;
   manualForOperators: boolean;
+  /** Who to call when the lights have a problem (Settings), or null when nobody is set. */
+  contact: { name?: string; phone?: string } | null;
+  /**
+   * Controller keys: whether the server can use MIDI controllers at all, and the key of each song and quick
+   * look (by look id): its place on the controller ("pad 1,3") and its whole name ("APC mini mk2 · pad 1,3").
+   */
+  keys: { midi: boolean; connected: number; songs: Record<string, KeyName>; quickLooks: Record<string, KeyName> };
 }
 
-export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayout {
+export interface KeyName {
+  place: string;
+  /** The place shortened for a small chip ("1,3"). */
+  short: string;
+  name: string;
+}
+
+/** `midi`: the server has MIDI support (the add-on loaded), so keys can be assigned; `connected`: controllers listened to now. */
+export function operatorLayout(show: Show, fixtureOrder: string[], midi = false, connected = 0): OperatorLayout {
   const lookIds = show.operator.looks.length ? show.operator.looks : show.looks.map((l) => l.id);
   const groupIds = show.operator.groups.length ? show.operator.groups : show.groups.map((g) => g.id);
   const byId = new Map(show.fixtures.map((f) => [f.id, f]));
@@ -160,7 +194,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
         .map((p) => ({
           id: p.id, name: p.name, swatch: p.swatch ?? null,
           usedBy: presetUsers(show, p.id), canRecolour: canRecolour(p), light: presetLight(p, palettes),
-          level: presetLevel(p), fade: p.fade, shared: sharedReach(show, p),
+          colour: presetColour(p, palettes), level: presetLevel(p), fade: p.fade, shared: sharedReach(show, p),
           effect: presetEffect(p, palettes),
         }));
       const any = (roles: ChannelRole[]) => g.fixtures.some((f) => hasRole(f, roles));
@@ -169,6 +203,9 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
         extras: { white: any(['white']), amber: any(['amber']), uv: any(['uv']) },
         segments: groupSegments(show, g.id),
         presets,
+        hidden: show.presets
+          .filter((p) => p.group === id && p.custom)
+          .map((p) => ({ id: p.id, name: p.name, swatch: p.swatch ?? null, light: presetLight(p, palettes), effect: presetEffect(p, palettes) })),
       }];
     }),
     fixtures: fixtureOrder.flatMap((id) => {
@@ -183,7 +220,20 @@ export function operatorLayout(show: Show, fixtureOrder: string[]): OperatorLayo
     }),
     members: Object.fromEntries(show.groups.map((g) => [g.id, g.fixtures])),
     manualForOperators: show.operator.manualForOperators,
+    contact: show.settings.contact ?? null,
+    keys: layoutKeys(show, midi, connected),
   };
+}
+
+function layoutKeys(show: Show, midi: boolean, connected: number): OperatorLayout['keys'] {
+  const songs: Record<string, KeyName> = {};
+  const quickLooks: Record<string, KeyName> = {};
+  for (const { key, does } of show.operator.controller?.keys ?? []) {
+    const name = { place: keyPlace(key), short: keyShort(key), name: keyLabel(key) };
+    if (does.kind === 'song') songs[does.id] = name;
+    else if (does.kind === 'quickLook') quickLooks[does.id] = name;
+  }
+  return { midi, connected, songs, quickLooks };
 }
 
 /** The plain light a preset shows; null for an effect (it moves, so it has no one light). */
@@ -191,6 +241,12 @@ function presetLight(preset: Preset, palettes: ReadonlyMap<string, Palette>): Op
   const top = preset.layers[preset.layers.length - 1];
   if (!top || top.kind !== 'static') return null;
   return liveLight(resolveColour(top.colour, palettes), top.intensity);
+}
+
+/** A preset's top layer's own colour (#rrggbb, before its intensity) when it is a plain colour; null otherwise. */
+function presetColour(preset: Preset, palettes: ReadonlyMap<string, Palette>): string | null {
+  const top = preset.layers[preset.layers.length - 1];
+  return top?.kind === 'static' ? resolveColour(top.colour, palettes).hex.toLowerCase() : null;
 }
 
 /** The brightness of a preset's only layer when it is a plain colour; null otherwise. */

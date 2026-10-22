@@ -4,14 +4,14 @@
 
 import {
   BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, LiveEffectLayer, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, displayColour, effectKey, findProfile,
-  liveEffectId, livePresetId, parseLiveEffect, parseLivePreset, resolveColour, resolveEffect,
-  type StageCommand, type EffectLayer, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
-  type GroupStatus, type Layer, type Palette, type Preset, type RuntimeState, type Show, type StageState,
+  liveEffectId, livePresetId, parseLiveEffect, parseLivePreset, resolvedLayers,
+  type PresetPin, type StageCommand, type EffectLayer, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
+  type GroupStatus, type HeldLight, type Palette, type Preset, type RuntimeState, type Show, type StageState,
 } from '../../shared/src/index.ts';
-import { SafeRates } from './effects.ts';
+import { SafeRates, cyclesPerSecond, safeRate } from './effects.ts';
 import { Crossfade, Ramp } from './fade.ts';
 import { advancePhases, compilePreset, fixedPreset, moves, renderPreset, type CompiledPreset, type LayerContext } from './layers.ts';
-import { copy, dark, fromHex, mix, mix2, withoutUv, type Light } from './light.ts';
+import { copy, dark, fromHex, mix, mix2, toHex, withoutUv, type Light } from './light.ts';
 import { hasWideColour, planChannels, visibleCells, visibleLevel, visualOf, writeCells, writeSmoke, type ChannelPlan } from './output.ts';
 
 /** Safe's fixed warm white stage wash. */
@@ -111,6 +111,19 @@ class ManualRun {
   }
 }
 
+/** Something manual control can hold: a group, a fixture, or one segment of a fixture. */
+interface ManualHolder {
+  manual: ManualRun | null;
+}
+
+/** One target of a manual command, found: what holds it, what it shows now, and its group or whole fixture. */
+interface ManualTake {
+  holder: ManualHolder;
+  showing: Light;
+  group?: GroupRun;
+  whole?: FixtureRun;
+}
+
 class GroupRun {
   readonly id: string;
   /** Fixture indices, in group order. */
@@ -162,6 +175,8 @@ class FixtureRun {
   /** Which group drives this fixture. The most recent change wins, and the handover fades. */
   owners = new Crossfade<string>();
   manual: ManualRun | null = null;
+  /** Manual control of each segment on its own, on top of the fixture's (one per segment). */
+  segmentHolds: ManualHolder[] = [];
   /** Smoke groups this fixture is in. When there are any, only they drive it. */
   smokeGroups: GroupRun[] = [];
   /** Hung the other way round: its segments run backwards along a group's line. */
@@ -170,6 +185,8 @@ class FixtureRun {
   visualAt = 0;
   /** Final light of each segment after manual and master, before gamma. */
   cells: Light[] = [];
+  /** The first segment's light under its own hold (its groups and the fixture's hold), where a take of the whole fixture starts. */
+  under: Light = dark();
   /** Each segment's own motion this frame: the most a preset running there changed it by itself. */
   motion: number[] = [];
   /** It has a colour channel shared by all its segments, so one segment's motion shows on all of them. */
@@ -190,6 +207,8 @@ class FixtureRun {
     this.plan = plan;
     while (this.cells.length < plan.cells) this.cells.push(dark());
     this.cells.length = plan.cells;
+    while (this.segmentHolds.length < plan.cells) this.segmentHolds.push({ manual: null });
+    this.segmentHolds.length = plan.cells;
     this.motion = new Array<number>(plan.cells).fill(0);
     this.wide = hasWideColour(plan);
   }
@@ -215,14 +234,6 @@ function sameLight(a: CompiledPreset, b: CompiledPreset): boolean {
   const x = p.light, y = q.light;
   const near = (p: number, q: number) => Math.abs(p - q) < 1e-9;
   return near(x.r, y.r) && near(x.g, y.g) && near(x.b, y.b) && near(x.w, y.w) && near(x.a, y.a) && near(x.u, y.u) && near(x.i, y.i);
-}
-
-/** A preset's layers with palette colours looked up, so two layers compare by the light they make. */
-function resolvedLayers(layers: Layer[], palettes: Palette[]): Layer[] {
-  const byId = new Map(palettes.map((p) => [p.id, p]));
-  return layers.map((l) => (l.kind === 'static'
-    ? { ...l, colour: resolveColour(l.colour, byId) }
-    : resolveEffect(l, byId)));
 }
 
 /** True when the group runs (or is fading into) a preset with an effect in it, as Save sees it (isEffectPreset). */
@@ -299,6 +310,8 @@ export class Engine {
   private scratch: Light[] = [];
   private scratchWeights: number[] = [];
   private scratchLights: Light[] = [];
+  /** A hold's light as a fixture without UV shows it (see held()). */
+  private scratchHold: Light = dark();
   /** A fixture's owning groups this frame, where its segments start in each, and their weights. */
   private scratchOwners: GroupRun[] = [];
   private scratchStarts: number[] = [];
@@ -308,14 +321,20 @@ export class Engine {
     this.setShow(show, now);
   }
 
-  /** Load a new or edited show without disturbing what is on stage. */
-  setShow(show: Show, now: number): void {
+  /**
+   * Load a new or edited show without disturbing what is on stage. `keep` (an edit made in Prepare, and its Undo): the
+   * edit never changes the lights. Each pin whose `to` makes the light its `from` made moves the group running `from`
+   * onto `to` (no fade, an effect keeps its place), and Blackout's memory and the Undo steps with it; a run fading out
+   * whose colour the edit changes keeps the light it had, set aside so the stage takes the edited one when it next uses it.
+   */
+  setShow(show: Show, now: number, keep?: { pins: readonly PresetPin[] }): void {
     const before = this.show as Show | undefined;
     this.show = show;
     const palettes = new Map<string, Palette>(show.palettes.map((p) => [p.id, p]));
     this.presets = new Map(show.presets.map((p) => [p.id, compilePreset(p, palettes, this.rates)]));
     this.rates.prune();
     this.looks = new Map(show.looks.map((l) => [l.id, l]));
+    const pins = keep && before ? this.validPins(keep.pins, before) : [];
 
     const oldFixtures = new Map(this.fixtures.map((f) => [f.id, f]));
     this.fixtures = [];
@@ -350,8 +369,11 @@ export class Engine {
       }
       run.smoke = smoke;
       run.setFixtures(g.fixtures.map((id) => this.fixtureIndex.get(id)).filter((i): i is number => i !== undefined), this.fixtures);
-      // A colour (or effect) edited while it is lit fades to the new one instead of snapping.
-      const lit = this.editedColour(run, before, now);
+      // Kept (Prepare): the group carries on as its pin's copy, and runs fading out keep the light they have.
+      const pinned = pins.some((p) => p.pin.group === g.id && this.pinRun(run, p.pin, p.fresh));
+      if (keep && before) this.keepFading(run, before, now);
+      // A colour (or effect) edited while it is lit fades to the new one instead of snapping, unless it is pinned.
+      const lit = pinned ? null : this.editedColour(run, before, now);
       // Running presets pick up edits; deleted ones keep running until they fade out.
       run.presets.update((key, item) => {
         const fresh = this.presets.get(key);
@@ -378,6 +400,7 @@ export class Engine {
         if (g.smoke) {
           run.smokeGroups.push(g);
           run.manual = null;
+          for (const h of run.segmentHolds) h.manual = null;
         }
       }
     }
@@ -392,6 +415,16 @@ export class Engine {
       segments += f.cells.length;
     }
     this.visual = new Uint8Array(segments * 3);
+
+    // What Blackout brings back, and what Undo goes back to, keep the light too.
+    for (const { pin } of pins) {
+      const { group, from, to } = pin;
+      if (this.beforeBlackout?.[group] === from) this.beforeBlackout[group] = to;
+      for (const step of this.history) {
+        if (step.groups[group] === from) step.groups[group] = to;
+        if (step.beforeBlackout?.[group] === from) step.beforeBlackout[group] = to;
+      }
+    }
 
     for (const id of this.flash) if (!this.groups.has(id)) this.flash.delete(id);
     for (const id of this.puffStart.keys()) if (!this.flash.has(id)) this.puffStart.delete(id);
@@ -435,6 +468,44 @@ export class Engine {
         : sameLight(target, running);
       if (!same) continue;
       group.presets.rekey(key, target.id, { ...group.presets.current!, preset: target });
+    }
+  }
+
+  /** The pins whose `to` (in the new show) makes the light their `from` made (in the old one), with `to` compiled. */
+  private validPins(pins: readonly PresetPin[], before: Show): { pin: PresetPin; fresh: CompiledPreset }[] {
+    const out: { pin: PresetPin; fresh: CompiledPreset }[] = [];
+    for (const pin of pins) {
+      const was = before.presets.find((p) => p.id === pin.from);
+      const is = this.show.presets.find((p) => p.id === pin.to);
+      const fresh = this.presets.get(pin.to);
+      if (!was || !is || !fresh || is.group !== pin.group) continue;
+      if (JSON.stringify(resolvedLayers(was.layers, before.palettes)) !== JSON.stringify(resolvedLayers(is.layers, this.show.palettes))) continue;
+      out.push({ pin, fresh });
+    }
+    return out;
+  }
+
+  /** A valid pin for the group running its `from`: the run carries on under `to`, so nothing on stage moves. True when it moved. */
+  private pinRun(group: GroupRun, pin: PresetPin, fresh: CompiledPreset): boolean {
+    const running = group.presets.current;
+    if (!running || group.presets.currentKey !== pin.from) return false;
+    return group.presets.rekey(pin.from, pin.to, { ...running, preset: fresh });
+  }
+
+  /**
+   * An edit that must not change the lights: each run fading out (not the one the group settles on) whose preset the
+   * edit changes keeps its old definition, under a spare key, so it fades out as it was and the next use of the
+   * preset starts the edited one.
+   */
+  private keepFading(group: GroupRun, before: Show, now: number): void {
+    const current = group.presets.currentKey;
+    for (const [key] of group.presets.entriesOf()) {
+      if (key === current) continue;
+      const was = before.presets.find((p) => p.id === key);
+      const is = this.show.presets.find((p) => p.id === key);
+      if (!was || !is) continue;
+      if (JSON.stringify(resolvedLayers(was.layers, before.palettes)) === JSON.stringify(resolvedLayers(is.layers, this.show.palettes))) continue;
+      group.presets.setAside(key, `${key}~kept${now}`);
     }
   }
 
@@ -707,8 +778,8 @@ export class Engine {
         this.updateFlashed();
         return null;
       }
-      case 'manual': return this.setManual(cmd.target, cmd.colour, cmd.intensity, now);
-      case 'release': return this.release(cmd.target, now);
+      case 'manual': return this.setManual(cmd, now);
+      case 'release': return this.release(cmd, now);
       case 'releaseAll': this.releaseAll(now); return null;
       case 'backToLook': return this.backToLook(now);
       case 'safe': this.goSafe(now); return null;
@@ -943,59 +1014,106 @@ export class Engine {
     }
   }
 
-  private setManual(target: ManualTarget, colour: string | undefined, intensity: number | undefined, now: number): string | null {
-    let holder: { manual: ManualRun | null };
-    let showing: Light;
+  /** The fixture (and segment) a manual target names, or why there is none. */
+  private fixtureTarget(target: Exclude<ManualTarget, { group: string }>): { run: FixtureRun; segment: number | null } | string {
+    const index = this.fixtureIndex.get(target.fixture);
+    if (index === undefined) return `unknown fixture "${target.fixture}"`;
+    const run = this.fixtures[index];
+    const segment = 'segment' in target ? target.segment : null;
+    if (segment !== null && segment >= run.cells.length) return `fixture "${target.fixture}" has no segment ${segment + 1}`;
+    return { run, segment };
+  }
+
+  /** A manual or release command's targets: its list, or its one target. */
+  private static targetsOf(cmd: { target?: ManualTarget; targets?: ManualTarget[] }): ManualTarget[] {
+    return cmd.targets ?? (cmd.target ? [cmd.target] : []);
+  }
+
+  /**
+   * What a manual target holds, what it shows now (where a take starts from) and, for a whole fixture, the fixture;
+   * or why it can't be held. `forRelease`: a smoke group can be let go of (it has nothing held).
+   */
+  private holderOf(target: ManualTarget, forRelease: boolean): ManualTake | string {
     if ('group' in target) {
       const group = this.groups.get(target.group);
-      if (!group) return `unknown group "${target.group}"`;
-      if (group.smoke) return smokeRefusal(target.group);
-      holder = group;
-      showing = group.out[0] ?? dark();
-      this.takeOwnership(group, now, MANUAL_IN);
-    } else {
-      const index = this.fixtureIndex.get(target.fixture);
-      if (index === undefined) return `unknown fixture "${target.fixture}"`;
-      if (this.fixtures[index].smokeGroups.length) return smokeRefusal(target.fixture);
-      holder = this.fixtures[index];
-      showing = this.fixtures[index].light;
+      if (!group) return forRelease ? 'unknown target' : `unknown group "${target.group}"`;
+      if (group.smoke && !forRelease) return smokeRefusal(target.group);
+      return { holder: group, showing: group.out[0] ?? dark(), group };
     }
-    let m = holder.manual;
-    if (!m || m.releasing) {
-      // Start from what the fixture shows now, so taking control never jumps.
-      const start = m && m.releasing ? m.current : showing;
-      m = new ManualRun(start, now);
-      if (holder.manual) m.weight = holder.manual.weight;
-      m.weight.set(1, now, MANUAL_IN);
-      holder.manual = m;
+    const found = this.fixtureTarget(target);
+    if (typeof found === 'string') return forRelease && found.startsWith('unknown') ? 'unknown target' : found;
+    if (found.run.smokeGroups.length && !forRelease) return smokeRefusal(target.fixture);
+    // A segment's hold sits on top of the fixture's: it starts from what that segment shows.
+    // A whole fixture's starts from what is under its held segments, so a level alone never takes a held segment's colour.
+    if (found.segment === null) return { holder: found.run, showing: found.run.under, whole: found.run };
+    return { holder: found.run.segmentHolds[found.segment]!, showing: found.run.cells[found.segment]! };
+  }
+
+  /** Every target of a command, or the first reason one of them can't be: then nothing is changed. */
+  private holdersOf(cmd: { target?: ManualTarget; targets?: ManualTarget[] }, forRelease: boolean): ManualTake[] | string {
+    const targets = Engine.targetsOf(cmd);
+    if (!targets.length) return 'no target';
+    const out: ManualTake[] = [];
+    for (const target of targets) {
+      const found = this.holderOf(target, forRelease);
+      if (typeof found === 'string') return found;
+      out.push(found);
     }
-    if (colour) {
-      const c = fromHex(colour);
-      m.target.r = c.r; m.target.g = c.g; m.target.b = c.b; m.target.w = c.w; m.target.a = c.a; m.target.u = c.u;
-      if (intensity === undefined && c.i < 1) m.target.i = c.i;
+    return out;
+  }
+
+  /** Every target at once (one command, one frame), or none of them when one can't be held. */
+  private setManual(cmd: Extract<StageCommand, { type: 'manual' }>, now: number): string | null {
+    const found = this.holdersOf(cmd, false);
+    if (typeof found === 'string') return found;
+    const { colour, intensity } = cmd;
+    const light = colour ? fromHex(colour, { white: cmd.white, amber: cmd.amber, uv: cmd.uv }) : null;
+    for (const { holder, showing, group, whole } of found) {
+      if (group) this.takeOwnership(group, now, MANUAL_IN);
+      // A new colour for a whole fixture: its held segments fade back to it.
+      if (whole && cmd.releaseSegments) for (const h of whole.segmentHolds) this.releaseHolder(h, now);
+      let m = holder.manual;
+      if (!m || m.releasing) {
+        // Start from what the fixture shows now, so taking control never jumps.
+        const start = m && m.releasing ? m.current : showing;
+        m = new ManualRun(start, now);
+        if (holder.manual) m.weight = holder.manual.weight;
+        m.weight.set(1, now, MANUAL_IN);
+        holder.manual = m;
+      }
+      if (light) {
+        m.target.r = light.r; m.target.g = light.g; m.target.b = light.b; m.target.w = light.w; m.target.a = light.a; m.target.u = light.u;
+        if (intensity === undefined && light.i < 1) m.target.i = light.i;
+      }
+      if (intensity !== undefined) m.target.i = intensity;
     }
-    if (intensity !== undefined) m.target.i = intensity;
     return null;
   }
 
-  private release(target: ManualTarget, now: number): string | null {
-    let holder: { manual: ManualRun | null } | undefined;
-    if ('group' in target) holder = this.groups.get(target.group);
-    else {
-      const index = this.fixtureIndex.get(target.fixture);
-      holder = index === undefined ? undefined : this.fixtures[index];
+  private release(cmd: Extract<StageCommand, { type: 'release' }>, now: number): string | null {
+    const found = this.holdersOf(cmd, true);
+    if (typeof found === 'string') return found;
+    for (const { holder, whole } of found) {
+      this.releaseHolder(holder, now);
+      if (whole && cmd.releaseSegments) for (const h of whole.segmentHolds) this.releaseHolder(h, now);
     }
-    if (!holder) return `unknown target`;
+    return null;
+  }
+
+  /** Let go: fade back to what is underneath over MANUAL_OUT. */
+  private releaseHolder(holder: ManualHolder, now: number): void {
     if (holder.manual && !holder.manual.releasing) {
       holder.manual.releasing = true;
       holder.manual.weight.set(0, now, MANUAL_OUT);
     }
-    return null;
   }
 
   private releaseAll(now: number): void {
-    for (const g of this.groups.values()) if (g.manual) this.release({ group: g.id }, now);
-    for (const f of this.fixtures) if (f.manual) this.release({ fixture: f.id }, now);
+    for (const g of this.groups.values()) this.releaseHolder(g, now);
+    for (const f of this.fixtures) {
+      this.releaseHolder(f, now);
+      for (const h of f.segmentHolds) this.releaseHolder(h, now);
+    }
   }
 
   /** Render one frame at time `now`. */
@@ -1069,7 +1187,7 @@ export class Engine {
           }
           mix(out, parts, weights);
         }
-        if (manual) mix2(out, out, manual.current, manual.weight.value(now));
+        if (manual) mix2(out, out, this.held(manual, noUv), manual.weight.value(now));
         out.i *= level;
       }
     }
@@ -1118,7 +1236,10 @@ export class Engine {
           for (let j = 0; j < from.length; j++) parts.push(from[j].out[starts[j] + slot]);
           mix(light, parts, ownerWeights);
         }
-        if (manual) mix2(light, light, manual.current, manualWeight);
+        if (manual) mix2(light, light, this.held(manual, !run.plan.hasUv), manualWeight);
+        if (c === 0) copy(run.under, light);
+        const held = this.liveManual(run.segmentHolds[c]!, now, dt);
+        if (held) mix2(light, light, this.held(held, !run.plan.hasUv), held.weight.value(now));
         if (!run.plan.hasUv) withoutUv(light);
         light.i *= master;
         if (flash) copy(light, FLASH_LIGHT);
@@ -1149,6 +1270,15 @@ export class Engine {
     if (buf) writeSmoke(buf, run.plan, level);
     const grey = Math.round(level * 140);
     this.visual.fill(grey, run.visualAt * 3, (run.visualAt + run.cells.length) * 3);
+  }
+
+  /**
+   * A hold's light to mix in. On a fixture without UV, the UV is taken out first (as for presets), so the mix
+   * scales by the light it can make: otherwise the UV it can't show sets the brightness, and it steps when another
+   * channel overtakes it.
+   */
+  private held(m: ManualRun, noUv: boolean): Light {
+    return noUv && m.current.u > 0 ? withoutUv(copy(this.scratchHold, m.current)) : m.current;
   }
 
   /** The holder's manual override if it still has weight; clears it once released. */
@@ -1238,10 +1368,12 @@ export class Engine {
         preset,
         changed: expected !== undefined && expected !== preset,
         manual: g.manual !== null && !g.manual.releasing,
+        hold: g.manual && !g.manual.releasing ? this.holdView(g.manual) : null,
         progress: g.presets.progress(now),
         level: g.level.target,
         live: liveView(preset),
         effect: (preset ? this.liveEffects.get(preset) : undefined) ?? null,
+        ...this.effectRate(g),
       };
     }
     return {
@@ -1254,6 +1386,7 @@ export class Engine {
       fadeTime: this.fadeTime,
       groups,
       fixturesManual: this.fixtures.filter((f) => f.manual && !f.manual.releasing).map((f) => f.id),
+      held: this.heldLights(),
       flashing: [...this.flash],
       master: this.master.target,
       speed: this.speed.target,
@@ -1262,6 +1395,38 @@ export class Engine {
       outputProblem: null,
       outputProblemKind: null,
     };
+  }
+
+  /** A hold's colour (White, Amber and UV mixed in, as the page draws it) and level. */
+  private holdView(m: ManualRun): { colour: string; level: number } {
+    return { colour: displayColour(toHex(m.target), { white: m.target.w, amber: m.target.a, uv: m.target.u }), level: m.target.i };
+  }
+
+  /** Every fixture and segment manual control holds (not ones being released), fixtures in show order. */
+  private heldLights(): HeldLight[] {
+    const out: HeldLight[] = [];
+    const view = (m: ManualRun) => this.holdView(m);
+    for (const f of this.fixtures) {
+      if (f.manual && !f.manual.releasing) out.push({ fixture: f.id, segment: null, ...view(f.manual) });
+      f.segmentHolds.forEach((h, segment) => {
+        if (h.manual && !h.manual.releasing) out.push({ fixture: f.id, segment, ...view(h.manual) });
+      });
+    }
+    return out;
+  }
+
+  /**
+   * How the effect a group runs (or is fading into) runs, at the tempo and the speed dial's target: `slowed` when light
+   * safety runs it slower than asked, so it never flashes, and `round`, the seconds one round really takes (null: no effect on top).
+   */
+  private effectRate(group: GroupRun): Pick<GroupStatus, 'slowed' | 'round'> {
+    const run = group.presets.current;
+    const top = run?.preset.layers[run.preset.layers.length - 1];
+    if (top?.kind !== 'effect') return { slowed: false, round: null };
+    const speed = this.speed.target;
+    const asked = cyclesPerSecond(top, (this.bpm / 60) * speed, speed);
+    const rate = safeRate(top, asked);
+    return { slowed: rate < asked, round: rate > 0 ? 1 / rate : null };
   }
 
   /** A group the current look lists runs another preset, or has another level target, than the look says. */

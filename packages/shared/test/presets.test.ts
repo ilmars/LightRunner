@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   addColour, addEffect, canRecolour, checkReferences, deleteColour, displayColour, editColour, editEffect, EffectLayer, ensureEffects, ensureRunningOrder, groupIsWhiteOnly,
-  effectKey, groupSegments, isEffectPreset, isOff, listNames, parseShow, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect,
+  effectKey, groupSegments, isEffectPreset, isOff, keepLitPresets, listNames, parseShow, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, resolvedLayers,
   type Show, type StaticLayer,
 } from '../src/index.ts';
 
@@ -72,6 +72,31 @@ test('a colour of Amber alone (black with amber) is a lit colour, not Off; black
   assert.throws(() => addColour(before, { group: 'key-lights', colour: '#000000', name: 'x', allGroups: false }), /has no light/);
   assert.equal(isOff({ id: 'x', name: 'x', group: 'key-lights', fade: 3, layers: [{ kind: 'static', colour: { hex: '#000000' }, intensity: 1 }] }), true);
   assert.equal(isOff({ id: 'x', name: 'x', group: 'key-lights', fade: 3, layers: [{ kind: 'static', colour: { hex: '#000000', uv: 0.2 }, intensity: 1 }] }), false);
+});
+
+test('a new colour can have its own brightness and fade (the colour editor sets them for ＋ New colour)', () => {
+  const before = rig();
+  const { show, ids } = addColour(before, { group: 'key-lights', colour: '#2a4b9c', name: 'Soft blue', allGroups: true, level: 0.456, fade: 1 });
+  assert.equal(ids.length, COLOUR_GROUPS.length);
+  for (const id of ids) {
+    const made = show.presets.find((p) => p.id === id)!;
+    // Whole percent, like the editor's Brightness; the swatch is the colour itself, as an edited brightness leaves it.
+    assert.deepEqual(made.layers, [{ kind: 'static', colour: { hex: '#2a4b9c' }, intensity: 0.46 }]);
+    assert.equal(made.fade, 1);
+    assert.equal(made.swatch, '#2a4b9c');
+  }
+  // Left out: full brightness and 3 s, as before.
+  const plain = addColour(before, { group: 'key-lights', colour: '#2a4b9c', name: 'x', allGroups: false });
+  const made = plain.show.presets.find((p) => p.id === plain.ids[0])!;
+  assert.equal((made.layers[0] as StaticLayer).intensity, 1);
+  assert.equal(made.fade, 3);
+  // The same colour at another brightness is another colour; the same one again is refused.
+  assert.equal(addColour(plain.show, { group: 'key-lights', colour: '#2a4b9c', name: 'y', allGroups: false, level: 0.5 }).ids.length, 1);
+  assert.throws(() => addColour(plain.show, { group: 'key-lights', colour: '#2a4b9c', name: 'y', allGroups: false, level: 1 }), /already in the list/);
+  // Out of range is refused, as in the editor.
+  assert.throws(() => addColour(before, { group: 'key-lights', colour: '#2a4b9c', name: 'x', allGroups: false, level: 0.01 }), { message: 'the brightness is between 5 % and 100 %' });
+  assert.throws(() => addColour(before, { group: 'key-lights', colour: '#2a4b9c', name: 'x', allGroups: false, fade: 601 }), { message: 'the fade is between 0 and 600 seconds' });
+  parseShow(JSON.parse(JSON.stringify(show)));
 });
 
 test('an empty name becomes Colour N with the next free number in the group', () => {
@@ -407,6 +432,51 @@ test("with shared on, a same-named colour of another shared colour takes the col
   assert.deepEqual([...ids].sort(), [...ZILS, 'background-tirkizs'].sort());
 });
 
+test('a listed colour\'s White, Amber and UV can be changed, kept to whole percent, and the swatch follows', () => {
+  const s = ready();
+  const plain = addColour(s, { group: 'key-lights', colour: '#ff8800', name: 'Warm', allGroups: false, white: 0.2 });
+  const id = plain.ids[0]!;
+  const { show, ids } = editColour(plain.show, { preset: id, amber: 0.456, white: 0, sameName: false });
+  assert.deepEqual(ids, [id]);
+  // White at 0 is taken out; amber is kept to whole percent; the colour and brightness stay.
+  assert.deepEqual(preset(show, id).layers, [{ kind: 'static', colour: { hex: '#ff8800', amber: 0.46 }, intensity: 1 }]);
+  assert.equal(preset(show, id).swatch, displayColour('#ff8800', { amber: 0.46 }));
+  // With a new colour too: both change at once.
+  const both = editColour(plain.show, { preset: id, colour: '#000000', amber: 1, sameName: false }).show;
+  assert.deepEqual(preset(both, id).layers, [{ kind: 'static', colour: { hex: '#000000', white: 0.2, amber: 1 }, intensity: 1 }]);
+  assert.equal(isOff(preset(both, id)), false);
+  // Nothing left in it is refused: that would be Off.
+  assert.throws(() => editColour(plain.show, { preset: id, colour: '#000000', white: 0, sameName: false }), { message: 'that colour has no light: pick a colour, or add White, Amber or UV' });
+  // Out of range is refused; the same levels again change nothing.
+  assert.throws(() => editColour(plain.show, { preset: id, uv: 1.5, sameName: false }), /UV level is between 0 and 100 %/);
+  assert.throws(() => editColour(plain.show, { preset: id, white: 0.2, sameName: false }), { message: 'nothing changed' });
+  // Off has no colour to give them to.
+  assert.throws(() => editColour(s, { preset: 'key-lights-off', amber: 0.5, sameName: false }), { message: "Off can't be given a colour; add a new colour instead." });
+  parseShow(JSON.parse(JSON.stringify(show)));
+});
+
+test('White, Amber and UV follow the shared and same-name choices like a new colour', () => {
+  const s = ready();
+  // Shared: the palette entry takes them, so every colour pointing to it follows and keeps pointing to it.
+  const shared = editColour(s, { preset: 'key-lights-zils', amber: 0.5, shared: true, sameName: true });
+  assert.deepEqual(shared.show.palettes.find((p) => p.id === 'lightkey')!.colours[7], { hex: '#0000ff', amber: 0.5 });
+  assert.deepEqual([...shared.ids].sort(), ZILS);
+  for (const id of ZILS) {
+    assert.equal(zilsPoint(shared.show, id), true, id);
+    assert.equal(preset(shared.show, id).swatch, displayColour('#0000ff', { amber: 0.5 }), id);
+  }
+  // Only this group: it is cut loose with its own colour and the amber; the others stay as they were.
+  const own = editColour(s, { preset: 'key-lights-zils', amber: 0.5, shared: false, sameName: false });
+  assert.deepEqual(own.ids, ['key-lights-zils']);
+  assert.deepEqual(preset(own.show, 'key-lights-zils').layers, [{ kind: 'static', colour: { hex: '#0000ff', amber: 0.5 }, intensity: 1 }]);
+  assert.deepEqual(own.show.palettes, s.palettes);
+  // Same name without shared: each same-named colour gets the amber as its own.
+  const same = editColour(s, { preset: 'key-lights-zils', uv: 0.3, shared: false, sameName: true });
+  assert.deepEqual([...same.ids].sort(), ZILS);
+  for (const id of ZILS) assert.deepEqual((preset(same.show, id).layers[0] as StaticLayer).colour, { hex: '#0000ff', uv: 0.3 }, id);
+  assert.deepEqual(same.show.palettes, s.palettes);
+});
+
 /** A show holding a hidden (custom) preset, as Save makes for an Any colour pick. */
 function saveHidden(s: Show): { show: Show; id: string } {
   const show = structuredClone(s);
@@ -504,6 +574,23 @@ test('an effect\'s settings are edited in place; a colour is not an effect', () 
   assert.throws(() => editEffect(hidden, { preset: id, effect: hard }), { message: "that effect can't be edited" });
 });
 
+test("an effect's name and settings change together in one edit, or not at all", () => {
+  const s = ready();
+  const { show, id } = addEffect(s, { group: 'background', name: 'Wave', effect: fx() });
+  const hard = fx({ edge: 'hard' });
+  const both = editEffect(show, { preset: id, effect: hard, name: '  Hard wave ' });
+  assert.equal(preset(both, id).name, 'Hard wave');
+  assert.deepEqual(preset(both, id).layers, [hard]);
+  // A new name alone (the same settings) is a change too.
+  const renamed = editEffect(show, { preset: id, effect: fx(), name: 'Soft wave' });
+  assert.equal(preset(renamed, id).name, 'Soft wave');
+  assert.deepEqual(preset(renamed, id).layers, [fx()]);
+  assert.throws(() => editEffect(show, { preset: id, effect: fx(), name: 'Wave' }), { message: 'nothing changed' });
+  // A refused name refuses the settings with it.
+  assert.throws(() => editEffect(show, { preset: id, effect: hard, name: '   ' }), { message: 'a name is needed' });
+  assert.deepEqual(preset(show, id).layers, [fx()]);
+});
+
 test('an effect keeps its base colour through add, edit and the show file', () => {
   const s = ready();
   const base = { colour: { hex: '#ffb46b', white: 0.4 }, level: 0.5 };
@@ -594,4 +681,72 @@ test('ready-made effects are added once to every coloured group with more than o
   const cleared = structuredClone(out);
   cleared.presets = cleared.presets.filter((p) => !isEffectPreset(p));
   assert.deepEqual(ensureEffects(cleared), cleared);
+});
+
+test('an edit in Prepare keeps the lit colours as they were: a hidden copy and a pin for each group whose light changes', () => {
+  const before = ready();
+  const running = { 'key-lights': 'key-lights-sarkans', background: 'background-sarkans', 'drum-cage': 'drum-cage-zils', 'front-lights': null };
+  // Red, shared and for every group of that name, with White, Amber and UV and a new brightness.
+  const edited = editColour(before, { preset: 'key-lights-sarkans', colour: '#00FF00', white: 0.4, amber: 0.3, uv: 0.2, level: 0.6, shared: true, sameName: true }).show;
+  const frozen = JSON.stringify(edited);
+  const { show, pins } = keepLitPresets(before, edited, { groups: running });
+  assert.equal(JSON.stringify(edited), frozen, 'the input show is not changed');
+  assert.deepEqual(pins.map((p) => [p.group, p.from]), [['key-lights', 'key-lights-sarkans'], ['background', 'background-sarkans']]);
+  const palettes = before.palettes;
+  for (const pin of pins) {
+    const copy = preset(show, pin.to);
+    const was = preset(before, pin.from);
+    assert.equal(copy.custom, true, 'the copy is hidden');
+    assert.equal(copy.group, pin.group);
+    assert.equal(copy.name, was.name);
+    assert.equal(copy.fade, was.fade);
+    // The copy makes the light the preset made before the edit, with no palette to follow.
+    assert.deepEqual(copy.layers, resolvedLayers(was.layers, palettes));
+    assert.deepEqual(resolvedLayers(copy.layers, show.palettes), resolvedLayers(was.layers, palettes));
+    assert.ok(!JSON.stringify(copy.layers).includes('palette'));
+    // The edit itself is in the show.
+    assert.deepEqual(preset(show, pin.from), preset(edited, pin.from));
+  }
+  assert.equal(show.presets.length, edited.presets.length + 2);
+
+  // A fade alone, or a colour nobody shows, pins nothing.
+  const fadeOnly = editColour(before, { preset: 'key-lights-sarkans', fade: 9, sameName: false }).show;
+  assert.deepEqual(keepLitPresets(before, fadeOnly, { groups: running }), { show: fadeOnly, pins: [] });
+  const unlit = editColour(before, { preset: 'key-lights-zils', colour: '#123456', sameName: false }).show;
+  assert.deepEqual(keepLitPresets(before, unlit, { groups: running }).pins, []);
+  // A second edit while the group runs its copy pins nothing more.
+  const again = editColour(show, { preset: 'key-lights-sarkans', colour: '#0000ff', sameName: false }).show;
+  const onCopy = { ...running, 'key-lights': pins[0]!.to, background: pins[1]!.to };
+  assert.deepEqual(keepLitPresets(show, again, { groups: onCopy }).pins, []);
+});
+
+test('an effect edited in Prepare is kept as it was where it runs', () => {
+  const s = ready();
+  const { show: before, id } = addEffect(s, { group: 'background', name: 'Wave', effect: fx({ colours: [{ palette: 'lightkey', index: 2 }, { hex: '#0000ff' }], base: { colour: { palette: 'lightkey', index: 0 }, level: 0.3 } }) });
+  const edited = editEffect(before, { preset: id, effect: fx({ edge: 'hard' }) });
+  const { show, pins } = keepLitPresets(before, edited, { groups: { background: id } });
+  assert.equal(pins.length, 1);
+  const copy = preset(show, pins[0]!.to);
+  assert.equal(copy.custom, true);
+  assert.deepEqual(copy.layers, resolvedLayers(preset(before, id).layers, before.palettes));
+  assert.deepEqual((copy.layers[0] as EffectLayer).colours[0], { hex: '#ff0000' });
+  assert.deepEqual((copy.layers[0] as EffectLayer).base, { colour: { hex: '#ffaa5a' }, level: 0.3 });
+});
+
+test("an edit in Prepare during Blackout keeps what Blackout's memory brings back, and a copy with the same light is used again", () => {
+  const before = ready();
+  const edited = editColour(before, { preset: 'key-lights-sarkans', colour: '#00ff00', sameName: false }).show;
+  const stage = { groups: { 'key-lights': '__blackout', background: '__blackout' }, beforeBlackout: { 'key-lights': 'key-lights-sarkans', background: 'background-zils' } };
+  const { show, pins } = keepLitPresets(before, edited, stage);
+  assert.equal(pins.length, 1);
+  assert.deepEqual([pins[0]!.group, pins[0]!.from], ['key-lights', 'key-lights-sarkans']);
+  assert.equal(preset(show, pins[0]!.to).custom, true);
+
+  // Red edited back and then again (Undo kept the copy in the show): the copy of red is used again.
+  const back = { ...before, presets: [...before.presets, preset(show, pins[0]!.to)] };
+  const again = editColour(back, { preset: 'key-lights-sarkans', colour: '#0000ff', sameName: false }).show;
+  const second = keepLitPresets(back, again, { groups: { 'key-lights': 'key-lights-sarkans' } });
+  assert.deepEqual(second.pins, [{ group: 'key-lights', from: 'key-lights-sarkans', to: pins[0]!.to }]);
+  assert.equal(second.show, again, 'no new copy');
+  assert.equal(second.show.presets.filter((p) => p.custom && p.group === 'key-lights' && p.name === 'Sarkans').length, 1);
 });

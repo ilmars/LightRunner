@@ -5,6 +5,7 @@ import {
   aimBeam, alignFixtures, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setShape, shapeOf, spaceEvenly, touches, turnBar,
 } from './plan.js';
 import { PLAN_ASPECT, barAxis, beamCone } from '../shared/stage.js';
+import { request, startClock, watchState } from '../shared/appbar.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -20,7 +21,7 @@ let profiles = []; // [{ id, name, channels }]
 const profileById = new Map();
 
 async function call(method, path, body) {
-  const res = await fetch(path, {
+  const res = await request(path, {
     method,
     headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -186,21 +187,21 @@ function renderFixtures() {
     tr.dataset.id = f.id;
     tr.addEventListener('pointerdown', () => { if (selectedId !== f.id) selectFixture(f.id, false); });
 
-    const name = el('input');
+    const name = el('input', 'ds-field');
     name.type = 'text';
     name.value = f.name;
     name.addEventListener('change', () => { f.name = name.value.trim() || f.name; changed(); });
 
-    const type = el('select');
+    const type = el('select', 'ds-field');
     for (const p of profiles) type.append(new Option(`${p.name}`, p.id));
     type.value = f.profile;
     type.addEventListener('change', () => { f.profile = type.value; changed(); });
 
-    const uni = el('input');
+    const uni = el('input', 'ds-field');
     uni.type = 'number'; uni.min = '0'; uni.max = '32767'; uni.value = String(f.universe);
     uni.addEventListener('change', () => { f.universe = clampInt(uni.value, 0, 32767, f.universe); changed(); });
 
-    const addr = el('input');
+    const addr = el('input', 'ds-field');
     addr.type = 'number'; addr.min = '1'; addr.max = '512'; addr.value = String(f.address);
     addr.addEventListener('change', () => { f.address = clampInt(addr.value, 1, 512, f.address); changed(); });
 
@@ -210,7 +211,7 @@ function renderFixtures() {
     range.append(el('div', 'segments', segs === 1 ? '1 segment' : `${segs} segments`));
 
     // Hung the other way round: its first segment is at the other end of the bar.
-    const rev = el('label', 'switch');
+    const rev = el('label', 'ds-switch');
     const revInput = el('input');
     revInput.type = 'checkbox';
     revInput.checked = !!f.reversed;
@@ -220,15 +221,13 @@ function renderFixtures() {
       else delete f.reversed;
       changed();
     });
-    const track = el('span', 'track');
-    track.append(el('span', 'knob'));
-    rev.append(revInput, track);
+    rev.append(revInput, el('span', 'ds-switch-track'));
 
     const chips = el('div', 'chips');
     for (const g of groupsOf(f.id)) chips.append(el('span', 'chip', g.name));
 
     const actions = el('div', 'actions');
-    const identify = el('button', 'ghost small', 'Identify');
+    const identify = el('button', 'ds-btn ds-btn--quiet', 'Identify');
     identify.type = 'button';
     identify.disabled = !savedIds.has(f.id);
     identify.title = identify.disabled ? 'Save the patch first' : 'Flash this fixture white for 3 seconds';
@@ -240,7 +239,7 @@ function renderFixtures() {
         toast(err.message, true);
       }
     });
-    const del = el('button', 'ghost small danger', 'Delete');
+    const del = el('button', 'ds-btn ds-btn--quiet del', 'Delete');
     del.type = 'button';
     del.addEventListener('click', () => {
       const inGroups = groupsOf(f.id).map((g) => g.name);
@@ -376,7 +375,8 @@ function addFixtures(p, prefix, count, universe, start, spot = null) {
 
 // ---- Graphical patch: the universe map ----
 
-const COLS = 32;
+/** Channels to a row of the map: 32, or 16 when the map is narrow (a phone). */
+let COLS = 32;
 let selectedId = null;
 let viewUniverse = null;
 
@@ -433,12 +433,14 @@ function renderMap() {
     b.addEventListener('click', () => { viewUniverse = u; renderMap(); });
     tabs.append(b);
   }
-  const more = el('button', 'utab', '+');
+  const more = el('button', 'utab utab-add', '＋');
   more.title = 'Add a universe';
   more.addEventListener('click', () => { viewUniverse = Math.max(...universes) + 1; renderMap(); });
   tabs.append(more);
 
   const grid = $('dmxMap');
+  COLS = mapColumns();
+  grid.style.gridTemplateColumns = `repeat(${COLS}, minmax(0, 1fr))`;
   grid.replaceChildren();
   for (let ch = 1; ch <= 512; ch++) {
     const cell = el('div', 'cell', String(ch));
@@ -492,6 +494,13 @@ function renderMap() {
   }
   $('mapInfo').textContent = `Universe ${viewUniverse}: ${used} of 512 channels used. Drag a fixture to move it; tap a free channel to add fixtures there.`;
 }
+
+function mapColumns() {
+  const w = $('dmxMap').clientWidth;
+  return w && w < 560 ? 16 : 32;
+}
+// Draw the map again when it gets narrow or wide enough to change its rows.
+window.addEventListener('resize', () => { if (show && !$('main').hidden && mapColumns() !== COLS) renderMap(); });
 
 /** Drag a fixture block to a new start address. A tap without moving just selects it. */
 function startBlockDrag(ev, f) {
@@ -655,7 +664,7 @@ async function showOflModes(loadInfo, makeProfile) {
   try {
     const info = await loadInfo();
     const wrap = el('div', 'ofl-modes');
-    const back = el('button', 'back-link', '‹ Back to results');
+    const back = el('button', 'ds-btn ds-btn--quiet back-link', '‹ Back to results');
     back.type = 'button';
     back.addEventListener('click', () => (lastHits ? showHits(lastHits.hits, lastHits.note, lastHits.empty) : $('oflForm').requestSubmit()));
     wrap.append(back, el('h4', null, `${info.manufacturer} ${info.name}`.trim()), el('p', 'hint', 'Pick the DMX mode the fixture is set to:'));
@@ -720,12 +729,13 @@ function renderGroups() {
   for (const g of show.groups) {
     const card = el('div', 'group-card');
     const head = el('div', 'head');
-    const name = el('input');
+    const name = el('input', 'ds-field');
     name.type = 'text';
     name.value = g.name;
+    name.setAttribute('aria-label', 'Group name');
     name.addEventListener('change', () => { g.name = name.value.trim() || g.name; changed(); });
     const presets = show.presets.filter((p) => p.group === g.id).length;
-    const del = el('button', 'ghost small danger', 'Delete group');
+    const del = el('button', 'ds-btn ds-btn--quiet del', 'Delete group');
     del.type = 'button';
     del.addEventListener('click', () => {
       const looks = show.looks.filter((l) => l.groups.some((e) => e.group === g.id)).length;
@@ -740,14 +750,12 @@ function renderGroups() {
 
     // A smoke or haze machine: only its own slider and Puff on the operator page turn it on.
     const kind = el('div', 'group-kind');
-    const sw = el('label', 'switch');
+    const sw = el('label', 'ds-switch');
     const box = el('input');
     box.type = 'checkbox';
     box.checked = g.kind === 'smoke';
     box.addEventListener('change', () => { g.kind = box.checked ? 'smoke' : 'light'; changed(); });
-    const track = el('span', 'track');
-    track.append(el('span', 'knob'));
-    sw.append(box, track, el('span', 'switch-label', 'Smoke or haze machine'));
+    sw.append(box, el('span', 'ds-switch-track'), el('span', 'switch-label', 'Smoke or haze machine'));
     kind.append(sw);
     if (g.kind === 'smoke') {
       kind.append(el('span', 'note', 'Looks, Basic lights and Flash leave it alone. It runs only from its own slider and Puff, and is off after a restart. Turning this off lets Basic lights and looks drive the machine.'));
@@ -773,8 +781,9 @@ function renderGroups() {
       chip.append(left, right, remove);
       members.append(chip);
     });
-    const add = el('select');
-    add.append(new Option('+ Add fixture…', ''));
+    const add = el('select', 'ds-field member-add');
+    add.setAttribute('aria-label', `Add a fixture to ${g.name}`);
+    add.append(new Option('＋ Add fixture…', ''));
     for (const f of show.fixtures) if (!g.fixtures.includes(f.id)) add.append(new Option(f.name, f.id));
     add.addEventListener('change', () => { if (add.value) { g.fixtures.push(add.value); changed(); } });
     if (add.options.length > 1) members.append(add);
@@ -1003,7 +1012,7 @@ function renderStage() {
     placeFixture(f);
   }
   if (planSpot) {
-    const add = el('button', 'plan-add', '+ Add fixture here');
+    const add = el('button', 'plan-add', '＋ Add fixture here');
     add.type = 'button';
     add.style.left = pct(planSpot.x);
     add.style.top = pct(planSpot.y);
@@ -1183,10 +1192,19 @@ let toastTimer = 0;
 function toast(text, bad = false) {
   const t = $('toast');
   t.textContent = text;
-  t.className = bad ? 'toast bad' : 'toast';
+  t.className = bad ? 'ds-toast ds-toast--bad' : 'ds-toast';
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (t.hidden = true), 4000);
 }
+
+// The top bar: the clock, and the pill while something is wrong with the lights.
+startClock($('clock'));
+watchState({
+  pill: $('status'),
+  offline: $('offline'),
+  // The page couldn't load while the server was down: load it now.
+  onBack: () => { if (!show) start().catch((err) => toast(err.message, true)); },
+});
 
 start().catch((err) => toast(err.message, true));

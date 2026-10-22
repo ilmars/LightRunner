@@ -5,14 +5,16 @@
   --bg: var(--ds-bg);
   --panel: var(--ds-surface);
   --raised: var(--ds-elevated);
-  --line: rgba(255, 255, 255, 0.07);
+  --line: rgba(148, 163, 184, 0.08);
   --text: var(--ds-text);
   --dim: var(--ds-muted);
   --accent: var(--ds-accent);
   --warn: var(--ds-warn);
   --danger: #7a2626;
-  /* Blind's tint (as r, g, b): only for its top-bar strip and its switch. */
-  --blind: 150, 124, 226;
+  /* Prepare's violet (the designer's): text, and the tint and edge as r, g, b. Only for what Prepare shows. */
+  --prep-text: var(--ds-violet);
+  --prep-tint: 161, 147, 242;
+  --prep-edge: 171, 160, 244;
   --radius: var(--ds-r-panel);
   color-scheme: dark;
 }
@@ -20,14 +22,14 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
-  background: radial-gradient(90% 70% at 60% -10%, #18233b 0%, var(--ds-bg) 60%, var(--ds-bg-deep) 100%) fixed var(--ds-bg);
+  background: var(--ds-bg);
   color: var(--text);
-  font: 16px/1.25 var(--ds-font);
+  font: 14px/1.25 var(--ds-font);
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  grid-template-rows: 44px minmax(0, 1fr) 72px;
+  grid-template-columns: 292px minmax(0, 1fr);
+  grid-template-rows: 60px minmax(0, 1fr) 76px;
   gap: var(--ds-gap);
-  padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
@@ -35,6 +37,7 @@ body {
   touch-action: manipulation;
 }
 button { font: inherit; color: inherit; cursor: pointer; }
+.grow { flex: 1; min-width: 0; }
 
 .banner {
   position: fixed; inset: 0 0 auto 0; z-index: 10;
@@ -43,72 +46,85 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 @keyframes pulse { 50% { opacity: 0.6; } }
 
-/* ---- Top bar ---- */
+/* ---- Top bar: a panel strip; violet while preparing, red during Blackout ---- */
 .topbar {
-  grid-column: 1 / -1; position: relative; z-index: 5;
-  display: flex; align-items: center; gap: 18px; padding: 0 2px 0 8px;
+  grid-column: 1 / -1; position: relative; z-index: 5; min-width: 0;
+  display: flex; align-items: center; gap: 8px; padding: 0 6px 0 18px;
+  background: var(--ds-panel-fill); box-shadow: var(--ds-shadow-raise); border-radius: var(--ds-r-bar);
 }
-/* A state that matters gets a quiet tinted strip behind the bar, not a bright frame. */
-.topbar.problem, .topbar.off, .topbar.flash, .topbar.preview, .topbar.blind { border-radius: var(--ds-r-tile); }
-/* Preview is on: a neutral strip (no colour of its own). Written first so the states below win over it. */
-.topbar.preview { background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10); }
-/* Blind is on: a faint violet strip, so it can't be taken for Preview (neutral), Flash (blue) or a problem (amber).
-   Also written before the states below, which win over it. */
-.topbar.blind { background: rgba(var(--blind), 0.08); box-shadow: inset 0 0 0 1px rgba(var(--blind), 0.26); }
-.topbar.problem { background: rgba(201, 138, 42, 0.10); box-shadow: inset 0 0 0 1px rgba(201, 138, 42, 0.30); }
-.topbar.off { background: rgba(201, 138, 42, 0.07); box-shadow: inset 0 0 0 1px rgba(201, 138, 42, 0.22); }
-.topbar.flash { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.topbar.blackout { border-radius: var(--ds-r-tile); background: rgba(var(--ds-danger), 0.22); box-shadow: inset 0 0 0 1px rgba(var(--ds-danger), 0.55); }
-.topbar.blackout .now-name { color: #ffdfe2; }
-.now { flex: 1; min-width: 0; display: flex; align-items: baseline; white-space: nowrap; overflow: hidden; }
-.now-name { font-size: var(--ds-fs-title); font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
-.changed { color: var(--warn); font-size: 14px; font-weight: 600; margin-left: 8px; }
-.quiet { display: flex; align-items: center; gap: 18px; }
-.q { display: inline-flex; align-items: center; color: var(--dim); font-size: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.topbar.blackout { background: rgba(var(--ds-danger), 0.16); box-shadow: inset 0 0 0 1px rgba(var(--ds-danger), 0.5); }
+/* Prepare is on: the violet bar. Written after Blackout and wins over it: this tablet's bar is about the draft
+   (the problem pill, Flash and Blackout still show in their own places). */
+.topbar.prepare { background: rgba(var(--prep-tint), 0.11); box-shadow: inset 0 0 0 1px rgba(var(--prep-edge), 0.38); }
+/* What is on stage: a small label over the name. */
+.now { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 14px; overflow: hidden; }
+.head { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; overflow: hidden; }
+.head .ds-caps { line-height: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prep-label { color: var(--prep-text); }
+.black-label { color: var(--ds-danger-text); }
+.head-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; white-space: nowrap; overflow: hidden; }
+.head-name { min-width: 0; font-size: 20px; line-height: 1.15; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+/* A long note ("On stage: <name>") gives way first, so the name keeps its room (up to the whole line). */
+.head-line:has(> .head-note) > .head-name { flex: 0 0 auto; max-width: 100%; }
+.head-note { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--ds-muted); }
+.changed { flex: none; color: var(--warn); font-size: 13px; }
+.notes { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.q { display: inline-flex; align-items: center; color: var(--dim); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .q b { color: var(--text); font-weight: 600; }
-.flash-note { color: #e3e6ea; font-weight: 600; }
-.fade-bar { display: inline-block; width: 110px; height: 5px; margin: 0 8px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.fade-bar { display: inline-block; width: 64px; height: 4px; margin: 0 8px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .fade-bar span { display: block; height: 100%; width: 0; background: var(--accent); opacity: 0.7; }
-.dot { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; background: #2f9e5b; }
-.link.down .dot { background: #d43c3c; animation: pulse 1s infinite; }
-.output-note {
-  display: inline-flex; align-items: center; gap: 2px; min-height: 36px; padding: 0 14px 0 12px; border: 0; border-radius: var(--ds-r-pill);
-  background: rgba(201, 138, 42, 0.12); box-shadow: inset 0 0 0 1px rgba(201, 138, 42, 0.35); color: var(--ds-warn-text);
-  font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 62%; cursor: pointer;
+/* The problem pill (amber) and its explanation. */
+.problem { position: relative; flex: none; }
+.problem-pill {
+  min-height: 44px; padding: 0 14px; border: 1px solid var(--ds-warn-edge); border-radius: 22px;
+  background: var(--ds-warn-tint); color: var(--ds-warn-text); font-size: 13px; font-weight: 600; white-space: nowrap;
 }
-.output-note .info { margin-left: 8px; color: rgba(224, 180, 106, 0.7); font-weight: 400; }
-.output-note.problem { color: #e0b46a; }
-.output-note.problem .dot { background: var(--warn); }
-.output-note .dot { background: var(--ds-warn); box-shadow: 0 0 0 3px rgba(201, 138, 42, 0.18); }
-.clock { color: var(--dim); font-size: 14px; font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; }
-.gear { color: var(--dim); display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 8px; }
+.problem-box {
+  position: absolute; top: calc(100% + 14px); left: 0; z-index: 20; width: 450px; max-width: calc(100vw - 40px);
+  display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border-radius: 16px;
+  background: var(--ds-popover); border: 1px solid var(--ds-warn-edge); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  user-select: text; -webkit-user-select: text;
+}
+.pb-title { font-size: 16px; font-weight: 600; }
+.pb-text { font-size: 13px; color: var(--ds-muted); line-height: 1.5; }
+.pb-contact { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 12px; background: rgba(0, 0, 0, 0.22); border: 1px solid var(--ds-edge); }
+.pb-contact-text { font-size: 15px; font-weight: 600; }
+.pb-note { font-size: 12px; color: var(--ds-muted); line-height: 1.5; }
+.pb-foot { display: flex; justify-content: flex-end; }
+.pb-ok { min-height: 44px; padding: 0 18px; border: 1px solid var(--ds-edge); border-radius: 10px; background: var(--ds-tile-fill); font-size: 14px; font-weight: 600; }
+.clock { flex: none; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; padding: 0 2px; }
+.gear { flex: none; color: var(--dim); display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 10px; }
 .gear:hover { color: var(--text); background: var(--raised); }
-.preview-btn { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--dim); font: inherit; font-size: 14px; }
-.preview-btn:hover { color: var(--text); background: var(--raised); }
-.preview-btn[aria-pressed="true"] { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-/* Blind on: the strip's violet, so Go stays the one blue control in the bar. */
-.blind-btn[aria-pressed="true"] { background: rgba(var(--blind), 0.14); box-shadow: inset 0 0 0 1px rgba(var(--blind), 0.40); }
-/* Go: the Save and Done pill (blue tint, blue edge), 44 px high; never brighter than that. */
+/* Live / Prepare: one segmented switch. Live on is blue, Prepare on is violet. */
+.mode-seg { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 12px; background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge); }
+.mode-seg button { min-height: 44px; min-width: 64px; padding: 0 12px; border: 0; border-radius: 9px; background: transparent; color: var(--ds-muted); font: inherit; font-size: 13px; white-space: nowrap; }
+.mode-seg button.prep { min-width: 84px; }
+.mode-seg button[aria-pressed="true"] { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.mode-seg button.prep[aria-pressed="true"] { background: rgba(var(--prep-tint), 0.16); box-shadow: inset 0 0 0 1px rgba(var(--prep-edge), 0.5); }
+/* Go ▸: the one blue control while preparing (blue tint, blue edge); never brighter than that. */
 .go-btn {
-  flex: none; min-height: 44px; min-width: 88px; padding: 0 22px; border: 0; border-radius: var(--ds-r-pill);
-  background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-text); font: inherit; font-size: 16px; font-weight: 600;
+  flex: none; min-height: 44px; min-width: 84px; padding: 0 14px; border: 1px solid var(--ds-edge-held); border-radius: 10px;
+  background: var(--ds-tile-fill-on); color: var(--ds-text); font: inherit; font-size: 15px; font-weight: 700;
 }
 .go-btn:active { background: var(--ds-selected); }
 .go-btn:disabled { opacity: 0.5; }
 
+/* Fade and Tempo: a small label over the value; each opens its menu. */
+.quiet { flex: none; display: flex; align-items: center; gap: 8px; }
 .fadepick { position: relative; }
 .fade-btn {
-  display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--dim);
-  font-size: 14px; padding: 6px 8px; border-radius: 8px; min-height: 44px;
+  display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 1px;
+  min-height: 44px; padding: 0 12px; border: 1px solid var(--ds-edge); border-radius: 10px; background: var(--ds-tile-fill); color: var(--ds-text);
+  white-space: nowrap;
 }
-.fade-btn b { color: var(--text); font-weight: 600; }
-.fade-btn.fixed b { color: #a8c7ff; }
+.fade-btn .lv-label { font-size: 10px; line-height: 12px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ds-muted); font-weight: 600; }
+.fade-btn b { font-size: 14px; line-height: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .fade-btn:hover, .fade-btn[aria-expanded="true"] { background: var(--raised); }
 .fade-menu {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 190px;
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; min-width: 190px;
   background: var(--ds-glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
   border: 0; border-radius: var(--ds-r-tile); padding: 4px;
-  display: flex; flex-direction: column; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
+  display: flex; flex-direction: column; box-shadow: inset 0 0 0 1px var(--ds-edge), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
 }
 .fade-menu button {
   border: 0; background: transparent; color: var(--text); text-align: left; padding: 10px 12px; min-height: 44px;
@@ -119,86 +135,93 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .fade-menu button.on { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
 
 /* Tempo: the readout opens its steps like Fade does; Tap sits beside it. */
-.tempo { display: flex; align-items: center; gap: 4px; }
-.tempo-menu { flex-direction: row; min-width: 0; gap: 2px; }
+.tempo { display: flex; align-items: center; gap: 8px; }
+/* The menu: a field to type the tempo in (Done or Enter sets it), the steps under it, and a quiet note when a typed tempo is refused. */
+.tempo-menu { flex-direction: column; min-width: 0; gap: 4px; }
+.tempo-type { display: flex; align-items: center; gap: 8px; padding: 0 10px 0 0; color: var(--ds-muted); font-size: 13px; }
+.tempo-type .ds-field {
+  flex: 1 1 auto; width: 0; min-width: 0; min-height: 44px; padding: 0 12px;
+  font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; user-select: text; -webkit-user-select: text;
+}
+.tempo-steps { display: flex; gap: 2px; }
 .tempo-menu button { justify-content: center; min-width: 52px; padding: 10px 8px; font-size: 18px; touch-action: manipulation; }
+.tempo-note { box-sizing: border-box; width: 0; min-width: 100%; margin: 0; padding: 0 8px 4px; color: var(--ds-muted); font-size: 12px; line-height: 1.35; }
 .tap-btn {
-  min-width: 56px; min-height: 44px; padding: 0 14px; border: 0; border-radius: var(--ds-r-small); background: transparent; color: var(--ds-muted-on);
-  font: inherit; font-size: 14px; font-weight: 500; touch-action: manipulation;
+  min-width: 52px; min-height: 44px; padding: 0 12px; border: 1px solid var(--ds-edge); border-radius: 10px; background: var(--ds-tile-fill); color: var(--ds-text);
+  font: inherit; font-size: 13px; font-weight: 600; touch-action: manipulation;
 }
 .tap-btn:hover { background: var(--raised); }
-.tap-btn.hit { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-text); }
+.tap-btn.hit { background: var(--ds-tile-fill-on); border-color: var(--ds-edge-on); }
 .tempo button:disabled { opacity: 0.4; }
 
-/* ---- Left column ---- */
-.left { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 140px minmax(0, 1fr); gap: var(--ds-gap); min-height: 0; min-width: 0; }
-.stage {
-  width: 100%; height: 140px; background: #06080c; border-radius: var(--ds-r-panel); box-shadow: var(--ds-shadow-inset); display: block;
-}
-/* Section header: small spaced capitals, the same in every panel. */
-.order-title, .sec-title { color: var(--ds-text); font-size: 15px; font-weight: 600; letter-spacing: 0.01em; }
+/* ---- Left column: the stage view, then the running order ---- */
+.left { display: flex; flex-direction: column; gap: var(--ds-gap); min-height: 0; min-width: 0; }
+.stage-box { flex: none; padding: 8px; background: var(--ds-panel-fill); border-radius: var(--ds-r-panel); box-shadow: var(--ds-shadow-raise); }
+.stage { width: 100%; height: 124px; background: #04070D; border-radius: 12px; display: block; }
+/* Panel titles. */
+.order-title, .sec-title { flex: none; color: var(--ds-text); font-size: 14px; font-weight: 600; white-space: nowrap; }
+.sec-sub { min-width: 0; color: var(--ds-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .order {
-  min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 6px 8px 8px;
+  flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px; padding: 8px;
   background: var(--ds-panel-fill); border-radius: var(--ds-r-panel); box-shadow: var(--ds-shadow-raise);
 }
-.order-head { flex: none; display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding-left: 8px; }
-.ebtn { min-height: 34px; min-width: 64px; padding: 0 16px; border: 0; border-radius: var(--ds-r-pill); background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low); color: var(--ds-muted-on); font-size: 14px; }
+.order-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 4px 4px 8px; }
+/* Quiet header buttons: Edit list, Edit looks. */
+.ebtn { flex: none; min-height: 44px; padding: 0 12px; border: 1px solid var(--ds-edge); border-radius: 10px; background: transparent; color: var(--ds-muted); font-size: 13px; white-space: nowrap; }
 .ebtn:active { background: var(--ds-elevated); }
-.ebtn.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.ebtn.on { color: var(--ds-text); background: var(--ds-tile-fill-on); border-color: var(--ds-edge-on); }
 .order-foot { flex: none; padding-top: 4px; }
+/* "Add" tiles have a dashed edge. */
 .add-song {
-  width: 100%; min-height: 44px; border: 0; border-radius: var(--ds-r-tile); background: transparent; color: var(--ds-muted); font-size: 15px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  width: 100%; min-height: 44px; border: 1px dashed rgba(148, 163, 184, 0.28); border-radius: var(--ds-r-tile); background: transparent; color: var(--ds-muted); font-size: 13px;
 }
 .add-song:active { background: var(--ds-elevated); }
 .order-list {
   flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; overscroll-behavior: contain;
   scrollbar-width: thin; scrollbar-color: var(--ds-elevated) transparent;
 }
-/* One running-order item. At rest: text on the panel. On stage: a lighter tile with a thin accent bar. */
+/* One running-order item. At rest: text on the panel. On stage: a blue tint with a blue edge. */
 .item {
-  position: relative; display: flex; align-items: center; gap: 12px; flex: none; width: 100%; min-height: 44px; padding: 0 12px 0 14px;
-  border: 0; border-radius: var(--ds-r-tile); background: transparent; text-align: left; color: var(--ds-muted-on);
+  position: relative; display: flex; align-items: center; gap: 10px; flex: none; width: 100%; min-height: 44px; padding: 0 10px;
+  border: 1px solid transparent; border-radius: var(--ds-r-tile); background: transparent; text-align: left; color: var(--ds-text); font-size: 15px;
 }
 .item:active { background: rgba(255, 255, 255, 0.04); }
 /* The item's colours: one small dot per group, like a tiny stage. */
-.item .dots { flex: none; display: flex; align-items: center; gap: 3px; }
-.item .dots i { width: 7px; height: 7px; border-radius: 50%; opacity: 0.85; }
-.item .dots i.unset { background: rgba(255, 255, 255, 0.08); opacity: 1; }
-.item.on .dots i { opacity: 1; }
-.item .name { flex: 1; min-width: 0; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.item .mark { display: inline-flex; align-items: center; gap: 6px; color: var(--ds-warn-text); font-size: 12px; }
-.item .mark::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ds-warn); }
-.item.fixed .name { color: var(--ds-muted-on); }
-.item.on {
-  background: var(--ds-tile-fill-on); color: var(--ds-text); box-shadow: inset 0 0 0 1px var(--ds-edge-on);
-}
-
-.item.on .name { font-weight: 500; }
-/* The item Preview is showing: a quiet outline, no fill, so it can't be taken for the one on stage. */
-.item.selected { box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-/* Selected and on stage at once: the same edge, a little thicker, so the two can be told apart. */
-.item.on.selected { box-shadow: inset 0 0 0 2px var(--ds-edge-on); }
-/* In Blind, the item on the real stage (when the draft has another): a quiet grey outline, no fill. */
-.item.live:not(.on) { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); }
-/* The item Next will start: a quiet hint, not a second selection. */
-.item.is-next:not(.on)::after { content: "next"; color: var(--ds-muted); font-size: 12px; }
-.sep { flex: none; height: 1px; margin: 3px 12px; background: rgba(255, 255, 255, 0.05); }
+.item .dots { flex: none; min-width: 50px; display: flex; align-items: center; gap: 3px; }
+.item .dots i { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+.item .dots i.unset { background: rgba(148, 163, 184, 0.1); }
+.item .dots i.off { box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.45); }
+.item .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .tag { flex: none; color: var(--ds-muted); font-size: 12px; white-space: nowrap; }
+.item .tag.changed-tag { color: var(--ds-warn-text); }
+.item.on { background: var(--ds-tile-fill-on); border-color: var(--ds-edge-on); font-weight: 600; }
+/* Prepare: the item being prepared (the draft's) is violet with "preparing"; the item on the real stage
+   (when it is another) has a dashed outline with "on stage". */
+.item.prep { background: rgba(var(--prep-tint), 0.14); border-color: rgba(var(--prep-edge), 0.5); font-weight: 600; }
+.item.prep .tag { color: var(--prep-text); }
+.item.live { border: 1px dashed rgba(148, 163, 184, 0.45); }
+.sep { flex: none; height: 1px; margin: 3px 10px; background: var(--ds-edge); }
 
 /* Editing the running order: a delete button, the name as a field, a handle to drag. */
 .erow {
-  position: relative; flex: none; display: flex; align-items: center; gap: 4px; min-height: 50px; padding: 0 4px;
+  position: relative; flex: none; display: flex; align-items: center; gap: 2px; min-height: 50px; padding: 0 4px;
   background: var(--ds-tile-fill); border-radius: var(--ds-r-tile); box-shadow: var(--ds-shadow-low);
 }
-.erow.fixed { padding: 0 14px; background: transparent; box-shadow: none; color: var(--ds-muted); font-size: 16px; }
-.erow.fixed small { margin-left: 6px; font-size: 12px; }
+.erow.fixed { padding: 0 4px 0 14px; background: transparent; box-shadow: none; color: var(--ds-muted); font-size: 16px; }
+.erow.fixed .fname { flex: 1; min-width: 0; line-height: 1.25; }
+/* "always first" under the name, so it never wraps beside a Key chip. */
+.erow.fixed small { display: block; font-size: 12px; }
+.erow .grip-space { flex: none; width: 44px; }
 .erow .del { flex: none; width: 44px; height: 44px; border: 0; background: transparent; color: var(--ds-danger-text); opacity: 0.8; font-size: 22px; border-radius: var(--ds-r-small); }
 .erow .del.sure { width: auto; min-width: 76px; padding: 0 12px; margin-right: 2px; background: var(--ds-danger-fill); color: var(--ds-danger-text); opacity: 1; font-size: 14px; box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
 .erow .ename {
-  flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--ds-r-small); background: rgba(148, 170, 210, 0.07);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-text); font: inherit; font-size: 17px; user-select: text; -webkit-user-select: text;
+  flex: 1; min-width: 0; min-height: 44px; padding: 0 8px; border: 0; border-radius: var(--ds-r-small); background: rgba(148, 170, 210, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-text); font: inherit; font-size: 16px; user-select: text; -webkit-user-select: text;
+  text-overflow: ellipsis;
 }
 .erow .ename:focus { outline: none; box-shadow: inset 0 0 0 1px var(--ds-accent); }
+/* While a name is typed its Key chip makes way, so a long name has the row's room. */
+.erow:has(.ename:focus) .kchip { display: none; }
 .erow .grip {
   flex: none; width: 44px; height: 44px; display: grid; place-items: center; color: var(--ds-mark); font-size: 22px; cursor: grab;
   touch-action: none; border-radius: var(--ds-r-small);
@@ -207,122 +230,144 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .erow.dragging .grip { cursor: grabbing; }
 .order-list.reordering .erow:not(.dragging) { transition: transform 0.12s ease-out; }
 
+/* Controller keys: a song's (and a quick look's) key as a quiet 44 px chip with its place only ("1,3"), or "＋";
+   blue while it waits for a key. The whole name is in its title and the toast; the bar at the bottom says what to press. */
+.kchip {
+  flex: none; min-width: 44px; max-width: 64px; min-height: 44px; padding: 0 6px; border: 1px solid var(--ds-edge); border-radius: var(--ds-r-small);
+  background: transparent; color: var(--ds-muted); font: inherit; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.kchip.set { color: var(--ds-text); }
+.kchip.on { background: var(--ds-tile-fill-on); border-color: var(--ds-edge-on); color: var(--ds-text); }
+.qs-key { flex: none; display: flex; flex-direction: column; gap: 6px; }
+.qs-key[hidden] { display: none; }
+.qs-keyline { display: flex; }
+.qs-keyline .kchip { max-width: 160px; }
+.learnbar {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 21; display: flex; align-items: center; gap: 8px;
+  max-width: calc(100vw - 24px); padding: 6px 6px 6px 16px; border-radius: var(--ds-r-tile);
+  background: var(--ds-glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  box-shadow: inset 0 0 0 1px var(--ds-edge-on), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
+}
+.learnbar .lb-text { min-width: 0; font-size: 14px; }
+.learnbar .lb-left { color: var(--ds-muted); font-variant-numeric: tabular-nums; }
+.lb-btn { flex: none; min-height: 44px; padding: 0 14px; border: 1px solid var(--ds-edge); border-radius: var(--ds-r-small); background: transparent; color: var(--ds-muted); font: inherit; font-size: 14px; }
+
 /* ---- Right column ---- */
-.right { display: grid; grid-template-rows: 164px minmax(0, 1fr); gap: var(--ds-gap); min-height: 0; min-width: 0; }
+.right { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: var(--ds-gap); min-height: 0; min-width: 0; }
 .block { min-height: 0; min-width: 0; background: var(--ds-panel-fill); border-radius: var(--ds-r-panel); box-shadow: var(--ds-shadow-raise); padding: 10px; overflow: hidden; }
 
-/* ---- Quick looks: header with tabs, then 6 columns by 2 rows (scrolls when a tab holds more) ---- */
-.quick-looks { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px 12px; }
-.qhead { display: flex; align-items: center; justify-content: space-between; flex: none; padding-left: 4px; }
+/* ---- Quick looks: header with tabs, then 6 columns (two rows show; more scroll) ---- */
+.quick-looks { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px 16px; }
+.qhead { display: flex; align-items: center; gap: 12px; flex: none; min-width: 0; }
 .qright { display: flex; align-items: center; gap: 8px; }
 .qtabs {
-  display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; flex: none;
-  border-radius: var(--ds-r-tile); background: rgba(148, 170, 210, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  display: inline-flex; gap: 2px; padding: 2px; flex: none;
+  border-radius: 12px; background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge);
 }
+.qtabs .tab { min-height: 44px; padding: 0 12px; border-radius: 9px; font-size: 13px; white-space: nowrap; }
+.qtabs .tab.on { box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
 .qgrid {
-  flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
-  grid-auto-rows: 46px; gap: 8px; align-content: start; overscroll-behavior: contain;
+  min-height: 0; max-height: 120px; overflow-y: auto; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-auto-rows: 56px; gap: 8px; align-content: start; overscroll-behavior: contain;
   scrollbar-width: thin; scrollbar-color: var(--ds-elevated) transparent;
 }
 .ql {
-  position: relative; overflow: hidden; display: flex; align-items: center; padding: 0 12px 3px; min-width: 0;
-  background: var(--ds-tile-fill); border: 0; border-radius: var(--ds-r-tile); box-shadow: var(--ds-shadow-low);
-  font-size: 15px; text-align: left; color: var(--ds-text);
+  position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; padding: 9px 10px; min-width: 0;
+  background: var(--ds-tile-fill); border: 1px solid var(--ds-edge); border-radius: var(--ds-r-tile);
+  font-size: 13px; text-align: left; color: var(--ds-text);
 }
 .ql:active { background: var(--ds-elevated); }
-.ql .qname {
-  min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
-  line-height: 1.15; overflow-wrap: anywhere;
-}
-.ql .qstrip { position: absolute; left: 12px; right: 12px; bottom: 6px; height: 3px; display: flex; border-radius: 2px; overflow: hidden; opacity: 0.65; }
-.ql .qstrip i { flex: 1; }
-.ql.newq { grid-column: span 2; justify-content: center; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-muted); font-size: 14px; }
+.ql .qname { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* One block per group: the colour this quick look gives it; faint for a group it leaves alone. */
+.ql .qstrip { display: flex; gap: 2px; }
+.ql .qstrip i { flex: 1; height: 3px; border-radius: 2px; background: rgba(148, 163, 184, 0.1); }
+.ql .qstrip i.off { background: rgba(148, 163, 184, 0.35); }
+.ql.newq { justify-content: center; align-items: center; text-align: center; background: transparent; border: 1px dashed rgba(148, 163, 184, 0.28); color: var(--ds-muted); font-size: 12px; line-height: 1.3; }
 .ql.newq:active { background: var(--ds-elevated); }
 /* Edit on: a tap opens the quick look in the sheet; a small pencil says so. Hold and drag changes its place. */
-.ql.editable::after { content: "✎"; position: absolute; top: 6px; right: 8px; font-size: 13px; line-height: 1; color: var(--ds-muted-on); opacity: 0.8; }
+.ql.editable::after { content: "✎"; position: absolute; top: 7px; right: 8px; font-size: 12px; line-height: 1; color: var(--ds-muted-on); opacity: 0.8; }
 .ql.editable .qname { padding-right: 14px; }
-.ql.editing { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.ql.editing { border-color: var(--ds-accent); }
 .ql.lifted { opacity: 0.4; }
-.ql.drop { box-shadow: inset 0 0 0 2px var(--ds-edge-on); background: var(--ds-tile-fill-on); }
+.ql.drop { border-color: var(--ds-edge-on); background: var(--ds-tile-fill-on); }
 /* The quiet copy that follows the finger. */
-.ql.ql-ghost { position: fixed; z-index: 30; margin: 0; pointer-events: none; background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on), 0 16px 32px -12px rgba(0, 0, 0, 0.7); }
+.ql.ql-ghost { position: fixed; z-index: 30; margin: 0; pointer-events: none; background: var(--ds-tile-fill-on); border-color: var(--ds-edge-on); box-shadow: 0 16px 32px -12px rgba(0, 0, 0, 0.7); }
 .ql.ql-ghost::after { content: none; }
-.qnone { grid-column: span 4; align-self: center; padding: 0 6px; color: var(--ds-muted); font-size: 15px; }
+.qnone { grid-column: span 2; align-self: center; padding: 0 6px; color: var(--ds-muted); font-size: 13px; }
 
-/* ---- Details: the item on stage, then one zone per group (name, colour, level, then the fill slider) ---- */
-.details { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 10px 14px 14px; }
-.dhead { display: flex; align-items: center; gap: 8px; flex: none; min-height: 44px; }
-.dhead h2 { flex: 1; min-width: 0; margin: 0 0 0 4px; font-size: var(--ds-fs-value); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Quiet text buttons (Back, Cancel). */
+/* ---- Groups: Back to saved and Save in the header, then one row per group ---- */
+.details { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 10px 16px 12px; }
+.dhead { display: flex; align-items: center; gap: 10px; flex: none; min-height: 48px; }
+.dhead h2 { flex: none; margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.dsub { flex: 1; min-width: 0; color: var(--ds-muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A header button (Back to saved). */
+.hbtn { flex: none; min-height: 44px; padding: 0 14px; border: 1px solid var(--ds-edge); border-radius: 10px; background: var(--ds-tile-fill); font-size: 13px; white-space: nowrap; }
+.hbtn:active { background: var(--ds-elevated); }
+/* Quiet text buttons (Cancel and the like, in the picker and the sheet). */
 .ghost {
   min-height: 36px; padding: 0 16px; border: 0; border-radius: var(--ds-r-pill); background: transparent;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); color: var(--ds-muted-on); font-size: 14px; white-space: nowrap;
+  box-shadow: inset 0 0 0 1px var(--ds-edge); color: var(--ds-muted-on); font-size: 14px; white-space: nowrap;
 }
 .ghost:active { background: var(--ds-elevated); }
-/* Save: a raised tile that fills with the accent (at half strength) while held. */
+/* Save to <item> (hold): an amber edge while the stage differs from the item; it fills while held. */
 .save {
-  position: relative; overflow: hidden; min-height: 40px; padding: 0 18px; border: 0; border-radius: var(--ds-r-pill);
-  background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); font-size: 15px; white-space: nowrap;
+  position: relative; overflow: hidden; flex: none; min-height: 44px; padding: 0 14px; border: 1px solid var(--ds-edge); border-radius: 10px;
+  background: var(--ds-tile-fill); font-size: 13px; font-weight: 600; white-space: nowrap;
 }
-.save .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--ds-accent-fill); opacity: 0.45; }
-.save.holding { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.save.dirty { border-color: rgba(227, 166, 70, 0.45); }
+.save .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--ds-accent-fill); opacity: 0.35; }
+.save.holding { border-color: var(--ds-accent); }
 .save.holding .fill { width: 100%; transition: width 1s linear; }
-.save .label { position: relative; }
-.save small { color: var(--ds-muted-on); font-size: 12px; margin-left: 4px; }
+.save .label { position: relative; display: flex; align-items: center; gap: 8px; }
+/* In Prepare, Save keeps the draft in the item: violet, as the rest of Prepare. */
+body.prepare .save { background: rgba(var(--prep-tint), 0.14); border-color: rgba(var(--prep-edge), 0.5); }
+body.prepare .save .fill { background: rgb(var(--prep-tint)); opacity: 0.22; }
+body.prepare .save.holding { border-color: var(--prep-text); }
+.save small { color: var(--ds-muted); font-size: 11px; font-weight: 500; }
 
 .rows {
-  flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-  /* Rows grow into spare room up to 124 px (bigger sliders for fewer groups) and never below their content (then the list scrolls). */
-  grid-auto-rows: minmax(min-content, 124px);
-  gap: 6px 14px; align-content: start; overflow-y: auto; overscroll-behavior: contain;
+  flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
   scrollbar-width: thin; scrollbar-color: var(--ds-elevated) transparent;
 }
-/* A group zone: flat (no card), divided from the next by a faint line. */
+/* A group row: name · colour button · level slider · level. */
 .row {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 36px minmax(44px, 1fr); align-items: center; gap: 4px 6px;
-  padding: 4px 2px 10px 4px; border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  flex: none; display: grid; grid-template-columns: 108px 190px minmax(0, 1fr) 62px; align-items: center; gap: 12px;
+  min-height: 64px; border-top: 1px solid rgba(148, 163, 184, 0.08);
 }
-.row .g { font-size: var(--ds-fs-label); color: var(--ds-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* The colour chip: swatch and preset name; tap to open the picker. */
+.row .g { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The colour button: swatch, colour name, chevron; opens the picker. */
 .chip {
-  justify-self: start; display: flex; align-items: center; gap: 8px; min-height: 36px; max-width: 100%; padding: 0 10px; min-width: 0; text-align: left;
-  border: 0; border-radius: var(--ds-r-small); background: transparent; color: var(--ds-text); font-size: 15px;
+  display: flex; align-items: center; gap: 10px; min-height: 44px; min-width: 0; padding: 0 10px 0 12px; text-align: left;
+  border: 1px solid var(--ds-edge); border-radius: 10px; background: var(--ds-tile-fill); color: var(--ds-text); font-size: 14px;
 }
 .chip:active { background: var(--ds-elevated); }
-.chip i, .cur i { flex: none; width: 16px; height: 16px; border-radius: 5px; opacity: 0.85; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
-.chip span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip i { flex: none; width: 16px; height: 16px; border-radius: 50%; }
+.chip i.off { box-shadow: inset 0 0 0 1.5px rgba(148, 163, 184, 0.5); }
+.chip span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip svg { flex: none; color: var(--ds-muted); }
 /* The level: a clear number on the right, never on top of the slider. */
-.row .pct { font-size: 20px; font-weight: 400; color: var(--ds-text); font-variant-numeric: tabular-nums; text-align: right; min-width: 64px; padding-right: 4px; }
+.row .pct { font-size: 17px; font-weight: 600; color: var(--ds-text); font-variant-numeric: tabular-nums; text-align: right; }
 .row .pct.zero { color: var(--ds-muted); }
-/* Group dimmer: the design system's fill slider, across the zone. */
-.row .ds-fill { grid-column: 1 / -1; height: auto; align-self: stretch; min-height: 44px; max-height: 64px; }
-/* A smoke or haze machine: a plain "Smoke" label instead of the colour chip, Puff on the right,
-   and a neutral grey fill (no colour to carry). */
-.row.smoke { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-rows: var(--ds-target) minmax(44px, 1fr); }
-.row .smoke-tag { justify-self: start; padding: 0 10px; color: var(--ds-muted); font-size: 15px; }
-.row.smoke .ds-fill > .ds-fill-slab { background: var(--ds-fill-sheen), linear-gradient(90deg, rgba(143, 154, 176, 0.20), rgba(160, 170, 190, 0.28)); }
+/* Group dimmer: the design system's fill slider, 48 px high, with two grip marks at its left end. */
+.row .ds-fill { height: 48px; }
+.row .ds-fill::after {
+  content: ""; position: absolute; top: 50%; left: 12px; width: 7px; height: 14px; transform: translateY(-50%); pointer-events: none;
+  background: linear-gradient(90deg, rgba(227, 232, 240, 0.22) 0 2px, transparent 2px 5px, rgba(227, 232, 240, 0.22) 5px 7px);
+}
+/* A smoke or haze machine: a plain "Smoke" label and Puff instead of the colour button, and a grey fill (no colour to carry). */
+.row .smoke-cell { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.row .smoke-tag { padding-left: 2px; color: var(--ds-muted); font-size: 14px; }
+.row.smoke .ds-fill { --c: #94A3B8; }
 .puff {
-  min-height: var(--ds-target); min-width: 76px; padding: 0 16px; border: 0; border-radius: var(--ds-r-pill);
-  background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low); color: var(--ds-muted-on); font-size: 14px; font-weight: 500;
+  min-height: var(--ds-target); min-width: 76px; padding: 0 16px; border: 1px solid var(--ds-edge); border-radius: 10px;
+  background: var(--ds-tile-fill); color: var(--ds-text); font-size: 13px; font-weight: 600;
   touch-action: none; -webkit-touch-callout: none;
 }
 /* Held: tinted, like a held Flash button. */
-.puff.down { background: var(--ds-selected); color: var(--ds-text); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.puff.down { background: var(--ds-selected); border-color: var(--ds-edge-held); }
 
-/* Preview: a group the selected item doesn't set says "not set" quietly. */
-.chip.unset span { color: var(--ds-muted); }
 
-/* ---- Preview: the details work on the selected item ----
-   Smoke isn't part of a song, and these work on other things than the item:
-   Save stage as quick look, the colour list's Edit and Add to colours. */
-body.preview .row.smoke,
-body.preview .ql.newq,
-body.preview #pEditBtn,
-body.preview #fxEdit,
-body.preview #pAddOpen,
-body.preview #pAdd { display: none; }
-
-/* ---- Colour picker: covers the details panel only ---- */
+/* ---- Sheets over the Groups panel (the quick-look sheet; the colour picker below) ---- */
 .picker {
   position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; gap: 8px;
   background: var(--ds-glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
@@ -330,22 +375,42 @@ body.preview #pAdd { display: none; }
 }
 .phead { display: flex; align-items: center; gap: 10px; flex: none; }
 .phead h2 { margin: 0 0 0 2px; font-size: var(--ds-fs-value); font-weight: 400; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cur { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 15px; white-space: nowrap; }
-.cur i { width: 18px; height: 18px; border-radius: 5px; }
+
+/* ---- Colour picker: takes the Groups panel's place (its rows hide; the panel stays), Quick looks stay ---- */
+.details.picking > :not(#picker) { visibility: hidden; }
+.cpick {
+  gap: 10px; padding: 10px 16px 14px; background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none;
+  overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--ds-elevated) transparent;
+}
+/* Header: ‹ Groups, the group, what it runs and its level, Colours / Effects, Done. */
+.cpick .phead { gap: 12px; min-width: 0; }
+.cpick .phead h2 { flex: none; margin: 0; max-width: 200px; font-size: 17px; font-weight: 600; }
+.cur { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--ds-muted); font-size: 13px; white-space: nowrap; }
+.cur span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cur i { flex: none; width: 14px; height: 14px; border-radius: 50%; }
+.cur i.off { box-shadow: inset 0 0 0 1.5px rgba(148, 163, 184, 0.5); }
+.cpick .phead .grow { flex: 1 1 0; }
+.pdone { padding: 0 16px; font-size: 14px; font-weight: 600; }
 .done { min-width: 96px; min-height: 40px; padding: 0 20px; border: 0; border-radius: var(--ds-r-pill); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); font-size: 15px; font-weight: 500; }
 .done:active { background: var(--ds-selected); }
 .tab { min-height: 38px; padding: 0 16px; border: 0; border-radius: var(--ds-r-small); background: transparent; color: var(--ds-muted); font-size: 15px; }
 .tab.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.ptabs { display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; border-radius: var(--ds-r-tile); background: rgba(148, 170, 210, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05); }
-.pcol { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.pcol { display: flex; flex-direction: column; gap: 10px; flex: none; }
+/* Colour tiles: a bar of the colour over its name; six to a row (five for effects), ＋ New colour / ＋ New effect last. */
 .pgrid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.pgrid.fxgrid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.pgrid[hidden] { display: none; }
 .pc {
-  display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 6px; min-height: 76px; padding: 10px;
-  background: var(--ds-tile-fill); border: 0; border-radius: var(--ds-r-tile); box-shadow: var(--ds-shadow-low); font-size: 14px; text-align: left;
+  position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 7px; min-width: 0; min-height: 58px; padding: 8px;
+  background: var(--ds-tile-fill); border: 1px solid var(--ds-edge); border-radius: var(--ds-r-tile); color: var(--ds-text); font-size: 13px; text-align: left;
 }
-.pc i { flex: none; width: 100%; height: 26px; border-radius: 8px; opacity: 0.8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
-.pc span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pc.on { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.pc:active { background: var(--ds-elevated); }
+.pc i { flex: none; height: 22px; border-radius: 7px; opacity: 0.82; }
+.pc i.off { background: #05080E; opacity: 1; box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.3); }
+.pc span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc.on { background: var(--ds-tile-fill-on); border-color: rgba(67, 137, 232, 0.55); }
+.pc.fx { min-height: 62px; }
+.pc i.fxsw { height: 20px; border-radius: 6px; background: #05080E; opacity: 1; }
 .lab2 { margin: 4px 2px 0; font-size: var(--ds-fs-label); color: var(--ds-muted); font-weight: 400; }
 .strip2 { position: relative; height: 44px; border-radius: var(--ds-r-tile); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); cursor: crosshair; touch-action: none; flex: none; overflow: hidden; }
 /* The colour is dimmed on the strip (the handle and border are not); the colour sent is the true one. */
@@ -353,38 +418,22 @@ body.preview #pAdd { display: none; }
 .strip2.hue { --grad: linear-gradient(90deg, #ff0000, #ffc800, #00ff00, #00ffc8, #0000ff, #8c00ff, #ff008c, #ff0000); }
 .strip2.cct { --grad: linear-gradient(90deg, #f7d6b4, #f4f8ff); }
 .strip2.cct::before { opacity: 0.7; }
-/* Keep a strip colour: a quiet pill beside the strip's label, and a small form under the strip. */
+/* A small-capitals label over a list or the strip, with its button at the right (Edit this colour, ＋ Keep as a colour). */
 .labrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; }
 .labrow .lab2 { margin: 4px 2px 0; }
-.pill-add { flex: none; min-height: 40px; }
-#pEditBtn { min-height: 40px; padding: 0 18px; }
+.labrow .ds-caps { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.labrow .ebtn:disabled, .labrow .hbtn:disabled { opacity: 0.4; }
 .padd {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 14px; flex: none; padding: 6px 12px;
   border-radius: var(--ds-r-tile); background: var(--ds-tile-fill); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
-.padd[hidden], .pill-add[hidden], .pswitch[hidden] { display: none; }
-/* Edit mode: the strip row and the Add form give way to the editor. */
-.pcol.editing .labrow, .pcol.editing #pAny { display: none; }
-.pc { position: relative; }
-.pc.editable::after { content: "✎"; position: absolute; bottom: 10px; right: 10px; font-size: 14px; line-height: 1; color: var(--ds-muted-on); opacity: 0.8; }
-.pc.editable span { max-width: calc(100% - 16px); }
-.pc.editing { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.padd[hidden], .pswitch[hidden] { display: none; }
 .ghost.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.pedit .pe-strip { grid-column: 1 / -1; height: 40px; }
-.pe-strip[hidden] { display: none; }
-.pe-used { grid-column: 1 / -1; margin: 0 2px; font-size: var(--ds-fs-label); color: var(--ds-muted); }
-.pedit .padd-btns { grid-column: 2; justify-self: end; }
 .ghost.danger.armed { color: var(--ds-danger-text); background: var(--ds-danger-fill); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
 .padd-top { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }
 .padd-top .qs-name { flex: 1; min-width: 0; }
 .padd-sw { flex: none; width: 28px; height: 28px; border-radius: 8px; opacity: 0.8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
 .padd-btns { display: flex; align-items: center; gap: 8px; }
-/* ＋ New colour: its own strip and White, Amber and UV sliders across the form. */
-.pa-strip, .pa-extras, .pa-row { grid-column: 1 / -1; }
-.pa-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; }
-.pa-row[hidden] { display: none; }
-.pa-strip { margin: 4px 0; }
-.pa-strip[hidden] { display: none; }
 /* A switch in the picker's quiet style: faint track, blue tint when on. */
 .pswitch { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; color: var(--ds-muted-on); font-size: 15px; cursor: pointer; }
 .pswitch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
@@ -401,9 +450,290 @@ body.preview #pAdd { display: none; }
 .pextras .pct { font-size: var(--ds-fs-value); color: var(--ds-text); font-variant-numeric: tabular-nums; text-align: right; padding-right: 4px; }
 .pextras .pct.zero { color: var(--ds-muted); }
 .pextras .ds-fill { grid-column: 1 / -1; }
-/* Editing a colour: the White, Amber and UV sliders give way to the editor too. */
-.pcol.editing #pExtras { display: none; }
 .strip-handle { position: absolute; top: 4px; bottom: 4px; left: 0; width: 4px; background: #c9ccd2; border-radius: 2px; box-shadow: 0 0 0 1px #000; }
+/* The picker's Any colour strip: 40 px, its colours dimmed, a light line for the handle that stands out above and below. */
+#pAny { height: 40px; border-radius: 12px; box-shadow: none; overflow: visible; }
+#pAny::before { border-radius: 12px; }
+#pAny .strip-handle { top: -3px; bottom: -3px; width: 3px; background: #E3E8F0; box-shadow: none; }
+/* White, Amber and UV under it: "White 0 %" over a 44 px fill slider, three to a row. */
+#pExtras { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 0; }
+#pExtras .xcell { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+#pExtras .lab2, #pExtras .pct, #pExtras .pct.zero { margin: 0; padding: 0; font-size: 12px; color: var(--ds-muted); }
+#pExtras .ds-fill { flex: 1 0 100%; height: 44px; }
+/* Saturation and Exact values under a colour strip (Any colour, the colour editor, own colours in the effect editor).
+   Saturation: "Saturation 100 %" over a 44 px fill slider carrying the strip's colour, with Exact values › at the
+   right of its line (quiet: the edge, muted text); open, a hex field and R, G, B fields (44 px) and a quiet note. */
+.cx-line { display: flex; align-items: flex-end; gap: 10px; min-width: 0; }
+.cx-sat { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.cx-sat[hidden] { display: none; }
+.cx-sat .lab2, .cx-sat .pct, .cx-sat .pct.zero { margin: 0; padding: 0; font-size: 12px; color: var(--ds-muted); }
+.cx-sat .ds-fill { flex: 1 0 100%; height: 44px; }
+.cx-foldwrap { flex: none; display: flex; margin-left: auto; }
+.cx-fold {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px;
+  border: 1px solid var(--ds-edge); border-radius: 10px; background: transparent; color: var(--ds-muted); font-size: 13px; white-space: nowrap;
+}
+.cx-fold:active { background: var(--ds-elevated); }
+.cx-fold.open { color: var(--ds-muted-on); }
+.cx-arrow { display: inline-block; transition: transform 0.15s; }
+.cx-fold.open .cx-arrow { transform: rotate(90deg); }
+.cx-exact { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cx-exact[hidden] { display: none; }
+.cx-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.cx-cell { display: inline-flex; align-items: center; gap: 6px; }
+.cx-lab { color: var(--ds-muted); font-size: 12px; }
+.cx-cell .ds-field {
+  box-sizing: border-box; height: 44px; min-height: 44px; padding: 0 10px; font-size: 15px; font-variant-numeric: tabular-nums;
+  user-select: text; -webkit-user-select: text;
+}
+.cx-hex { width: 108px; }
+.cx-num { width: 62px; text-align: center; }
+.cx-note { margin: 0; color: var(--ds-muted); font-size: 12px; }
+.cx-note[hidden] { display: none; }
+/* ---- Colour editor: the whole right column (Quick looks and Groups give way; the effect editor too), as the mockup's colour editor ---- */
+.right.ce-open { grid-template-rows: minmax(0, 1fr); }
+.right.ce-open > #quickLooks, .right.ce-open > #details { display: none; }
+.cedit {
+  display: flex; flex-direction: column; gap: 12px; padding: 10px 16px 14px;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--ds-elevated) transparent;
+}
+.cedit[hidden] { display: none; }
+.cedit > .grow { flex: 1; }
+/* Header: ‹ <group>, Name, Cancel, Save. */
+.ce-head { display: flex; align-items: center; gap: 10px; flex: none; min-width: 0; }
+.ce-back { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.ce-name { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ce-name > span { color: var(--ds-muted); font-size: 12px; }
+.ce-name input {
+  flex: 1; min-width: 0; height: 44px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--ds-edge); border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18); color: var(--ds-text); font: inherit; font-size: 16px; font-weight: 600; user-select: text; -webkit-user-select: text;
+}
+.ce-name input:focus { outline: none; border-color: var(--ds-accent); }
+.ce-name input::placeholder { color: var(--ds-muted); font-weight: 400; }
+.ce-cancel { flex: none; min-height: 44px; padding: 0 14px; border: 1px solid var(--ds-edge); border-radius: 10px; background: transparent; color: var(--ds-text); font-size: 13px; }
+.ce-save { flex: none; min-height: 44px; padding: 0 18px; border: 1px solid rgba(67, 137, 232, 0.5); border-radius: 10px; background: var(--ds-tile-fill-on); color: var(--ds-text); font-size: 14px; font-weight: 600; }
+.ce-cancel:active, .ce-save:active { background: var(--ds-elevated); }
+.ce-save:disabled { opacity: 0.4; }
+/* The preview card: the colour's swatch, "<colour> on <group>" (or "New colour for <group>") and what saving does. */
+.ce-card { flex: none; display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 14px; background: rgba(0, 0, 0, 0.18); border: 1px solid var(--ds-edge); }
+.ce-sw { flex: none; width: 56px; height: 36px; border-radius: 10px; opacity: 0.82; }
+.ce-sw.off { background: #05080E; opacity: 1; box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.3); }
+.ce-card-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ce-card-text b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ce-card-text span { color: var(--ds-muted); font-size: 12px; }
+/* The rows: a 96 px muted label, then the control. */
+.ce-rows { flex: none; display: flex; flex-direction: column; gap: 12px; }
+.ce-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 12px; }
+.ce-row[hidden] { display: none; }
+.ce-row-top { align-items: start; }
+.ce-lab { color: var(--ds-muted); font-size: 13px; line-height: 1.35; text-wrap: balance; }
+.ce-colour { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* The strip, dimmed, with a light line for the colour that stands out above and below (as Any colour's). */
+.ce-strip { flex: 1; height: 44px; border-radius: 12px; box-shadow: none; overflow: visible; }
+.ce-strip::before { border-radius: 12px; }
+.ce-strip .strip-handle { top: -3px; bottom: -3px; width: 3px; background: #E3E8F0; box-shadow: none; }
+.ce-chip { flex: none; min-height: 44px; padding: 0 12px; border: 1px solid var(--ds-edge); border-radius: 9px; background: transparent; color: var(--ds-muted); font-size: 13px; white-space: nowrap; }
+.ce-chip.on { color: var(--ds-text); background: var(--ds-tile-fill-on); border-color: rgba(67, 137, 232, 0.45); }
+.ce-chip[hidden] { display: none; }
+/* White, Amber and UV, three to a row: "White 0 %" over a 44 px fill slider, as in the picker. */
+.ce-extras { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 0; }
+.ce-extras .xcell { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.ce-extras .lab2, .ce-extras .pct, .ce-extras .pct.zero { margin: 0; padding: 0; font-size: 12px; color: var(--ds-muted); }
+.ce-extras .ds-fill { flex: 1 0 100%; height: 44px; }
+/* Brightness: the range inside at the left, the level beside the slider (never over it). */
+.ce-level { display: grid; grid-template-columns: minmax(0, 1fr) 58px; align-items: center; gap: 12px; }
+.ce-range { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ds-muted); font-size: 12px; pointer-events: none; }
+.ce-level .pct { font-size: 14px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+/* Exact values › in the editor: the button, then its fields under it. */
+.ce-exact { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.ce-exact .cx-foldwrap { margin-left: 0; }
+/* Fade into it and Apply to: the segmented style of the picker's tabs, 44 px. */
+.ce-seg { justify-self: start; flex-wrap: wrap; border-radius: 12px; }
+.ce-seg > button { min-height: 44px; padding: 0 12px; font-size: 13px; white-space: nowrap; }
+.ce-seg > button.on { box-shadow: inset 0 0 0 1px rgba(67, 137, 232, 0.45); }
+.ce-seg > button:disabled { opacity: 0.4; }
+.ce-used { font-size: 13px; line-height: 1.5; }
+/* Delete colour (a second tap deletes) and one line on what it does. */
+.ce-del { flex: none; display: flex; align-items: center; gap: 12px; }
+.ce-del[hidden] { display: none; }
+.ce-delete { flex: none; min-height: 44px; padding: 0 14px; border: 1px solid rgba(227, 106, 111, 0.3); border-radius: 10px; background: transparent; color: var(--ds-danger-text); font-size: 13px; white-space: nowrap; }
+.ce-delete.armed { background: var(--ds-danger-fill); border-color: var(--ds-danger-edge); }
+.ce-delete:disabled { opacity: 0.4; }
+.ce-delnote { min-width: 0; color: var(--ds-muted); font-size: 12px; }
+/* ---- Effect editor: the whole right column, as the colour editor (the mockup's effect editor) ---- */
+.fe-note { color: var(--ds-muted); font-size: 12px; }
+/* ⋯ in the header: Save as a copy and Delete, in a small glass menu under it. */
+.fe-more { position: relative; flex: none; }
+.fe-more[hidden] { display: none; }
+.fe-more-btn { width: 44px; height: 44px; padding: 0; border: 1px solid var(--ds-edge); border-radius: 10px; background: transparent; color: var(--ds-muted); font-size: 18px; }
+.fe-more-btn:active, .fe-more-btn.open { background: var(--ds-elevated); }
+.fe-menu { top: calc(100% + 6px); min-width: 220px; }
+.fe-menu[hidden] { display: none; }
+.fe-menu button { font-size: 14px; color: var(--ds-text); }
+.fe-menu button:disabled { opacity: 0.4; }
+.fe-menu .fe-delete { color: var(--ds-danger-text); }
+.fe-menu .fe-delete.armed { background: var(--ds-danger-fill); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
+/* "PREVIEW ON <group>" and its note over the moving strip (on the stage picture's darkest ground). */
+.fe-preview { flex: none; display: flex; flex-direction: column; gap: 6px; }
+.fe-prev-lab { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; min-width: 0; }
+.fe-prev-lab .ds-caps { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fe-prev-lab .fe-note { flex: 0 1 auto; min-width: 0; text-align: right; }
+.fe-strip { display: block; width: 100%; height: 34px; border-radius: 12px; background: #04070D; }
+/* Effect: one chip per kind, the chosen one blue. */
+.fe-kind { display: flex; flex-wrap: wrap; gap: 6px; }
+.fe-kind > button {
+  min-height: 44px; padding: 0 12px; border: 1px solid var(--ds-edge); border-radius: 10px;
+  background: var(--ds-tile-fill); color: var(--ds-muted); font-size: 13px;
+}
+.fe-kind > button.on { color: var(--ds-text); background: var(--ds-tile-fill-on); border-color: rgba(67, 137, 232, 0.5); }
+/* Colours: the chosen ones as numbered pills in the order they play, then ＋ Colour and the note. */
+.fe-order { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.fechip {
+  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px 0 6px; max-width: 100%;
+  border: 1px solid var(--ds-edge); border-radius: 22px; background: var(--ds-tile-fill); color: var(--ds-text); font-size: 13px;
+}
+.fechip:not(:has(.fechip-n)) { padding-left: 10px; }
+.fechip.movable { cursor: grab; }
+.fechip-n { width: 18px; text-align: center; color: var(--ds-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.fechip i { flex: none; width: 16px; height: 16px; border-radius: 50%; opacity: 0.85; }
+.fechip i.off { opacity: 1; box-shadow: inset 0 0 0 1.5px rgba(148, 163, 184, 0.5); }
+.fechip-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fechip.lifted { opacity: 0.45; }
+.fechip.drop { border-color: var(--ds-accent); }
+.fe-add { min-height: 44px; padding: 0 14px; border: 1px dashed rgba(148, 163, 184, 0.3); border-radius: 22px; background: transparent; color: var(--ds-muted); font-size: 13px; white-space: nowrap; }
+.fe-add.open { border-style: solid; border-color: var(--ds-edge-on); color: var(--ds-muted-on); }
+.fe-order .fe-note { margin-left: 4px; }
+.fe-ghost { position: fixed; z-index: 50; margin: 0; pointer-events: none; opacity: 0.9; background: var(--ds-popover); }
+/* The list ＋ Colour (or a base colour) opens under its row: the colours to tap, and ＋ Own colour's strip. */
+.fe-tray { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 8px; margin-top: -4px; border-radius: 12px; background: rgba(0, 0, 0, 0.14); border: 1px solid var(--ds-edge); }
+.fe-colours { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 6px; }
+.fecol {
+  position: relative; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 28px 0 8px; min-width: 0;
+  border: 1px solid var(--ds-edge); border-radius: 10px; background: var(--ds-tile-fill); color: var(--ds-muted-on); font-size: 13px; text-align: left;
+}
+.fecol i { flex: none; width: 16px; height: 16px; border-radius: 50%; opacity: 0.85; }
+.fecol span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fecol.on { color: var(--ds-text); background: var(--ds-tile-fill-on); border-color: rgba(67, 137, 232, 0.5); }
+.fecol .fenum { position: absolute; right: 8px; font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; color: var(--ds-muted); }
+/* ＋ Own colour: dashed like the other add buttons; unavailable (40 %) when an effect has six colours. */
+.fecol.add { justify-content: center; padding: 0 8px; background: transparent; border-style: dashed; border-color: rgba(148, 163, 184, 0.3); color: var(--ds-muted); }
+.fecol.add.open { border-style: solid; border-color: var(--ds-edge-on); color: var(--ds-muted-on); }
+.fecol.add:disabled { opacity: 0.4; cursor: default; }
+.fe-own { height: 44px; border-radius: 12px; box-shadow: none; overflow: visible; }
+.fe-own::before { border-radius: 12px; }
+.fe-own .strip-handle { top: -3px; bottom: -3px; width: 3px; background: #E3E8F0; box-shadow: none; }
+.fe-own[hidden] { display: none; }
+/* ＋ Own colour's box: the strip, Saturation and Exact values; it stays open until ＋ Own colour is tapped again. */
+.fe-ownbox { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.fe-ownbox[hidden] { display: none; }
+/* Base: None | a colour | Own colour, and its brightness (the fill carries the base colour). */
+.fe-base { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.fe-base .ce-seg { flex: none; flex-wrap: nowrap; }
+.fe-base .ce-seg > button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.fe-base .ds-fill { flex: 1; min-width: 120px; }
+.fe-base .ds-fill.fe-off { pointer-events: none; cursor: default; }
+.fe-base .ce-range[hidden] { display: none; }
+.fe-base .ce-range .pct { font: inherit; color: inherit; }
+/* Speed: 1 … 32 beats and Free (then its seconds), with the round's length. */
+.fe-speed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; }
+.fe-speed-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.fe-speed-seg .ce-seg > button { min-width: 44px; font-variant-numeric: tabular-nums; }
+.fe-speed-seg .ce-seg[hidden] { display: none; }
+/* Fine-tune: a quiet bar with its summary; open, its settings three to a row. */
+.fe-fine {
+  flex: none; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; text-align: left;
+  border: 1px solid var(--ds-edge); border-radius: 12px; background: rgba(0, 0, 0, 0.14); color: var(--ds-text); font-size: 13px;
+}
+.fe-fine b { flex: none; font-weight: 600; }
+.fe-fine span { color: var(--ds-muted); }
+.fe-fine span:nth-child(2) { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fe-fine-box { flex: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: -4px; }
+.fe-fine-box[hidden] { display: none; }
+.fe-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fe-cell[hidden] { display: none; }
+.fe-cell-lab { color: var(--ds-muted); font-size: 12px; white-space: nowrap; }
+.fe-cell-lab .pct, .fe-cell-lab .pct.zero { font: inherit; color: inherit; }
+.fe-step { display: flex; align-items: center; justify-content: space-between; height: 44px; box-sizing: border-box; border-radius: 12px; border: 1px solid var(--ds-edge); background: rgba(255, 255, 255, 0.025); }
+.fe-stepb { width: 44px; height: 42px; padding: 0; border: 0; background: transparent; color: var(--ds-text); font-size: 18px; }
+.fe-stepb:disabled { opacity: 0.4; }
+.fe-count { font-weight: 600; font-variant-numeric: tabular-nums; }
+.fe-edges { display: flex; flex-wrap: nowrap; }
+.fe-edges > button { flex: 1; min-height: 44px; }
+.fe-used { flex: none; margin: 0; color: var(--ds-muted); font-size: 12px; }
+.fe-used[hidden] { display: none; }
+
+/* ---- Individual lights: the whole right column, as the editors (the mockup's individual lights) ---- */
+.mlights { gap: 10px; }
+.mlights .hbtn:disabled { opacity: 0.4; }
+/* In Prepare the button stays where it is, faded: a tap says it works live only. */
+#manualBtn.unavail { opacity: 0.4; }
+.m-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.m-title b { font-size: 17px; font-weight: 600; white-space: nowrap; }
+.m-title span { color: var(--ds-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Pick: All, each group, None. */
+.m-pick { flex: none; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.m-pick > .ds-caps { margin-right: 4px; }
+.m-chips { display: contents; }
+/* The plan: every light where Patch puts it, on the stage view's dark. */
+.m-plan { position: relative; flex: none; height: 236px; border-radius: 14px; background: #04070D; border: 1px solid var(--ds-edge); overflow: hidden; }
+.m-plan-lab { position: absolute; left: 12px; top: 8px; font-size: 10px; pointer-events: none; }
+.mfix {
+  position: absolute; box-sizing: border-box; padding: 4px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--ds-muted);
+}
+.mfix.on { background: rgba(67, 137, 232, 0.14); border-color: rgba(67, 137, 232, 0.7); color: var(--ds-text); }
+/* The light as the stage shows it now, one cell per segment; a dark light is a faint shape. */
+/* The light's drawing sits in the space it covers on the plan (a turned bar's corners included), turned about its middle. */
+.mshape { flex: none; position: relative; }
+.mvis { position: absolute; display: flex; border-radius: 3px; overflow: hidden; background: rgba(148, 163, 184, 0.12); }
+.mfix.round .mvis { border-radius: 50%; }
+/* An outline: one stroke per segment round its edge. */
+.mvis.outline { background: none; border-radius: 0; overflow: visible; }
+.mvis.outline polyline { fill: none; stroke-width: 3; stroke-linejoin: round; opacity: 0.85; }
+/* Beams' cones, under every button and never in the way of a tap. */
+.m-cones { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.mvis > i { flex: 1 1 0; opacity: 0.85; }
+.mname { font-size: 11px; line-height: 1; white-space: nowrap; }
+.mdot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--ds-warn); pointer-events: none; }
+.mdot[hidden] { display: none; }
+/* One bar picked: its segments in their places along it. */
+.m-segrow { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.m-segrow[hidden] { display: none; }
+.m-segof { flex: none; width: 112px; color: var(--ds-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-segs { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.mseg {
+  position: relative; flex: none; width: 44px; height: 44px; padding: 0; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--ds-edge); border-radius: 10px; background: rgba(255, 255, 255, 0.03);
+}
+.mseg.on { background: rgba(67, 137, 232, 0.14); border-color: rgba(67, 137, 232, 0.7); }
+.mseg > i { width: 26px; height: 8px; border-radius: 2px; background: rgba(148, 163, 184, 0.12); }
+.mseg .mdot { top: 2px; right: 2px; width: 6px; height: 6px; }
+.m-note { color: var(--ds-muted); font-size: 12px; margin-left: 6px; white-space: nowrap; }
+/* What is picked, then its colours, Any colour … and the level. */
+.m-sum { flex: none; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.m-sum b { flex: none; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.m-sum span { min-width: 0; color: var(--ds-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-blacknote { flex: none; margin: 0; color: var(--ds-muted); font-size: 12px; }
+.m-blacknote[hidden] { display: none; }
+.m-colours { flex: none; display: flex; align-items: center; gap: 8px; }
+#mAnyBtn:disabled { opacity: 0.4; }
+.m-pal { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.mcol { flex: none; width: 44px; height: 44px; padding: 0; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 50%; }
+.mcol.off { background: #05080E; }
+.mcol.on { border: 2px solid var(--ds-accent); box-shadow: inset 0 0 0 3px #141C2E; }
+.m-pal.idle .mcol { opacity: 0.4; }
+#mAnyBtn[aria-expanded="true"] { color: var(--ds-text); background: var(--ds-tile-fill-on); border-color: var(--ds-edge-on); }
+.m-any { height: 40px; border-radius: 12px; box-shadow: none; overflow: visible; }
+.m-any[hidden] { display: none; }
+.m-any::before { border-radius: 12px; }
+.m-any .strip-handle { top: -3px; bottom: -3px; width: 3px; background: #E3E8F0; box-shadow: none; }
+.m-level { flex: none; display: flex; align-items: center; gap: 10px; }
+.m-lab { flex: none; width: 44px; color: var(--ds-muted); font-size: 13px; }
+.m-level .ds-fill { flex: 1; min-width: 0; height: 48px; }
+.m-level .pct { flex: none; width: 58px; font-size: 17px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.m-level .pct.zero { color: var(--ds-muted); }
+.m-level .ds-fill.idle { opacity: 0.4; }
+
 /* ---- New quick look sheet (same cover as the colour picker) ---- */
 .lab-note { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .qs-name {
@@ -433,10 +763,24 @@ body.preview #pAdd { display: none; }
 .qs-stage { flex: none; display: flex; flex-direction: column; gap: 0; }
 .qs-stage[hidden] { display: none; }
 .qs-stage .lab-note { margin: -4px 0 0 60px; font-size: var(--ds-fs-label); color: var(--ds-muted); }
-.soon { margin: 0; padding: 24px 4px; color: var(--dim); font-size: 15px; }
 
-/* ---- Effects tab: the group's effects, then the running effect's settings ---- */
-.pfx { display: flex; flex-direction: column; gap: 8px; flex: none; }
+/* ---- Effects tab: the group's effects, then the running effect's card ---- */
+.pfx { display: flex; flex-direction: column; gap: 10px; flex: 1 0 auto; }
+.pfx > .ds-caps[hidden] { display: none; }
+/* A group that isn't a line of lights: why there are no effects, and which groups take them. */
+.fx-notline { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px 0; text-align: center; color: var(--ds-muted); font-size: 13px; line-height: 1.5; }
+.fx-notline > span:last-child { max-width: 380px; }
+.fx-notline-title { color: var(--ds-text); font-size: 15px; }
+/* While an effect runs: "<effect> is running", the round's length, All settings, then Speed. */
+.fxcard { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 14px; background: rgba(0, 0, 0, 0.16); border: 1px solid var(--ds-edge); }
+.fxcard-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.fxcard-top b { flex: none; font-size: 14px; font-weight: 600; }
+.fxnote { min-width: 0; color: var(--ds-muted); font-size: 12px; }
+.fxcard .fxset { padding-top: 0; border-top: 0; }
+.fxspeed .fxitem { gap: 10px; }
+.fxspeed .fxitem > .lab2 { width: 64px; margin: 0; font-size: 12px; }
+.fxspeed .ds-seg > button { min-width: 40px; font-size: 13px; }
+.fxunit { color: var(--ds-muted); font-size: 12px; white-space: nowrap; }
 /* An effect's swatch: its colours side by side, drifting slowly to one side (twice as wide, moved by its own width, so it loops). */
 .pc .fxsw { position: relative; overflow: hidden; }
 .pc .fxsw::before {
@@ -453,222 +797,268 @@ body.preview #pAdd { display: none; }
 .fxitem .lab2 { margin: 0 2px; white-space: nowrap; }
 .fxset .ds-seg { flex-wrap: wrap; }
 .fxset .ds-seg > button { min-height: 44px; min-width: 44px; padding: 0 12px; font-size: 15px; font-variant-numeric: tabular-nums; }
-.fxstep { width: 44px; padding: 0; font-size: 20px; color: var(--ds-muted-on); }
-.fxcount { min-width: 28px; text-align: center; font-size: var(--ds-fs-value); font-weight: 400; font-variant-numeric: tabular-nums; }
-.fxsize { flex: 1; min-width: 220px; }
-.fxsize .ds-fill { flex: 1; min-width: 120px; }
-.fxsize .pct { min-width: 52px; text-align: right; font-size: var(--ds-fs-value); font-variant-numeric: tabular-nums; }
-.fxsize .pct.zero { color: var(--ds-muted); }
-/* Edit mode on the Effects tab: the running effect's settings give way to the editor, as the Any colour strip does on Colours. */
-.pfx.editing #fxSet { display: none; }
-.pc.newfx { align-items: center; justify-content: center; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-muted); }
-.pc.newfx.editing { box-shadow: inset 0 0 0 1px var(--ds-accent); }
-.fxedit > * { grid-column: 1 / -1; }
-.fxedit .lab2 { margin: 4px 2px 0; }
-.fxedit .padd-btns { justify-self: end; }
-.padd-btns [hidden] { display: none; }
-.fxedit .fxset { padding-top: 4px; border-top: 0; }
-/* The effect moving along the group's lights, on the stage picture's dark ground; app.js draws it mixed down like a swatch. */
-.fe-strip { display: block; width: 100%; height: 32px; margin: 6px 0 2px; border-radius: var(--ds-r-tile); background: #06080c; box-shadow: var(--ds-shadow-inset); }
-/* The colour editor's Brightness and Fade: the same quiet rows as an effect's settings, under the colour strip. */
-.pedit .pe-set { grid-column: 1 / -1; padding-top: 4px; border-top: 0; }
-.pe-set .fxrow[hidden] { display: none; }
-.fe-kind { flex-wrap: wrap; justify-self: start; }
-.fe-kind > button { min-height: 44px; }
-/* The group's colours to choose from: a tapped one shows its place in the order. */
-.fe-colours { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
-.fecol {
-  position: relative; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 28px 0 8px; min-width: 0;
-  border: 0; border-radius: var(--ds-r-small); background: rgba(148, 170, 210, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-  color: var(--ds-muted-on); font-size: 14px; text-align: left;
-}
-.fecol i { flex: none; width: 22px; height: 22px; border-radius: 6px; opacity: 0.8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
-.fecol span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fecol.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.fecol .fenum { position: absolute; right: 8px; font-size: 13px; font-weight: 400; font-variant-numeric: tabular-nums; color: var(--ds-muted-on); }
-/* ＋ Own colour: a quiet outline like ＋ New effect; unavailable (dimmer still) when an effect has six colours. */
-.fecol.add { justify-content: center; padding: 0 8px; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--ds-muted); }
-.fecol.add.open { box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-muted-on); }
-.fecol.add:disabled { opacity: 0.4; cursor: default; }
-/* Hold and drag (effect colours, quick looks): a tile that can be held does not select or open a menu. A held colour lifts (its place dims), a quiet copy follows the finger, and the colour under it is outlined. */
+/* ＋ New colour and ＋ New effect: dashed "add" tiles. */
+.pc.newfx { align-items: center; justify-content: center; background: transparent; border: 1px dashed rgba(148, 163, 184, 0.3); color: var(--ds-muted); text-align: center; }
+/* Hold and drag (effect colours, quick looks): a tile that can be held does not select or open a menu. A held tile lifts (its place dims), a quiet copy follows the finger, and the tile under it is outlined. */
 .movable { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.fecol.lifted { opacity: 0.45; }
-.fecol.drop { box-shadow: inset 0 0 0 1px var(--ds-accent); }
-.fe-ghost { position: fixed; z-index: 50; margin: 0; pointer-events: none; opacity: 0.85; box-shadow: var(--ds-shadow-raise); }
-.fe-own[hidden], .fe-base-row[hidden] { display: none; }
 
-/* ---- Bottom bar: one control strip; groups divided by faint lines ---- */
+/* ---- Bottom bar: Master, Flash, then Undo, Basic lights, Next and Blackout (52 px targets) ---- */
 .bottom {
-  grid-column: 1 / -1; display: flex; align-items: stretch; gap: 6px; min-width: 0; padding: 7px;
-  background: var(--ds-panel-fill); border-radius: var(--ds-r-panel); box-shadow: var(--ds-shadow-raise);
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 10px 0 16px;
+  background: var(--ds-panel-fill); border-radius: var(--ds-r-bar); box-shadow: var(--ds-shadow-raise);
 }
-.bottom > * + * { position: relative; }
+.bdiv { flex: none; width: 1px; align-self: stretch; margin: 14px 4px; background: var(--ds-edge); }
 .master {
-  flex: none; width: 206px; display: flex; flex-direction: column; justify-content: center; gap: 5px; padding: 0 10px 0 8px;
+  flex: none; width: 180px; display: flex; flex-direction: column; justify-content: center; gap: 5px;
   background: transparent; border: 0; touch-action: none;
 }
-.master-label { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.09em; color: var(--ds-muted); }
-.master-label b { color: var(--ds-text); font-size: 15px; font-weight: 400; letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
+.master-label { display: flex; justify-content: space-between; align-items: baseline; }
+.master-label b { color: var(--ds-text); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 /* Master below full: say so in amber, because the whole stage is dimmer than its looks. */
 .master.dimmed .master-label b { color: var(--ds-warn-text); }
-.master.dimmed .master-fill { background: var(--ds-fill-sheen), linear-gradient(90deg, rgba(201, 138, 42, 0.18), rgba(201, 138, 42, 0.30)); }
+.master.dimmed .master-fill { background: rgba(227, 166, 70, 0.18); }
 .master-track {
-  position: relative; height: 32px; border-radius: var(--ds-r-small); overflow: hidden; touch-action: none; cursor: ew-resize;
-  background: rgba(148, 170, 210, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04); border: 0;
+  position: relative; height: 32px; border-radius: 10px; overflow: hidden; touch-action: none; cursor: ew-resize;
+  background: rgba(255, 255, 255, 0.025); box-shadow: inset 0 0 0 1px var(--ds-edge); border: 0;
 }
-.master-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; border-radius: var(--ds-r-small); background: var(--ds-slab-fill); }
+.master-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: rgba(148, 163, 184, 0.18); }
 .master-handle { display: none; }
 .master.dragging .master-track { box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-.flash-area {
-  flex: 1 1 auto; min-width: 0; display: flex; align-items: stretch; justify-content: center; gap: 5px; padding: 0 8px;
-  background: transparent; border: 0; border-left: 1px solid rgba(255, 255, 255, 0.05); border-right: 1px solid rgba(255, 255, 255, 0.05);
-}
-.flash-area .flash-label { align-self: center; color: var(--ds-muted); font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.09em; padding: 0 4px; }
+/* Flash: when its buttons don't fit on the bar's line, the bar takes two lines (see .bar-two-rows); scrolling is the last resort. */
+.flash-area { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; overflow-x: auto; scrollbar-width: none; }
+.flash-area::-webkit-scrollbar { display: none; }
+.flash-area .flash-label { flex: none; margin-right: 5px; }
 .flash-area button {
-  flex: none; width: 54px; padding: 0; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; color: var(--ds-muted-on);
-  background: var(--ds-tile-fill); border: 0; border-radius: var(--ds-r-small); box-shadow: var(--ds-shadow-low);
+  flex: none; min-width: 50px; min-height: 52px; padding: 0 6px; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden;
+  background: var(--ds-tile-fill); border: 1px solid var(--ds-edge); border-radius: 10px;
   touch-action: none; -webkit-touch-callout: none;
 }
-/* Held: pressed in and lighter, so the volunteer sees it is on (never the bright accent). */
-.flash-area button.down { background: var(--ds-selected); color: #fff; box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+/* Held: a blue tint and edge, so the volunteer sees it is on (never the bright accent as an area). */
+.flash-area button.down { background: var(--ds-selected); border-color: var(--ds-edge-held); }
 
 .action {
-  flex: none; min-width: 84px; border: 0; border-radius: var(--ds-r-tile); background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low);
-  font-size: 16px; font-weight: 500; padding: 0 14px; color: var(--ds-text);
+  flex: none; min-height: 52px; padding: 0 12px; border: 1px solid var(--ds-edge); border-radius: 10px; background: var(--ds-tile-fill);
+  font-size: 13px; color: var(--ds-text);
 }
 .action:active { background: var(--ds-elevated); }
-.undo { display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--ds-muted-on); }
-.undo:disabled { opacity: 0.35; }
-.next { min-width: 150px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 2px; }
-.next small { color: var(--ds-muted); font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.09em; }
-.next .next-name { max-width: 124px; font-size: 17px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.action small { font-size: 10px; line-height: 12px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ds-muted); font-weight: 600; }
+.undo { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.undo:disabled { opacity: 0.4; }
+/* Basic lights: the safe look, with a faint warm edge. */
+.basic { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 1px; font-weight: 600; border-color: rgba(233, 225, 207, 0.28); }
+.next { min-width: 128px; padding: 0 14px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 1px; }
+.next .next-name { max-width: 100px; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .next:disabled { opacity: 0.4; }
-/* Blackout: the one red control. Muted at rest; filling red while held; strong red while the stage is dark. */
-.blackout {
-  position: relative; overflow: hidden; min-width: 112px; background: var(--ds-danger-fill); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); color: var(--ds-danger-text);
+/* Blackout: the one red control. Red tint at rest; filling red while held; stronger red while the stage is dark. */
+.blackout-btn {
+  position: relative; overflow: hidden; min-width: 104px; background: var(--ds-danger-fill); border-color: var(--ds-danger-edge); color: var(--ds-danger-text);
 }
-.blackout .label { position: relative; display: flex; flex-direction: column; align-items: center; gap: 1px; }
-.blackout small { font-size: 11px; font-weight: 400; color: rgba(235, 169, 176, 0.75); }
-.blackout .hold { position: absolute; inset: 0 auto 0 0; width: 0; background: rgba(var(--ds-danger), 0.30); }
-.blackout.holding .hold { width: 100%; transition: width 1s linear; }
-.blackout.on { background: rgba(var(--ds-danger), 0.32); color: #ffe3e6; box-shadow: inset 0 0 0 1px rgba(var(--ds-danger), 0.65); }
-.blackout.on small { color: rgba(255, 227, 230, 0.8); }
+.blackout-btn .label { position: relative; display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 14px; font-weight: 700; }
+.blackout-btn small { font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ds-muted); }
+.blackout-btn .hold { position: absolute; inset: 0 auto 0 0; width: 0; background: rgba(var(--ds-danger), 0.30); }
+.blackout-btn.holding .hold { width: 100%; transition: width 1s linear; }
+.blackout-btn.on { background: rgba(var(--ds-danger), 0.26); border-color: rgba(var(--ds-danger), 0.6); }
 
 .toast {
   position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 20;
   background: rgba(58, 22, 30, 0.88); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
   color: #ffe3e6; padding: 12px 18px; border-radius: var(--ds-r-tile); border: 0; box-shadow: inset 0 0 0 1px rgba(var(--ds-danger), 0.45), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
 }
+/* While the learn bar is up (it sits where messages do), a message goes above it rather than under it. */
+.learnbar:not([hidden]) ~ .toast { bottom: 160px; }
 /* A plain confirmation ("Saved to …"), not a problem. */
 .toast.quiet { background: var(--ds-glass); color: var(--ds-text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -12px rgba(0, 0, 0, 0.7); }
 [hidden] { display: none !important; }
 
-/* ---- Between a phone and the iPad in landscape (an iPad upright, a smaller window) ----
-   The bottom bar doesn't fit on one line: Flash gets its own line above Master and the buttons. */
+/* ---- The bottom bar on two lines: Flash gets its own line above Master and the buttons ----
+   app.js sets bar-two-rows between a phone and the iPad in landscape, and on the iPad when the Flash buttons
+   (one per light group) don't fit on the bar's one line. */
+body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
+.bar-two-rows .bottom {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto auto; grid-template-rows: 60px 64px; gap: 6px 10px; padding: 6px 10px 6px 16px;
+  grid-template-areas: "flash flash flash flash flash" "master undo basic next blackout";
+}
+.bar-two-rows .bdiv, .bar-two-rows .bottom > .grow { display: none; }
+.bar-two-rows .master { grid-area: master; width: auto; }
+.bar-two-rows .flash-area { grid-area: flash; align-self: stretch; border-bottom: 1px solid var(--ds-edge); padding-bottom: 6px; }
+.bar-two-rows .flash-area button { flex: 1 0 auto; min-width: 50px; }
+.bar-two-rows .undo { grid-area: undo; } .bar-two-rows .basic { grid-area: basic; } .bar-two-rows .next { grid-area: next; } .bar-two-rows .blackout-btn { grid-area: blackout; }
+
+/* ---- Between a phone and the iPad in landscape (an iPad upright, a smaller window) ---- */
 @media (min-width: 701px) and (max-width: 1079px) and (min-height: 501px) {
-  body { grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: 44px minmax(0, 1fr) auto; }
-  .bottom {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; grid-template-rows: 52px 60px;
-    grid-template-areas: "flash flash flash flash" "master undo next blackout";
-  }
-  .master { grid-area: master; width: auto; }
-  .flash-area { grid-area: flash; border: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding: 0 0 6px; }
-  .flash-area button { flex: 1 1 0; width: auto; min-width: 0; }
-  .undo { grid-area: undo; } .next { grid-area: next; } .blackout { grid-area: blackout; }
-  /* Blind adds Go to the top bar: tighter spacing so the name keeps some room. */
-  .topbar.blind, .topbar.blind .quiet { gap: 8px; }
-  .go-btn { min-width: 64px; padding: 0 16px; }
+  body { grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: 60px minmax(0, 1fr) auto; }
+  /* The top bar: the fade and Flash notes and the clock give way (smoke stays); tighter spacing so the name keeps some room. */
+  #fading, #flashNote, .clock { display: none !important; }
+  .topbar { gap: 6px; padding-left: 12px; }
+  .go-btn { min-width: 64px; padding: 0 12px; }
+  /* Groups: a narrower colour button. */
+  .row { grid-template-columns: 92px minmax(120px, 160px) minmax(0, 1fr) 54px; gap: 10px; }
+  .qgrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .sec-sub { display: none; }
 }
 
 /* ---- Phone remote: narrow screens (portrait phones, and phones on their side) ----
-   The same page as a remote in the director's hand: Order, Groups and Looks tabs,
-   Master and the dock (Undo, Blackout, Next) always visible, and nothing that saves
-   or edits the show. See docs/superpowers/specs/2026-10-19-phone-remote-design.md. */
+   The same page as a remote in the director's hand, as the designer's phone artboard: "On stage" with the
+   problem pill, Order / Groups / Looks tabs, one panel for the tab, then Master and Undo · Basic lights · Next ·
+   Blackout always visible. Nothing here saves or edits the show. See docs/superpowers/specs/2026-10-19-phone-remote-design.md
+   and the restyle design (2026-10-20). */
 .phone-tabs { display: none; }
+/* Words only the phone shows (the short problem pill), or only the iPad. */
+.phone-only { display: none; }
 @media (max-width: 700px), (max-height: 500px) {
   body {
-    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 8px;
-    padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 10px;
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   }
-  /* Top line: what's on stage, "changed", and a status dot (tap it for the explanation). */
-  .topbar { grid-column: 1; min-height: 44px; gap: 10px; padding: 0 2px 0 6px; }
-  .now-name { font-size: 22px; }
-  #quiet, .clock, .gear, #previewBtn, #blindBtn, #goBtn { display: none !important; }
-  .output-note { width: 44px; min-height: 44px; padding: 0; justify-content: center; max-width: none; }
-  .output-note #outputText, .output-note .info { display: none; }
-  .output-note .dot { margin: 0; }
+  /* Header: "On stage" over the name and "● changed", the problem pill at the right (short words; tap it for the explanation). */
+  .topbar { grid-column: 1; min-height: 64px; gap: 10px; padding: 10px 12px 10px 16px; border-radius: 16px; }
+  .head-line { gap: 8px; }
+  .head-name { font-size: 20px; }
+  .changed { font-size: 12px; }
+  /* Smoke stays in the header: the machine can run while the lights have a problem. */
+  .head-note, #fading, #flashNote { display: none !important; }
+  #quiet, .clock, .gear, #modeSwitch, #goBtn, .grow { display: none !important; }
+  .now { flex: 1; }
+  .problem-pill { padding: 0 12px; font-size: 12px; }
+  .problem-pill #outputText { display: none; }
+  .phone-only { display: revert; }
+  .not-phone { display: none; }
+  /* The explanation: the whole width, under the header. */
+  .problem-box {
+    --box-top: calc(max(12px, env(safe-area-inset-top)) + 74px);
+    position: fixed; top: var(--box-top); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right));
+    width: auto; max-width: none; max-height: calc(100dvh - var(--box-top) - max(12px, env(safe-area-inset-bottom))); overflow-y: auto;
+  }
 
   .phone-tabs {
-    display: flex; gap: 2px; padding: 3px; border-radius: var(--ds-r-tile);
-    background: rgba(148, 170, 210, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    display: flex; gap: 2px; padding: 2px; border-radius: 12px;
+    background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge);
   }
   .phone-tabs button {
-    flex: 1; min-height: 44px; border: 0; border-radius: var(--ds-r-small); background: transparent;
-    color: var(--ds-muted); font-size: 15px; font-weight: 500;
+    flex: 1; min-height: 44px; border: 0; border-radius: 9px; background: transparent;
+    color: var(--ds-muted); font-size: 14px;
   }
-  .phone-tabs button.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+  .phone-tabs button.on { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px rgba(67, 137, 232, 0.45); }
 
-  /* One tab at a time fills the middle. */
+  /* One tab at a time fills the middle panel. */
   .left, .right { grid-column: 1; grid-row: 3; min-height: 0; }
-  .left { grid-template-rows: minmax(0, 1fr); }
   .right { grid-template-rows: minmax(0, 1fr); }
-  .stage { display: none; }
+  .stage-box { display: none; }
   body:not([data-tab="order"]) .left, body[data-tab="order"] .right { display: none; }
   body[data-tab="groups"] #quickLooks, body[data-tab="looks"] #details { display: none; }
 
   /* A remote doesn't change the prepared show. */
-  #editBtn, #qEditBtn, #orderFoot, #saveBtn, #pEditBtn, #pAddOpen, #pAdd, #pEdit, #fxEdit, .ql.newq { display: none !important; }
-  /* Effects can be picked here, but their settings stay on the iPad. */
-  #fxSet { display: none !important; }
+  #editBtn, #qEditBtn, #orderFoot, #saveBtn, #pEditCur, #pAddOpen, #pAdd, #colEdit, #fxEdit, .pc.newfx, .ql.newq { display: none !important; }
+  /* Individual lights needs the iPad's room for the stage plan. */
+  #manualBtn, #manual { display: none !important; }
+  /* Effects can be picked here, but their settings stay on the iPad; so does holding a tile to edit it. */
+  #fxCard, .hold-hint { display: none !important; }
+  /* Any colour keeps Saturation on the phone; typing exact values stays on the iPad, as the editors do. */
+  .cx-foldwrap, .cx-exact { display: none !important; }
 
-  /* Order: big rows. */
-  .order { padding: 6px; }
-  .order-head { min-height: 32px; }
-  .item { min-height: 52px; font-size: 18px; }
-  .item .name { font-size: 18px; }
+  /* Order: the list on its own (the tab names it), big rows. */
+  .order { padding: 8px; gap: 4px; }
+  .order-head, .sep { display: none; }
+  .order-list { gap: 4px; }
+  .item { min-height: 52px; padding: 0 12px; font-size: 16px; }
 
-  /* Groups: one group per row; Flash (moved here from the bottom bar) along the top. */
-  .details { padding: 10px 12px 12px; gap: 8px; }
-  .rows { grid-template-columns: minmax(0, 1fr); }
-  /* The Flash buttons share the width, so All and every group fit without scrolling. */
-  /* The tempo row at the top of Groups: the readout and Tap share the width, as tiles. */
-  #details .tempo { flex: none; gap: 6px; }
+  /* Groups: per group a line with the name, the colour (tap for the picker) and the level, then a 44 px slider.
+     The tempo row and Flash (moved here from the top bar and the bottom bar) along the top. */
+  .details { padding: 8px; gap: 4px; }
+  .dhead { display: none; }
+  /* Back to saved, when the item on stage is changed: on its own line at the right. */
+  .dhead:has(> #backBtn:not([hidden])) { display: flex; justify-content: flex-end; min-height: 0; padding: 0 0 4px; }
+  .dhead h2, .dsub { display: none; }
+  .row {
+    grid-template-columns: minmax(0, 1fr) auto 48px; gap: 6px 8px; min-height: 0; padding: 8px 6px 10px;
+    border-top: 0; border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  }
+  .row .ds-fill { grid-column: 1 / -1; grid-row: 2; height: 44px; }
+  .row .ds-fill::after { display: none; }
+  .row .pct { font-size: 14px; }
+  .chip { justify-self: end; max-width: 150px; gap: 8px; padding: 0 2px 0 8px; border: 0; background: transparent; color: var(--ds-muted); font-size: 13px; }
+  .chip i { width: 12px; height: 12px; }
+  .chip span { flex: 0 1 auto; }
+  .row .smoke-cell { justify-self: end; }
+  #details .tempo { flex: none; gap: 6px; padding: 0 2px 4px; }
   #details .tempo .fadepick { flex: 1 1 0; min-width: 0; }
-  #details .tempo .fade-btn { width: 100%; justify-content: space-between; padding: 0 14px; background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low); border-radius: var(--ds-r-small); font-size: 15px; }
-  #details .tempo .tap-btn { flex: 1 1 0; background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low); font-size: 15px; }
-  #details .tempo .tap-btn.hit { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+  #details .tempo .fade-btn { width: 100%; }
+  #details .tempo .tap-btn { flex: 1 1 0; font-size: 14px; }
   #details .tempo-menu { left: 0; right: auto; }
   #details .tempo-menu button { flex: 1 1 0; min-width: 64px; }
-  #details .flash-area { flex: none; justify-content: stretch; gap: 6px; padding: 0; border: 0; }
+  /* The Flash buttons share the width, so All and every group fit without scrolling; never under 44 px, they take a second line first. */
+  #details .flash-area { flex: none; flex-wrap: wrap; justify-content: stretch; gap: 6px; padding: 0 2px 4px; }
   #details .flash-area .flash-label { display: none; }
-  #details .flash-area button { flex: 1 1 0; width: auto; min-width: 0; min-height: 44px; }
-  .pgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #details .flash-area button { flex: 1 1 44px; width: auto; min-width: 44px; min-height: 44px; }
+  .pgrid, .pgrid.fxgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .pextras { grid-auto-flow: row; }
+  /* The picker's header on two lines: ‹ Groups, the group and Done, then what it runs and the tabs. */
+  .cpick { padding: 10px 12px 12px; }
+  .cpick .phead { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "back name done" "cur cur tabs"; align-items: center; gap: 8px 10px; }
+  #pBack { grid-area: back; } .cpick .phead h2 { grid-area: name; max-width: none; } #pDone { grid-area: done; justify-self: end; }
+  .cpick .cur { grid-area: cur; } .cpick #pTabs { grid-area: tabs; }
+  #pExtras { grid-template-columns: minmax(0, 1fr); }
 
-  /* Looks: two columns. */
-  .quick-looks { padding: 10px 12px 12px; }
-  .qhead { flex-wrap: wrap; gap: 8px; }
-  .qgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 60px; }
+  /* Looks: the quick-look tabs across the top, then two columns of tiles. */
+  .quick-looks { padding: 8px; gap: 8px; }
+  .qhead .sec-title, .sec-sub, .qhead .grow { display: none; }
+  .qhead .qtabs { flex: 1; }
+  .qhead .qtabs .tab { flex: 1; font-size: 14px; }
+  .qgrid { max-height: none; flex: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(64px, auto); }
+  .ql { padding: 10px; font-size: 14px; }
 
-  /* Master on its own line, then the dock: Undo · Blackout · a wide Next. */
-  .bottom { grid-column: 1; display: grid; grid-template-columns: 1fr 1fr 2fr; grid-template-rows: auto 64px; gap: 8px; padding: 8px; }
-  .master { grid-column: 1 / -1; width: auto; padding: 2px 4px 4px; }
-  .master-track { height: 44px; }
-  .undo { order: 1; } .blackout { order: 2; } .next { order: 3; }
-  .action, .next, .blackout { min-width: 0; padding: 0 12px; }
-  .next .next-name { max-width: 100%; }
-  .toast { bottom: 172px; max-width: calc(100vw - 24px); }
+  /* Footer: Master on its own line (label, slider, level), then Undo · Basic lights · Next · Blackout. */
+  .bottom {
+    grid-column: 1; display: grid; grid-template-columns: 0.8fr 1fr 1.3fr 1fr; grid-template-rows: auto 52px;
+    align-items: stretch; gap: 10px 6px; padding: 10px; border-radius: 16px;
+  }
+  .bdiv, .bottom > .grow { display: none; }
+  .master { grid-column: 1 / -1; display: grid; grid-template-columns: 54px minmax(0, 1fr) 46px; align-items: center; gap: 10px; width: auto; }
+  .master-label { display: contents; }
+  .master-label .ds-caps { grid-column: 1; grid-row: 1; }
+  .master-label b { grid-column: 3; grid-row: 1; text-align: right; }
+  .master-track { grid-column: 2; grid-row: 1; height: 44px; border-radius: 12px; }
+  .action, .next, .blackout-btn { min-width: 0; min-height: 52px; padding: 0 6px; }
+  .undo svg, .basic small { display: none; }
+  .basic { align-items: center; text-align: center; line-height: 1.2; }
+  .next { align-items: center; }
+  .next .next-name { max-width: 100%; font-size: 14px; }
+  .blackout-btn .label { font-size: 13px; }
+  .blackout-btn small { font-size: 10px; }
+  .toast { bottom: calc(144px + max(12px, env(safe-area-inset-bottom))); max-width: calc(100vw - 24px); }
 }
-/* A phone on its side: too short for tabs, content, Master and the dock stacked. The tab's
-   content goes on the left; Master and the dock become a column on the right. */
+/* A phone on its side: too short for the header, tabs, the list and the footer stacked. The tab's panel
+   goes on the left; Master (its label over the slider) and the four buttons, two by two, on the right. */
 @media (max-height: 500px) and (orientation: landscape) {
-  body { grid-template-columns: minmax(0, 1fr) 240px; grid-template-rows: auto auto minmax(0, 1fr); }
-  .topbar { grid-column: 1 / -1; }
+  body { grid-template-columns: minmax(0, 1fr) 240px; grid-template-rows: auto auto minmax(0, 1fr); gap: 8px; }
+  .topbar { grid-column: 1 / -1; min-height: 60px; padding-top: 8px; padding-bottom: 8px; }
+  .problem-box { --box-top: calc(max(12px, env(safe-area-inset-top)) + 68px); }
   .phone-tabs { grid-column: 1; grid-row: 2; }
   .left, .right { grid-column: 1; grid-row: 3; }
-  .bottom { grid-column: 2; grid-row: 2 / 4; grid-template-columns: 1fr 1fr; grid-template-rows: auto minmax(52px, 1fr) minmax(52px, 1fr); align-content: stretch; }
-  .master { grid-column: 1 / -1; }
-  .undo { grid-column: 1; grid-row: 2; } .blackout { grid-column: 2; grid-row: 2; }
-  .next { grid-column: 1 / -1; grid-row: 3; }
-  .toast { bottom: 16px; }
+  .bottom { grid-column: 2; grid-row: 2 / 4; grid-template-columns: 1fr 1fr; grid-template-rows: auto minmax(52px, 1fr) minmax(52px, 1fr); align-content: stretch; gap: 8px 6px; }
+  /* Groups: the tempo row and Flash share a line, and each group is one line (name, colour, slider, level). */
+  #details { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); column-gap: 8px; }
+  #details > .dhead { grid-column: 1 / -1; }
+  #details > .tempo { grid-column: 1; grid-row: 2; }
+  #details > .flash-area { grid-column: 2; grid-row: 2; }
+  /* Too short for a second line: Flash stays on one, and scrolls sideways when 44 px buttons don't fit. */
+  #details .flash-area { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  #details .flash-area::-webkit-scrollbar { display: none; }
+  #details .flash-area button { flex: 1 0 44px; }
+  #details .tempo .fadepick { flex: none; }
+  #details > .rows { grid-column: 1 / -1; grid-row: 3; }
+  /* On a small phone the name and the colour give way first; the slider keeps at least 80 px. */
+  .row { grid-template-columns: minmax(60px, 120px) minmax(90px, 150px) minmax(80px, 1fr) 48px; padding: 6px; }
+  .row .ds-fill { grid-column: auto; grid-row: auto; }
+  .chip, .row .smoke-cell { justify-self: start; }
+  .chip { max-width: min(150px, 100%); }
+  .qgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .master { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; }
+  .master-label b { grid-column: 2; }
+  .master-track { grid-column: 1 / -1; grid-row: 2; }
+  .toast { bottom: calc(4px + max(12px, env(safe-area-inset-bottom))); }
+}
+/* The smallest phones on their side (568 × 320): a narrower right column leaves the group rows their room. */
+@media (max-height: 500px) and (orientation: landscape) and (max-width: 600px) {
+  body { grid-template-columns: minmax(0, 1fr) 200px; }
 }

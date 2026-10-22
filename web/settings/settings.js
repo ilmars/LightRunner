@@ -1,6 +1,8 @@
 // Settings page for the programmer. Talks to the server's /api/settings
 // routes; nothing here changes the stage except the Send DMX switch.
 
+import { NOT_ANSWERING, getJson, request, showProblem, startClock, watchState } from '../shared/appbar.js';
+
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -13,7 +15,7 @@ let saved = null; // settings as last loaded from the server
 let draft = null; // settings with unsaved edits
 
 async function call(method, path, body) {
-  const res = await fetch(path, {
+  const res = await request(path, {
     method,
     headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -69,6 +71,7 @@ async function load() {
   render();
   loadBackups();
   loadOfl();
+  loadKeys();
 }
 
 // ---- Fixture database (Open Fixture Library) ----
@@ -84,7 +87,7 @@ async function loadOfl() {
     return;
   }
   const pill = $('oflPill');
-  pill.className = `pill ${st.installed ? 'ok' : 'off'}`;
+  pill.className = 'ds-pill';
   pill.textContent = st.downloading ? 'Downloading…' : st.installed ? 'On this computer' : 'Not downloaded';
   const when = st.downloadedAt ? new Date(st.downloadedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
   $('oflState').textContent = st.installed
@@ -170,12 +173,13 @@ function render() {
   renderRoutes();
 
   $('manualForOperators').checked = s.manualForOperators;
+  $('contactName').value = s.contact.name;
+  $('contactPhone').value = s.contact.phone;
 
   $('oscEnabled').checked = s.osc.enabled;
   $('oscPort').value = String(s.osc.port);
   $('oscPortField').hidden = !s.osc.enabled;
   $('oscProblem').textContent = s.osc.enabled ? s.oscProblem ?? '' : '';
-  renderApc(s.apc);
 
   $('frameRate').value = String(s.frameRate);
   $('gamma').value = String(s.gamma);
@@ -189,44 +193,265 @@ function render() {
   $('removePin').hidden = !s.pinSet;
   $('savePin').textContent = s.pinSet ? 'Change PIN' : 'Set PIN';
 
-  renderStatus(s.outputStatus, s.outputEnabled);
+  renderStatus();
   markDirty();
 }
 
-function renderStatus(status, enabled, problem) {
-  const pill = $('status');
-  const st = !enabled ? 'off' : status ?? 'off';
-  pill.className = `pill ${st}`;
-  pill.textContent = st === 'ok' ? 'DMX: sending' : st === 'lost' ? 'DMX: output lost' : 'DMX: off';
-  pill.title = problem ?? '';
-  $('outputProblem').textContent = enabled && problem ? problem : '';
+/** The live state as last read (null while the server doesn't answer). */
+let lastState = null;
+
+/**
+ * The top bar's pill (only while something is wrong with the lights) and the DMX output card's problem line,
+ * from the last live state; Send DMX off as saved here shows at once, without waiting for the next read.
+ */
+function renderStatus() {
+  if (!lastState) return; // "Not connected" is showing instead
+  const enabled = saved?.outputEnabled;
+  showProblem($('status'), enabled === false ? { ...lastState, output: 'off' } : lastState);
+  const problem = enabled && lastState.outputProblem ? lastState.outputProblem : '';
+  if ($('outputProblem').textContent !== problem) $('outputProblem').textContent = problem;
 }
 
-/** Whether an APC mini is plugged in, and which model. */
-function renderApc(apc) {
-  $('apcStatus').textContent =
-    !apc?.midi ? "APC mini: MIDI support isn't installed on this computer" :
-    apc.connected ? `APC mini: connected (${apc.model === 'mk2' ? 'mk2' : 'older model'})` :
-    'APC mini: not connected';
-}
+// ---- Controller keys ----
+// The server lists the devices and every fixed action with its key. Assign a key asks the server to take the next
+// key pressed on a controller (it waits up to 10 s); one page at a time. Changes apply at once, like Send DMX.
 
-// Keep the status pill and the APC mini line live.
-setInterval(async () => {
-  if ($('main').hidden) return;
+/** The view from GET /api/controller, as last shown (its JSON, to redraw only on a change). */
+let keysView = null;
+let keysShown = '';
+/** The action waiting for its key: what it does, its name, the request, when it gives up, the countdown. */
+const keyLearn = { does: null, label: '', ctl: null, until: 0, timer: 0 };
+const sameDoes = (a, b) => !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
+
+async function loadKeys() {
   try {
-    const state = await (await fetch('/api/state')).json();
-    if (state && saved) renderStatus(state.output, saved.outputEnabled, state.outputProblem);
-    renderApc(await (await fetch('/api/apc')).json());
+    showKeys(await call('GET', '/api/controller'));
   } catch {
-    // offline; try again
+    // the next read tries again
   }
-}, 2000);
+}
+
+/** Draw the card when the view changed (never in the middle of a learn, which keeps its own row up to date). */
+function showKeys(view) {
+  keysView = view;
+  const text = JSON.stringify(view);
+  if (text === keysShown) return;
+  keysShown = text;
+  renderKeys();
+}
+
+const MODEL_NAMES = { mk2: 'mk2', mk1: 'older model' };
+
+function renderKeys() {
+  const v = keysView;
+  if (!v) return;
+  $('keysNoMidi').hidden = v.midi;
+  $('keysTop').hidden = !v.midi;
+  $('keysList').hidden = !v.midi;
+  $('keysHint').hidden = !v.midi;
+  $('keysNote').hidden = !v.midi;
+
+  const list = $('keysDevices');
+  list.replaceChildren();
+  if (!v.devices.length) list.append(el('p', 'hint', 'No controller is connected. Plug one into this computer.'));
+  for (const d of v.devices) {
+    const row = el('div', 'keys-device');
+    const meta = el('div', 'meta');
+    meta.append(el('b', null, d.name));
+    const state = d.listening ? 'connected' : 'not listened to';
+    meta.append(el('span', null, d.model ? `${MODEL_NAMES[d.model]} · ${state}` : state));
+    const sw = el('label', 'ds-switch');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = d.listening;
+    box.setAttribute('aria-label', `Listen to ${d.name}`);
+    box.addEventListener('change', () => listenTo(d.name, box.checked, box));
+    sw.append(box, el('span', 'ds-switch-track'), el('span', 'switch-label', 'Listen'));
+    row.append(meta, sw);
+    list.append(row);
+  }
+  $('apcLayout').checked = v.apcLayout;
+
+  const root = $('keysList');
+  root.replaceChildren();
+  const sections = [...new Set(v.actions.map((a) => a.section))];
+  for (const section of sections) {
+    const box = el('div', 'keys-section');
+    box.append(el('h3', 'ds-caps', section));
+    for (const a of v.actions.filter((x) => x.section === section)) box.append(keyRow(a));
+    root.append(box);
+  }
+  paintLearn();
+}
+
+function keyRow(a) {
+  const row = el('div', 'krow');
+  row.dataset.does = JSON.stringify(a.does);
+  const name = el('div', 'kname');
+  name.append(el('b', null, a.label));
+  if (a.hold) name.append(el('span', 'khold', a.hold));
+  const now = el('span', 'know');
+  // Its own key, and the APC mini layout's when that still does it too (a key on another controller, say).
+  if (a.key) {
+    now.textContent = a.key;
+    if (a.standard) now.append(el('span', 'kstd', ` · and the APC mini layout: ${a.standard}`));
+  } else if (a.standard) now.append(el('span', 'kstd', `APC mini layout: ${a.standard}`));
+  else now.append(el('span', 'kstd', 'No key'));
+  now.classList.toggle('set', !!a.key);
+  name.append(now);
+  const assign = el('button', 'ds-btn ds-btn--quiet kassign', 'Assign a key');
+  assign.type = 'button';
+  assign.addEventListener('click', () => (sameDoes(keyLearn.does, a.does) ? stopLearn() : learnKey(a.does, a.label)));
+  const clear = el('button', 'ds-btn ds-btn--quiet kclear', 'Clear');
+  clear.type = 'button';
+  clear.hidden = !a.key;
+  clear.addEventListener('click', () => clearKey(a.does, a.label));
+  const buttons = el('div', 'kbtns');
+  buttons.append(assign, clear);
+  row.append(name, buttons);
+  return row;
+}
+
+/** The row waiting for its key says so, with the seconds left; the other rows wait their turn. */
+function paintLearn() {
+  for (const row of $('keysList').querySelectorAll('.krow')) {
+    const waiting = sameDoes(keyLearn.does, JSON.parse(row.dataset.does));
+    const btn = row.querySelector('.kassign');
+    row.classList.toggle('learning', waiting);
+    btn.classList.toggle('ds-btn--primary', waiting);
+    btn.classList.toggle('ds-btn--quiet', !waiting);
+    btn.disabled = !!keyLearn.does && !waiting;
+    const left = Math.max(0, Math.ceil((keyLearn.until - performance.now()) / 1000));
+    btn.textContent = waiting ? `Press a key… ${left} s · Stop` : 'Assign a key';
+  }
+}
+
+async function learnKey(does, label) {
+  if (keyLearn.ctl) return;
+  const ctl = new AbortController();
+  Object.assign(keyLearn, { does, label, ctl, until: performance.now() + 10000 });
+  keyLearn.timer = setInterval(paintLearn, 250);
+  $('keysNote').textContent = '';
+  paintLearn();
+  let answer = null;
+  try {
+    const res = await fetch('/api/keys/learn', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ does }), signal: ctl.signal });
+    const data = await res.json().catch(() => ({}));
+    answer = res.ok ? data : { ok: false, message: data.error || `request failed (${res.status})`, bad: true };
+  } catch {
+    if (!ctl.signal.aborted) answer = { ok: false, message: NOT_ANSWERING, bad: true };
+  }
+  if (keyLearn.ctl !== ctl) return;
+  endLearn();
+  if (answer?.ok) {
+    $('keysNote').textContent = answer.note ?? `${label} is now ${answer.key}.`;
+  } else if (answer) {
+    toast(answer.message, answer.bad);
+  }
+  await loadKeys();
+}
+
+function stopLearn() {
+  keyLearn.ctl?.abort();
+  endLearn();
+}
+
+function endLearn() {
+  clearInterval(keyLearn.timer);
+  Object.assign(keyLearn, { does: null, label: '', ctl: null });
+  paintLearn();
+}
+
+async function clearKey(does, label) {
+  try {
+    await call('POST', '/api/keys/clear', { does });
+    $('keysNote').textContent = `${label} has no key now.`;
+  } catch (err) {
+    toast(err.message, true);
+  }
+  await loadKeys();
+}
+
+async function listenTo(device, on, box) {
+  const ignored = new Set((keysView?.devices ?? []).filter((d) => !d.listening).map((d) => d.name));
+  if (on) ignored.delete(device);
+  else ignored.add(device);
+  try {
+    showKeys(await call('PUT', '/api/controller', { ignored: [...ignored] }));
+  } catch (err) {
+    box.checked = !on;
+    toast(err.message, true);
+  }
+}
+
+$('apcLayout').addEventListener('change', async (e) => {
+  const on = e.target.checked;
+  try {
+    showKeys(await call('PUT', '/api/controller', { apcLayout: on }));
+  } catch (err) {
+    e.target.checked = !on;
+    toast(err.message, true);
+  }
+});
+
+// Reset asks twice, as deleting does elsewhere: the first tap arms it for a few seconds.
+let resetArmed = 0;
+$('apcReset').addEventListener('click', async () => {
+  const btn = $('apcReset');
+  if (!resetArmed) {
+    btn.textContent = 'Tap again to clear every key on the APC mini';
+    btn.classList.add('ds-btn--danger');
+    resetArmed = setTimeout(disarmReset, 4000);
+    return;
+  }
+  disarmReset();
+  try {
+    showKeys(await call('POST', '/api/keys/reset'));
+    $('keysNote').textContent = 'The APC mini has its standard layout again. The keys it had are in a backup (Backups).';
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+function disarmReset() {
+  clearTimeout(resetArmed);
+  resetArmed = 0;
+  $('apcReset').textContent = 'Reset to the APC mini layout';
+  $('apcReset').classList.remove('ds-btn--danger');
+}
+
+/** The live state's reads (watchState), to read again at once after Send DMX changes. */
+let stateWatch = null;
+
+// Keep the status pill and the controller card live (the pill also before the PIN is entered, as on Patch).
+function watch() {
+  stateWatch = watchState({
+    pill: $('status'),
+    offline: $('offline'),
+    onState: async (state) => {
+      lastState = state;
+      renderStatus();
+      if ($('main').hidden || keyLearn.does) return;
+      try {
+        showKeys(await getJson('/api/controller', 4000));
+      } catch {
+        // the next read tries again
+      }
+    },
+    // "Not connected" says it all: the DMX card's line (from the last answer) goes too.
+    onLost: () => {
+      lastState = null;
+      $('outputProblem').textContent = '';
+    },
+    // The page couldn't load while the server was down: load it now.
+    onBack: () => { if (!saved) start().catch((err) => toast(err.message, true)); },
+  });
+}
 
 // ---- Editing ----
 
 function changedFields() {
   const out = {};
-  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators', 'osc'];
+  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators', 'osc', 'contact'];
   for (const k of keys) if (JSON.stringify(draft[k]) !== JSON.stringify(saved[k])) out[k] = draft[k];
   if (draft.universe !== undefined && draft.universe !== saved.universes[0]) out.universe = draft.universe;
   return out;
@@ -260,6 +485,8 @@ $('sacnPriority').addEventListener('input', (e) => { draft.output.priority = Num
 $('enttecPort').addEventListener('change', (e) => { draft.output.port = e.target.value; markDirty(); });
 $('universe').addEventListener('input', (e) => { draft.universe = Number(e.target.value); markDirty(); });
 $('manualForOperators').addEventListener('change', (e) => { draft.manualForOperators = e.target.checked; markDirty(); });
+$('contactName').addEventListener('input', (e) => { draft.contact.name = e.target.value; markDirty(); });
+$('contactPhone').addEventListener('input', (e) => { draft.contact.phone = e.target.value; markDirty(); });
 $('oscEnabled').addEventListener('change', (e) => edit((s) => { s.osc.enabled = e.target.checked; }));
 $('oscPort').addEventListener('input', (e) => { draft.osc.port = Number(e.target.value); markDirty(); });
 $('frameRate').addEventListener('change', (e) => { draft.frameRate = Number(e.target.value); markDirty(); });
@@ -290,7 +517,11 @@ $('outputEnabled').addEventListener('change', async (e) => {
     const next = await call('PUT', '/api/settings', { outputEnabled: on });
     saved.outputEnabled = next.outputEnabled;
     draft.outputEnabled = next.outputEnabled;
-    renderStatus(next.outputStatus, next.outputEnabled);
+    // The pill from the last read (up to 2 s old) would say "Not sending" just after it was turned on: it waits
+    // for a fresh read, a moment from now, once the lights have the change.
+    if (on && lastState?.output === 'off') showProblem($('status'), null);
+    else renderStatus();
+    setTimeout(() => stateWatch?.refresh(), 150);
     toast(on ? 'Sending DMX' : 'DMX output off');
   } catch (err) {
     e.target.checked = !on;
@@ -313,7 +544,7 @@ async function findNodes(btn, box, onUse) {
       const meta = el('div', 'meta');
       meta.append(el('b', null, n.longName || n.shortName || n.ip));
       meta.append(el('span', null, `${n.ip} · ${n.universes.length ? `universe ${n.universes.join(', ')}` : 'no DMX outputs'}${n.thisMachine ? ' · software on this computer, not a node box' : ''}`));
-      const use = el('button', 'ghost small', n.thisMachine ? 'Use anyway' : 'Use');
+      const use = el('button', 'ds-btn', n.thisMachine ? 'Use anyway' : 'Use');
       use.type = 'button';
       use.addEventListener('click', () => {
         if (n.thisMachine && !confirm(`${n.longName || n.shortName} is software on this computer, not the node box. It only reaches the lights while that program runs. Use it anyway?`)) return;
@@ -426,7 +657,7 @@ function routeRow(u, fixtures) {
   meta.append(el('span', null, `${fixtures ? `${fixtures} fixture${fixtures === 1 ? '' : 's'}` : 'No fixtures patched yet'} · ${route ? 'Own output' : 'Default output'}`));
   // A universe nothing is patched on has no output to fall back to: it is only listed because it was added, so it can go.
   const removable = route && !fixtures;
-  const toggle = el('button', 'ghost small', removable ? 'Remove' : route ? 'Use default' : 'Use its own output');
+  const toggle = el('button', removable ? 'ds-btn ds-btn--danger' : 'ds-btn ds-btn--quiet', removable ? 'Remove' : route ? 'Use default' : 'Use its own output');
   toggle.type = 'button';
   toggle.addEventListener('click', () => edit((s) => {
     if (route) s.routes = s.routes.filter((r) => r.universe !== u);
@@ -440,7 +671,7 @@ function routeRow(u, fixtures) {
 
 function routeFields(u, out) {
   const box = el('div', 'route-fields');
-  const seg = el('div', 'segmented small');
+  const seg = el('div', 'ds-seg');
   seg.setAttribute('role', 'radiogroup');
   seg.setAttribute('aria-label', `Output type for universe ${u}`);
   for (const [kind, label] of KINDS) {
@@ -466,7 +697,7 @@ function routeFields(u, out) {
     const id = `route-${u}-${label.replace(/\W+/g, '-').toLowerCase()}`;
     const lab = el('label', null, label);
     lab.htmlFor = id;
-    const input = el('input');
+    const input = el('input', 'ds-field');
     input.id = id;
     input.type = 'text';
     input.inputMode = 'decimal';
@@ -480,7 +711,7 @@ function routeFields(u, out) {
   if (out.kind === 'artnet') {
     const { f, input } = textField('Node IP address', out.host, '192.168.0.120', (v) => { routeFor(u).output.host = v; });
     const line = el('div', 'row');
-    const find = el('button', 'ghost', 'Find nodes');
+    const find = el('button', 'ds-btn', 'Find nodes');
     find.type = 'button';
     const nodes = el('div', 'nodes');
     find.addEventListener('click', () => findNodes(find, nodes, (n) => edit(() => { routeFor(u).output = { kind: 'artnet', host: n.ip }; })));
@@ -489,7 +720,7 @@ function routeFields(u, out) {
     box.append(f, nodes);
   } else if (out.kind === 'sacn') {
     const unicast = Boolean(out.host) || sacnUnicast.has(u);
-    const mode = el('div', 'segmented small');
+    const mode = el('div', 'ds-seg');
     for (const [value, label] of [['multicast', 'Multicast'], ['unicast', 'One receiver']]) {
       const l = el('label');
       const r = el('input');
@@ -515,7 +746,7 @@ function routeFields(u, out) {
   } else if (out.kind === 'enttec') {
     const f = el('div', 'field');
     const lab = el('label', null, 'USB port');
-    const sel = el('select');
+    const sel = el('select', 'ds-field');
     sel.id = `route-${u}-port`;
     lab.htmlFor = sel.id;
     sel.addEventListener('change', (e) => { routeFor(u).output.port = e.target.value; markDirty(); });
@@ -540,7 +771,7 @@ $('importFile').addEventListener('change', async (e) => {
   if (!file) return;
   try {
     const lightkey = /\.lightkeyproj$/i.test(file.name);
-    const res = await fetch(`/api/import/preview?name=${encodeURIComponent(file.name)}`, {
+    const res = await request(`/api/import/preview?name=${encodeURIComponent(file.name)}`, {
       method: 'POST',
       headers: { 'content-type': lightkey ? 'application/octet-stream' : 'application/json' },
       body: lightkey ? file : await file.text(),
@@ -568,7 +799,7 @@ function showComparison(fileName) {
     const rows = items.filter((i) => i.kind === kind);
     if (!rows.length) continue;
     const section = el('div');
-    section.append(el('h3', null, `${KIND_TITLES[kind]} (${rows.length})`));
+    section.append(el('h3', 'ds-caps', `${KIND_TITLES[kind]} (${rows.length})`));
     for (const item of rows) {
       const row = el('label', 'diff-row');
       const box = el('input');
@@ -581,7 +812,7 @@ function showComparison(fileName) {
       what.append(el('b', null, item.name));
       const detail = item.change === 'removed' ? 'In this show but not in the file. Ticking removes it (and what depends on it).' : item.details.join(' · ');
       if (detail) what.append(el('span', null, detail));
-      row.append(box, el('span', `tag ${item.change}`, CHANGE_LABEL[item.change]), what);
+      row.append(box, el('span', `ds-tag ${item.change}`, CHANGE_LABEL[item.change]), what);
       section.append(row);
     }
     list.append(section);
@@ -621,7 +852,8 @@ async function loadBackups() {
   for (const b of backups) {
     const li = el('li');
     li.append(el('span', null, new Date(b.savedAt).toLocaleString()));
-    const restore = el('button', 'ghost small', 'Restore');
+    const restore = el('button', 'ds-btn ds-btn--quiet', 'Restore');
+    restore.type = 'button';
     restore.addEventListener('click', async () => {
       if (!confirm(`Restore the show saved ${new Date(b.savedAt).toLocaleString()}? The current show is kept as a backup.`)) return;
       try {
@@ -672,7 +904,7 @@ let toastTimer = 0;
 function toast(text, bad = false) {
   const t = $('toast');
   t.textContent = text;
-  t.className = bad ? 'toast bad' : 'toast';
+  t.className = bad ? 'ds-toast ds-toast--bad' : 'ds-toast';
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (t.hidden = true), 3500);
@@ -682,4 +914,6 @@ window.addEventListener('beforeunload', (e) => {
   if (saved && Object.keys(changedFields()).length) e.preventDefault();
 });
 
+startClock($('clock'));
+watch();
 start().catch((err) => toast(err.message, true));

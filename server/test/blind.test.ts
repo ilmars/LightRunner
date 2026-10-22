@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createSocket } from 'node:dgram';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import { App } from '../src/app.ts';
@@ -16,9 +17,9 @@ const tempDir = () => mkdtempSync(join(tmpdir(), 'light-runner-'));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const REAL_STAGE_ONLY = 'That works on the real stage only.';
-const BLIND_OFF = 'Blind is off.';
-const BLIND_PROBLEM = 'Blind stopped because of a problem. The lights were not changed.';
-const TOO_MANY = 'Too many tablets are in Blind.';
+const BLIND_OFF = 'Prepare is off.';
+const BLIND_PROBLEM = 'Prepare stopped because of a problem. The lights were not changed.';
+const TOO_MANY = 'Too many tablets are preparing.';
 
 function makeApp(dataDir: string, log: (msg: string) => void = () => {}) {
   return new App({ port: 0, host: '127.0.0.1', dataDir, seedPath, webDir: join(root, 'web'), output: { kind: 'none' }, log });
@@ -169,7 +170,7 @@ test('Blind refuses what works on the real stage only, and needs Blind on', () =
   // A light group's dimmer is the draft's.
   assert.equal(await t.send({ type: 'draft', cmd: { type: 'groupLevel', group: 'audience', value: 0.5 } }), null);
   // A whole stage is only ever sent by Go.
-  assert.equal(await t.send({ type: 'applyStage', stage: { look: null, groups: {}, levels: {} } }), 'Use Blind and Go to send a whole stage.');
+  assert.equal(await t.send({ type: 'applyStage', stage: { look: null, groups: {}, levels: {} } }), 'Use Prepare and Go to send a whole stage.');
   assert.match(await t.send({ type: 'draft', cmd: { type: 'saveItem', id: 'worship' } }) ?? '', /^invalid command/);
   assert.match(await t.send({ type: 'draft', cmd: { type: 'draft', cmd: { type: 'safe' } } }) ?? '', /^invalid command/);
 
@@ -178,6 +179,42 @@ test('Blind refuses what works on the real stage only, and needs Blind on', () =
   assert.equal(t.state().master, 1);
   assert.equal(t.state().look, 'worship');
   assert.deepEqual(t.state().flashing, []);
+}));
+
+test("a draft shows the stage's held lights (manual control stays live)", () => withApp(async (app) => {
+  const show = (await api(app, 'GET', '/api/show')).body;
+  show.operator.manualForOperators = true;
+  assert.equal((await api(app, 'PUT', '/api/show', show)).status, 200);
+  const t = await onWorship(app);
+  assert.equal(await t.send({ type: 'blindStart' }), null);
+  await waitFor(() => t.draft(), 2000, 'the draft');
+  assert.equal(await t.send({ type: 'manual', target: { fixture: 'back-1' }, colour: '#ff0000', intensity: 0.5 }), null);
+  assert.equal(await t.send({ type: 'manual', target: { fixture: 'back-2', segment: 0 }, colour: '#00ff00', intensity: 1 }), null);
+  const held = [
+    { fixture: 'back-1', segment: null, colour: '#ff0000', level: 0.5 },
+    { fixture: 'back-2', segment: 0, colour: '#00ff00', level: 1 },
+  ];
+  await waitFor(() => t.state()?.held?.length === 2, 2000, 'the stage to hold both');
+  assert.deepEqual(t.state().held, held);
+  await waitFor(() => t.draft()?.held?.length === 2, 2000, 'the draft to show them');
+  assert.deepEqual(t.draft().held, held);
+  assert.deepEqual(t.draft().fixturesManual, ['back-1']);
+}));
+
+test('a list of manual targets from a tablet is one command: one reply, and refused whole when one is bad', () => withApp(async (app) => {
+  const show = (await api(app, 'GET', '/api/show')).body;
+  show.operator.manualForOperators = true;
+  assert.equal((await api(app, 'PUT', '/api/show', show)).status, 200);
+  const t = await onWorship(app);
+  const before = t.seen.filter((m) => m.type === 'result').length;
+  assert.match(await t.send({ type: 'manual', targets: [{ fixture: 'back-1' }, { fixture: 'nope' }], colour: '#ff0000', intensity: 1 }) ?? '', /nope/);
+  assert.match(await t.send({ type: 'manual', targets: [{ fixture: 'back-1', segment: '2' }], intensity: 1 }) ?? '', /^invalid command/);
+  assert.equal(await t.send({ type: 'manual', targets: [{ fixture: 'back-1' }, { fixture: 'back-2', segment: 0 }], colour: '#ff0000', intensity: 1 }), null);
+  assert.equal(t.seen.filter((m) => m.type === 'result').length - before, 3, 'one reply each');
+  await waitFor(() => t.state()?.held?.length === 2, 2000, 'both held');
+  assert.deepEqual(t.state().held.map((h: any) => h.fixture), ['back-1', 'back-2']);
+  assert.equal(await t.send({ type: 'release', targets: [{ fixture: 'back-1' }, { fixture: 'back-2', segment: 0 }] }), null);
+  await waitFor(() => t.state()?.held?.length === 0, 2000, 'both let go');
 }));
 
 test('Save, Add song and Save as quick look in Blind store the draft, not the stage', () => withApp(async (app, dir) => {
@@ -214,6 +251,50 @@ test('Save, Add song and Save as quick look in Blind store the draft, not the st
   assert.equal(t.state().groups['back-wall'].preset, liveWall);
   assert.equal(t.state().tempo, liveTempo);
   assert.equal(t.draft().groups['back-wall'].preset, 'back-amber');
+}));
+
+test('Prepare: a song started in the draft is what Save stores, Live drops it, and the other tablet never sees it', () => withApp(async (app, dir) => {
+  const a = await onWorship(app);
+  const b = await tablet(app);
+  await waitFor(b.state);
+  const song = a.order().find((id) => id !== 'worship' && id !== a.layout().basicLights)!;
+  const before = savedLook(dir, song)!;
+  const worshipBefore = savedLook(dir, 'worship')!;
+
+  // Prepare on, then a running-order tap: the draft starts the song, the stage keeps worship.
+  assert.equal(await a.send({ type: 'blindStart' }), null);
+  assert.equal(await a.send({ type: 'draft', cmd: { type: 'look', id: song, fade: 0 } }), null);
+  await waitFor(() => a.draft()?.look === song, 2000, 'the draft on the song');
+  assert.equal(await a.send({ type: 'draft', cmd: { type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 } }), null);
+  assert.equal(await a.send({ type: 'draft', cmd: { type: 'groupLevel', group: 'audience', value: 0.35 } }), null);
+  await waitFor(() => a.draft()?.groups.audience.level === 0.35, 2000, 'the draft change');
+
+  // Save to the song stores the draft in it, without touching the lights.
+  assert.equal(await a.send({ type: 'saveItem', id: song }), null);
+  const saved = savedLook(dir, song)!;
+  assert.equal(saved.groups.find((e) => e.group === 'back-wall')!.preset, 'back-amber');
+  assert.equal(saved.groups.find((e) => e.group === 'audience')!.level, 0.35);
+  assert.notDeepEqual(saved.groups, before.groups);
+  assert.deepEqual(savedLook(dir, 'worship')!.groups, worshipBefore.groups, 'the song on stage is not changed');
+  await sleep(150);
+  for (const t of [a, b]) {
+    assert.equal(t.state().look, 'worship');
+    assert.equal(t.state().groups['back-wall'].preset, 'back-purple');
+    assert.equal(t.state().groups.audience.level, 1);
+  }
+
+  // Live drops the draft: no Go, no more draft states, the stage as it was.
+  assert.equal(await a.send({ type: 'blindEnd' }), null);
+  assert.equal(app.drafts, 0);
+  assert.equal(await a.send({ type: 'blindGo' }), BLIND_OFF);
+  const drafts = a.seen.filter((m) => m.type === 'draftState').length;
+  await sleep(200);
+  assert.equal(a.seen.filter((m) => m.type === 'draftState').length, drafts, 'no more draft states');
+  assert.equal(b.state().look, 'worship');
+  assert.equal(b.state().groups['back-wall'].preset, 'back-purple');
+
+  // The other tablet never heard of the draft.
+  assert.ok(!b.seen.some((m) => m.type === 'draftState' || m.type === 'draftVisual' || m.type === 'draftEnded'));
 }));
 
 test('Go sends the draft to the stage with the Fade setting, as one Undo step, and ends Blind', () => withApp(async (app) => {
@@ -337,6 +418,26 @@ test('a draft picks up the live stage clock, so an effect on stage looks the sam
   // In step, the two pictures differ by a few levels at most (they are up to a frame or two apart); a draft on
   // its own clock is a good part of a wave off (about 28 levels on average here).
   assert.ok(diff / live.length < 8, `mean difference ${diff / live.length}`);
+}));
+
+test("a draft's live state gives the round of the effect it runs, slowed by light safety as on stage", () => withApp(async (app) => {
+  const t = await onWorship(app);
+  assert.equal(await t.send({ type: 'blindStart' }), null);
+  await waitFor(() => t.draft(), 2000, 'the draft');
+  const effect = (kind: string, beats: number) => ({
+    kind: 'effect', effect: kind, colours: [{ hex: '#ff0000' }], speed: { beats }, direction: 'ltr', waves: 1, size: 0.5, edge: 'hard', intensity: 1,
+  });
+  // A wave of 16 beats runs as asked: 16 beats at the draft's tempo.
+  assert.equal(await t.send({ type: 'draft', cmd: { type: 'groupEffect', group: 'back-wall', effect: effect('wave', 16), fade: 0 } }), null);
+  await waitFor(() => t.draft()?.groups['back-wall'].round !== null, 2000, 'the draft to run the wave');
+  const tempo = t.draft().tempo;
+  assert.ok(Math.abs(t.draft().groups['back-wall'].round - (16 * 60) / tempo) < 1e-9);
+  assert.equal(t.draft().groups['back-wall'].slowed, false);
+  // A sparkle of 1 beat is slowed: longer than the beat asked for. The stage runs no effect at all.
+  assert.equal(await t.send({ type: 'draft', cmd: { type: 'groupEffect', group: 'back-wall', effect: effect('sparkle', 1), fade: 0 } }), null);
+  await waitFor(() => t.draft()?.groups['back-wall'].slowed === true, 2000, 'the draft to run the slowed sparkle');
+  assert.ok(t.draft().groups['back-wall'].round > 60 / tempo);
+  assert.equal(t.state().groups['back-wall'].round, null);
 }));
 
 test('Save in Blind works for a draft made during Blackout: lit groups keep their colours, the rest are Off', () => withApp(async (app, dir) => {
@@ -506,4 +607,190 @@ test('Update from the stage in Blind stores the draft, not the stage', () => wit
   assert.equal(savedLook(dir, quick.id), undefined);
   await sleep(150);
   assert.equal(t.state().groups['back-wall'].preset, liveWall);
+}));
+
+/** A stand-in Art-Net node on this machine: every ArtDmx packet it gets, as "universe:data". */
+async function artnetNode() {
+  const socket = createSocket('udp4');
+  await new Promise<void>((r) => socket.bind(0, '127.0.0.1', r));
+  const packets: string[] = [];
+  socket.on('message', (m) => {
+    if (m.subarray(0, 8).toString('ascii') === 'Art-Net\0' && m.readUInt16LE(8) === 0x5000) packets.push(`${m.readUInt16LE(14)}:${m.subarray(18).toString('hex')}`);
+  });
+  return { port: socket.address().port, packets, close: () => socket.close() };
+}
+
+/** The stage-L1 rig, sending Art-Net to `node` (and nowhere else). */
+async function withRig(fn: (app: App, node: Awaited<ReturnType<typeof artnetNode>>) => Promise<void>) {
+  const node = await artnetNode();
+  const dir = tempDir();
+  const app = new App({
+    port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'shows/stage-l1.json'), webDir: join(root, 'web'),
+    output: { kind: 'artnet', host: '192.0.2.1' }, artnetRedirect: { '192.0.2.1': { host: '127.0.0.1', port: node.port } }, log: () => {},
+  });
+  try {
+    await app.start();
+    await fn(app, node);
+  } finally {
+    await app.stop();
+    node.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Every packet the node gets for `ms` from now, by universe, and the tablet's live pictures in that time. */
+async function watch(node: { packets: string[] }, t: { visuals: Buffer[] }, ms: number) {
+  const from = node.packets.length, seen = t.visuals.length;
+  await sleep(ms);
+  const byUniverse = new Map<string, Set<string>>();
+  for (const p of node.packets.slice(from)) {
+    const [u, data] = p.split(':') as [string, string];
+    if (!byUniverse.has(u)) byUniverse.set(u, new Set());
+    byUniverse.get(u)!.add(data);
+  }
+  return { byUniverse, count: node.packets.length - from, visuals: new Set(t.visuals.slice(seen).map((v) => v.toString('hex'))) };
+}
+
+/** Lights that hold still: each universe's one packet, and the one live picture. */
+function steady(w: Awaited<ReturnType<typeof watch>>, what: string) {
+  assert.ok(w.count >= 10, `${what}: packets ${w.count}`);
+  for (const [u, set] of w.byUniverse) assert.equal(set.size, 1, `${what}: universe ${u} changed`);
+  assert.equal(w.visuals.size, 1, `${what}: the stage view changed`);
+  return { dmx: [...w.byUniverse].map(([u, set]) => `${u}:${[...set][0]}`).sort(), visual: [...w.visuals][0] };
+}
+
+test('a colour or effect edited in Prepare never moves the lights: the draft takes it, the stage keeps a copy until it next takes that colour', () => withRig(async (app, node) => {
+  const a = await tablet(app);
+  const b = await tablet(app);
+  await waitFor(a.layout);
+  // A steady red colour fade (two reds) on the side bar, to edit as an effect.
+  const red = { kind: 'effect', effect: 'colourFade', colours: [{ hex: '#ff0000' }, { hex: '#ff0000' }], speed: { beats: 4 } };
+  assert.equal(await a.send({ type: 'addEffect', group: 'b8-side-bar', name: 'Steady red', effect: red }), null);
+  const fx = (await api(app, 'GET', '/api/show')).body.presets.find((p: any) => p.name === 'Steady red').id;
+  for (const cmd of [
+    { type: 'look', id: 'worship', fade: 0 },
+    { type: 'groupPreset', group: 'key-lights', preset: 'key-lights-sarkans', fade: 0 },
+    { type: 'groupPreset', group: 'background', preset: 'background-sarkans', fade: 0 },
+    { type: 'groupPreset', group: 'b8-side-bar', preset: fx, fade: 0 },
+  ]) assert.equal(await a.send(cmd), null);
+  await waitFor(() => b.state()?.groups['b8-side-bar'].preset === fx, 2000, 'the stage set');
+  await sleep(300);
+  assert.equal(await a.send({ type: 'blindStart' }), null);
+  await waitFor(() => a.draft(), 2000, 'the draft');
+  const lights = steady(await watch(node, b, 400), 'before the edits');
+
+  // Red, shared by every group of that name: a new colour, brightness, White, Amber and UV. And the effect turns green.
+  assert.equal(await a.send({ type: 'editColour', preset: 'key-lights-sarkans', colour: '#00ff00', white: 0.5, amber: 0.4, uv: 0.3, level: 0.5, shared: true, sameName: true }), null);
+  const green = { ...red, colours: [{ hex: '#00ff00' }, { hex: '#00ff00' }] };
+  assert.equal(await a.send({ type: 'editEffect', preset: fx, effect: green }), null);
+  assert.deepEqual(steady(await watch(node, b, 1000), 'after the edits'), lights, 'the lights and the stage view did not move');
+
+  // The stage runs copies of how the colours were, so the song reads as changed; the draft has the edits.
+  const live = app.state!.groups;
+  for (const [group, id] of [['key-lights', 'key-lights-sarkans'], ['background', 'background-sarkans'], ['b8-side-bar', fx]]) {
+    assert.notEqual(live[group]!.preset, id, `${group} runs a copy`);
+    assert.equal(live[group]!.changed, true);
+    assert.equal(a.draft().groups[group].preset, id, `the draft's ${group} runs the edited one`);
+  }
+  const show = (await api(app, 'GET', '/api/show')).body;
+  assert.equal(show.palettes.find((p: any) => p.id === 'lightkey').colours[2].hex, '#00ff00');
+  const pick = (id: string) => show.presets.find((p: any) => p.id === id);
+  assert.equal(pick(live['key-lights']!.preset!).custom, true);
+  assert.deepEqual(pick(live['b8-side-bar']!.preset!).layers[0].colours, red.colours);
+  // The page can show the copies as the colours they are.
+  const hidden = (await waitFor(() => b.layout()?.groups.find((g: any) => g.id === 'background')?.hidden.find((h: any) => h.id === live.background!.preset), 2000, 'the copy in the layout'));
+  assert.equal(hidden.name, 'Sarkans');
+  assert.equal(hidden.light.hex, '#ff0000');
+  // The draft's picture shows the edit.
+  await waitFor(() => a.draftVisuals().at(-1)?.toString('hex') !== lights.visual, 4000, "the draft's picture to change");
+
+  // Undo from Live takes back each edit with its copy, and the lights still don't move.
+  assert.equal(await a.send({ type: 'blindEnd' }), null);
+  const during = watch(node, b, 1200);
+  assert.equal(await a.send({ type: 'undo' }), null);
+  assert.equal(await a.send({ type: 'undo' }), null);
+  assert.deepEqual(steady(await during, 'through Undo'), lights);
+  const back = app.state!.groups;
+  assert.equal(back['key-lights']!.preset, 'key-lights-sarkans');
+  assert.equal(back.background!.preset, 'background-sarkans');
+  assert.equal(back['b8-side-bar']!.preset, fx);
+  assert.equal((await api(app, 'GET', '/api/show')).body.palettes.find((p: any) => p.id === 'lightkey').colours[2].hex, '#ff0000');
+
+  // Edited again in Prepare, then Go: the stage takes the colour.
+  assert.equal(await a.send({ type: 'fadeTime', value: 0 }), null);
+  assert.equal(await a.send({ type: 'blindStart' }), null);
+  await waitFor(() => a.draft(), 2000, 'the draft');
+  assert.equal(await a.send({ type: 'editColour', preset: 'key-lights-sarkans', colour: '#0000ff', sameName: false }), null);
+  await waitFor(() => app.state!.groups['key-lights']!.preset !== 'key-lights-sarkans', 2000, 'the key lights on their copy');
+  assert.equal(await a.send({ type: 'blindGo' }), null);
+  await waitFor(() => app.state!.groups['key-lights']!.preset === 'key-lights-sarkans', 2000, 'Go to put the key lights on the edited red');
+  await sleep(300);
+  assert.notDeepEqual(steady(await watch(node, b, 300), 'after Go').dmx, lights.dmx, 'the lights took the edit');
+}));
+
+test('an edit made in Live still changes the lights wherever the colour is lit', () => withRig(async (app, node) => {
+  const a = await tablet(app);
+  await waitFor(a.layout);
+  assert.equal(await a.send({ type: 'fadeTime', value: 0 }), null);
+  assert.equal(await a.send({ type: 'groupPreset', group: 'key-lights', preset: 'key-lights-sarkans', fade: 0 }), null);
+  await sleep(300);
+  const lights = steady(await watch(node, a, 300), 'before');
+  assert.equal(await a.send({ type: 'editColour', preset: 'key-lights-sarkans', colour: '#0000ff', sameName: false }), null);
+  await sleep(4000);
+  assert.equal(app.state!.groups['key-lights']!.preset, 'key-lights-sarkans');
+  assert.notDeepEqual(steady(await watch(node, a, 300), 'after').dmx, lights.dmx);
+}));
+
+/** The largest green any key-light segment showed in the stage pictures the tablet got since `from`. */
+function keyGreen(t: { visuals: Buffer[]; layout: () => any }, from: number): number {
+  const fixtures = t.layout().fixtures as { id: string; segments: number }[];
+  const spans: [number, number][] = [];
+  let at = 0;
+  for (const f of fixtures) {
+    if (f.id === 'b1' || f.id === 'b2') spans.push([at, at + f.segments]);
+    at += f.segments;
+  }
+  let most = 0;
+  for (const v of t.visuals.slice(from)) {
+    for (const [a, b] of spans) for (let k = a; k < b; k++) most = Math.max(most, v[k * 3 + 1]!);
+  }
+  return most;
+}
+
+test('an edit in Prepare made in the middle of a fade, or of Blackout fading out, never shows on the lights', () => withRig(async (app) => {
+  const a = await tablet(app);
+  const b = await tablet(app);
+  await waitFor(a.layout);
+  for (const cmd of [
+    { type: 'look', id: 'worship', fade: 0 },
+    { type: 'groupPreset', group: 'key-lights', preset: 'key-lights-sarkans', fade: 0 },
+  ]) assert.equal(await a.send(cmd), null);
+  await sleep(300);
+  assert.equal(await a.send({ type: 'blindStart' }), null);
+  await waitFor(() => a.draft(), 2000, 'the draft');
+
+  // Red fading to blue over 3 s; a second in, red becomes green in Prepare.
+  let from = b.visuals.length;
+  assert.equal(await b.send({ type: 'groupPreset', group: 'key-lights', preset: 'key-lights-zils', fade: 3 }), null);
+  await sleep(1000);
+  assert.equal(await a.send({ type: 'editColour', preset: 'key-lights-sarkans', colour: '#00ff00', sameName: false }), null);
+  await sleep(2500);
+  assert.ok(keyGreen(b, from) <= 2, `no green on the key lights through the fade: ${keyGreen(b, from)}`);
+  assert.equal(app.state!.groups['key-lights']!.preset, 'key-lights-zils');
+
+  // Undo takes the edit back; the key lights go back on red.
+  assert.equal(await a.send({ type: 'blindEnd' }), null);
+  assert.equal(await b.send({ type: 'undo' }), null);
+  await sleep(300);
+  assert.equal(await b.send({ type: 'groupPreset', group: 'key-lights', preset: 'key-lights-sarkans', fade: 0 }), null);
+  await sleep(300);
+  // Blackout fades red out over 1 s; 0.3 s in, red becomes green in Prepare.
+  assert.equal(await a.send({ type: 'blindStart' }), null);
+  await waitFor(() => a.draft(), 2000, 'the draft');
+  from = b.visuals.length;
+  assert.equal(await b.send({ type: 'blackout' }), null);
+  await sleep(300);
+  assert.equal(await a.send({ type: 'editColour', preset: 'key-lights-sarkans', colour: '#00ff00', sameName: false }), null);
+  await sleep(1200);
+  assert.ok(keyGreen(b, from) <= 2, `no green on the key lights through Blackout: ${keyGreen(b, from)}`);
 }));

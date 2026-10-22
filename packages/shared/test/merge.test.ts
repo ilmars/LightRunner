@@ -220,3 +220,27 @@ test('a file that has shapes is compared and taken as usual', () => {
   const out = applyPicks(current, incoming, [{ kind: 'fixture', id: 'b8', change: 'changed' }]);
   assert.equal(out.fixtures.find((f) => f.id === 'b8')!.angle, 30);
 });
+
+test('hidden colours (Custom, and the copies Prepare keeps) are left out of the compare; a taken look brings its own', () => {
+  const hidden = (id: string, hex: string) => ({ id, name: 'Zils', group: 'key-lights', custom: true, fade: 3, layers: [{ kind: 'static' as const, colour: { hex }, intensity: 1 }] });
+  const current = rig();
+  current.presets.push(hidden('key-lights-zils-kept', '#0000ff'), hidden('custom-1', '#123456'));
+  // The file (a Lightkey project, or an older export) has neither: nothing to list.
+  assert.deepEqual(diffShows(current, rig()), []);
+  // A file whose look uses a hidden colour of its own: the look is listed, the hidden colour is not, and taking the look brings it.
+  const incoming = rig();
+  incoming.presets.push(hidden('custom-9', '#00ff00'));
+  incoming.looks.find((l) => l.id === 'worship')!.groups.find((e) => e.group === 'key-lights')!.preset = 'custom-9';
+  const items = diffShows(rig(), incoming);
+  assert.deepEqual(items.map((i) => `${i.kind}:${i.id}:${i.change}`), ['look:worship:changed']);
+  const taken = applyPicks(rig(), incoming, [{ kind: 'look', id: 'worship', change: 'changed' }]);
+  assert.equal(taken.presets.find((p) => p.id === 'custom-9')?.layers[0]?.kind, 'static');
+  // A hidden colour here with the same id but another light stays as it is; the taken look gets its own copy.
+  const mine = rig();
+  mine.presets.push(hidden('custom-9', '#ff0000'));
+  const both = applyPicks(mine, incoming, [{ kind: 'look', id: 'worship', change: 'changed' }]);
+  assert.deepEqual(both.presets.find((p) => p.id === 'custom-9')!.layers, hidden('custom-9', '#ff0000').layers);
+  const used = both.looks.find((l) => l.id === 'worship')!.groups.find((e) => e.group === 'key-lights')!.preset;
+  assert.notEqual(used, 'custom-9');
+  assert.deepEqual(both.presets.find((p) => p.id === used)!.layers, hidden('custom-9', '#00ff00').layers);
+});

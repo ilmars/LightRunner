@@ -625,6 +625,15 @@ test("Add to colours keeps an Any colour pick's white, amber and UV, and the gro
   assert.equal(amber.swatch, '#ffbf00');
   assert.equal(amber.canRecolour, true);
   assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: '#000000', name: 'Dark', allGroups: false }), 'that colour has no light: pick a colour, or add White, Amber or UV');
+  // ＋ New colour's Brightness and Fade come with it.
+  assert.equal(await t.send({ type: 'addColour', group: 'back-wall', colour: '#123456', name: 'Dim navy', allGroups: false, level: 0.4, fade: 1 }), null);
+  const dim = presetsOf(t.layout(), 'back-wall').find((p) => p.name === 'Dim navy') as any;
+  assert.equal(dim.level, 0.4);
+  assert.equal(dim.fade, 1);
+  // Its own colour comes as it was typed: the light (scaled by 40 %) can't give #123456 back exactly.
+  assert.equal(dim.colour, '#123456');
+  assert.equal(dim.light.hex, '#071522');
+  assert.match((await t.send({ type: 'addColour', group: 'back-wall', colour: '#123457', name: 'x', allGroups: false, level: 0.01 }))!, /^invalid command/);
 }));
 
 test('Add to colours: names, every group, duplicates, Blackout and the PIN', () => withApp(async (app, dir) => {
@@ -826,6 +835,25 @@ test('an editColour with shared is one Undo step', () => withRig(async (app, dir
   assert.deepEqual(swatches(), before);
   const undone = parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8')));
   assert.equal(undone.palettes.find((p) => p.id === 'lightkey')!.colours[7]!.hex, '#0000ff');
+}));
+
+test("an editColour can change a listed colour's White, Amber and UV, as one Undo step", () => withRig(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const zils = () => rigPresets(t.layout(), 'Zils');
+  const before = zils().map((p: any) => p.swatch);
+  // Only this group's: it gets its own colour with the amber; the light the layout gives shows it.
+  assert.equal(await t.send({ type: 'editColour', preset: zils()[0].id, amber: 0.5, sameName: false }), null);
+  assert.equal(zils()[0].light.amber, 0.5);
+  assert.equal(zils()[0].shared, null);
+  assert.equal(zils()[1].light.amber, 0);
+  assert.equal(await t.send({ type: 'undo' }), null);
+  assert.deepEqual(zils().map((p: any) => p.swatch), before);
+  // With shared: every Zils follows.
+  assert.equal(await t.send({ type: 'editColour', preset: zils()[0].id, white: 0.25, shared: true, sameName: true }), null);
+  for (const p of zils()) assert.equal(p.light.white, 0.25);
+  assert.match((await t.send({ type: 'editColour', preset: zils()[0].id, uv: 2, sameName: false }))!, /^invalid command/);
+  assert.equal(await t.send({ type: 'editColour', preset: zils()[0].id, colour: '#000000', white: 0, sameName: false }), 'that colour has no light: pick a colour, or add White, Amber or UV');
 }));
 
 test('colours can be edited and deleted during Blackout, with no PIN',() => withApp(async (app) => {
@@ -1037,6 +1065,37 @@ test('the layout gives each item its entries, and the preview picture is served'
   assert.equal(missing.status, 404);
 }));
 
+test('the pages, the font and the icon are served with their types', () => withApp(async (app) => {
+  const get = (path: string) => fetch(`http://127.0.0.1:${app.port}${path}`);
+  const types: Record<string, string> = {
+    '/operator/': 'text/html; charset=utf-8',
+    '/shared/theme.css': 'text/css; charset=utf-8',
+    '/shared/fonts/inter-latin-wght-normal.woff2': 'font/woff2',
+    '/shared/fonts/inter-latin-ext-wght-normal.woff2': 'font/woff2',
+    '/shared/fonts/OFL.txt': 'text/plain; charset=utf-8',
+    '/shared/icon.svg': 'image/svg+xml',
+    '/shared/icon-16.svg': 'image/svg+xml',
+    '/shared/icon-180.png': 'image/png',
+  };
+  for (const [path, type] of Object.entries(types)) {
+    const res = await get(path);
+    assert.equal(res.status, 200, path);
+    assert.equal(res.headers.get('content-type'), type, path);
+    if (type === 'font/woff2') assert.equal(Buffer.from(await res.arrayBuffer()).subarray(0, 4).toString('latin1'), 'wOF2', path);
+    else await res.arrayBuffer();
+  }
+  // Every page loads the shared theme (where Inter is) and has the icon.
+  for (const page of ['/operator/', '/patch/', '/settings/']) {
+    const html = await (await get(page)).text();
+    assert.match(html, /<link rel="stylesheet" href="\/shared\/theme\.css">/, page);
+    assert.match(html, /<link rel="icon" href="\/shared\/icon-16\.svg" type="image\/svg\+xml">/, page);
+    assert.match(html, /<link rel="apple-touch-icon" href="\/shared\/icon-180\.png">/, page);
+  }
+  const css = await (await get('/shared/theme.css')).text();
+  assert.match(css, /--ds-font: Inter, system-ui/);
+  for (const m of css.matchAll(/url\(([^)]+\.woff2)\)/g)) assert.equal((await get(`/shared/${m[1]}`)).status, 200, m[1]);
+}));
+
 // ---- Live effects, the song's tempo and the effects list ----
 
 /** A wave as the Effects tab sends it: every setting, colours as plain hex. */
@@ -1206,6 +1265,13 @@ test('the effects list: add, edit, rename and delete over the wire, and the layo
   assert.equal(await t.send({ type: 'editEffect', preset: added.id, effect: liveWave({ waves: 1 }) }), null);
   await waitFor(() => t.layout().groups.find((g: any) => g.id === 'back-wall').presets.find((p: any) => p.id === added.id).effect.waves === 1, 2000, 'the edit');
   assert.equal(await t.send({ type: 'editEffect', preset: 'back-amber', effect: liveWave() }), 'that is not an effect');
+  // A new name and new settings in one command are one Undo step; a refused name refuses the settings too.
+  const effectOf = () => t.layout().groups.find((g: any) => g.id === 'back-wall').presets.find((p: any) => p.id === added.id);
+  assert.equal(await t.send({ type: 'editEffect', preset: added.id, effect: liveWave({ waves: 3 }), name: 'Three rolls' }), null);
+  await waitFor(() => effectOf().name === 'Three rolls' && effectOf().effect.waves === 3, 2000, 'the name and settings together');
+  assert.equal(await t.send({ type: 'editEffect', preset: added.id, effect: liveWave({ waves: 2 }), name: ' ' }), 'a name is needed');
+  assert.equal(await t.send({ type: 'undo' }), null);
+  await waitFor(() => effectOf().name === 'Rolling' && effectOf().effect.waves === 1, 2000, 'one Undo step takes both back');
   assert.equal(await t.send({ type: 'editColour', preset: added.id, name: 'Slow roll', sameName: false }), null);
   // On stage it stays.
   assert.equal(await t.send({ type: 'groupPreset', group: 'back-wall', preset: added.id, fade: 0 }), null);

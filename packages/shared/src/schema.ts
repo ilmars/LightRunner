@@ -229,6 +229,61 @@ export type QuickTab = z.infer<typeof QuickTab>;
 export const QuickLook = z.object({ look: id, tab: QuickTab });
 export type QuickLook = z.infer<typeof QuickLook>;
 
+// ---- Controller keys (MIDI) ----
+
+/**
+ * A key on a MIDI controller: the device it is on (its port name as `deviceName` gives it, so the same
+ * controller is known again after a re-plug) and what it sends: a note (a pad or a button) or a control
+ * change (a fader or a knob), on a channel 1-16, with its number 0-127.
+ */
+export const ControlKey = z.object({
+  device: z.string().min(1).max(120),
+  type: z.enum(['note', 'cc']),
+  channel: z.number().int().min(1).max(16),
+  number: z.number().int().min(0).max(127),
+});
+export type ControlKey = z.infer<typeof ControlKey>;
+
+/**
+ * What a key does. Songs (Basic lights too), quick looks and groups are named by id, so a key follows the
+ * song when the running order changes. Master, a group's level and the fade knob need a fader or a knob.
+ */
+export const KeyTarget = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('song'), id }),
+  z.object({ kind: z.literal('quickLook'), id }),
+  z.object({ kind: z.literal('next') }),
+  z.object({ kind: z.literal('backToLook') }),
+  z.object({ kind: z.literal('undo') }),
+  z.object({ kind: z.literal('basic') }),
+  /** Held 1 s, as on the iPad. */
+  z.object({ kind: z.literal('blackout') }),
+  /** Flash while held. */
+  z.object({ kind: z.literal('flashAll') }),
+  z.object({ kind: z.literal('flash'), group: id }),
+  z.object({ kind: z.literal('master') }),
+  z.object({ kind: z.literal('groupLevel'), group: id }),
+  /** A knob or fader that sweeps the fade times (FADE_STEPS). */
+  z.object({ kind: z.literal('fadeKnob') }),
+  /** One fade time; null is Auto (each look's own). */
+  z.object({ kind: z.literal('fadeTime'), value: z.number().min(0).max(600).nullable() }),
+  z.object({ kind: z.literal('tap') }),
+  z.object({ kind: z.literal('tempoStep'), times: z.union([z.literal(2), z.literal(0.5)]) }),
+]);
+export type KeyTarget = z.infer<typeof KeyTarget>;
+
+export const KeyBinding = z.object({ key: ControlKey, does: KeyTarget });
+export type KeyBinding = z.infer<typeof KeyBinding>;
+
+/** Controller keys (Settings › Controller keys). Absent in older shows: no keys, the standard APC mini layout, every device listened to. */
+export const ControllerSettings = z.object({
+  keys: z.array(KeyBinding).max(1024).default([]),
+  /** The standard APC mini layout for keys not assigned; absent = on. */
+  apcLayout: z.boolean().optional(),
+  /** Devices (by `deviceName`) Light Runner doesn't listen to; absent = none. */
+  ignored: z.array(z.string().min(1).max(120)).max(64).optional(),
+});
+export type ControllerSettings = z.infer<typeof ControllerSettings>;
+
 export const OperatorLayout = z.object({
   looks: z.array(id).default([]),
   groups: z.array(id).default([]),
@@ -240,6 +295,8 @@ export const OperatorLayout = z.object({
   quickLooks: z.array(QuickLook).default([]),
   /** The ready-made effects have been added once (see ensureEffects); they are never added again. */
   effectsAdded: z.boolean().optional(),
+  /** Keys on MIDI controllers; absent in older shows. */
+  controller: ControllerSettings.optional(),
 });
 export type OperatorLayout = z.infer<typeof OperatorLayout>;
 
@@ -266,6 +323,21 @@ export const OscSettings = z.object({
 });
 export type OscSettings = z.infer<typeof OscSettings>;
 
+/** A contact field: trimmed; blank (as a hand-edited show file may have it) is left out. */
+const contactField = (max: number) => z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+  z.string().trim().max(max).optional(),
+);
+/** Who to call when the lights have a problem (Settings > Who to call). An empty field is left out. */
+export const Contact = z.object({ name: contactField(60), phone: contactField(40) });
+export type Contact = z.infer<typeof Contact>;
+
+/** The contact with its fields checked, or nothing at all when both are empty. Throws on bad input. */
+export function contactOf(input: unknown): Contact | undefined {
+  const contact = Contact.parse(input);
+  return contact.name || contact.phone ? contact : undefined;
+}
+
 export const Settings = z.object({
   /** The default output: every universe goes here unless a route says otherwise. */
   output: OutputSettings.default({ kind: 'artnet', host: '2.255.255.255' }),
@@ -278,6 +350,8 @@ export const Settings = z.object({
   pinHash: z.string().optional(),
   /** Absent in older shows: OSC is off. */
   osc: OscSettings.optional(),
+  /** Who to call, shown in the operator page's problem explanation. Absent when nobody is set. */
+  contact: Contact.transform((c) => (c.name || c.phone ? c : undefined)).optional(),
 }).superRefine((s, ctx) => {
   for (const message of routeProblems(s.output, s.routes)) ctx.addIssue({ code: 'custom', message, path: ['routes'] });
 });

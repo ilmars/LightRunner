@@ -4,8 +4,8 @@
 
 import { HEX_COLOUR, displayColour } from './protocol.ts';
 import { cleanName, effectSwatch, uniqueId } from './runningorder.ts';
-import { findProfile, isEffectPreset, layerColours, resolveColour } from './schema.ts';
-import type { ChannelRole, ColourSpec, EffectLayer, Palette, Preset, Profile, Show, StaticLayer } from './schema.ts';
+import { findProfile, isEffectPreset, layerColours, resolveColour, resolveEffect } from './schema.ts';
+import type { ChannelRole, ColourSpec, EffectLayer, Layer, Palette, Preset, Profile, Show, StaticLayer } from './schema.ts';
 
 /** True when no fixture in the group has a red, green or blue channel: the picker offers it warm-to-cool white only. */
 export function groupIsWhiteOnly(show: Show, groupId: string): boolean {
@@ -33,6 +33,10 @@ export interface AddColour {
   white?: number;
   amber?: number;
   uv?: number;
+  /** Its brightness, 0.05 to 1, kept to whole percent (missing is full). */
+  level?: number;
+  /** Its own fade in seconds, 0 to 600 (missing is 3 s). */
+  fade?: number;
 }
 
 /** The light (hex, white, amber, UV, intensity) a preset's only layer makes, palette colours looked up; null for anything else (an effect, say). */
@@ -80,8 +84,12 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
     const level = Math.round(v * 100) / 100;
     if (level > 0) extras[k] = level;
   }
-  const layer: StaticLayer = { kind: 'static', colour: { hex: colour, ...extras }, intensity: 1 };
-  const wanted = JSON.stringify([colour, extras.white ?? 0, extras.amber ?? 0, extras.uv ?? 0, 1]);
+  if (input.level !== undefined && !(input.level >= 0.05 && input.level <= 1)) throw new Error('the brightness is between 5 % and 100 %');
+  if (input.fade !== undefined && !(input.fade >= 0 && input.fade <= 600)) throw new Error('the fade is between 0 and 600 seconds');
+  const level = input.level === undefined ? 1 : Math.round(input.level * 100) / 100;
+  const fade = input.fade ?? 3;
+  const layer: StaticLayer = { kind: 'static', colour: { hex: colour, ...extras }, intensity: level };
+  const wanted = JSON.stringify([colour, extras.white ?? 0, extras.amber ?? 0, extras.uv ?? 0, level]);
   // The swatch shows the white, amber and UV in it, as a saved Any colour pick's does.
   const swatch = Object.keys(extras).length ? displayColour(colour, extras) : colour;
   // A black colour is a light only with White, Amber or UV in it.
@@ -93,7 +101,7 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
     const own = out.presets.filter((p) => p.group === group);
     if (own.some((p) => !p.custom && plainLight(out, p) === wanted)) continue;
     const id = uniqueId(`${group} ${name}`, out.presets.map((p) => p.id));
-    out.presets.push({ id, name, group, layers: [structuredClone(layer)], fade: 3, swatch });
+    out.presets.push({ id, name, group, layers: [structuredClone(layer)], fade, swatch });
     ids.push(id);
   }
   if (!ids.length) throw new Error(input.allGroups ? 'every group already has that colour' : 'that colour is already in the list');
@@ -137,7 +145,14 @@ export interface EditColour {
   /** New fade time in seconds, 0 to 600 (the preset's own fade); undefined leaves it. */
   fade?: number;
   /**
-   * With a new colour on a colour that points to a palette entry: change the palette entry,
+   * New White, Amber and UV levels 0..1, kept to whole percent (0 takes it out); undefined leaves each.
+   * They go with the colour: to the palette entry with `shared`, otherwise into the colour's own.
+   */
+  white?: number;
+  amber?: number;
+  uv?: number;
+  /**
+   * With a new colour (or new White, Amber or UV) on a colour that points to a palette entry: change the palette entry,
    * so every colour pointing to it follows. Without a palette entry it does nothing. A same-named
    * colour of another group that points elsewhere (or nowhere) takes the new colour as its own.
    */
@@ -160,7 +175,7 @@ export function presetsUsingPaletteEntry(show: Show, palette: string, index: num
 }
 
 /**
- * Changes the name, colour, brightness and/or fade of a colour in a group's list. A new colour
+ * Changes the name, colour, White, Amber and UV, brightness and/or fade of a colour in a group's list. A new colour
  * replaces the preset's layer with one plain colour (keeping its brightness) and updates the swatch,
  * or, with `shared` on a palette colour, changes the palette entry itself for everything that points to it.
  * Returns the ids of every preset changed. Hidden (custom) presets can't be edited from here.
@@ -170,7 +185,15 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
   const target = out.presets.find((p) => p.id === input.preset);
   if (!target) throw new Error('that colour is not in the list');
   if (target.custom) throw new Error("that colour can't be edited");
-  if (input.name === undefined && input.colour === undefined && input.level === undefined && input.fade === undefined) throw new Error('nothing to change');
+  const extras: { white?: number; amber?: number; uv?: number } = {};
+  for (const k of ['white', 'amber', 'uv'] as const) {
+    const v = input[k];
+    if (v === undefined) continue;
+    if (!(v >= 0 && v <= 1)) throw new Error(`the ${k === 'uv' ? 'UV' : k} level is between 0 and 100 %`);
+    extras[k] = Math.round(v * 100) / 100;
+  }
+  const newExtras = Object.keys(extras).length > 0;
+  if (input.name === undefined && input.colour === undefined && input.level === undefined && input.fade === undefined && !newExtras) throw new Error('nothing to change');
   const name = input.name === undefined ? undefined : cleanName(input.name);
   if (input.colour !== undefined && !HEX_COLOUR.test(input.colour)) throw new Error('that is not a colour');
   const colour = input.colour?.toLowerCase();
@@ -178,7 +201,7 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
   if (level !== undefined && !(level >= 0.05 && level <= 1)) throw new Error('the brightness is between 5 % and 100 %');
   if (fade !== undefined && !(fade >= 0 && fade <= 600)) throw new Error('the fade is between 0 and 600 seconds');
 
-  if ((colour !== undefined || level !== undefined) && !canRecolour(target)) {
+  if ((colour !== undefined || level !== undefined || newExtras) && !canRecolour(target)) {
     throw new Error(isOff(target) ? "Off can't be given a colour; add a new colour instead." : "that colour can't be changed here");
   }
 
@@ -191,6 +214,15 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
     !!e && !!sharedEntry && e.palette === sharedEntry.palette && e.index === sharedEntry.index;
   const moved = new Set<string>(); // palette entries that got a new hex, as "palette:index"
   const edited = new Set<string>(); // presets that got a new colour of their own
+  /** The new colour and White, Amber and UV on `c` (0 takes one out); a colour with no light left is refused. */
+  const recolour = (c: { hex: string; white?: number; amber?: number; uv?: number }) => {
+    if (colour !== undefined) c.hex = colour;
+    for (const [k, v] of Object.entries(extras) as ['white' | 'amber' | 'uv', number][]) {
+      if (v > 0) c[k] = v;
+      else delete c[k];
+    }
+    if (/^#0{6}$/i.test(c.hex) && !c.white && !c.amber && !c.uv) throw new Error('that colour has no light: pick a colour, or add White, Amber or UV');
+  };
 
   for (const p of sameNamePresets(out, target, input.sameName)) {
     if (name !== undefined) p.name = name;
@@ -199,18 +231,21 @@ export function editColour(show: Show, input: EditColour): { show: Show; ids: st
     if (!canRecolour(p)) continue;
     const layer = p.layers[0] as StaticLayer;
     if (level !== undefined) layer.intensity = level;
-    if (colour === undefined) continue;
+    if (colour === undefined && !newExtras) continue;
     const entry = paletteEntryOf(p);
     if (entry && followsTarget(entry)) {
       const found = out.palettes.find((x) => x.id === entry.palette)?.colours[entry.index];
       if (found) {
-        found.hex = colour;
+        // Two same-named colours pointing to it change it once.
+        if (!moved.has(`${entry.palette}:${entry.index}`)) recolour(found);
         moved.add(`${entry.palette}:${entry.index}`);
         edited.add(p.id);
         continue;
       }
     }
-    p.layers = [recoloured(out, layer, colour)];
+    const own = recoloured(out, layer, colour ?? resolveColour(layer.colour, new Map(out.palettes.map((x) => [x.id, x]))).hex);
+    recolour(own.colour as { hex: string });
+    p.layers = [own];
     edited.add(p.id);
   }
 
@@ -312,19 +347,23 @@ export function addEffect(show: Show, input: AddEffect): { show: Show; id: strin
 export interface EditEffect {
   preset: string;
   effect: EffectLayer;
+  /** A new name too, in the same edit (one Undo step). A name alone can also be changed with editColour, like a colour's. */
+  name?: string | undefined;
 }
 
-/** New settings for an effect in a group's list. Its name is changed with editColour, like a colour's. */
+/** New settings for an effect in a group's list, and a new name when given: all of it, or (refused) none of it. */
 export function editEffect(show: Show, input: EditEffect): Show {
   const out = structuredClone(show);
   const target = out.presets.find((p) => p.id === input.preset);
   if (!target) throw new Error('that effect is not in the list');
   if (!isEffectPreset(target)) throw new Error('that is not an effect');
   if (target.custom) throw new Error("that effect can't be edited");
-  const before = JSON.stringify([target.layers, target.swatch]);
+  const name = input.name === undefined ? undefined : cleanName(input.name);
+  const before = JSON.stringify([target.name, target.layers, target.swatch]);
+  if (name !== undefined) target.name = name;
   target.layers = [structuredClone(input.effect)];
   target.swatch = effectSwatch(out, input.effect);
-  if (JSON.stringify([target.layers, target.swatch]) === before) throw new Error('nothing changed');
+  if (JSON.stringify([target.name, target.layers, target.swatch]) === before) throw new Error('nothing changed');
   return out;
 }
 
@@ -435,4 +474,59 @@ export function ensureEffects(show: Show): Show {
   }
   out.operator.effectsAdded = true;
   return out;
+}
+
+// ---- Edits in Prepare keep the stage as it is ----
+
+/** A preset's layers with palette colours looked up, so two layers compare by the light they make. */
+export function resolvedLayers(layers: readonly Layer[], palettes: readonly Palette[]): Layer[] {
+  const byId = new Map(palettes.map((p) => [p.id, p]));
+  return layers.map((l) => (l.kind === 'static' ? { ...l, colour: { ...resolveColour(l.colour, byId) } } : resolveEffect(l, byId)));
+}
+
+/** The group running preset `from` carries on as preset `to`, which makes the same light: no fade, an effect keeps its place. */
+export interface PresetPin {
+  group: string;
+  from: string;
+  to: string;
+}
+
+/**
+ * Keep the stage as it is through a show edit (one made in Prepare, which never changes the lights): each group whose
+ * colour or effect on stage (or in Blackout's memory) the edit changes gets a pin onto a hidden copy of it as it was
+ * (palette colours looked up, brightness and fade kept), for the engine to move the group onto. A hidden preset of the
+ * group that already makes that light, with that name and fade, is used again; otherwise a new copy is added.
+ * Returns the edited show (with any new copies) and the pins; with no new copies, `next` itself. The inputs are not changed.
+ */
+export function keepLitPresets(
+  before: Show, next: Show,
+  stage: { groups: Readonly<Record<string, string | null>>; beforeBlackout?: Readonly<Record<string, string | null>> | null },
+): { show: Show; pins: PresetPin[] } {
+  const pins: PresetPin[] = [];
+  const copies: Preset[] = [];
+  const taken = next.presets.map((p) => p.id);
+  const lightOf = (p: Preset, show: Show) => JSON.stringify(resolvedLayers(p.layers, show.palettes));
+  const lit = new Set<string>();
+  for (const named of [stage.groups, stage.beforeBlackout ?? {}]) {
+    for (const [group, id] of Object.entries(named)) if (id) lit.add(JSON.stringify([group, id]));
+  }
+  for (const key of lit) {
+    const [group, id] = JSON.parse(key) as [string, string];
+    const was = before.presets.find((p) => p.id === id && p.group === group);
+    const is = next.presets.find((p) => p.id === id && p.group === group);
+    // A preset the edit takes away is the engine's to let go of (it keeps the light).
+    if (!was || !is) continue;
+    const light = lightOf(was, before);
+    if (light === lightOf(is, next)) continue;
+    const same = (p: Preset, show: Show) => p.custom && p.group === group && p.id !== id && p.name === was.name && p.fade === was.fade && lightOf(p, show) === light;
+    let to = next.presets.find((p) => same(p, next))?.id ?? copies.find((p) => same(p, next))?.id;
+    if (!to) {
+      const copy: Preset = { ...structuredClone(was), id: uniqueId(`${was.id}-kept`, taken), layers: resolvedLayers(was.layers, before.palettes), custom: true };
+      taken.push(copy.id);
+      copies.push(copy);
+      to = copy.id;
+    }
+    pins.push({ group, from: was.id, to });
+  }
+  return copies.length ? { show: { ...next, presets: [...next.presets, ...copies] }, pins } : { show: next, pins };
 }

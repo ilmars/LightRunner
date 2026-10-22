@@ -6,36 +6,68 @@
    accent (#4389E8) is only used for thin lines.
    See docs/design-system.md. Class names are prefixed ds- so they never clash
    with a page's own classes. */
+
+/* Inter (variable, weights 100–900), served by Light Runner so it works offline. Two files: Latin, and
+   Latin Extended for Latvian (ā č ē ģ ī ķ ļ ņ š ū ž); the browser only loads the one a page's text needs.
+   Inter 5.3.0 from @fontsource-variable/inter, under the SIL Open Font License (fonts/OFL.txt). */
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(fonts/inter-latin-ext-wght-normal.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(fonts/inter-latin-wght-normal.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
-  /* Page and panels, darkest to lightest. */
-  --ds-bg: #0F1625;
-  --ds-bg-deep: #0C121F;
-  --ds-surface: #121A2B;
-  --ds-surface-hi: #162034;
+  /* Page and panels, darkest to lightest (the designer's restyle, 20 Oct 2026). */
+  --ds-bg: #090F1C;
+  /* The ground as r, g, b, for rgba() (a bar the page scrolls under). */
+  --ds-bg-rgb: 9, 15, 28;
+  --ds-bg-deep: #070C17;
+  /* A panel's colour over the ground, for places that need it solid. */
+  --ds-surface: #141D30;
+  --ds-surface-hi: #18233A;
   /* Translucent layers on top of a panel. */
-  --ds-elevated: rgba(148, 170, 210, 0.10);
-  --ds-selected: rgba(84, 146, 236, 0.24);
+  --ds-elevated: rgba(148, 163, 184, 0.10);
+  --ds-selected: rgba(67, 137, 232, 0.22);
   /* Small marks only (ticks, focus edges): never a large area. */
   --ds-mark: #68758F;
-  /* Accent: a soft tint for areas, the bright one for thin lines and focus. */
+  /* Blue = selected / on stage: a soft tint for areas, the bright one for thin lines and focus. */
   --ds-accent-fill: #3A6FB8;
   --ds-accent: #4389E8;
-  --ds-edge-on: rgba(98, 155, 240, 0.45);
+  --ds-edge-on: rgba(67, 137, 232, 0.5);
+  /* A held or pressed blue control's edge (Flash, Puff, Go). */
+  --ds-edge-held: rgba(67, 137, 232, 0.7);
   /* Text. */
-  --ds-text: #E6EAF2;
-  --ds-muted: #8F9AB0;
-  --ds-muted-on: #B4BDCF;
-  /* Status. */
+  --ds-text: #E3E8F0;
+  --ds-muted: #97A4BA;
+  --ds-muted-on: #B7C1D1;
+  /* Status. Amber = changed, Master below full, problems; red = Blackout, delete; violet = Prepare. */
   --ds-ok: #2f9e5b;
-  --ds-warn: #c98a2a;
-  --ds-warn-text: #e0b46a;
-  --ds-danger: 224, 90, 104;
-  --ds-danger-text: #EBA9B0;
-  --ds-danger-fill: rgba(224, 90, 104, 0.10);
-  --ds-danger-edge: rgba(224, 90, 104, 0.30);
+  --ds-warn: #E3A646;
+  --ds-warn-text: #E3A646;
+  --ds-warn-tint: rgba(227, 166, 70, 0.13);
+  --ds-warn-edge: rgba(227, 166, 70, 0.38);
+  --ds-danger: 227, 106, 111;
+  --ds-danger-text: #EC8286;
+  --ds-danger-fill: rgba(227, 106, 111, 0.12);
+  --ds-danger-edge: rgba(227, 106, 111, 0.35);
+  --ds-violet: #B0A6F5;
+  --ds-violet-tint: rgba(161, 147, 242, 0.13);
+  --ds-violet-edge: rgba(171, 160, 244, 0.5);
 
   /* Shape. */
   --ds-r-panel: 18px;
+  --ds-r-bar: 16px;
   --ds-r-tile: 12px;
   --ds-r-small: 10px;
   --ds-r-pill: 999px;
@@ -44,24 +76,24 @@
   --ds-pad: 14px;
   --ds-target: 44px;
 
-  /* Surfaces: flat glass. Panels get a faint edge and a very soft far shadow;
-     controls get only the faint edge. No bevels, no inset wells. */
-  --ds-edge: rgba(255, 255, 255, 0.06);
-  /* Panels: a faint all-round edge, a slightly brighter line along the top (light falling on the glass), and a very soft far shadow. */
-  --ds-shadow-raise: inset 0 1px 0 rgba(255, 255, 255, 0.075), inset 0 0 0 1px rgba(255, 255, 255, 0.05), 0 24px 48px -32px rgba(0, 0, 0, 0.75);
-  --ds-shadow-low: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-  --ds-shadow-inset: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+  /* Surfaces: flat glass with a 1 px edge (drawn inside, so it takes no room). No bevels, no heavy shadows. */
+  --ds-edge: rgba(148, 163, 184, 0.14);
+  --ds-shadow-raise: inset 0 0 0 1px rgba(148, 163, 184, 0.14);
+  --ds-shadow-low: inset 0 0 0 1px rgba(148, 163, 184, 0.14);
+  --ds-shadow-inset: inset 0 0 0 1px rgba(148, 163, 184, 0.08);
 
-  /* Fills, translucent so panels read as glass. Glass panel: a little lighter at the top, settling into the navy below. */
-  --ds-panel-fill: linear-gradient(180deg, rgba(36, 49, 78, 0.80) 0%, rgba(25, 34, 56, 0.78) 34%, rgba(17, 24, 40, 0.78) 100%);
-  --ds-tile-fill: rgba(148, 170, 210, 0.055);
-  --ds-tile-fill-on: linear-gradient(180deg, rgba(84, 146, 236, 0.26), rgba(84, 146, 236, 0.17));
-  --ds-fill-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 50%, rgba(0, 0, 0, 0.05) 100%);
-  --ds-slab-fill: var(--ds-fill-sheen), linear-gradient(90deg, rgba(76, 122, 204, 0.32), rgba(96, 148, 232, 0.44));
-  --ds-glass: rgba(14, 20, 34, 0.86);
+  /* Fills, translucent so panels read as glass. */
+  --ds-panel-fill: rgba(28, 39, 62, 0.58);
+  --ds-tile-fill: rgba(255, 255, 255, 0.035);
+  --ds-tile-fill-on: rgba(67, 137, 232, 0.16);
+  --ds-fill-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 50%, rgba(0, 0, 0, 0.04) 100%);
+  --ds-slab-fill: linear-gradient(90deg, rgba(148, 163, 184, 0.18), rgba(148, 163, 184, 0.18));
+  /* Popovers, menus and sheets over other content; --ds-popover is the solid one (the problem explanation). */
+  --ds-glass: rgba(20, 28, 46, 0.94);
+  --ds-popover: #141C2E;
 
   /* Type: size and weight carry the hierarchy; panel titles semibold, the rest regular. */
-  --ds-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  --ds-font: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --ds-fs-label: 13px;
   --ds-fs-body: 16px;
   --ds-fs-value: 18px;
@@ -91,6 +123,15 @@
   box-shadow: inset 0 0 0 1px var(--ds-edge-on);
 }
 
+/* Small label: spaced capitals over a value ("ON STAGE", "MASTER", "WHO TO CALL"). */
+.ds-caps {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ds-muted);
+}
+
 /* Muted label above a value ("Key lights" over "Vēsi balts"). */
 .ds-label {
   font-size: var(--ds-fs-label);
@@ -101,12 +142,18 @@
 
 /* Buttons: flat, softly tinted; pressed is a lighter tint. */
 .ds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: var(--ds-target);
   padding: 0 16px;
   border: 0;
-  border-radius: var(--ds-r-tile);
+  border-radius: var(--ds-r-small);
   font: inherit;
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
   color: var(--ds-text);
   background: var(--ds-tile-fill);
   box-shadow: var(--ds-shadow-low);
@@ -137,8 +184,8 @@
   position: relative;
   height: 44px;
   border-radius: var(--ds-r-tile);
-  background: rgba(148, 170, 210, 0.06);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.025);
+  box-shadow: inset 0 0 0 1px var(--ds-edge);
   overflow: hidden;
   touch-action: none;
   cursor: ew-resize;
@@ -146,14 +193,10 @@
 .ds-fill > .ds-fill-tint, .ds-fill > .ds-fill-grip { display: none; }
 .ds-fill > .ds-fill-slab {
   position: absolute; inset: 0 auto 0 0; width: 0; min-width: 0;
-  border-radius: var(--ds-r-tile);
-  /* A soft sheen (about 7 % lighter at the top, a touch darker at the bottom)
-     over the colour, which itself deepens a little towards the level. */
-  background:
-    var(--ds-fill-sheen),
-    linear-gradient(90deg,
-      color-mix(in srgb, var(--c) 15%, rgba(70, 104, 170, 0.32)),
-      color-mix(in srgb, var(--c) 26%, rgba(92, 132, 206, 0.40)));
+  border-radius: 0;
+  /* The control's colour as a soft tint, with a thin line of it at the level. */
+  background: color-mix(in srgb, var(--c) 22%, transparent);
+  box-shadow: inset -2px 0 0 color-mix(in srgb, var(--c) 70%, transparent);
 }
 .ds-fill > .ds-fill-val {
   position: absolute; top: 0; bottom: 0; left: 14px;
@@ -167,13 +210,13 @@
 
 /* Segmented control (tabs, choices): a faint glass track; selected is tinted. */
 .ds-seg {
-  display: inline-flex; gap: 2px; padding: 3px;
+  display: inline-flex; gap: 2px; padding: 2px;
   border-radius: var(--ds-r-tile);
-  background: rgba(148, 170, 210, 0.05);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.2);
+  box-shadow: inset 0 0 0 1px var(--ds-edge);
 }
 .ds-seg > button {
-  min-height: 38px; padding: 0 16px; border: 0; border-radius: var(--ds-r-small);
+  min-height: var(--ds-target); padding: 0 16px; border: 0; border-radius: 9px;
   background: transparent; color: var(--ds-muted); font: inherit; font-size: 15px; cursor: pointer;
 }
 .ds-seg > button.on, .ds-seg > button[aria-selected="true"], .ds-seg > button[aria-checked="true"] {
@@ -204,3 +247,81 @@
 
 /* Swatch: a small colour square. Saturated colours are dimmed a little. */
 .ds-swatch { display: inline-block; width: 18px; height: 18px; border-radius: 6px; opacity: 0.85; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+
+/* ---- More base components (used by Patch and Settings) ---- */
+
+/* Button kinds, on top of ds-btn. Quiet: the edge and muted text, no fill (Edit list, Discard). Primary: the blue
+   tint with a blue edge (Save, Add, Unlock), never a solid bright slab. Danger: red text and a red edge (Delete). */
+.ds-btn--quiet { background: transparent; color: var(--ds-muted); }
+.ds-btn--quiet:hover { color: var(--ds-text); }
+.ds-btn--primary { background: var(--ds-tile-fill-on); color: var(--ds-text); box-shadow: inset 0 0 0 1px var(--ds-edge-on); font-weight: 600; }
+.ds-btn--primary:active { background: var(--ds-selected); }
+.ds-btn--danger { background: transparent; color: var(--ds-danger-text); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
+.ds-btn--danger:active { background: var(--ds-danger-fill); }
+.ds-btn:disabled { cursor: default; }
+
+/* Add tile: a dashed edge marks "add" (＋ Add a universe, ＋ Add group). */
+.ds-add {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: var(--ds-target); padding: 0 16px; border: 1px dashed rgba(148, 163, 184, 0.28); border-radius: var(--ds-r-tile);
+  background: transparent; color: var(--ds-muted); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+.ds-add:hover { color: var(--ds-text); }
+.ds-add:active { background: var(--ds-elevated); }
+
+/* Segmented choices made of radio buttons: <label><input type=radio><span>…</span></label>, looking like ds-seg's buttons. */
+.ds-seg > label { display: flex; position: relative; cursor: pointer; }
+.ds-seg > label > input { position: absolute; opacity: 0; pointer-events: none; }
+.ds-seg > label > span {
+  display: flex; align-items: center; min-height: var(--ds-target); padding: 0 16px; border-radius: 9px;
+  color: var(--ds-muted); font-size: 14px; white-space: nowrap;
+}
+.ds-seg > label > input:checked + span { background: var(--ds-tile-fill-on); color: var(--ds-text); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.ds-seg > label > input:focus-visible + span { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+
+/* A menu in the field's look, with a small chevron. */
+select.ds-field {
+  appearance: none; -webkit-appearance: none; padding-right: 36px; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ds-muted) 50%), linear-gradient(135deg, var(--ds-muted) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+}
+select.ds-field option { background: var(--ds-surface); color: var(--ds-text); }
+.ds-field[type=search]::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
+
+/* Switch: <label class="ds-switch"><input type=checkbox><span class="ds-switch-track"></span>label</label>.
+   Off: a faint track; on: the blue tint. ds-switch--ok is green when on: only Send DMX. */
+.ds-switch { position: relative; display: inline-flex; align-items: center; gap: 12px; min-height: var(--ds-target); cursor: pointer; color: var(--ds-text); }
+.ds-switch > input { position: absolute; left: 0; top: 50%; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.ds-switch-track {
+  position: relative; flex: none; width: 48px; height: 28px; border-radius: var(--ds-r-pill);
+  background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge); transition: background 0.15s;
+}
+.ds-switch-track::after {
+  content: ""; position: absolute; top: 5px; left: 5px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--ds-muted); transition: transform 0.15s, background 0.15s;
+}
+.ds-switch > input:checked + .ds-switch-track { background: var(--ds-selected); box-shadow: inset 0 0 0 1px var(--ds-edge-held); }
+.ds-switch > input:checked + .ds-switch-track::after { transform: translateX(20px); background: var(--ds-text); }
+.ds-switch > input:focus-visible + .ds-switch-track { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.ds-switch--ok > input:checked + .ds-switch-track { background: rgba(47, 158, 91, 0.24); box-shadow: inset 0 0 0 1px rgba(47, 158, 91, 0.6); }
+.ds-switch--ok > input:checked + .ds-switch-track::after { background: #9fdcb7; }
+
+/* Pill: a status in a few words. Quiet by default; ds-pill--warn is amber (a problem with the lights). */
+.ds-pill {
+  display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 12px; border-radius: var(--ds-r-pill);
+  font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--ds-muted); box-shadow: inset 0 0 0 1px var(--ds-edge);
+}
+.ds-pill:empty { display: none; }
+.ds-pill--warn { min-height: 44px; padding: 0 14px; background: var(--ds-warn-tint); color: var(--ds-warn-text); box-shadow: inset 0 0 0 1px var(--ds-warn-edge); font-weight: 600; }
+
+/* Tag: a word on a tint (New, Changed, Removed). */
+.ds-tag { display: inline-block; font-size: 12px; font-weight: 600; border-radius: var(--ds-r-pill); padding: 2px 10px; text-align: center; white-space: nowrap; }
+
+/* Toast: a message near the bottom. Glass for a confirmation; ds-toast--bad (red glass) for a problem. */
+.ds-toast {
+  position: fixed; left: 50%; bottom: var(--ds-toast-bottom, 96px); transform: translateX(-50%); z-index: 40; max-width: calc(100vw - 32px);
+  padding: 12px 18px; border-radius: var(--ds-r-tile); color: var(--ds-text); font-size: 14px;
+  background: var(--ds-glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
+}
+.ds-toast--bad { background: rgba(58, 22, 30, 0.88); color: #ffe3e6; box-shadow: inset 0 0 0 1px rgba(var(--ds-danger), 0.45), 0 18px 40px -12px rgba(0, 0, 0, 0.7); }

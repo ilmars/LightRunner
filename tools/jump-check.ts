@@ -1,4 +1,4 @@
-// Runs the engine headless through hours of random look, preset, effect, tempo, manual,
+// Runs the engine headless through hours of random look, preset, effect, tempo, manual (groups, fixtures and single segments),
 // Safe, Blackout, Any colour and Blind Go changes (Flash is left out: it snaps by design), tapping mid-fade on purpose, and reports the
 // largest jump in how bright any segment of any fixture looks (its brightest written colour
 // channel times its intensity) between two frames, beyond what the effects running there move by themselves.
@@ -21,7 +21,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { EffectKind, EffectLayer, parseShow, type ColourSpec, type StageCommand } from '../packages/shared/src/index.ts';
+import { EffectKind, EffectLayer, parseShow, type ColourSpec, type ManualTarget, type StageCommand } from '../packages/shared/src/index.ts';
 import { Engine } from '../packages/engine/src/index.ts';
 
 const { values } = parseArgs({
@@ -86,6 +86,21 @@ for (const look of show.looks) {
   }
 }
 
+/** What manual control takes or lets go: a group, a fixture or (Individual lights) one segment of one. */
+function manualTarget(): ManualTarget {
+  if (rand() < 0.4) return { group: pick(show.groups).id };
+  const ids = engine.fixtureIds();
+  const f = Math.floor(rand() * ids.length);
+  if (rand() < 0.5) return { fixture: ids[f]! };
+  return { fixture: ids[f]!, segment: Math.floor(rand() * engine.segmentCounts()[f]!) };
+}
+
+/** One target, or (a third of the time) a list of a few changed together, as Individual lights sends them. */
+function manualTargets(): { target: ManualTarget } | { targets: ManualTarget[]; releaseSegments: boolean } {
+  if (rand() < 0.67) return { target: manualTarget() };
+  return { targets: Array.from({ length: 1 + Math.floor(rand() * 4) }, manualTarget), releaseSegments: rand() < 0.5 };
+}
+
 function randomCommand(): { cmd: StageCommand; fast: boolean } {
   // Tempo and the speed dial change how fast effects run; neither may make one jump.
   if (rand() < 0.05) {
@@ -133,13 +148,13 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
     return { cmd, fast: false };
   }
   if (r < 0.68) {
-    const target = rand() < 0.5 ? { group: pick(show.groups).id } : { fixture: pick(show.fixtures).id };
-    return { cmd: { type: 'manual', target, colour: hex(), intensity: rand() }, fast: true };
+    // As on the page: half the held colours carry white, amber or UV, and some sends are a level alone (Level on held lights).
+    if (rand() < 0.2) return { cmd: { type: 'manual', ...manualTargets(), intensity: rand() }, fast: true };
+    const extra = () => (rand() < 0.5 ? rand() : undefined);
+    const extras = rand() < 0.5 ? { white: extra(), amber: extra(), uv: extra() } : {};
+    return { cmd: { type: 'manual', ...manualTargets(), colour: hex(), ...extras, intensity: rand() }, fast: true };
   }
-  if (r < 0.76) {
-    const target = rand() < 0.5 ? { group: pick(show.groups).id } : { fixture: pick(show.fixtures).id };
-    return { cmd: { type: 'release', target }, fast: false };
-  }
+  if (r < 0.76) return { cmd: { type: 'release', ...manualTargets() }, fast: false };
   if (r < 0.8) return { cmd: { type: 'releaseAll' }, fast: false };
   if (r < 0.85) return { cmd: { type: 'backToLook' }, fast: false };
   if (r < 0.9) return { cmd: { type: 'safe' }, fast: false };

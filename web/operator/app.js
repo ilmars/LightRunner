@@ -2,6 +2,7 @@
 // sends commands and shows the live state it is given.
 
 import { barAxis, barEnds, beamCone, outlineCells } from '/shared/stage.js';
+import { HUE_STOPS, WHITE_STOPS, hexRgb, parseChannel, parseHex, rgbHex, stripColour, stripMix, stripPick } from '/shared/colour.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -51,17 +52,18 @@ let pendingSave = null;
 // The ref of an Add to colours that the server hasn't answered yet.
 let pendingColour = null;
 
-// Blind: this tablet works on a draft of the stage that the server keeps for it; Go sends it.
-// `state` stays the live stage; `blind.state` is the draft's (same shape), `blind.visual` its picture.
-// `session` counts the times Blind went on or off, so a drag that started before never lands in the other one.
-// `startRef` is the ref of the blindStart that began this Blind (it stays after the answer, to tell this Blind's answers
-// from older ones); `starting` is true until that answer comes.
-const blind = { on: false, session: 0, state: null, visual: null, startRef: null, starting: false, goRef: null };
+// Prepare: this tablet works on a draft of the stage that the server keeps for it; Go sends it.
+// (The server's commands for it are still called blindStart, blindEnd and blindGo.)
+// `state` stays the live stage; `prep.state` is the draft's (same shape), `prep.visual` its picture.
+// `session` counts the times Prepare went on or off, so a drag that started before never lands in the other one.
+// `startRef` is the ref of the blindStart that began this Prepare (it stays after the answer, to tell this Prepare's
+// answers from older ones); `starting` is true until that answer comes.
+const prep = { on: false, session: 0, state: null, visual: null, startRef: null, starting: false, goRef: null };
 /** The server's answer to a draft command when it has no draft for this tablet. */
-const BLIND_OFF = 'Blind is off.';
+const PREPARE_OFF = 'Prepare is off.';
 
-/** The stage the page is working on: the draft while Blind is on, else the live stage. */
-const shownState = () => (blind.on ? blind.state ?? state : state);
+/** The stage the page is working on: the draft while Prepare is on, else the live stage. */
+const shownState = () => (prep.on ? prep.state ?? state : state);
 
 // ---- Connection: reconnect every 2 s and resync on reconnect ----
 
@@ -80,24 +82,22 @@ function connect() {
     if (ev.data instanceof ArrayBuffer) {
       visual = new Uint8Array(ev.data);
       drawStage();
+      paintManual();
       return;
     }
     const msg = JSON.parse(ev.data);
     if (msg.type === 'layout') {
       layout = msg.layout;
-      // Move Preview off an item that is gone (before the list is drawn, so the outline goes to the new one).
-      if (preview.on && !previewItem()) {
-        preview.item = defaultPreviewItem();
-        previewVisual = null;
-      }
       buildOrder();
       buildDetails();
       buildQuick();
       syncQuickSheet();
       buildSheetGroups();
       buildFlash();
-      // The show changed (maybe this item): ask for its picture again.
-      if (preview.on) loadPreviewVisual();
+      paintKeyChips();
+      // Operators can lose manual control in Settings; the panel goes with it.
+      if (!layout.manualForOperators) closeManual();
+      else if (manualSel.open) buildManual();
       render();
     } else if (msg.type === 'state') {
       if (state && msg.state.look !== seenLook) previousLook = seenLook;
@@ -105,22 +105,22 @@ function connect() {
       state = msg.state;
       render();
     } else if (msg.type === 'draftState') {
-      // Only while this page is in Blind (one may still be on its way after Blind went off).
-      if (!blind.on) return;
-      blind.state = msg.state;
+      // Only while this page is in Prepare (one may still be on its way after Prepare went off).
+      if (!prep.on) return;
+      prep.state = msg.state;
       render();
     } else if (msg.type === 'draftEnded') {
       // The server met a problem in this tablet's draft and dropped it; the lights were not changed.
       // While a start is on its way this is about an older draft: the start's own answer says how it went.
-      if (!blind.on || blind.starting) return;
-      setBlind(false, false);
+      if (!prep.on || prep.starting) return;
+      setPrepare(false, false);
       toast(msg.reason);
     } else if (msg.type === 'draftVisual') {
-      if (!blind.on) return;
-      blind.visual = Uint8Array.from(atob(msg.data), (c) => c.charCodeAt(0));
+      if (!prep.on) return;
+      prep.visual = Uint8Array.from(atob(msg.data), (c) => c.charCodeAt(0));
       drawStage();
     } else if (msg.type === 'result') {
-      blindResult(msg);
+      prepareResult(msg);
       orderResult(msg);
       if (msg.ref !== null && msg.ref === pendingSave) {
         // The answer to the sheet's Save: on an error the sheet stays open to fix it.
@@ -134,7 +134,11 @@ function connect() {
         if (!msg.error) toast(`Saved to ${itemSave.name}`, true);
         itemSave = null;
       }
-      if (msg.error) toast(msg.error);
+      // Individual lights' answers say what went wrong in plain words (once for the whole drag).
+      if (msg.ref !== null && manualRefs.has(msg.ref)) {
+        manualRefs.delete(msg.ref);
+        if (msg.error) toast(manualProblem(msg.error));
+      } else if (msg.error) toast(msg.error);
     }
   };
 }
@@ -142,8 +146,6 @@ function connect() {
 function setConnected(on) {
   connected = on;
   $('banner').hidden = on;
-  $('link').classList.toggle('down', !on);
-  $('linkText').textContent = on ? 'Connected' : 'Offline';
   if (!on) {
     // The server puts a flash out when it loses us; show the same here.
     for (const h of flashHeld.values()) h.button.classList.remove('down');
@@ -153,17 +155,14 @@ function setConnected(on) {
     addWanted = false;
     renames.clear();
     moves.clear();
-    // After a reconnect Preview is off, as after a reload.
-    setPreview(false);
-    // The server dropped the draft with the connection; Blind is off here too.
-    setBlind(false);
+    // The server dropped the draft with the connection; Prepare is off here too.
+    setPrepare(false);
   }
   if (!on && pendingEdit !== null) {
     pendingEdit = null;
-    pendingEditNext = [];
-    $('peSave').disabled = false;
     $('feSave').disabled = false;
     $('feCopy').disabled = false;
+    renderEditor();
   }
   if (!on && pendingColour !== null) {
     pendingColour = null;
@@ -186,17 +185,17 @@ function send(cmd) {
   return ref;
 }
 
-/** Where a stage command goes now: the live stage, or this tablet's Blind draft. A drag takes it when the finger touches. */
-const stageTarget = () => ({ blind: blind.on, session: blind.session });
+/** Where a stage command goes now: the live stage, or this tablet's Prepare draft. A drag takes it when the finger touches. */
+const stageTarget = () => ({ prep: prep.on, session: prep.session });
 
 /**
- * Sends a command for the stage the page is working on: wrapped for the draft while Blind is on.
+ * Sends a command for the stage the page is working on: wrapped for the draft while Prepare is on.
  * Master, Flash, Blackout, Next, Fade and smoke never come here; they always go to the real stage.
- * With a `target` from the start of a drag, a send after Blind went on or off is dropped.
+ * With a `target` from the start of a drag, a send after Prepare went on or off is dropped.
  */
 function sendStage(cmd, target = stageTarget()) {
-  if (target.blind !== blind.on || target.session !== blind.session) return null;
-  return send(target.blind ? { type: 'draft', cmd } : cmd);
+  if (target.prep !== prep.on || target.session !== prep.session) return null;
+  return send(target.prep ? { type: 'draft', cmd } : cmd);
 }
 
 // ---- Groups: lights, and smoke or haze machines ----
@@ -223,7 +222,7 @@ const isBasic = (item) => item.id === layout?.basicLights;
 /** The command that starts an item: Basic lights is the show's Safe look; every other item is a look. */
 const startCommand = (item) => (isBasic(item) ? { type: 'safe' } : { type: 'look', id: item.id });
 
-/** Start an item from the running order (in Blind, in the draft). */
+/** Start an item from the running order (in Prepare, in the draft: it becomes the item being prepared). */
 function start(item) {
   sendStage(startCommand(item));
 }
@@ -273,7 +272,6 @@ function buildOrder() {
   const top = list.scrollTop;
   if (editing) buildEditRows(order);
   else buildPlainRows(order);
-  markSelected();
   list.scrollTop = top;
   if (addWanted && added.length) {
     addWanted = false;
@@ -294,24 +292,24 @@ function buildPlainRows(order) {
   editRows = [];
   order.forEach((item, k) => {
     const basic = isBasic(item);
-    const b = el('button', basic ? 'item fixed' : 'item');
+    const b = el('button', 'item');
     // One small dot per group (smoke machines left out), in group order: the colour this item
     // gives it, whites drawn as whites. Basic lights' groups without a saved colour run the built-in warm light.
     const strip = el('span', 'dots');
     for (const { colour: c, name } of stripBlocks(item.colours)) {
       const colour = c ?? (basic ? layout.basicSwatch : null);
-      const dot = el('i', colour ? null : 'unset');
-      if (colour) dot.style.background = shown(colour);
+      // A group the item leaves alone is a faint dot; one it turns off is a ring.
+      const dot = el('i', colour === '#000000' ? 'off' : colour ? null : 'unset');
+      if (colour && colour !== '#000000') dot.style.background = tint(colour, 0.85);
       dot.title = name;
       strip.append(dot);
     }
-    const mark = el('span', 'mark', 'changed');
-    mark.hidden = true;
-    b.append(strip, el('span', 'name', item.name), mark);
-    // In Preview a tap picks the item to look at; it starts nothing.
-    b.addEventListener('click', () => (preview.on ? selectItem(item.id) : start(item)));
+    // "● changed", "next" or "safe look"; in Prepare "preparing" on the draft's item, "on stage" on the real stage's.
+    const tag = el('span', 'tag');
+    b.append(strip, el('span', 'name', item.name), tag);
+    b.addEventListener('click', () => start(item));
     nodes.push(b);
-    orderRows.push({ item, button: b, mark });
+    orderRows.push({ item, button: b, tag });
     if (basic && k < order.length - 1) nodes.push(el('div', 'sep'));
   });
   replaceRows(nodes);
@@ -329,7 +327,8 @@ function showDeleteState(row) {
 }
 
 function buildEditRows(order) {
-  const same = orderRows.length === 0 && editRows.length === order.length && editRows.every((r, k) => r.id === order[k].id);
+  const same = orderRows.length === 0 && editRows.length === order.length && editRows.every((r, k) => r.id === order[k].id)
+    && editKeys === keysShown();
   if (same) {
     // Same items in the same order: only fresh names go in, and never over what is being typed.
     editRows.forEach((row, k) => {
@@ -351,12 +350,17 @@ function buildEditRows(order) {
   }
   orderRows = [];
   editRows = [];
+  editKeys = keysShown();
   const nodes = [];
   let refocus = null;
   for (const item of order) {
     if (isBasic(item)) {
       const fixed = el('div', 'erow fixed');
-      fixed.append(item.name, el('small', null, '· always first'));
+      const name = el('span', 'fname', item.name);
+      name.append(el('small', null, 'always first'));
+      fixed.append(name);
+      // Its Key chip lines up with the songs' (theirs have the drag handle after it).
+      if (showsChip({ kind: 'song', id: item.id })) fixed.append(keyChip({ kind: 'song', id: item.id }, item.name), el('span', 'grip-space'));
       nodes.push(fixed);
       editRows.push({ id: item.id, fixed: true, el: fixed });
       continue;
@@ -375,7 +379,9 @@ function buildEditRows(order) {
     const grip = el('span', 'grip', '≡');
     grip.setAttribute('role', 'button');
     grip.setAttribute('aria-label', 'Drag to move');
-    node.append(del, input, grip);
+    node.append(del, input);
+    if (showsChip({ kind: 'song', id: item.id })) node.append(keyChip({ kind: 'song', id: item.id }, item.name));
+    node.append(grip);
     const row = { id: item.id, name: item.name, el: node, input, del };
     editRows.push(row);
     nodes.push(node);
@@ -545,17 +551,16 @@ function finishDrag(cancelled) {
 
 function setEditing(on) {
   if (drag || on === editing) return;
-  // Editing the order doesn't mix with Preview or Blind.
-  if (on) {
-    setPreview(false);
-    setBlind(false);
-  }
+  // Editing the order doesn't mix with Prepare.
+  if (on) setPrepare(false);
   // On a tablet a tap on this button doesn't leave the field, so do it here: it sends the rename.
   if (document.activeElement instanceof HTMLElement && $('runningOrder').contains(document.activeElement)) document.activeElement.blur();
   editing = on;
   confirmDelete = null;
   revealedId = null;
-  $('editBtn').textContent = on ? 'Done' : 'Edit';
+  // A song's key chip goes with the list: a learn still waiting for one stops.
+  if (!on && keyLearn.does?.kind === 'song') stopLearn();
+  $('editBtn').textContent = on ? 'Done' : 'Edit list';
   $('editBtn').classList.toggle('on', on);
   $('editBtn').setAttribute('aria-pressed', String(on));
   if (layout) {
@@ -565,171 +570,199 @@ function setEditing(on) {
 }
 $('editBtn').addEventListener('click', () => setEditing(!editing));
 
-// ---- Preview: look at an item, and change it, without touching the stage ----
-// Only this tablet knows it is on; the server's stage and show are untouched by selecting.
+// ---- Controller keys: a song's or a quick look's key, taken by pressing it on the controller ----
+// Only when the server can use MIDI controllers (layout.keys.midi). A tap on a Key chip asks the server to take the
+// next key pressed (it waits up to 10 s, one page at a time); the bar at the bottom says so and has Clear and Cancel.
+// The key follows the song, not its place. Keys always act on the real stage.
 
-const preview = { on: false, item: null };
-// What the selected item looks like settled (3 bytes per fixture), or null until the server has answered.
-// While it is null the picture is drawn dark, never as the live stage.
-let previewVisual = null;
-// The picture's "Preview" or "Blind" label: its font and colour, read from the page when either turns on.
+/** What the running-order Edit rows' Key chips were built from (rebuilt when it changes). */
+let editKeys = '';
+const keysShown = () => JSON.stringify(layout?.keys ?? null);
+/**
+ * A Key chip shows while a controller is listened to, or when the song or quick look already has a key (so it can
+ * be seen and cleared); never without MIDI support.
+ */
+const showsChip = (does) => !!layout?.keys?.midi && (layout.keys.connected > 0 || !!keyOfTarget(does));
+/** What is waiting for its key: what it does, its name, the request and when it gives up. */
+const keyLearn = { does: null, name: '', ctl: null, until: 0, timer: 0 };
+const sameDoes = (a, b) => !!a && !!b && a.kind === b.kind && a.id === b.id;
+
+/** The key a song or quick look has now ({ place, name }), or null. */
+function keyOfTarget(does) {
+  const map = does.kind === 'song' ? layout?.keys?.songs : layout?.keys?.quickLooks;
+  return map?.[does.id] ?? null;
+}
+
+function keyChip(does, name) {
+  const b = el('button', 'kchip');
+  b.type = 'button';
+  b.dataset.does = JSON.stringify(does);
+  b.dataset.name = name;
+  paintKeyChip(b);
+  // A tap on the chip doesn't reach the row (no drag, no rename).
+  b.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+  b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    if (sameDoes(keyLearn.does, does)) stopLearn();
+    else learnKey(does, b.dataset.name);
+  });
+  return b;
+}
+
+/** The key's place, shortened ("1,3"), "＋" without one, "…" while waiting; the whole name in its title. */
+function paintKeyChip(b) {
+  const does = JSON.parse(b.dataset.does);
+  const key = keyOfTarget(does);
+  const waiting = sameDoes(keyLearn.does, does);
+  b.classList.toggle('on', waiting);
+  b.classList.toggle('set', !!key && !waiting);
+  b.textContent = waiting ? '…' : key ? key.short : '＋';
+  b.title = key ? `Key: ${key.name}` : 'Assign a key on a controller';
+  b.setAttribute('aria-label', waiting ? 'Waiting for a key. Tap to stop' : key ? `Key: ${key.name}. Tap to assign another` : 'Assign a controller key');
+}
+
+function paintKeyChips() {
+  for (const b of document.querySelectorAll('.kchip[data-does]')) paintKeyChip(b);
+  paintLearnBar();
+}
+
+function paintLearnBar() {
+  const bar = $('learnBar');
+  bar.hidden = !keyLearn.does;
+  if (!keyLearn.does) return;
+  $('lbWhat').textContent = `Press a key on the controller for ${keyLearn.name}`;
+  $('lbLeft').textContent = ` · ${Math.max(0, Math.ceil((keyLearn.until - performance.now()) / 1000))} s`;
+  $('lbClear').hidden = !keyOfTarget(keyLearn.does);
+}
+
+async function learnKey(does, name) {
+  if (keyLearn.ctl) stopLearn();
+  const ctl = new AbortController();
+  Object.assign(keyLearn, { does, name, ctl, until: performance.now() + 10000 });
+  keyLearn.timer = setInterval(paintLearnBar, 250);
+  paintKeyChips();
+  let answer = null;
+  try {
+    const res = await fetch('/api/keys/learn', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ does }), signal: ctl.signal });
+    const data = await res.json().catch(() => ({}));
+    answer = res.ok ? data : { ok: false, message: data.error || 'That did not work.', bad: true };
+  } catch {
+    if (!ctl.signal.aborted) answer = { ok: false, message: 'Not connected. Lights keep running; try again in a moment.', bad: true };
+  }
+  // Stopped, or another chip took over.
+  if (keyLearn.ctl !== ctl) return;
+  endLearn();
+  if (!answer) return;
+  if (answer.ok) toast(answer.note ?? `${name}: ${answer.key}`, true);
+  else toast(answer.message, !answer.bad);
+}
+
+function stopLearn() {
+  keyLearn.ctl?.abort();
+  endLearn();
+}
+
+function endLearn() {
+  clearInterval(keyLearn.timer);
+  Object.assign(keyLearn, { does: null, name: '', ctl: null });
+  paintKeyChips();
+}
+
+$('lbCancel').addEventListener('click', stopLearn);
+$('lbClear').addEventListener('click', async () => {
+  const { does, name } = keyLearn;
+  if (!does) return;
+  stopLearn();
+  try {
+    const res = await fetch('/api/keys/clear', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ does }) });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) toast(`${name} has no key now`, true);
+    else toast(data.error || 'That did not work.');
+  } catch {
+    toast('Not connected. Lights keep running; try again in a moment.');
+  }
+});
+
+// ---- Prepare: get the next moment ready on a draft of the stage, then Go ----
+// Only this tablet works on its draft; the server keeps it and sends this page its state and picture.
+// A running-order tap starts the item in the draft: that is the item being prepared. Save to it keeps the
+// draft in it; Go sends the draft to the lights. Master, Flash, Blackout, Next, Fade and smoke stay on the real stage.
+
+// The stage view's label ("Live", "Off", "Draft · <name>"): its font and colours, read from the page once.
 let pictureLabel = null;
 function readPictureLabel() {
   const style = getComputedStyle(document.body);
-  pictureLabel = { font: `11px ${style.fontFamily}`, colour: style.getPropertyValue('--ds-muted').trim() || '#8F9AB0' };
+  const v = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
+  pictureLabel = { font: `600 10px ${style.fontFamily}`, prep: v('--ds-violet', '#B0A6F5'), off: v('--ds-danger-text', '#EC8286'), live: v('--ds-muted', '#97A4BA') };
 }
-// Counts the asks for a picture, so a slow answer for an earlier choice is dropped.
-let previewSeq = 0;
-
-/** The selected running-order item, or null. */
-function previewItem() {
-  return layout?.runningOrder.find((i) => i.id === preview.item) ?? null;
-}
-
-/** The item Preview opens on, and falls back to: what is on stage, else what Next would start. */
-const defaultPreviewItem = () => (stageItem() ?? nextItem() ?? layout?.runningOrder[0] ?? null)?.id ?? null;
-
-function markSelected() {
-  orderRows.forEach((row) => row.button.classList.toggle('selected', preview.on && row.item.id === preview.item));
-}
-
-function setPreview(on) {
-  if (on === preview.on) return;
-  if (on) {
-    if (!layout || phoneQuery.matches) return;
-    if (editing) {
-      setEditing(false);
-      if (editing) return;
-    }
-    // Quick looks' Edit doesn't mix with Preview either (a tap there would open the sheet, not fill the item).
-    if (quickEditing) setQuickEditing(false);
-    // Only one of Preview and Blind is on at a time.
-    setBlind(false);
-  }
-  preview.on = on;
-  preview.item = on ? defaultPreviewItem() : null;
-  // White, Amber and UV moves belong to what the picker showed before.
-  extrasMoved = false;
-  document.body.classList.toggle('preview', on);
-  $('topBar').classList.toggle('preview', on);
-  $('previewBtn').setAttribute('aria-pressed', String(on));
-  if (on) {
-    readPictureLabel();
-    // Things that work on other than the selected item: Save stage as quick look, the colour list's Edit and Add to colours.
-    closeSheet();
-    if (picker.edit) setEditMode(false);
-    if (picker.group && !$('pAdd').hidden) closeAddColour();
-    loadPreviewVisual();
-  } else {
-    // Drop any answer still on its way.
-    previewSeq++;
-    previewVisual = null;
-    drawStage();
-  }
-  markSelected();
-  render();
-}
-$('previewBtn').addEventListener('click', () => setPreview(!preview.on));
-
-function selectItem(id) {
-  if (!preview.on || preview.item === id) return;
-  preview.item = id;
-  previewVisual = null;
-  extrasMoved = false;
-  markSelected();
-  loadPreviewVisual();
-  render();
-}
-
-async function loadPreviewVisual() {
-  const seq = ++previewSeq;
-  if (!preview.on || !preview.item) {
-    previewVisual = null;
-    drawStage();
-    return;
-  }
-  let bytes = null;
-  try {
-    const res = await fetch(`/api/looks/${encodeURIComponent(preview.item)}/visual`);
-    if (res.ok) bytes = Uint8Array.from((await res.json()).visual);
-  } catch {
-    // Offline or the item is gone: the picture waits for the next layout.
-  }
-  if (seq !== previewSeq) return;
-  // A failed ask keeps the picture there was (dark when there was none yet).
-  if (bytes) previewVisual = bytes;
-  drawStage();
-}
-
-// ---- Blind: get the next moment ready on a draft of the stage, then Go ----
-// Only this tablet works on its draft; the server keeps it and sends this page its state and picture.
-// Master, Flash, Blackout, Next, Fade and smoke stay on the real stage.
 
 /**
- * Turns Blind on (a fresh draft of the stage now) or off (the draft is thrown away).
+ * Turns Prepare on (a fresh draft of the stage now) or off (the draft is thrown away).
  * `tell` false: the server has already ended it (after Go, or a refused start).
  */
-function setBlind(on, tell = true) {
-  if (on === blind.on) return;
+function setPrepare(on, tell = true) {
+  if (on === prep.on) return;
   if (on) {
     if (!layout || phoneQuery.matches) return;
     if (editing) {
       setEditing(false);
       if (editing) return;
     }
-    setPreview(false);
     const r = send({ type: 'blindStart' });
     if (r === null) return;
-    blind.startRef = r;
-    blind.starting = true;
-    readPictureLabel();
+    prep.startRef = r;
+    prep.starting = true;
   } else {
     // Off before the server made the draft is fine too: a start still on its way then makes none.
     if (tell && connected) send({ type: 'blindEnd' });
-    blind.startRef = null;
-    blind.starting = false;
+    prep.startRef = null;
+    prep.starting = false;
   }
-  blind.on = on;
-  blind.session++;
-  blind.state = null;
-  blind.visual = null;
-  blind.goRef = null;
+  // Individual lights holds the real stage: it closes for Prepare.
+  if (on) closeManual();
+  prep.on = on;
+  prep.session++;
+  prep.state = null;
+  prep.visual = null;
+  prep.goRef = null;
   // White, Amber and UV moves belong to what the picker showed before.
   extrasMoved = false;
-  document.body.classList.toggle('blind', on);
-  $('topBar').classList.toggle('blind', on);
-  $('blindBtn').setAttribute('aria-pressed', String(on));
+  document.body.classList.toggle('prepare', on);
+  $('topBar').classList.toggle('prepare', on);
+  $('liveBtn').setAttribute('aria-pressed', String(!on));
+  $('prepBtn').setAttribute('aria-pressed', String(on));
   $('goBtn').hidden = !on;
   $('goBtn').disabled = false;
   drawStage();
   render();
 }
-$('blindBtn').addEventListener('click', () => setBlind(!blind.on));
+$('liveBtn').addEventListener('click', () => setPrepare(false));
+$('prepBtn').addEventListener('click', () => setPrepare(true));
 
-// Go: the whole draft goes to the lights in one change (with the Fade setting); Blind ends when the server says yes.
+// Go: the whole draft goes to the lights in one change (with the Fade setting); the page is Live again when the server says yes.
 $('goBtn').addEventListener('click', () => {
-  if (!blind.on || blind.goRef !== null) return;
-  blind.goRef = send({ type: 'blindGo' });
-  $('goBtn').disabled = blind.goRef !== null;
+  if (!prep.on || prep.goRef !== null) return;
+  prep.goRef = send({ type: 'blindGo' });
+  $('goBtn').disabled = prep.goRef !== null;
 });
 
-/** The server's answer to Blind's start or Go, or "Blind is off." to a draft command. */
-function blindResult(msg) {
-  if (msg.ref === null || !blind.on) return;
-  if (msg.ref === blind.startRef) {
-    blind.starting = false;
-    // No draft was made (the stage didn't answer, too many tablets in Blind, a problem): Blind goes off
+/** The server's answer to Prepare's start or Go, or "Prepare is off." to a draft command. */
+function prepareResult(msg) {
+  if (msg.ref === null || !prep.on) return;
+  if (msg.ref === prep.startRef) {
+    prep.starting = false;
+    // No draft was made (the stage didn't answer, too many tablets preparing, a problem): Prepare goes off
     // again; the toast says why.
-    if (msg.error) return setBlind(false, false);
+    if (msg.error) return setPrepare(false, false);
   }
-  // The server has no draft for this tablet (it ended it): Blind is off here too. Not while the start is on
+  // The server has no draft for this tablet (it ended it): Prepare is off here too. Not while the start is on
   // its way: a draft command that reaches the server before the draft is made is refused the same way.
-  if (msg.error === BLIND_OFF && !blind.starting && msg.ref > blind.startRef) return setBlind(false, false);
-  if (msg.ref === blind.goRef) {
-    blind.goRef = null;
+  if (msg.error === PREPARE_OFF && !prep.starting && msg.ref > prep.startRef) return setPrepare(false, false);
+  if (msg.ref === prep.goRef) {
+    prep.goRef = null;
     $('goBtn').disabled = false;
     // On an error the draft stays, to try again.
-    if (!msg.error) setBlind(false, false);
+    if (!msg.error) setPrepare(false, false);
   }
 }
 
@@ -754,7 +787,7 @@ $('addSong').addEventListener('click', () => {
 
 /**
  * Index in the running order of what is on stage, or -1 (Blackout, or a look that isn't in the order).
- * `s`: the stage to look at; by default the one the page works on (the draft in Blind).
+ * `s`: the stage to look at; by default the one the page works on (the draft in Prepare).
  */
 function stageIndex(s = shownState()) {
   const order = layout?.runningOrder ?? [];
@@ -766,7 +799,7 @@ function stageIndex(s = shownState()) {
 /**
  * The item after the one on stage; the first song when nothing is on stage.
  * After Blackout the item before it still counts, so Next carries on the service.
- * Always the real stage's: Next stays live in Blind.
+ * Always the real stage's: Next stays live in Prepare.
  */
 function nextItem() {
   const order = layout?.runningOrder ?? [];
@@ -781,11 +814,14 @@ $('next').addEventListener('click', () => {
   // Nothing goes on stage while the running order is being edited.
   if (editing) return;
   const item = nextItem();
-  // Next always starts on the real stage, Blind or not.
+  // Next always starts on the real stage, in Prepare too.
   if (item) send(startCommand(item));
 });
-// In Blind, Undo takes back the draft's last change; otherwise the stage's.
+// In Prepare, Undo takes back the draft's last change; otherwise the stage's.
 $('undo').addEventListener('click', () => sendStage({ type: 'undo' }));
+// Basic lights (safe): always starts it on the real stage, in Prepare too (the draft stays), like Next.
+// A safety button never goes into a draft; to prepare Basic lights, tap it in the running order.
+$('basicBtn').addEventListener('click', () => send({ type: 'safe' }));
 
 // ---- Fade time for every look and preset change; shared by all devices ----
 
@@ -805,19 +841,31 @@ document.addEventListener('pointerdown', (ev) => {
   if (!fadeMenu.hidden && !fadeMenu.parentElement.contains(ev.target)) showFadeMenu(false);
 }, true);
 
-// ---- Tempo: beats per minute for the stage (in Preview, for the selected song) ----
-// Live it sends `tempo`; in Preview, `itemTempo`. The readout shows the stage's tempo, or the
-// selected song's saved one (120 when it has none). The menu steps by 1 (hold to repeat), ×2, ÷2.
+// ---- Tempo: beats per minute for the stage (in Prepare, for the draft) ----
+// It sends `tempo`. The readout shows the stage's tempo (or the draft's). The menu steps by 1 (hold to repeat), ×2, ÷2.
 
 const TEMPO_MIN = 40;
 const TEMPO_MAX = 240;
 const clampTempo = (bpm) => Math.min(TEMPO_MAX, Math.max(TEMPO_MIN, Math.round(bpm)));
 
 const tempoMenu = $('tempoMenu');
+const tempoField = $('tempoField');
+/** True while the menu closes: a refused tempo then says so in a toast, as its note goes with the menu. */
+let tempoClosing = false;
 const showTempoMenu = (open) => {
+  // Closing with a typed tempo still in the field: the field's change (on blur) sets it, as Done does.
+  if (!open && document.activeElement === tempoField) {
+    tempoClosing = true;
+    tempoField.blur();
+    tempoClosing = false;
+  }
   tempoMenu.hidden = !open;
   $('tempoButton').setAttribute('aria-expanded', String(open));
-  if (open) showFadeMenu(false);
+  if (open) {
+    showFadeMenu(false);
+    $('tempoNote').hidden = true;
+    tempoField.value = String(currentTempo());
+  }
 };
 $('tempoButton').addEventListener('click', () => showTempoMenu(tempoMenu.hidden));
 $('fadeButton').addEventListener('click', () => showTempoMenu(false));
@@ -830,8 +878,8 @@ $('tempoCtl').addEventListener('keydown', (ev) => {
   $('tempoButton').focus();
 });
 
-/** What the stage runs (in Blind, the draft), or in Preview what the selected song is saved with. */
-const shownTempo = () => Math.round(preview.on ? previewItem()?.tempo ?? 120 : shownState()?.tempo ?? 120);
+/** What the stage runs (in Prepare, the draft). */
+const shownTempo = () => Math.round(shownState()?.tempo ?? 120);
 
 // A step shows at once; the server's answer takes over after a moment (so a held button doesn't jump back).
 let tempoLocal = null;
@@ -842,19 +890,15 @@ function currentTempo() {
   return shownTempo();
 }
 
-/** Where a tempo change goes, taken when the finger touches: the stage (or the draft in Blind), or the song in Preview. */
-const tempoTarget = () => ({ stage: stageTarget(), inPreview: preview.on, item: preview.item });
+/** Where a tempo change goes, taken when the finger touches: the stage, or the draft in Prepare. */
+const tempoTarget = stageTarget;
 
 /**
- * Sends a tempo to where `target` says. A held button that started live, in Blind or in Preview
- * never carries on somewhere else: after Blind or Preview went on or off, the rest is dropped.
+ * Sends a tempo to where `target` says. A held button that started live or in Prepare
+ * never carries on in the other: after Prepare went on or off, the rest is dropped.
  */
 function sendTempo(bpm, target = tempoTarget()) {
-  if (target.inPreview) {
-    if (preview.on && target.item && preview.item === target.item) send({ type: 'itemTempo', item: target.item, bpm });
-  } else if (!preview.on) {
-    sendStage({ type: 'tempo', bpm }, target.stage);
-  }
+  sendStage({ type: 'tempo', bpm }, target);
 }
 
 // A held button sends at most 4 a second (every change is an Undo step), and the last one when let go.
@@ -866,6 +910,7 @@ function setTempo(bpm, throttle = false, target = tempoTarget()) {
   tempoLocal = v;
   tempoLocalAt = performance.now();
   $('tempoValue').textContent = String(v);
+  if (document.activeElement !== tempoField) tempoField.value = String(v);
   if (throttle && tempoLocalAt - tempoSentAt < 250) {
     tempoUnsent = v;
     tempoUnsentTarget = target;
@@ -883,10 +928,18 @@ function flushTempo() {
   sendTempo(v, tempoUnsentTarget);
 }
 
+/** A step after typing starts from the typed tempo: leaving the field sets it first. */
+const takeTyped = () => {
+  if (document.activeElement === tempoField) tempoField.blur();
+};
+
 for (const b of tempoMenu.querySelectorAll('button')) {
   const step = b.dataset.step;
   if (step === 'double' || step === 'half') {
-    b.addEventListener('click', () => setTempo(currentTempo() * (step === 'double' ? 2 : 0.5)));
+    b.addEventListener('click', () => {
+      takeTyped();
+      setTempo(currentTempo() * (step === 'double' ? 2 : 0.5));
+    });
     continue;
   }
   const by = Number(step);
@@ -900,6 +953,7 @@ for (const b of tempoMenu.querySelectorAll('button')) {
   };
   b.addEventListener('pointerdown', (ev) => {
     if (ev.button || b.disabled) return;
+    takeTyped();
     try { b.setPointerCapture?.(ev.pointerId); } catch { /* pointer already gone */ }
     // The whole hold goes where it started.
     const target = tempoTarget();
@@ -938,13 +992,59 @@ $('tapBtn').addEventListener('click', (ev) => {
   if (ev.detail === 0) tapTempo();
 });
 
-function renderTempo() {
-  $('tempoValue').textContent = String(currentTempo());
-  // In Preview with no song selected there is nothing to change.
-  const none = preview.on && !previewItem();
-  for (const b of $('tempoCtl').querySelectorAll('button')) {
-    if (b !== $('tempoButton')) b.disabled = none;
+// Typed: Done or Enter (or leaving the field) sets it, through the same `tempo` command (in Prepare, into the draft).
+// 40–240 bpm; anything else is refused with a quiet note and the field goes back to the tempo. Escape puts it back.
+tempoField.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') {
+    ev.preventDefault();
+    tempoField.blur();
+  } else if (ev.key === 'Escape') {
+    tempoField.value = String(currentTempo());
+    $('tempoNote').hidden = true;
   }
+});
+tempoField.addEventListener('input', () => ($('tempoNote').hidden = true));
+// Typing replaces the tempo shown: its text is selected when the field gets focus, and again at the end of the
+// tap that gave it focus (on touch, focus comes after the finger lifts, and the tap would put the caret back).
+// A tap in a field that already has focus moves the caret as usual.
+const selectTempo = () => tempoField.setSelectionRange(0, tempoField.value.length);
+let tempoFocusTap = false;
+tempoField.addEventListener('pointerdown', () => (tempoFocusTap = document.activeElement !== tempoField));
+tempoField.addEventListener('focus', selectTempo);
+tempoField.addEventListener('click', () => {
+  if (tempoFocusTap) selectTempo();
+  tempoFocusTap = false;
+});
+// Left (after its change, if any): it shows the tempo again, never a number nobody set.
+tempoField.addEventListener('blur', () => {
+  tempoFocusTap = false;
+  tempoField.value = String(currentTempo());
+});
+tempoField.addEventListener('change', () => {
+  const text = tempoField.value.trim();
+  const bpm = /^\d+$/.test(text) ? Number(text) : NaN;
+  if (text === '' || bpm === currentTempo()) {
+    tempoField.value = String(currentTempo());
+    return;
+  }
+  if (!(bpm >= TEMPO_MIN && bpm <= TEMPO_MAX)) {
+    const note = $('tempoNote');
+    const why = Number.isNaN(bpm) ? 'Type a number' : `${bpm} is too ${bpm < TEMPO_MIN ? 'slow' : 'fast'}`;
+    note.textContent = `${why}: tempo goes from ${TEMPO_MIN} to ${TEMPO_MAX} bpm.`;
+    // Left by a tap outside, the menu closes and takes the note with it: a quiet toast says it instead.
+    if (tempoClosing || tempoMenu.hidden) toast(note.textContent, true);
+    else note.hidden = false;
+    tempoField.value = String(currentTempo());
+    return;
+  }
+  setTempo(bpm);
+});
+
+function renderTempo() {
+  const bpm = String(currentTempo());
+  $('tempoValue').textContent = bpm;
+  // Never while it is being typed in: a state from the server mustn't overwrite what the finger is typing.
+  if (document.activeElement !== tempoField) tempoField.value = bpm;
 }
 
 // ---- Rendering live state ----
@@ -956,10 +1056,66 @@ function lookName(id) {
   return layout.runningOrder.find((i) => i.id === id)?.name ?? layout.looks.find((l) => l.id === id)?.name ?? (id ? 'Deleted item' : '—');
 }
 
-/** The full explanation behind the short status label in the top bar. */
-let outputDetail = '';
-$('outputNote').addEventListener('click', () => toast(outputDetail, true));
+// ---- The problem pill: tap it for what is wrong, who to call and what still works ----
 
+const problemBox = $('problemBox');
+function showProblem(open) {
+  problemBox.hidden = !open;
+  $('outputNote').setAttribute('aria-expanded', String(open));
+}
+$('outputNote').addEventListener('click', () => showProblem(problemBox.hidden));
+$('problemOk').addEventListener('click', () => showProblem(false));
+document.addEventListener('pointerdown', (ev) => {
+  if (!problemBox.hidden && !problemBox.parentElement.contains(ev.target)) showProblem(false);
+}, true);
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && !problemBox.hidden) showProblem(false);
+});
+
+/** A sentence ends with a full stop. */
+const sentence = (text) => (/[.!?]$/.test(text) ? text : `${text}.`);
+
+/** What the pill and its explanation say: `{ pill, short, title, text }` (short: the phone's pill), or null when nothing is wrong. */
+// Patch and Settings show the same pill words (problemWords in web/shared/appbar.js): change both together.
+function problemWords(s) {
+  const notYou = 'It isn\'t something you did.';
+  if (s.output === 'off') {
+    return {
+      pill: 'Not sending to the lights',
+      short: 'Not sending',
+      title: 'The lights aren\'t getting any commands',
+      text: `Light Runner is working, but its output to the lights is switched off, so the stage won't follow your taps. Usually another desk, such as Lightkey, has the lights for now. ${notYou}`,
+    };
+  }
+  if (s.output !== 'lost') return null;
+  if (s.outputProblemKind === 'other-desk') {
+    return {
+      pill: 'Another desk is sending',
+      short: 'Another desk',
+      title: 'Another desk is also sending to the lights',
+      text: `${sentence(s.outputProblem ?? 'Another desk is also sending')} The lights may follow it instead of your taps. ${notYou}`,
+    };
+  }
+  return {
+    pill: 'Lights not answering',
+    short: 'Not answering',
+    title: 'The lights aren\'t answering',
+    text: `${sentence(s.outputProblem ?? 'The lighting network box is not answering')} Light Runner keeps sending, but the stage may not follow your taps. ${notYou}`,
+  };
+}
+
+/** "Name · phone" from Settings > Who to call, or '' when nobody is set. */
+const contactText = () => [layout?.contact?.name, layout?.contact?.phone].filter(Boolean).join(' · ');
+
+/** A colour as a see-through tint (the stage colours are mixed down like this everywhere on the page). */
+function tint(hex, alpha) {
+  const c = shown(hex);
+  if (!/^#[0-9a-f]{6}$/i.test(c ?? '')) return c;
+  const n = parseInt(c.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+let lastBlackedOut = false;
 function render() {
   if (!state || !layout) return;
   const blackedOut = state.look === 'blackout';
@@ -968,24 +1124,35 @@ function render() {
   // Top bar: the name, an amber "changed", and "A → B" while a fade runs.
   const name = state.look ? lookName(state.look) : '—';
   const from = previousLook ? lookName(previousLook) : null;
-  $('nowName').textContent = fading && from && from !== name ? `${from} → ${name}` : name;
+  const onStage = fading && from && from !== name ? `${from} → ${name}` : name;
+  $('nowName').textContent = onStage;
   $('nowChanged').hidden = !state.lookChanged || blackedOut;
+  // In Prepare: what is being prepared (the draft's item), over what the real stage runs. Blackout has its own head.
+  $('liveHead').hidden = prep.on || blackedOut;
+  $('blackHead').hidden = prep.on || !blackedOut;
+  $('prepHead').hidden = !prep.on;
+  if (prep.on) {
+    const draft = shownState();
+    $('prepName').textContent = draft.look ? lookName(draft.look) : '—';
+    $('prepStage').textContent = `On stage: ${onStage}`;
+  }
 
-  // Only the state that matters takes room. A problem with the lights replaces the quiet items.
-  const lost = state.output === 'lost';
-  const off = state.output === 'off';
+  // A problem with the lights: the amber pill (left out during Blackout, when the bar says the lights are off).
+  const problem = problemWords(state);
   const note = $('outputNote');
-  note.hidden = !(lost || off);
-  note.classList.toggle('problem', lost);
-  note.classList.toggle('off', off);
-  // A short label; the full explanation on hover (title) or tap (a message).
-  const otherDesk = lost && state.outputProblemKind === 'other-desk';
-  $('outputText').textContent = !lost ? 'DMX output inactive' : otherDesk ? 'Another desk is sending' : 'Lights not answering';
-  outputDetail = lost
-    ? state.outputProblem ?? 'Lights not answering. Check the lighting network box.'
-    : 'Light Runner is not sending to the lights (Lightkey has them). Turn Send DMX on in Settings.';
-  note.title = outputDetail;
-  $('quiet').hidden = lost || off;
+  note.hidden = !problem || (blackedOut && !prep.on);
+  if (note.hidden) showProblem(false);
+  if (problem) {
+    // While preparing the bar is busier: the pill just says there is a problem.
+    $('outputText').textContent = prep.on ? 'Problem' : problem.pill;
+    $('outputShort').textContent = problem.short;
+    note.setAttribute('aria-label', `${problem.pill}: what it means`);
+    $('problemTitle').textContent = problem.title;
+    $('problemText').textContent = problem.text;
+    const who = contactText();
+    $('contactBox').hidden = !who;
+    $('contactText').textContent = who;
+  }
 
   $('fading').hidden = !fading;
   if (fading) {
@@ -997,7 +1164,8 @@ function render() {
   const held = blackedOut ? [] : state.flashing ?? [];
   const flashing = held.filter((id) => !isSmoke(groupOf(id)));
   $('flashNote').hidden = !flashing.length;
-  $('flashNote').textContent = `Flash: ${flashing.map((id) => groupOf(id)?.name ?? id).join(', ')}`;
+  const allLights = lightGroups().every((g) => flashing.includes(g.id));
+  $('flashNote').textContent = `Flash: ${allLights ? 'all lights' : flashing.map((id) => groupOf(id)?.name ?? id).join(', ')}`;
   // A quiet readout while any smoke machine is running (the highest, if there are several).
   let smoke = 0;
   for (const g of layout.groups) {
@@ -1005,49 +1173,56 @@ function render() {
   }
   $('smokeNote').hidden = smoke <= 0;
   $('smokeNote').textContent = `Smoke: ${Math.round(smoke * 100)} %`;
-  const top = $('topBar');
-  top.classList.toggle('problem', lost);
-  top.classList.toggle('off', off);
-  top.classList.toggle('flash', flashing.length > 0 && !lost && !off);
   // Blackout is the most important state on the page: the whole bar says so.
-  top.classList.toggle('blackout', blackedOut);
+  $('topBar').classList.toggle('blackout', blackedOut);
 
   renderTempo();
   const fade = state.fadeTime ?? null;
   $('fadeValue').textContent = fade === null ? 'Auto' : fade === 0 ? 'Instant' : `${fade} s`;
-  $('fadeButton').classList.toggle('fixed', fade !== null);
   for (const b of fadeMenu.querySelectorAll('button')) {
     const v = b.dataset.fade === 'auto' ? null : Number(b.dataset.fade);
     b.classList.toggle('on', v === fade);
     b.setAttribute('aria-checked', String(v === fade));
   }
 
-  // Running order: the item on stage is marked, and "changed" while it has live changes.
-  // In Blind these are the draft's, and the item on the real stage keeps a quiet outline.
+  // Running order: the item on stage is blue, with "● changed" while it has live changes; "next" on the item Next
+  // starts; "safe look" on Basic lights otherwise. In Prepare the draft's item is the violet "preparing" one, and the
+  // item on the real stage (when it is another) keeps a dashed outline with "on stage".
   const shownStage = shownState();
   const on = stageIndex(shownStage);
-  const live = blind.on ? stageIndex(state) : -1;
+  const live = prep.on ? stageIndex(state) : -1;
+  const next = nextItem();
   orderRows.forEach((row, k) => {
     const active = k === on;
-    row.button.classList.toggle('on', active);
-    row.button.classList.toggle('live', k === live);
+    const staged = k === live && !active;
+    row.button.classList.toggle('on', active && !prep.on && !blackedOut);
+    row.button.classList.toggle('prep', active && prep.on);
+    row.button.classList.toggle('live', staged);
     row.button.setAttribute('aria-current', active ? 'true' : 'false');
-    row.mark.hidden = !(active && shownStage.lookChanged);
+    const changed = active && !prep.on && !blackedOut && shownStage.lookChanged;
+    const isNext = !editing && !prep.on && !active && !!next && row.item.id === next.id;
+    const tag = active && prep.on ? 'preparing' : staged ? 'on stage' : changed ? '● changed' : isNext ? 'next' : isBasic(row.item) && !active ? 'safe look' : '';
+    row.tag.textContent = tag;
+    row.tag.hidden = !tag;
+    row.tag.classList.toggle('changed-tag', changed);
   });
-  // Keep what is on stage in view when it changes (and when editing ends).
+  // Keep what is on stage (in Prepare, what is being prepared) in view when it changes (and when editing ends).
   const onId = on >= 0 ? layout.runningOrder[on].id : null;
   if (!editing && orderRows.length && onId !== revealedId) {
     revealedId = onId;
     if (onId) reveal(orderRows[on].button);
   }
 
-  // Bottom bar (and a quiet "next" mark on the item Next will start).
-  const next = nextItem();
-  orderRows.forEach((row) => row.button.classList.toggle('is-next', !editing && !!next && row.item.id === next.id));
+  // Bottom bar.
   $('nextName').textContent = next ? next.name : 'End of list';
   $('next').disabled = !next || editing;
   $('undo').disabled = !shownStage.canUndo;
   $('blackout').classList.toggle('on', blackedOut);
+  // Blackout's stage view says "Off".
+  if (blackedOut !== lastBlackedOut) {
+    lastBlackedOut = blackedOut;
+    drawStage();
+  }
   if (!master.dragging) master.set(state.master);
 
   renderDetails();
@@ -1067,7 +1242,7 @@ const master = (() => {
     dragging: false, v: 1,
     set(v) {
       m.v = Math.min(1, Math.max(0, v));
-      const pct = `${Math.round(m.v * 100)}%`;
+      const pct = `${Math.round(m.v * 100)} %`;
       $('masterValue').textContent = pct;
       box.classList.toggle('dimmed', m.v < 0.995);
       $('masterFill').style.width = `${m.v * 100}%`;
@@ -1128,55 +1303,28 @@ function liveColour(s) {
   return { hex: live.colour, white: live.white ?? 0, amber: live.amber ?? 0, uv: live.uv ?? 0, display: live.display ?? live.colour };
 }
 
-/**
- * What the details panel shows for a group. Live: the stage's status (`state.groups`; in Blind, the draft's).
- * In Preview: the selected item's saved entry, `{ preset, level, live: null, entry }`;
- * `entry` is null when the item doesn't set the group ("not set"). Basic lights' unset
- * groups run the built-in Basic light, at full.
- */
-function groupStatus(group) {
-  if (!preview.on) return shownState()?.groups?.[group.id];
-  const item = previewItem();
-  const k = layout.groups.findIndex((g) => g.id === group.id);
-  const entry = item?.entries?.[k] ?? null;
-  if (entry) return { preset: entry.preset, level: item.levels?.[k] ?? 1, live: null, entry };
-  if (item && isBasic(item) && !isSmoke(group)) return { preset: '__safe', level: 1, live: null, entry: null };
-  return { preset: null, level: 0, live: null, entry: null };
-}
-
-/** In Preview: the selected item doesn't set this group. */
-const notSet = (s) => s?.entry === null && s.preset === null;
-
-/** In Preview: a group's dimmer can't move (the item doesn't set the group, or Basic lights stays at full). */
-function dimmerLocked(group) {
-  if (!preview.on) return false;
-  const item = previewItem();
-  return !item || isBasic(item) || !groupStatus(group)?.entry;
-}
-
-/** Preview: changes one group of the selected item, saved straight into it; nothing goes on stage. */
-function sendItemGroup(group, change) {
-  if (!preview.on || !preview.item) return null;
-  return send({ type: 'itemGroup', item: preview.item, group, ...change });
-}
+/** What the details panel shows for a group: the stage's status (`state.groups`; in Prepare, the draft's). */
+const groupStatus = (group) => shownState()?.groups?.[group.id];
 
 /**
  * The effect a group runs now, as groupEffect takes it, or null when it runs a colour.
  * `s` is groupStatus(group). Live: a live change (`s.effect`, an `fx:` id), a listed effect,
  * or an effect a Save kept in a song (a hidden "Custom effect" the group goes on running:
- * its settings come with the look's entry). In Preview: the selected item's entry.
+ * its settings come with the look's entry).
  */
 function runningEffect(group, s) {
   if (!s || !group) return null;
-  if ('entry' in s) return s.entry?.effect ?? null;
   if (s.live) return null;
   if (s.effect) return s.effect;
   const id = s.preset;
   if (!id) return null;
-  const listed = group.presets.find((p) => p.id === id);
+  const listed = group.presets.find((p) => p.id === id) ?? hiddenPreset(group, id);
   if (listed) return listed.effect ?? null;
   return savedEntry(group, id)?.effect ?? null;
 }
+
+/** A hidden preset of the group (an Any colour Save kept, or the copy an edit in Prepare left on stage), or undefined. */
+const hiddenPreset = (group, id) => group?.hidden?.find((x) => x.id === id);
 
 /** A look's entry that gives the group this preset (a hidden one Save made): the look on stage first, then any. */
 function savedEntry(group, presetId) {
@@ -1210,12 +1358,8 @@ function runningLight(group, s) {
   // An effect: its first colour, with White, Amber and UV from 0. A strip pick or a slider replaces the effect with a colour.
   const effect = runningEffect(group, s);
   if (effect) return { colour: effect.colours[0]?.hex ?? '#000000', white: 0, amber: 0, uv: 0 };
-  if (s?.entry) {
-    const light = s.entry.light;
-    return light ? { colour: light.hex, white: light.white, amber: light.amber, uv: light.uv } : { colour: '#000000', white: 0, amber: 0, uv: 0 };
-  }
   const id = s?.preset;
-  const light = id === '__safe' ? layout.basicLight : group?.presets.find((x) => x.id === id)?.light;
+  const light = id === '__safe' ? layout.basicLight : (group?.presets.find((x) => x.id === id) ?? hiddenPreset(group, id))?.light;
   if (light) return { colour: light.hex, white: light.white, amber: light.amber, uv: light.uv };
   return { colour: '#000000', white: 0, amber: 0, uv: 0 };
 }
@@ -1226,16 +1370,17 @@ function runningLight(group, s) {
  */
 function presetInfo(group, s) {
   const effect = runningEffect(group, s);
-  if (s?.entry) return { name: s.entry.name, colour: s.entry.swatch, effect };
-  if (notSet(s)) return { name: 'not set', colour: null, effect: null };
   const id = s?.preset;
   if (id === null || id === undefined || id === '__blackout') return { name: 'Off', colour: null, effect: null };
   if (id === '__safe') return { name: 'Basic light', colour: layout.basicSwatch, effect: null };
   if (s.live) return { name: 'Custom', colour: s.live.display, effect: null };
   const p = group?.presets.find((x) => x.id === id);
   if (p) return { name: p.name, colour: p.swatch ?? NEUTRAL, effect };
+  // A hidden one: an Any colour Save kept, or the stage's copy of a colour edited in Prepare (shown as it was).
+  const hidden = hiddenPreset(group, id);
+  if (hidden && !effect) return { name: hidden.name, colour: hidden.swatch ?? NEUTRAL, effect: null };
   // A live change to an effect, or the "Custom effect" a Save kept in the song.
-  if (effect) return { name: savedEntry(group, id)?.name ?? 'Custom effect', colour: effect.colours[0]?.hex ?? NEUTRAL, effect };
+  if (effect) return { name: hidden?.name ?? savedEntry(group, id)?.name ?? 'Custom effect', colour: effect.colours[0]?.hex ?? NEUTRAL, effect };
   return { name: 'Custom', colour: NEUTRAL, effect: null };
 }
 
@@ -1296,16 +1441,23 @@ function buildDetails() {
       const puff = el('button', 'puff', 'Puff');
       puff.setAttribute('aria-label', `Puff ${group.name} (hold)`);
       wireHold(puff, [group.id]);
-      box.append(el('span', 'g', group.name), el('span', 'smoke-tag', 'Smoke'), pct, puff, dim);
+      const cell = el('span', 'smoke-cell');
+      cell.append(el('span', 'smoke-tag', 'Smoke'), puff);
+      box.append(el('span', 'g', group.name), cell, dim, pct);
     } else {
       const sw = el('i');
       const chipName = el('span');
       const chip = el('button', 'chip');
-      chip.append(sw, chipName);
-      chip.setAttribute('aria-label', `${group.name}: choose colour`);
+      const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      chevron.setAttribute('width', '14');
+      chevron.setAttribute('height', '14');
+      chevron.setAttribute('viewBox', '0 0 24 24');
+      chevron.setAttribute('aria-hidden', 'true');
+      chevron.innerHTML = '<path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2"/>';
+      chip.append(sw, chipName, chevron);
       chip.addEventListener('click', () => openPicker(group.id));
       Object.assign(row, { chip, sw, chipName });
-      box.append(el('span', 'g', group.name), chip, pct, dim);
+      box.append(el('span', 'g', group.name), chip, dim, pct);
     }
     root.append(box);
     detailRows.push(row);
@@ -1322,26 +1474,21 @@ function buildDetails() {
  * dimmer never makes the lights jump (same as Master).
  */
 function wireDimmer(row) {
-  // Smoke always goes to the real stage; a light's level goes where the drag started (the draft in Blind).
+  // Smoke always goes to the real stage; a light's level goes where the drag started (the draft in Prepare).
   let target = stageTarget();
   const out = throttle((v) => {
     const cmd = { type: 'groupLevel', group: row.group.id, value: v };
     if (row.smoke) send(cmd); else sendStage(cmd, target);
   });
   let startX = 0, startV = 0;
-  // A Preview drag changes `item` (saved once on release); a live drag changes the stage.
-  let inPreview = false, item = null;
   row.dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
-    if (row.dim.classList.contains('ds-disabled')) return;
     // The server refuses smoke during Blackout; say so once and leave the slider where it is.
     if (row.smoke && state?.look === 'blackout') {
       toast('Blackout is on.');
       return;
     }
     row.dragging = true;
-    inPreview = preview.on;
-    item = preview.item;
     target = stageTarget();
     try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     row.dim.classList.add('ds-dragging');
@@ -1351,8 +1498,7 @@ function wireDimmer(row) {
   row.dim.addEventListener('pointermove', (ev) => {
     if (!row.dragging) return;
     showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
-    // In Preview the level is saved into the item once, when the finger lifts.
-    if (!inPreview) out.push(row.value);
+    out.push(row.value);
   });
   const end = () => {
     if (!row.dragging) return;
@@ -1361,48 +1507,53 @@ function wireDimmer(row) {
     // Keep what the finger set until the server has caught up with it.
     row.holdUntil = performance.now() + 600;
     if (row.value === startV) return;
-    if (!inPreview) out.end(row.value);
-    else if (preview.on && item && preview.item === item) sendItemGroup(row.group.id, { level: Math.round(row.value * 100) / 100 });
+    out.end(row.value);
   };
   row.dim.addEventListener('pointerup', end);
   row.dim.addEventListener('pointercancel', end);
 }
 
 function renderDetails() {
-  // In Preview the details are the selected item's, saved straight into it: no Save, no Back.
-  const item = preview.on ? null : stageItem();
-  if (preview.on) $('dTitle').textContent = previewItem()?.name ?? 'Details';
-  else $('dTitle').textContent = item ? item.name : shownState().look === 'blackout' ? 'Blackout' : 'Details';
+  // The item on stage (in Prepare, the one being prepared: Save keeps the draft in it).
+  const item = stageItem();
+  $('dSub').textContent = prep.on ? `${item ? item.name : lookName(shownState().look)} · draft` : 'drag to dim';
   // Without an item on stage there is nothing to save into or go back to.
-  $('backBtn').hidden = !item || !shownState().lookChanged;
+  const changed = !!item && shownState().lookChanged;
+  $('backBtn').hidden = !changed;
   $('saveBtn').hidden = !item;
+  $('saveBtn').classList.toggle('dirty', changed && !prep.on);
+  // Individual lights: only when operators have manual control; faded in Prepare (manual control is live only).
+  $('manualBtn').hidden = !layout.manualForOperators;
+  $('manualBtn').classList.toggle('unavail', prep.on);
+  $('manualBtn').setAttribute('aria-disabled', String(prep.on));
+  $('manualBtn').title = prep.on ? MANUAL_LIVE_ONLY : 'Set single lights';
   if (item) {
-    $('backBtn').textContent = `Back to ${item.name}`;
-    $('saveBtn').querySelector('.label').replaceChildren(`Save to ${item.name} `, el('small', null, 'hold'));
+    $('backBtn').setAttribute('aria-label', `Back to ${item.name} as saved`);
+    $('saveBtn').querySelector('.label').replaceChildren(el('span', null, `Save to ${item.name}`), el('small', null, 'hold'));
   }
   const now = performance.now();
   for (const row of detailRows) {
     if (row.smoke) {
-      // The slider shows the smoke's own level; a Puff doesn't move it. (Hidden in Preview.)
+      // The slider shows the smoke's own level; a Puff doesn't move it.
       const s = state.groups?.[row.group.id];
       if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
       continue;
     }
     const s = groupStatus(row.group);
     const info = presetInfo(row.group, s);
-    row.sw.style.background = swatchFill(info);
+    // Off is a ring; a colour or an effect a soft disc.
+    const off = !info.effect && (!info.colour || info.colour === '#000000');
+    row.sw.classList.toggle('off', off);
+    row.sw.style.background = off ? 'transparent' : info.effect ? swatchFill(info) : tint(info.colour, 0.85);
     row.chipName.textContent = info.name;
-    row.chip.classList.toggle('unset', notSet(s));
-    const locked = dimmerLocked(row.group);
-    row.dim.classList.toggle('ds-disabled', locked);
-    if (locked) row.dim.setAttribute('aria-disabled', 'true');
-    else row.dim.removeAttribute('aria-disabled');
+    row.chip.setAttribute('aria-label', `${row.group.name} colour: ${info.name}. Change colour`);
     // The slider carries a little of the group's colour.
     row.dim.style.setProperty('--c', info.colour && info.colour !== '#000000' ? shown(info.colour) : '#5a6478');
     if (!row.dragging && now >= row.holdUntil) showLevel(row, s?.level ?? 0);
   }
   if (picker.group) renderPicker();
   if (qs.open) renderSheet();
+  renderManual();
 }
 
 // Back and Save.
@@ -1412,6 +1563,9 @@ $('backBtn').addEventListener('click', () => sendStage({ type: 'backToLook' }));
 const saveBtn = $('saveBtn');
 let saveTimer = 0;
 let saveFor = null;
+// The Prepare session the hold started in: a draft that ends mid-hold (Live, Go, a dropped draft) must never
+// turn the hold into a Save of the live stage, nor a hold started live into a Save of a new draft.
+let saveSession = 0;
 /** The Save hold waiting for its answer: { ref, name }, to say "Saved to …" when it works. */
 let itemSave = null;
 saveBtn.addEventListener('pointerdown', (ev) => {
@@ -1419,13 +1573,14 @@ saveBtn.addEventListener('pointerdown', (ev) => {
   const item = stageItem();
   if (!item) return;
   saveFor = item.id;
+  saveSession = prep.session;
   saveBtn.classList.add('holding');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveBtn.classList.remove('holding');
-    // Only if the same item is still on stage; for Basic lights the id is the safe look's.
+    // Only if the same item is still on stage, in the same Live or Prepare session; for Basic lights the id is the safe look's.
     const now = stageItem();
-    if (now && now.id === saveFor) {
+    if (now && now.id === saveFor && prep.session === saveSession) {
       const sent = send({ type: 'saveItem', id: now.id });
       if (sent !== null) itemSave = { ref: sent, name: now.name };
     }
@@ -1440,103 +1595,159 @@ saveBtn.addEventListener('click', (ev) => ev.preventDefault());
 
 // ---- Colour picker (covers the details panel only) ----
 
-const picker = { group: null, edit: false, tab: 'col' };
+const picker = { group: null, tab: 'col' };
 
-const HUE_STOPS = ['#ff0000', '#ffc800', '#00ff00', '#00ffc8', '#0000ff', '#8c00ff', '#ff008c', '#ff0000'];
-const WHITE_STOPS = ['#ffb46b', '#f4f8ff'];
-
-/** The colour a strip shows at position p (0..1), blended like the CSS gradient does. */
-function stripColour(stops, p) {
-  const x = clamp01(p) * (stops.length - 1);
-  const i = Math.min(stops.length - 2, Math.floor(x));
-  const t = x - i;
-  const rgb = (h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16));
-  const a = rgb(stops[i]), b = rgb(stops[i + 1]);
-  return `#${a.map((v, k) => Math.round(v + (b[k] - v) * t).toString(16).padStart(2, '0')).join('')}`;
-}
+// The strips' colours and their maths (place, saturation, exact values) are in /shared/colour.js.
 
 const pickerRow = () => detailRows.find((r) => r.group.id === picker.group);
+
+/** Holding a colour or an effect in the picker this long opens its editor; a tap still puts it on stage. */
+const EDIT_HOLD = 500;
+/** Moving further than this (px) before then is a swipe (the picker scrolls), not a hold. */
+const EDIT_SLOP = 8;
+// The hold under way: its pointer, where it started and its timer; `quietUntil`: the clicks that end a hold are not taps.
+const editHold = { pointer: null, x: 0, y: 0, timer: 0, fired: false, quietUntil: 0 };
+
+function endEditHold() {
+  clearTimeout(editHold.timer);
+  editHold.timer = 0;
+  editHold.pointer = null;
+}
+
+/**
+ * A new finger (or the mouse again) while a hold that fired is still waiting for its lift: the lift was lost (the
+ * grid was rebuilt under it) or a second finger came. Taps work again at once, so this new one (Save in the editor
+ * the hold opened, say) is never taken for the hold's: a lost lift has no click to come, and the first finger of
+ * two is over the editor by now, not over the tile.
+ */
+function dropFiredHold() {
+  if (!editHold.fired) return;
+  editHold.fired = false;
+  editHold.quietUntil = 0;
+  endEditHold();
+}
+
+/** The picker's tiles are being replaced: a hold that hasn't fired yet ends (it would open a colour that may be gone). */
+function cancelEditHold() {
+  if (editHold.timer) endEditHold();
+}
+
+/**
+ * Makes a picker tile open its editor when held (EDIT_HOLD), without changing the stage. The click that ends the hold
+ * is swallowed, so the tile's tap (fade to it, run it) doesn't also go. Not on the phone (no editing there).
+ */
+function holdToEdit(b, open) {
+  b.classList.add('movable');
+  b.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0 || document.body.classList.contains('phone')) return;
+    dropFiredHold();
+    endEditHold();
+    editHold.pointer = ev.pointerId;
+    editHold.x = ev.clientX;
+    editHold.y = ev.clientY;
+    editHold.fired = false;
+    editHold.timer = setTimeout(() => {
+      editHold.timer = 0;
+      editHold.fired = true;
+      // Until the finger lifts (and a moment after), clicks are the hold's, not taps.
+      editHold.quietUntil = Infinity;
+      open();
+    }, EDIT_HOLD);
+  });
+  // A long press on a touch screen must not open the page's own menu.
+  b.addEventListener('contextmenu', (ev) => { if (editHold.pointer !== null || editHold.fired) ev.preventDefault(); });
+}
+
+window.addEventListener('pointermove', (ev) => {
+  if (ev.pointerId !== editHold.pointer || !editHold.timer) return;
+  if (Math.hypot(ev.clientX - editHold.x, ev.clientY - editHold.y) > EDIT_SLOP) endEditHold();
+});
+const liftEditHold = (ev) => {
+  if (ev.pointerId !== editHold.pointer) return;
+  if (editHold.fired) editHold.quietUntil = performance.now() + 400;
+  editHold.fired = false;
+  endEditHold();
+};
+window.addEventListener('pointerup', liftEditHold);
+// Any new pointer while a fired hold waits for its lift (not only on a tile), so a lost lift can't keep taps quiet.
+window.addEventListener('pointerdown', dropFiredHold, true);
+window.addEventListener('pointercancel', liftEditHold);
+window.addEventListener('click', (ev) => {
+  if (performance.now() >= editHold.quietUntil) return;
+  editHold.quietUntil = 0;
+  ev.stopPropagation();
+  ev.preventDefault();
+}, true);
 
 function buildPickerGrid() {
   const row = pickerRow();
   if (!row) return;
   const grid = $('pGrid');
+  cancelEditHold();
   grid.replaceChildren();
-  // The Colours tab lists colours only; effects have their own tab.
+  // The Colours tab lists colours only; effects have their own tab. A tap fades the group to the colour
+  // (in Prepare, the draft's group); a hold opens its editor (the stage doesn't change), as do Edit this colour and ＋ New colour.
   for (const p of row.group.presets.filter((x) => !x.effect)) {
     const b = el('button', 'pc');
     b.dataset.preset = p.id;
     const sw = el('i');
-    sw.style.background = shown(p.swatch) ?? NEUTRAL;
+    // Off has no light: a dark bar with a faint edge.
+    if (!p.swatch || p.swatch === '#000000') sw.classList.add('off');
+    else sw.style.background = shown(p.swatch) ?? NEUTRAL;
     b.append(sw, el('span', null, p.name));
-    b.classList.toggle('editable', picker.edit);
-    b.classList.toggle('editing', colourEdit?.id === p.id);
-    // While editing, a tap opens the colour's editor and leaves the stage alone. In Preview it goes into the item.
-    b.addEventListener('click', () => {
-      if (picker.edit) openEditor(row.group.presets.find((x) => x.id === p.id) ?? p);
-      else if (preview.on) sendItemGroup(row.group.id, { preset: p.id });
-      else sendStage({ type: 'groupPreset', group: row.group.id, preset: p.id });
-    });
+    b.addEventListener('click', () => sendStage({ type: 'groupPreset', group: row.group.id, preset: p.id }));
+    holdToEdit(b, () => openColourEditor(p));
     grid.append(b);
   }
-  if (picker.edit) {
-    const add = el('button', 'pc newfx', '＋ New colour');
-    add.dataset.newColour = '1';
-    add.classList.toggle('editing', !!newColour);
-    add.addEventListener('click', openNewColour);
-    grid.append(add);
-  }
+  // ＋ New colour: always the last tile.
+  const add = el('button', 'pc newfx', '＋ New colour');
+  add.addEventListener('click', () => openColourEditor(null));
+  grid.append(add);
   $('pTitle').textContent = row.group.name;
-  $('pAnyLab').textContent = row.group.whiteOnly ? 'Any white, warm to cool' : 'Any colour';
+  $('pAnyLab').textContent = row.group.whiteOnly ? 'Any white · drag to try it live' : 'Any colour · drag to try it live';
   $('pAny').className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'}`;
-  $('pAny').setAttribute('aria-label', $('pAnyLab').textContent);
+  $('pAny').setAttribute('aria-label', row.group.whiteOnly ? 'Any white, warm to cool' : 'Any colour');
   buildExtras(row.group);
   buildEffectGrid(row.group);
-  // A group that is a single light has nowhere for an effect to move: no Effects tab.
-  $('pTabs').hidden = !hasLine(row.group);
-  if ($('pTabs').hidden && picker.tab === 'fx') showPickerTab('col');
 }
 
-/** The Effects tab: one tile per effect in the group's list, with a small moving swatch of its colours. */
+/** "Background, Drum cage and Side bar". */
+const listNames = (names) => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] ?? '');
+
+/**
+ * The Effects tab: one tile per effect in the group's list, with a small moving swatch of its colours, and
+ * ＋ New effect last. A group that isn't a line of lights says so instead, and names the groups that take effects.
+ */
 function buildEffectGrid(group) {
+  const line = hasLine(group);
+  $('fxNotLine').hidden = line;
+  $('fxLab').hidden = $('fxGrid').hidden = !line;
   const grid = $('fxGrid');
   grid.replaceChildren();
-  const effects = group.presets.filter((p) => p.effect);
-  for (const p of effects) {
+  if (!line) {
+    const lines = lightGroups().filter(hasLine).map((g) => g.name);
+    const others = lightGroups().filter((g) => !hasLine(g)).map((g) => g.name);
+    $('fxNotLineText').textContent = lines.length
+      ? `They run on ${listNames(lines)}. ${listNames(others)} ${others.length === 1 ? 'takes' : 'take'} colours only.`
+      : 'No group here is a line of lights, so every group takes colours only.';
+    return;
+  }
+  // ", hold to edit" is left out on the phone (no editing there).
+  $('fxLab').replaceChildren(`Effects · tap to run on ${group.name}`, el('span', 'hold-hint', ', hold to edit'));
+  for (const p of group.presets.filter((x) => x.effect)) {
     const b = el('button', 'pc fx');
     b.dataset.preset = p.id;
     const sw = el('i', 'fxsw');
     sw.style.setProperty('--g', effectGradient(p.effect, true));
     b.append(sw, el('span', null, p.name));
-    b.classList.toggle('editable', picker.edit);
-    b.classList.toggle('editing', effectEdit?.id === p.id);
-    // While editing, a tap opens the effect's editor and leaves the stage alone.
-    // In Preview it goes into the selected item; live it goes on stage.
-    b.addEventListener('click', () => {
-      if (picker.edit) openEffectEditor(group.presets.find((x) => x.id === p.id) ?? p);
-      else if (preview.on) sendItemGroup(group.id, { preset: p.id });
-      else sendStage({ type: 'groupPreset', group: group.id, preset: p.id });
-    });
+    // On stage, or in the draft in Prepare; a hold (or All settings, on the running effect's card) opens its editor.
+    b.addEventListener('click', () => sendStage({ type: 'groupPreset', group: group.id, preset: p.id }));
+    holdToEdit(b, () => openEffectEditor(p));
     grid.append(b);
   }
-  if (picker.edit) {
-    const add = el('button', 'pc newfx', '＋ New effect');
-    add.classList.toggle('editing', effectEdit?.id === null);
-    add.addEventListener('click', () => openEffectEditor(null));
-    grid.append(add);
-  }
-  showStill();
-}
-
-/** In Preview, Basic lights is always still: the Effects tab shows a note instead of effects it would refuse. */
-const previewStill = () => preview.on && !!previewItem() && isBasic(previewItem());
-
-function showStill() {
-  const still = previewStill();
-  const row = pickerRow();
-  $('fxStill').hidden = !still;
-  $('fxGrid').hidden = still;
-  $('fxNone').hidden = still || picker.edit || !!row?.group.presets.some((p) => p.effect);
+  const add = el('button', 'pc newfx', '＋ New effect');
+  add.addEventListener('click', () => openEffectEditor(null));
+  grid.append(add);
 }
 
 // White, Amber and UV under the Any colour strip, for groups whose fixtures have them.
@@ -1616,19 +1827,14 @@ function dragSender(sendOne) {
   return { start() { first = true; }, push: (v) => out.push(v), end: (v) => out.end(v) };
 }
 
-/**
- * Same feel as the group dimmers: the level moves relative to where the finger started.
- * In Preview nothing is sent while the finger moves; on release the item gets the colour with the new levels.
- */
+/** Same feel as the group dimmers: the level moves relative to where the finger started. */
 function wireExtra(row) {
   let target = stageTarget();
   const out = dragSender((_v, first) => sendColour(pickerColour, first, extraLevels(), target));
-  let startX = 0, startV = 0, inPreview = false, item = null;
+  let startX = 0, startV = 0;
   row.dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
     row.dragging = true;
-    inPreview = preview.on;
-    item = preview.item;
     target = stageTarget();
     try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     row.dim.classList.add('ds-dragging');
@@ -1640,7 +1846,7 @@ function wireExtra(row) {
     if (!row.dragging) return;
     showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
     if (row.value !== startV) extrasMoved = true;
-    if (!inPreview) out.push();
+    out.push();
   });
   const end = () => {
     if (!row.dragging) return;
@@ -1648,10 +1854,7 @@ function wireExtra(row) {
     row.dim.classList.remove('ds-dragging');
     row.holdUntil = performance.now() + 600;
     if (row.value === startV) return;
-    if (!inPreview) out.end();
-    else if (preview.on && item && preview.item === item && picker.group) {
-      sendItemGroup(picker.group, { colour: pickerColour, ...extraLevels() });
-    }
+    out.end();
   };
   row.dim.addEventListener('pointerup', end);
   row.dim.addEventListener('pointercancel', end);
@@ -1663,21 +1866,29 @@ function renderPicker() {
   if (!row) return;
   const s = groupStatus(row.group);
   const info = presetInfo(row.group, s);
-  $('pCurSw').style.background = swatchFill(info);
-  $('pCurText').textContent = notSet(s) ? info.name : `${info.name} · ${Math.round((s?.level ?? 0) * 100)}%`;
+  // Off is a ring, as on the group's colour button.
+  const off = !info.effect && (!info.colour || info.colour === '#000000');
+  $('pCurSw').classList.toggle('off', off);
+  $('pCurSw').style.background = off ? 'transparent' : info.effect ? swatchFill(info) : tint(info.colour, 0.85);
+  $('pCurText').textContent = `${info.name} · ${Math.round((s?.level ?? 0) * 100)} %`;
   for (const b of $('pGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
   for (const b of $('fxGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
-  // The settings of the effect the group runs (in Preview: the item's), under the list.
-  $('fxSet').hidden = !info.effect || previewStill();
-  showStill();
-  effectSettings.show(info.effect, preview.on ? previewItem()?.tempo ?? 120 : shownState()?.tempo ?? 120);
+  $('pEditCur').disabled = !currentColour(row.group, s);
+  // The effect the group runs: its card under the list (the round's length, Speed, All settings).
+  $('fxCard').hidden = !info.effect || !hasLine(row.group);
+  if (info.effect) {
+    // A listed effect by its name; one that isn't listed (a Speed change makes a live copy) by its kind: "Chase is running".
+    const listed = row.group.presets.some((p) => p.id === s?.preset && p.effect);
+    const kind = EFFECT_NAMES.find(([k]) => k === info.effect.effect)?.[1] ?? info.name;
+    $('fxRunning').textContent = `${listed ? info.name : kind} is running`;
+    $('fxNote').textContent = roundText(info.effect, s);
+  }
+  effectSettings.show(info.effect, shownState()?.tempo ?? 120);
   const running = runningLight(row.group, s);
   pickerColour = running.colour;
-  // In Preview the item's own Any colour pick is a saved hidden "Custom" preset (not in the colour list):
-  // its White, Amber and UV are the user's too.
-  pickerLive = preview.on
-    ? !!s?.entry && s.entry.name === 'Custom' && !row.group.presets.some((p) => p.id === s.entry.preset)
-    : !!s?.live;
+  pickerLive = !!s?.live;
+  // Any colour follows the group's Any colour pick (the draft's, in Prepare), unless a finger or a field is on it.
+  if (!anyColour.busy()) anyColour.set(s?.live ? s.live.colour : null);
   const now = performance.now();
   for (const r of extraRows) if (!r.dragging && now >= r.holdUntil) showLevel(r, running[r.key]);
   renderAddColour();
@@ -1685,7 +1896,29 @@ function renderPicker() {
   renderEffectEditor();
 }
 
-// ---- Keep a strip colour: "＋ Add to colours" ----
+/** The listed colour a group runs, for Edit this colour; null for a strip pick, an effect, Basic light or Off by Blackout. */
+function currentColour(group, s) {
+  if (!s?.preset || s.live || runningEffect(group, s)) return null;
+  return group.presets.find((p) => p.id === s.preset && !p.effect) ?? null;
+}
+
+/**
+ * How long one round of a running effect takes, as the stage runs it: "one round = 2 s at 120 bpm" (or
+ * "one round = 10 s" for Free), with the speed dial; when light safety slows it, the slowed length and "· slowed to stay safe".
+ */
+function roundText(effect, s) {
+  const st = shownState();
+  const speed = st?.speed ?? 1;
+  const bpm = st?.tempo ?? 120;
+  const beats = 'beats' in effect.speed;
+  // The engine's own length (slowed by light safety, when it is); worked out here only for an older server.
+  const secs = s?.round ?? (beats ? (effect.speed.beats * 60) / (bpm * speed) : effect.speed.seconds / speed);
+  const n = secs >= 10 ? Math.round(secs) : Math.round(secs * 10) / 10;
+  const text = beats ? `one round = ${n} s at ${Math.round(bpm)} bpm` : `one round = ${n} s`;
+  return s?.slowed ? `${text} · slowed to stay safe` : text;
+}
+
+// ---- Keep a strip colour: "＋ Keep as a colour" ----
 
 /** The colour the picker's group runs live from the strip (with its White, Amber and UV), or null. */
 function liveOfPicker() {
@@ -1693,22 +1926,24 @@ function liveOfPicker() {
   return row ? liveColour(shownState()?.groups?.[row.group.id]) : null;
 }
 
-/** Shows the pill while the group runs a strip colour that isn't a swatch yet; keeps the form in step. */
+/** A light with nothing in it: black with no White, Amber or UV (the server refuses to keep it: "that colour has no light"). */
+const noLight = (c) => /^#0{6}$/.test(c.hex) && !c.white && !c.amber && !c.uv;
+
+/**
+ * ＋ Keep as a colour is always there; it works while the group runs a strip colour that isn't a swatch yet (and has
+ * some light in it) and the form isn't open. Keeps the form in step.
+ */
 function renderAddColour() {
   const row = pickerRow();
-  if (row) $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
-  // ＋ New colour has its own colour: the stage has nothing to do with it.
-  if (newColour) {
-    $('pAddOpen').hidden = true;
-    return;
-  }
+  if (!row) return;
+  $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
   const pick = liveOfPicker();
   // Listed: the group's list has this very light (its colour, White, Amber and UV).
   const listed = !!pick && row.group.presets.some((p) => !p.effect && p.light && colourKey(p.light) === colourKey(pick));
-  const open = !$('pAdd').hidden;
+  const keepable = !!pick && !listed && !noLight(pick);
   // The form follows the colour: it goes when the group no longer runs a new strip colour.
-  if (open && (!pick || listed)) $('pAdd').hidden = true;
-  $('pAddOpen').hidden = !pick || listed || !$('pAdd').hidden || picker.edit;
+  if (!$('pAdd').hidden && !keepable) $('pAdd').hidden = true;
+  $('pAddOpen').disabled = !keepable || !$('pAdd').hidden;
   if (pick) $('paSw').style.background = shown(pick.display) ?? pick.display;
 }
 
@@ -1726,125 +1961,7 @@ function closeAddColour() {
   pendingColour = null;
   $('pAdd').hidden = true;
   $('paName').blur();
-  closeNewColour();
   if (picker.group) renderAddColour();
-}
-
-// ---- ＋ New colour (Edit mode): a colour for the list, picked on the form's own strip ----
-
-/** The New colour form while it is open: `{ hex }`, hex null until a colour is picked. Picking never touches the stage. */
-let newColour = null;
-// Its White, Amber and UV sliders (for groups with those channels), shaped as showLevel wants.
-let newExtraRows = [];
-
-function openNewColour() {
-  const row = pickerRow();
-  if (!row || !picker.edit) return;
-  closeEditor();
-  pendingColour = null;
-  newColour = { hex: null };
-  $('paName').value = '';
-  $('paAll').checked = false;
-  const strip = $('paStrip');
-  strip.className = `strip2 ${row.group.whiteOnly ? 'cct' : 'hue'} pa-strip`;
-  strip.hidden = false;
-  $('paStripRow').hidden = false;
-  $('paH').hidden = true;
-  buildNewExtras(row.group);
-  $('paAddBtn').textContent = 'Save';
-  showNewSwatch();
-  $('pAdd').hidden = false;
-  renderAddColour();
-  for (const b of $('pGrid').children) b.classList.toggle('editing', !!b.dataset.newColour);
-  $('pAdd').scrollIntoView({ block: 'nearest' });
-}
-
-/** Back to the Add to colours form (closed); nothing to do when New colour isn't open. */
-function closeNewColour() {
-  if (!newColour) return;
-  newColour = null;
-  $('pAdd').hidden = true;
-  $('paStrip').hidden = true;
-  $('paStripRow').hidden = true;
-  $('paExtras').hidden = true;
-  $('paExtras').replaceChildren();
-  newExtraRows = [];
-  $('paAddBtn').textContent = 'Add';
-  $('paAddBtn').disabled = pendingColour !== null;
-  for (const b of $('pGrid').children) if (b.dataset.newColour) b.classList.remove('editing');
-}
-
-/** White, Amber and UV sliders for the new colour, as Any colour has them; they change only the form. */
-function buildNewExtras(group) {
-  const box = $('paExtras');
-  box.replaceChildren();
-  newExtraRows = [];
-  for (const x of EXTRAS) {
-    if (!group.extras?.[x.key]) continue;
-    const row = extraSlider(box, x, `New colour ${x.label}`);
-    newExtraRows.push(row);
-    let startX = 0, startV = 0;
-    row.dim.addEventListener('pointerdown', (ev) => {
-      ev.preventDefault();
-      row.dragging = true;
-      try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
-      row.dim.classList.add('ds-dragging');
-      startX = ev.clientX;
-      startV = row.value;
-    });
-    row.dim.addEventListener('pointermove', (ev) => {
-      if (!row.dragging) return;
-      showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
-      showNewSwatch();
-    });
-    const end = () => {
-      row.dragging = false;
-      row.dim.classList.remove('ds-dragging');
-    };
-    row.dim.addEventListener('pointerup', end);
-    row.dim.addEventListener('pointercancel', end);
-  }
-  box.hidden = newExtraRows.length === 0;
-}
-
-attachStrip($('paStrip'), $('paH'), () => (newColour ? pickerRow()?.group.whiteOnly ?? null : null), (hex) => {
-  if (!newColour) return;
-  newColour.hex = hex;
-  showNewSwatch();
-});
-
-// No colour: the picked colour comes off again, so the new colour can be White, Amber or UV alone.
-$('paNoColour').addEventListener('click', () => {
-  if (!newColour) return;
-  newColour.hex = null;
-  $('paH').hidden = true;
-  showNewSwatch();
-});
-
-/** Something to add: a colour picked on the strip, or White, Amber or UV above 0 (an amber-only colour, say). */
-function newColourReady() {
-  const levels = newLevels();
-  return !!newColour && (!!newColour.hex || levels.white > 0 || levels.amber > 0 || levels.uv > 0);
-}
-
-/** The new colour's White, Amber and UV, as its sliders show them (0 where the group has no slider). */
-function newLevels() {
-  const levels = { white: 0, amber: 0, uv: 0 };
-  for (const r of newExtraRows) levels[r.key] = Math.round(r.value * 100) / 100;
-  return levels;
-}
-
-/**
- * The form's swatch: the picked colour (none is black) with its White, Amber and UV mixed in, as the
- * saved swatch will look; empty while there is nothing to add. Keeps Save and No colour in step too.
- */
-function showNewSwatch() {
-  if (!newColour) return;
-  const ready = newColourReady();
-  const look = mixedColour(newColour.hex ?? '#000000', newLevels());
-  $('paSw').style.background = ready ? shown(look) ?? look : 'transparent';
-  $('paNoColour').hidden = !newColour.hex;
-  $('paAddBtn').disabled = pendingColour !== null || !ready;
 }
 
 /**
@@ -1873,13 +1990,6 @@ $('paName').addEventListener('keydown', (ev) => {
 // A plain tap. The form closes when the server says yes; on an error it stays to fix.
 $('paAddBtn').addEventListener('click', () => {
   if (pendingColour !== null || !picker.group) return;
-  if (newColour) {
-    if (!newColourReady()) return;
-    // No colour picked: the light is its White, Amber or UV alone, on a black colour.
-    pendingColour = send({ type: 'addColour', group: picker.group, colour: newColour.hex ?? '#000000', ...newLevels(), name: $('paName').value, allGroups: $('paAll').checked });
-    $('paAddBtn').disabled = pendingColour !== null;
-    return;
-  }
   const pick = liveOfPicker();
   if (!pick) {
     closeAddColour();
@@ -1902,34 +2012,33 @@ function finishAddColour(error) {
 function openPicker(groupId) {
   if (isSmoke(layout?.groups.find((g) => g.id === groupId))) return;
   closeSheet();
-  if (picker.group !== groupId) {
-    $('pAnyH').hidden = true;
-  }
   $('pAdd').hidden = true;
   picker.group = groupId;
-  picker.edit = false;
-  $('pEditBtn').classList.remove('on');
-  $('pEditBtn').setAttribute('aria-pressed', 'false');
-  $('pCol').classList.remove('editing');
-  $('pFx').classList.remove('editing');
   closeEditor();
   extrasMoved = false;
   buildPickerGrid();
+  // Any colour starts from the group's own Any colour pick (none for another kind of colour; renderPicker), Exact values folded.
+  anyColour.set(null, true);
+  anyColour.fold(false);
   // A group that runs an effect opens on its Effects tab.
   const group = pickerRow()?.group;
   showPickerTab(group && hasLine(group) && runningEffect(group, groupStatus(group)) ? 'fx' : 'col');
+  // The picker takes the Groups panel's place.
+  $('details').classList.add('picking');
   $('picker').hidden = false;
+  $('picker').scrollTop = 0;
   renderPicker();
 }
 
 function closePicker() {
+  anyColour.cancel();
   pendingColour = null;
   $('paAddBtn').disabled = false;
   $('pAdd').hidden = true;
-  picker.edit = false;
   closeEditor();
   picker.group = null;
   $('picker').hidden = true;
+  $('details').classList.remove('picking');
 }
 
 function showPickerTab(name) {
@@ -1942,18 +2051,40 @@ function showPickerTab(name) {
   }
   $('pCol').hidden = name !== 'col';
   $('pFx').hidden = name !== 'fx';
-  // Edit works on the tab it was turned on in.
-  if (changed && picker.edit) setEditMode(false);
+  // An editor belongs to the tab it was opened on.
+  if (changed) closeEditor();
 }
 
 $('pDone').addEventListener('click', closePicker);
+$('pBack').addEventListener('click', closePicker);
 for (const t of document.querySelectorAll('[data-pt]')) t.addEventListener('click', () => showPickerTab(t.dataset.pt));
+
+// Edit this colour: the editor, on the colour the group runs (the stage's, or the draft's in Prepare).
+$('pEditCur').addEventListener('click', () => {
+  const row = pickerRow();
+  const preset = row && currentColour(row.group, groupStatus(row.group));
+  if (preset) openColourEditor(preset);
+});
+
+// All settings: the effect editor, on the effect the group runs. A listed effect is edited in place; one that
+// isn't in the list (a live change, or one a Save kept in a song) opens as a new effect with its settings.
+$('fxAll').addEventListener('click', () => {
+  const row = pickerRow();
+  if (!row) return;
+  const s = groupStatus(row.group);
+  const effect = runningEffect(row.group, s);
+  if (!effect) return;
+  const listed = !s.effect ? row.group.presets.find((p) => p.id === s.preset && p.effect) : null;
+  if (listed) openEffectEditor(listed);
+  else openEffectEditor(null, effect);
+});
 
 // ---- Effect settings: speed, direction, waves, size and edges ----
 
 const SPEED_BEATS = [1, 2, 4, 8, 16, 32];
 const SPEED_SECONDS = [2, 5, 10, 30, 60];
-const DIRECTIONS = [['ltr', 'Left to right'], ['rtl', 'Right to left'], ['centreOut', 'Centre out'], ['outsideIn', 'Outside in']];
+// As the editor shows them (arrows), with the spoken name where it differs.
+const DIRECTIONS = [['ltr', 'Left → right', 'Left to right'], ['rtl', 'Right → left', 'Right to left'], ['centreOut', 'Centre out'], ['outsideIn', 'Outside in']];
 /**
  * The settings that change what each kind of effect does (the others are left out), and what
  * its size is called. A wave uses its size only with one colour (soft or hard edges).
@@ -1996,17 +2127,22 @@ function liveLayer(fx) {
 }
 
 /**
- * The settings of one effect, built into `root`. `show(effect, tempo)` puts an effect in (the
+ * The settings of one effect, built into `slots`. `show(effect, tempo)` puts an effect in (the
  * caller hides the box when there is none). Every change calls `onChange(effect, how)` with the
  * whole effect: `how` is 'tap' for a choice, and 'start', 'move' and 'end' for a Size drag.
  * `current()`, when given, is the effect a change starts from (the caller's own, which may have
  * changed since it was shown here); otherwise the one last shown.
+ *
+ * `speedOnly`: just the Speed line in `slots.speed`, its unit after the choices (the picker's running-effect card;
+ * All settings has the rest). Otherwise the effect editor's parts: Speed's choices in `slots.speed`, Direction's in
+ * `slots.direction` (its row is left out for an effect that doesn't use it), and Fine-tune's Waves at once, Size
+ * (or Amount, Depth, Tail) and Edges in `slots.fine`, each left out when the effect doesn't use it.
  */
-function effectControls(root, onChange, current = null) {
+function effectControls(slots, onChange, current = null, { speedOnly = false } = {}) {
   let fx = null, tempo = 120;
   const now = () => (current ? current() : fx);
   const seg = (label) => {
-    const box = el('div', 'ds-seg');
+    const box = el('div', speedOnly ? 'ds-seg' : 'ds-seg ce-seg');
     box.setAttribute('role', 'radiogroup');
     box.setAttribute('aria-label', label);
     return box;
@@ -2019,12 +2155,6 @@ function effectControls(root, onChange, current = null) {
     b.addEventListener('click', () => { if (now()) pick(); });
     box.append(b);
     return b;
-  };
-  const item = (label, ...parts) => {
-    const box = el('span', 'fxitem');
-    const lab = el('span', 'lab2', label);
-    box.append(lab, ...parts);
-    return { box, lab };
   };
   /** A tap: the whole effect with `patch`, unless nothing changes. */
   const change = (patch) => {
@@ -2043,26 +2173,22 @@ function effectControls(root, onChange, current = null) {
   });
   const secondsBox = seg('Seconds for one round');
   const secondButtons = SPEED_SECONDS.map((n) => [n, choice(secondsBox, `${n} s`, `One round every ${n} seconds`, () => change({ speed: { seconds: n } }))]);
-  const speedUnit = el('span', 'lab-note');
-  const speed = item('Speed', beatsBox, secondsBox);
-  speed.lab.append(' ', speedUnit);
+  const speedUnit = el('span', 'fxunit');
 
   const dirBox = seg('Direction');
-  const dirButtons = DIRECTIONS.map(([d, text]) => [d, choice(dirBox, text, null, () => change({ direction: d }))]);
-  const direction = item('Direction', dirBox);
+  const dirButtons = DIRECTIONS.map(([d, text, label]) => [d, choice(dirBox, text, label, () => change({ direction: d }))]);
 
   const edgeBox = seg('Edges');
   const edgeButtons = [['soft', 'Soft'], ['hard', 'Hard']].map(([e, text]) => [e, choice(edgeBox, text, `${text} edges`, () => change({ edge: e }))]);
-  const edges = item('Edges', edgeBox);
 
-  const fewer = el('button', 'ds-btn fxstep', '−');
-  const more = el('button', 'ds-btn fxstep', '+');
-  const count = el('b', 'fxcount');
+  // Waves at once: − the count +.
+  const fewer = el('button', 'fe-stepb', '−');
+  const more = el('button', 'fe-stepb', '+');
+  const count = el('b', 'fe-count');
   fewer.setAttribute('aria-label', 'Fewer waves');
   more.setAttribute('aria-label', 'More waves');
   fewer.addEventListener('click', () => { const from = now(); if (from && from.waves > 1) change({ waves: from.waves - 1 }); });
   more.addEventListener('click', () => { const from = now(); if (from && from.waves < 16) change({ waves: from.waves + 1 }); });
-  const waves = item('Waves', fewer, count, more);
 
   // Size: a fill slider, moved relative to where the finger starts (as the dimmers are).
   const slab = el('span', 'ds-fill-slab');
@@ -2072,8 +2198,7 @@ function effectControls(root, onChange, current = null) {
   dim.setAttribute('aria-valuemax', '100');
   dim.append(slab);
   const pct = el('span', 'pct');
-  const size = item('Size', dim, pct);
-  size.box.classList.add('fxsize');
+  const sizeName = el('span', null, 'Size');
   const slider = { dim, slab, pct, value: 0, dragging: false, holdUntil: 0 };
   let startX = 0, startV = 0, base = null;
   const sized = () => ({ ...base, size: Math.round(slider.value * 100) / 100 });
@@ -2104,12 +2229,34 @@ function effectControls(root, onChange, current = null) {
   dim.addEventListener('pointerup', end);
   dim.addEventListener('pointercancel', end);
 
-  const line = (...items) => {
+  // The parts each kind of effect may leave out (the editor's), set by show().
+  let dirRow = null, wavesCell = null, sizeCell = null;
+  if (speedOnly) {
+    // The card: "Speed" (a 64 px label), the choices, the unit.
+    const box = el('span', 'fxitem');
+    box.append(el('span', 'lab2', 'Speed'), beatsBox, secondsBox, speedUnit);
     const row = el('div', 'fxrow');
-    row.append(...items.map((i) => i.box));
-    return row;
-  };
-  root.replaceChildren(line(speed), line(direction, edges), line(waves, size));
+    row.append(box);
+    slots.speed.replaceChildren(row);
+  } else {
+    slots.speed.replaceChildren(beatsBox, secondsBox);
+    slots.direction.replaceChildren(dirBox);
+    dirRow = slots.direction.closest('.ce-row');
+    // Fine-tune: a muted 12 px label over each 44 px control.
+    const cell = (lab, control) => {
+      const box = el('div', 'fe-cell');
+      box.append(lab, control);
+      return box;
+    };
+    const stepper = el('div', 'fe-step');
+    stepper.append(fewer, count, more);
+    wavesCell = cell(el('span', 'fe-cell-lab', 'Waves at once'), stepper);
+    const sizeLab = el('span', 'fe-cell-lab');
+    sizeLab.append(sizeName, ' ', pct);
+    sizeCell = cell(sizeLab, dim);
+    edgeBox.classList.add('fe-edges');
+    slots.fine.replaceChildren(wavesCell, sizeCell, cell(el('span', 'fe-cell-lab', 'Edges'), edgeBox));
+  }
 
   const mark = (pairs, value) => {
     for (const [v, b] of pairs) {
@@ -2128,17 +2275,17 @@ function effectControls(root, onChange, current = null) {
       freeButton.setAttribute('aria-checked', String(free));
       secondsBox.hidden = !free;
       mark(secondButtons, free ? fx.speed.seconds : null);
-      speedUnit.textContent = free ? '· seconds a round' : '· beats a round';
+      speedUnit.textContent = free ? 'seconds a round' : 'beats a round';
       mark(dirButtons, fx.direction);
       mark(edgeButtons, fx.edge);
       count.textContent = String(fx.waves);
       fewer.disabled = fx.waves <= 1;
       more.disabled = fx.waves >= 16;
       const uses = effectUses(fx);
-      direction.box.hidden = !uses.direction;
-      waves.box.hidden = !uses.waves;
-      size.box.hidden = !uses.size;
-      size.lab.textContent = uses.size ?? 'Size';
+      if (dirRow) dirRow.hidden = !uses.direction;
+      if (wavesCell) wavesCell.hidden = !uses.waves;
+      if (sizeCell) sizeCell.hidden = !uses.size;
+      sizeName.textContent = uses.size ?? 'Size';
       dim.setAttribute('aria-label', uses.size ?? 'Size');
       if (!slider.dragging && performance.now() >= slider.holdUntil) showLevel(slider, fx.size);
     },
@@ -2146,10 +2293,8 @@ function effectControls(root, onChange, current = null) {
 }
 
 /**
- * The picker's effect settings. Live, a change goes on stage (a Size drag is one Undo step:
- * its later sends continue it, in 0.2 s each, like Any colour). In Preview it goes into the
- * selected item: once per tap, and once when a drag ends. The group and item are the ones the
- * finger started on.
+ * The running effect's Speed, on the picker's card: a tap goes on stage, or in the draft in Prepare, for the
+ * group the finger started on. (The drag path is effectControls' Size, which the card leaves out.)
  */
 const effectSettings = (() => {
   let target = null;
@@ -2157,16 +2302,11 @@ const effectSettings = (() => {
   const sendEffect = (group, effect, first, stage) =>
     sendStage({ type: 'groupEffect', group, effect, ...(first ? {} : { continues: true, fade: DRAG_FADE }) }, stage);
   const out = dragSender((effect, first) => target && sendEffect(target.group, effect, first, target.stage));
-  const capture = () => ({ group: picker.group, inPreview: preview.on, item: preview.item, stage: stageTarget() });
-  const toItem = (t, effect) => {
-    if (preview.on && t.item && preview.item === t.item) sendItemGroup(t.group, { effect });
-  };
-  return effectControls($('fxSet'), (effect, how) => {
+  const capture = () => ({ group: picker.group, stage: stageTarget() });
+  return effectControls({ speed: $('fxSet') }, (effect, how) => {
     if (how === 'tap') {
       const t = capture();
-      if (!t.group) return;
-      if (t.inPreview) toItem(t, effect);
-      else sendEffect(t.group, effect, true, t.stage);
+      if (t.group) sendEffect(t.group, effect, true, t.stage);
       return;
     }
     if (how === 'start') {
@@ -2175,11 +2315,9 @@ const effectSettings = (() => {
       return;
     }
     if (!target?.group) return;
-    if (target.inPreview) {
-      if (how === 'end') toItem(target, effect);
-    } else if (how === 'move') out.push(effect);
+    if (how === 'move') out.push(effect);
     else out.end(effect);
-  });
+  }, null, { speedOnly: true });
 })();
 
 /**
@@ -2221,41 +2359,395 @@ function attachStrip(strip, handle, whiteOnly, onColour, onStart) {
   strip.addEventListener('pointercancel', end);
 }
 
-// Any colour: picking sends right away; moves are throttled and the last one always goes.
+/** After the page changes a colour, what the stage says is shown again only this much later (its answer can lag a move). */
+const COLOUR_HOLD = 800;
+/** A typed R, G or B is taken this long after the last key (at once when the field is left), so "128" isn't 1, 12, then 128. */
+const CHANNEL_WAIT = 400;
+let colourToolsMade = 0;
+
+/**
+ * A colour strip with Saturation under it and Exact values (a hex field and R, G, B, folded). The hex is the one
+ * source of truth: the strip's handle, Saturation and the fields are worked out from it (`set`), so a typed colour
+ * that isn't on the strip stays exactly as typed (the handle goes to the nearest place). A move on the strip or on
+ * Saturation makes a new hex from the place, the saturation and the strength the colour had (see /shared/colour.js).
+ *
+ * `onStart()` when a change begins (a touch on the strip or Saturation, or the first change typed since a field got
+ * focus), then `onColour(hex, last)` as it changes and once more with `last` at its end (the finger lifts, or the
+ * field is left). `whiteOnly()` says which strip it is (warm to cool has no Saturation), null while it can't be used.
+ * The parts go into `sat` (Saturation), `fold` (the Exact values button) and `exact` (the fields); `row`: Saturation
+ * as the editors' rows have Brightness (the range inside, the value beside), else "Saturation 100 %" over the slider.
+ */
+function colourTools({ strip, handle, sat, fold, exact, row = false, whiteOnly, onColour, onStart }) {
+  const st = { hex: null, p: null, s: 1, v: 1 };
+  let dragging = false, holdUntil = 0;
+  // A typed change under way: `began` once onStart has gone; `timer` for an R, G or B still being typed (`chan` says
+  // which); `skip`: Escape, or the change was already finished by flush or cancel.
+  const typed = { began: false, timer: 0, chan: -1, skip: false };
+
+  // Saturation: a fill slider carrying the full colour of the strip's place.
+  const satRow = { dim: el('div', 'ds-fill'), slab: el('span', 'ds-fill-slab'), pct: el('span', 'pct'), value: 1, dragging: false };
+  satRow.dim.setAttribute('role', 'slider');
+  satRow.dim.setAttribute('aria-label', 'Saturation');
+  satRow.dim.setAttribute('aria-valuemin', '0');
+  satRow.dim.setAttribute('aria-valuemax', '100');
+  satRow.dim.append(satRow.slab);
+  if (row) {
+    satRow.dim.append(el('span', 'ce-range', '0 – 100 %'));
+    sat.append(satRow.dim, satRow.pct);
+  } else {
+    sat.append(el('span', 'lab2', 'Saturation'), satRow.pct, satRow.dim);
+  }
+
+  // Exact values: folded; open, a hex field and R, G, B, and a quiet note when something typed can't be used.
+  const foldBtn = el('button', 'cx-fold');
+  foldBtn.type = 'button';
+  foldBtn.append('Exact values', el('span', 'cx-arrow', '›'));
+  if (!exact.id) exact.id = `cxExact${++colourToolsMade}`;
+  foldBtn.setAttribute('aria-controls', exact.id);
+  foldBtn.setAttribute('aria-expanded', 'false');
+  fold.append(foldBtn);
+  const field = (cls, label, numeric) => {
+    const f = el('input', `ds-field ${cls}`);
+    f.type = 'text';
+    f.autocomplete = 'off';
+    f.spellcheck = false;
+    f.setAttribute('enterkeyhint', 'done');
+    f.setAttribute('aria-label', label);
+    if (numeric) {
+      f.inputMode = 'numeric';
+      f.pattern = '[0-9]*';
+      f.maxLength = 3;
+    } else {
+      f.maxLength = 7;
+      f.placeholder = '#RRGGBB';
+      f.setAttribute('autocapitalize', 'characters');
+    }
+    return f;
+  };
+  const hexField = field('cx-hex', 'Colour as hex, #RRGGBB', false);
+  const chans = ['Red', 'Green', 'Blue'].map((name) => field('cx-num', `${name}, 0 to 255`, true));
+  const fields = [hexField, ...chans];
+  const note = el('p', 'cx-note');
+  note.setAttribute('role', 'status');
+  note.hidden = true;
+  const line = el('div', 'cx-fields');
+  const cell = (text, f) => {
+    const l = el('label', 'cx-cell');
+    l.append(el('span', 'cx-lab', text), f);
+    return l;
+  };
+  line.append(cell('Hex', hexField), ...chans.map((f, i) => cell('RGB'[i], f)));
+  exact.append(line, note);
+  exact.hidden = true;
+
+  function render() {
+    const w = whiteOnly();
+    sat.hidden = w !== false;
+    const lit = st.hex !== null && st.v > 0;
+    handle.hidden = st.p === null || !lit;
+    if (!handle.hidden) handle.style.left = `calc(${st.p * 100}% - ${st.p * 4}px)`;
+    // Saturation pales a hue: unavailable until there is one (nothing picked yet, black, or a white typed with none before).
+    const paled = st.p !== null && lit;
+    satRow.dim.classList.toggle('ds-disabled', !paled);
+    satRow.dim.setAttribute('aria-disabled', String(!paled));
+    if (!satRow.dragging) showLevel(satRow, st.hex ? st.s : 1);
+    satRow.dim.style.setProperty('--c', st.p === null ? '#6a7898' : shown(stripMix(false, st.p, 1, 1)));
+    // A field being typed in is never written over.
+    const rgb = st.hex ? hexRgb(st.hex) : null;
+    if (document.activeElement !== hexField) hexField.value = st.hex ? st.hex.toUpperCase() : '';
+    chans.forEach((f, i) => {
+      if (document.activeElement !== f) f.value = rgb ? String(rgb[i]) : '';
+    });
+  }
+
+  /** A finger on the strip or Saturation first ends any typing (its field would otherwise keep focus and go stale). */
+  const blurFields = () => {
+    if (fields.includes(document.activeElement)) document.activeElement.blur();
+  };
+
+  // The strip: the place it is touched picks the hue, at the saturation and strength the colour had.
+  const place = (ev) => {
+    const r = strip.getBoundingClientRect();
+    return r.width > 0 ? clamp01((ev.clientX - r.left) / r.width) : null;
+  };
+  const fromStrip = (ev) => {
+    const w = whiteOnly();
+    const p = place(ev);
+    if (w === null || p === null) return;
+    st.p = p;
+    st.hex = stripMix(w, st.p, st.s, st.v);
+    render();
+    onColour(st.hex, false);
+  };
+  strip.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    const w = whiteOnly();
+    if (w === null) return;
+    blurFields();
+    note.hidden = true;
+    dragging = true;
+    try { strip.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    // From black (No colour) the strip lights again; from white light (0 %), a hue comes back at full colour.
+    if (!st.hex || st.v === 0) st.v = 1;
+    if (!w && st.s === 0) st.s = 1;
+    onStart?.();
+    fromStrip(ev);
+  });
+  strip.addEventListener('pointermove', (ev) => {
+    if (dragging) fromStrip(ev);
+  });
+  const endStrip = () => {
+    if (!dragging) return;
+    dragging = false;
+    holdUntil = performance.now() + COLOUR_HOLD;
+    if (st.hex) onColour(st.hex, true);
+  };
+  strip.addEventListener('pointerup', endStrip);
+  strip.addEventListener('pointercancel', endStrip);
+
+  // Saturation: moves relative to where the finger starts, like the other sliders; whole percent.
+  {
+    let startX = 0, startS = 1, moved = false;
+    const dim = satRow.dim;
+    dim.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      if (whiteOnly() !== false || st.p === null || !st.hex || st.v === 0) return;
+      blurFields();
+      note.hidden = true;
+      satRow.dragging = true;
+      try { dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+      dim.classList.add('ds-dragging');
+      startX = ev.clientX;
+      startS = st.s;
+      moved = false;
+      onStart?.();
+    });
+    dim.addEventListener('pointermove', (ev) => {
+      if (!satRow.dragging) return;
+      const s = Math.round(clamp01(startS + (ev.clientX - startX) / dim.clientWidth) * 100) / 100;
+      showLevel(satRow, s);
+      if (s === st.s) return;
+      st.s = s;
+      st.hex = stripMix(false, st.p, s, st.v);
+      moved = true;
+      render();
+      onColour(st.hex, false);
+    });
+    const end = () => {
+      if (!satRow.dragging) return;
+      satRow.dragging = false;
+      dim.classList.remove('ds-dragging');
+      holdUntil = performance.now() + COLOUR_HOLD;
+      if (moved) onColour(st.hex, true);
+    };
+    dim.addEventListener('pointerup', end);
+    dim.addEventListener('pointercancel', end);
+  }
+
+  // The fields. A whole hex is taken as it is typed; R, G and B a moment after the last key. Left (Done, Enter, a tap
+  // elsewhere), a field that can't be used says why in a quiet note and shows the colour again. Escape puts it back.
+  function apply(hex) {
+    if (hex === st.hex) return;
+    if (!typed.began) {
+      typed.began = true;
+      onStart?.();
+    }
+    Object.assign(st, stripPick(!!whiteOnly(), hex, st));
+    st.hex = hex;
+    render();
+    onColour(hex, false);
+  }
+  const takeChannel = (i) => {
+    const n = parseChannel(chans[i].value);
+    if (n === null) return false;
+    const rgb = st.hex ? hexRgb(st.hex) : [0, 0, 0];
+    rgb[i] = n;
+    apply(rgbHex(rgb));
+    return true;
+  };
+  const refuse = (text) => {
+    note.textContent = text;
+    note.hidden = false;
+  };
+  hexField.addEventListener('input', () => {
+    note.hidden = true;
+    const hex = parseHex(hexField.value);
+    if (hex) apply(hex);
+  });
+  chans.forEach((f, i) => f.addEventListener('input', () => {
+    note.hidden = true;
+    clearTimeout(typed.timer);
+    typed.chan = i;
+    typed.timer = setTimeout(() => {
+      typed.timer = 0;
+      takeChannel(i);
+    }, CHANNEL_WAIT);
+  }));
+  for (const f of fields) {
+    // Typing replaces what the field shows: its text is selected on focus, and again at the end of the tap that gave it
+    // focus (on touch, focus comes before the finger lifts, and the tap would put the caret back), as Tempo's field does.
+    let focusTap = false;
+    const select = () => f.setSelectionRange(0, f.value.length);
+    f.addEventListener('pointerdown', () => (focusTap = document.activeElement !== f));
+    f.addEventListener('focus', () => {
+      typed.began = false;
+      typed.skip = false;
+      select();
+    });
+    f.addEventListener('click', () => {
+      if (focusTap) select();
+      focusTap = false;
+    });
+    f.addEventListener('keydown', (ev) => {
+      // Nothing else on the page reacts to typing.
+      ev.stopPropagation();
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        f.blur();
+      } else if (ev.key === 'Escape') {
+        typed.skip = true;
+        f.blur();
+      }
+    });
+    f.addEventListener('blur', () => {
+      clearTimeout(typed.timer);
+      typed.timer = 0;
+      const text = f.value.trim();
+      if (!typed.skip && text !== '') {
+        if (f === hexField) {
+          const hex = parseHex(text);
+          if (hex) apply(hex);
+          else refuse('Type a colour as # and six digits or letters A to F, like #FF8800.');
+        } else if (!takeChannel(chans.indexOf(f))) {
+          refuse('R, G and B are whole numbers from 0 to 255.');
+        }
+      }
+      typed.skip = false;
+      if (typed.began) {
+        typed.began = false;
+        holdUntil = performance.now() + COLOUR_HOLD;
+        onColour(st.hex, true);
+      }
+      render();
+    });
+  }
+
+  /**
+   * Ends a typed change now: with `take`, an R, G or B still waiting is taken (and a field that can't be used says
+   * why), else it is dropped; either way the change ends (`onColour(hex, true)`) and the field is left. On iPad Safari
+   * a tap on a button doesn't take the focus from a field, so Save, Done, a tile and the like call this first.
+   */
+  function endTyping(take, quiet = false) {
+    const f = fields.includes(document.activeElement) ? document.activeElement : null;
+    if (!f && !typed.timer && !typed.began) return;
+    const waiting = typed.timer ? typed.chan : -1;
+    clearTimeout(typed.timer);
+    typed.timer = 0;
+    if (take && f && !typed.skip && f.value.trim() !== '') {
+      if (f === hexField) {
+        const hex = parseHex(f.value.trim());
+        if (hex) apply(hex);
+        else refuse('Type a colour as # and six digits or letters A to F, like #FF8800.');
+      } else if (!takeChannel(chans.indexOf(f))) {
+        refuse('R, G and B are whole numbers from 0 to 255.');
+      }
+    } else if (take && waiting >= 0) {
+      takeChannel(waiting);
+    }
+    if (typed.began) {
+      typed.began = false;
+      holdUntil = performance.now() + COLOUR_HOLD;
+      if (!quiet) onColour(st.hex, true);
+    }
+    if (f) {
+      // Its blur has nothing more to do.
+      typed.skip = true;
+      f.blur();
+    }
+    typed.skip = false;
+    render();
+  }
+
+  const showFold = (open) => {
+    if (!open) blurFields();
+    exact.hidden = !open;
+    note.hidden = true;
+    foldBtn.classList.toggle('open', open);
+    foldBtn.setAttribute('aria-expanded', String(open));
+  };
+  foldBtn.addEventListener('click', () => showFold(exact.hidden));
+
+  return {
+    /** The colour now (#rrggbb), null for none. */
+    get hex() { return st.hex; },
+    /**
+     * Shows `hex` (null: none). `fresh` forgets the colour before (a new editor, another group); otherwise a colour
+     * with no hue (black, grey or white) keeps the place it had.
+     */
+    set(hex, fresh = false) {
+      const h = hex ? hex.toLowerCase() : null;
+      if (fresh) {
+        Object.assign(st, { hex: null, p: null, s: 1, v: 1 });
+        holdUntil = 0;
+      }
+      if (h !== st.hex) {
+        note.hidden = true;
+        if (h) Object.assign(st, stripPick(!!whiteOnly(), h, st));
+        else Object.assign(st, { p: null, s: 1, v: 1 });
+        st.hex = h;
+      }
+      render();
+    },
+    /** Folds Exact values (or opens it). */
+    fold: (open = false) => showFold(open),
+    /** Takes what is being typed now (an R, G or B still waiting too) and ends the change. */
+    flush: () => endTyping(true),
+    /** Drops an R, G or B still waiting (the picker or editor is closing) and ends the change. */
+    cancel: () => endTyping(false),
+    /** As cancel, but nothing more is sent at all (not even the end of the change): the stage is in Blackout. */
+    drop: () => endTyping(false, true),
+    /** A finger or a field is changing it, or did a moment ago: what the stage says must wait. */
+    busy: () => dragging || satRow.dragging || fields.includes(document.activeElement) || performance.now() < holdUntil,
+    render,
+  };
+}
+
+// Any colour: picking sends right away; moves are throttled and the last one always goes. Saturation and a typed
+// colour send the same way (one Undo step per touch, or per field until it is left); in Prepare they go to the draft.
 // The White, Amber and UV sliders' levels go with it when they are the user's: the group
 // already runs an Any colour pick, or a slider was moved since the picker opened. Otherwise
 // (a preset or Basic light with its own white) the pick is the plain colour.
-// In Preview nothing is sent while the finger moves: the item gets one colour when it lifts.
-(() => {
-  let keep = false, inPreview = false, item = null, target = stageTarget();
+const anyColour = (() => {
+  let keep = false, target = stageTarget();
   const out = dragSender((hex, first) => sendColour(hex, first, keep ? extraLevels() : NO_EXTRAS, target));
-  attachStrip($('pAny'), $('pAnyH'), () => pickerRow()?.group.whiteOnly ?? null,
-    (hex, last) => {
-      if (!inPreview) {
-        if (last) out.end(hex); else out.push(hex);
-      } else if (last && preview.on && item && preview.item === item && picker.group) {
-        sendItemGroup(picker.group, { colour: hex, ...(keep ? extraLevels() : {}) });
-      }
+  return colourTools({
+    strip: $('pAny'), handle: $('pAnyH'), sat: $('pSat'), fold: $('pFold'), exact: $('pExact'),
+    whiteOnly: () => pickerRow()?.group.whiteOnly ?? null,
+    onColour: (hex, last) => {
+      if (last) out.end(hex); else out.push(hex);
     },
-    () => {
+    onStart: () => {
       out.start();
       keep = pickerLive || extrasMoved;
-      inPreview = preview.on;
-      item = preview.item;
       target = stageTarget();
-    });
+    },
+  });
 })();
 
-// ---- Edit colours: tap a swatch to rename it, change its colour or delete it ----
+// ---- The colour editor: a listed colour (Edit this colour) or a new one (＋ New colour), in the whole right column ----
 
-/** The preset the editor is open on: { id, name, colour (picked, or null), swatch (as listed) }. */
+/**
+ * The colour editor while it is open. `group`: the group it opened for (it stays on it, and on this colour, whatever
+ * the stage does meanwhile). `id`: the listed colour, null for a new one. `name`: as it opened. `hex`: the colour picked
+ * on the strip, null for none yet (or No colour). `level` / `startLevel`: its brightness (null: no Brightness, as for Off).
+ * `fade` / `startFade`: its fade in seconds. `all`: Apply to every group.
+ */
 let colourEdit = null;
 let deleteArmed = 0;
 // The ref of an edit or delete the server hasn't answered yet.
 let pendingEdit = null;
-// What to say when the answer is yes, and the commands still to send after it (an effect's name, then its settings).
+// What to say when the answer is yes.
 let pendingEditToast = 'Colour saved';
-let pendingEditNext = [];
 /** The effect the editor is open on: { id (null for a new one), name, effect, original, choices }. */
 let effectEdit = null;
 /** The editor's moving strip (see startEffectStrip). */
@@ -2270,6 +2762,8 @@ const fxStrip = {
   frames: null, count: 0, fps: 20, segments: 0, fixtures: [],
   // The tempo and speed the frames were made at, as "tempo|speed", to ask again when they change.
   clock: null,
+  // The rate the answer ran the effect at (cycles a second, slowed by light safety when it is) and the effect it was for.
+  rate: 0, answerFor: null,
   start: 0,
   // When the last ask went (performance.now()), for the Size drag's one ask per FX_STRIP_WAIT.
   askedAt: -Infinity,
@@ -2285,239 +2779,447 @@ const FX_STRIP_GAP = 6;
 /** Mixed down like a swatch, so the strip never lights the operator's face. */
 const FX_STRIP_ALPHA = 0.85;
 
-const editedPreset = () => (colourEdit ? pickerRow()?.group.presets.find((p) => p.id === colourEdit.id) : undefined);
-
-function setEditMode(on) {
-  picker.edit = on;
-  closeEditor();
-  $('pEditBtn').classList.toggle('on', on);
-  $('pEditBtn').setAttribute('aria-pressed', String(on));
-  $('pCol').classList.toggle('editing', on);
-  $('pFx').classList.toggle('editing', on);
-  if (on) $('pAdd').hidden = true;
-  buildPickerGrid();
-  renderPicker();
-}
+/** The group the colour editor is for, and the listed colour it edits (undefined for a new one, or once it is gone). */
+const editGroup = () => (colourEdit ? layout?.groups.find((g) => g.id === colourEdit.group) : undefined);
+const editedPreset = () => (colourEdit?.id ? editGroup()?.presets.find((p) => p.id === colourEdit.id) : undefined);
 
 /** The fades the editor offers, in seconds. A colour with another fade gets one more button, selected. */
 const COLOUR_FADES = [0, 1, 2, 3, 5, 10];
 const fadeText = (s) => (s === 0 ? 'Instant' : `${s} s`);
 const MIN_LEVEL = 0.05;
 /** The Brightness slider of the colour editor, in the shape `showLevel` wants. */
-const peLevel = { dim: $('peLevel'), slab: $('peLevelSlab'), pct: $('peLevelPct'), value: 1, dragging: false };
+const ceLevel = { dim: $('ceLevel'), slab: $('ceLevelSlab'), pct: $('ceLevelPct'), value: 1, dragging: false };
+/** A new colour's White, Amber and UV sliders (for groups with those channels), shaped as showLevel wants. */
+let editExtraRows = [];
 
 /** Shows the brightness the editor holds (5–100 %). */
 function showEditLevel(v) {
-  showLevel(peLevel, Math.max(MIN_LEVEL, v));
-  if (colourEdit) colourEdit.level = peLevel.value;
+  showLevel(ceLevel, Math.max(MIN_LEVEL, v));
+  if (colourEdit) colourEdit.level = ceLevel.value;
 }
 
-/** The Fade buttons: the usual ones, and the colour's own fade too when it isn't one of them. */
-function buildFadeChoices(current) {
-  const box = $('peFade');
-  const values = COLOUR_FADES.includes(current) ? COLOUR_FADES : [...COLOUR_FADES, current].sort((a, b) => a - b);
+/**
+ * A segmented choice of `values` in `box` (Fade into it, Apply to): the buttons are made again only when the
+ * labels change, so a render never takes a tap away. `pick(value)` runs on a tap.
+ */
+function buildChoice(box, values, label, pick) {
+  const key = values.map(label).join('|');
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
   box.replaceChildren(...values.map((v) => {
-    const b = el('button', null, fadeText(v));
+    const b = el('button', null, label(v));
     b.type = 'button';
     b.setAttribute('role', 'radio');
-    b.dataset.fade = String(v);
+    b.dataset.value = JSON.stringify(v);
     b.addEventListener('click', () => {
       if (!colourEdit) return;
-      colourEdit.fade = v;
-      markFade();
+      pick(v);
       disarmDelete();
+      renderEditor();
     });
     return b;
   }));
-  markFade();
 }
 
-function markFade() {
-  for (const b of $('peFade').children) {
-    const on = colourEdit !== null && Number(b.dataset.fade) === colourEdit.fade;
+function markChoice(box, selected) {
+  for (const b of box.children) {
+    const on = b.dataset.value === JSON.stringify(selected);
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
 }
 
-function openEditor(preset) {
-  const row = pickerRow();
-  if (!row) return;
-  closeNewColour();
-  const fade = preset.fade ?? 0;
-  // Off has a level of 0 and no colour to dim: only a lit plain colour gets the slider.
-  const level = preset.canRecolour === false ? null : preset.level ?? null;
-  colourEdit = { id: preset.id, name: preset.name, colour: null, swatch: preset.swatch ?? NEUTRAL, level, startLevel: level, fade, startFade: fade };
-  pendingEdit = null;
-  disarmDelete();
-  $('peName').value = preset.name;
-  if (colourEdit.level !== null) showEditLevel(colourEdit.level);
-  buildFadeChoices(fade);
-  $('peShared').checked = false;
-  $('peStrip').className = `strip2 pe-strip ${row.group.whiteOnly ? 'cct' : 'hue'}`;
-  $('peStrip').setAttribute('aria-label', row.group.whiteOnly ? 'Change the colour: warm to cool' : 'Change the colour');
-  $('peH').hidden = true;
-  $('peSw').style.background = colourEdit.swatch;
-  // The switch never carries over from an earlier colour: a change reaches other groups only when asked for each time.
-  $('peSame').checked = false;
-  $('peSave').disabled = false;
-  $('pEdit').hidden = false;
-  renderEditor();
-  for (const b of $('pGrid').children) b.classList.toggle('editing', b.dataset.preset === preset.id);
-  $('pEdit').scrollIntoView({ block: 'nearest' });
+/** The colour's White, Amber and UV, as its sliders show them (as it was, or 0, where the group has no slider). */
+function editLevels() {
+  const levels = { ...(colourEdit?.startExtras ?? NO_EXTRAS) };
+  for (const r of editExtraRows) levels[r.key] = Math.round(r.value * 100) / 100;
+  return levels;
 }
 
-function closeEditor(keepPending = false) {
-  closeNewColour();
-  colourEdit = null;
-  if (!keepPending) pendingEdit = null;
-  disarmDelete();
-  $('peName').blur();
-  $('pEdit').hidden = true;
-  for (const b of $('pGrid').children) b.classList.remove('editing');
-  closeEffectEditor();
+/** The White, Amber and UV sliders were moved away from what the listed colour has. */
+function extrasChanged() {
+  if (!colourEdit?.id) return false;
+  const now = editLevels();
+  return ['white', 'amber', 'uv'].some((k) => Math.abs(now[k] - colourEdit.startExtras[k]) >= 0.005);
 }
 
-/** "Used in …" for the songs and quick looks that use any of these presets. */
+/** The colour (#rrggbb) Save would keep: the one picked on the strip, else the listed colour's own (black for None yet). */
+function editHex() {
+  const p = editedPreset();
+  return colourEdit.hex ?? (p ? presetHex(p) : '#000000');
+}
+
+/** There is some light in it: a colour, or White, Amber or UV above 0 (an amber-only colour, say). Save needs it. */
+function editReady() {
+  if (!colourEdit) return false;
+  const p = editedPreset();
+  // Off and colours of several layers keep their light (only their name and fade change).
+  if (p && p.canRecolour === false) return true;
+  const l = editLevels();
+  return !/^#0{6}$/i.test(editHex()) || l.white > 0 || l.amber > 0 || l.uv > 0;
+}
+
+/** White, Amber and UV sliders, as Any colour has them, from `start`; they change only the editor, never the stage. */
+function buildEditExtras(group, start) {
+  const box = $('ceExtras');
+  box.replaceChildren();
+  editExtraRows = [];
+  const names = [];
+  for (const x of group ? EXTRAS : []) {
+    if (!group.extras?.[x.key]) continue;
+    names.push(x.label);
+    const row = extraSlider(box, x, `${x.label} in the colour`);
+    showLevel(row, start[x.key]);
+    editExtraRows.push(row);
+    let startX = 0, startV = 0;
+    row.dim.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      row.dragging = true;
+      try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+      row.dim.classList.add('ds-dragging');
+      startX = ev.clientX;
+      startV = row.value;
+    });
+    row.dim.addEventListener('pointermove', (ev) => {
+      if (!row.dragging) return;
+      showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
+      renderEditor();
+    });
+    const end = () => {
+      row.dragging = false;
+      row.dim.classList.remove('ds-dragging');
+    };
+    row.dim.addEventListener('pointerup', end);
+    row.dim.addEventListener('pointercancel', end);
+  }
+  $('ceExtrasLab').textContent = names.join(' · ');
+}
+
+/** A listed colour's own White, Amber and UV, to whole percent (its light is scaled by its brightness; this undoes that). */
+function presetExtras(p) {
+  const k = p.level && p.level > 0 ? p.level : 1;
+  const raw = (v) => Math.min(1, Math.round(((v ?? 0) / k) * 100) / 100);
+  return { white: raw(p.light?.white), amber: raw(p.light?.amber), uv: raw(p.light?.uv) };
+}
+
+/** A listed colour's own #rrggbb, before its brightness (from an older server: its light, scaled back up). */
+function presetHex(p) {
+  if (p.colour) return p.colour;
+  const hex = p.light?.hex;
+  if (!hex) return '#000000';
+  const k = p.level && p.level > 0 ? p.level : 1;
+  const n = parseInt(hex.slice(1), 16);
+  return `#${[16, 8, 0].map((sh) => Math.min(255, Math.round(((n >> sh) & 255) / k)).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** "Song 2, Song 3 · quick looks: Worship, Prayer": the songs (and any other look) first, then the quick looks. */
+function usedInText(names) {
+  if (!names.length) return 'Nothing yet';
+  const order = new Set(layout.runningOrder.map((l) => l.name));
+  const quick = new Set(layout.quickLooks.map((q) => q.name));
+  const songs = names.filter((n) => order.has(n) || !quick.has(n));
+  const looks = names.filter((n) => !songs.includes(n));
+  const list = (xs) => (xs.length > 6 ? `${xs.slice(0, 6).join(', ')} and ${xs.length - 6} more` : xs.join(', '));
+  if (!songs.length) return `Quick looks: ${list(looks)}`;
+  return looks.length ? `${list(songs)} · quick looks: ${list(looks)}` : list(songs);
+}
+
+/** "Used in …" for the songs and quick looks that use any of these presets (the effect editor's line). */
 function usedText(presets) {
   const used = [...new Set(presets.flatMap((x) => x.usedBy ?? []))];
   return used.length ? `Used in ${used.slice(0, 4).join(', ')}${used.length > 4 ? ` and ${used.length - 4} more` : ''}` : 'Not used in any song or quick look';
 }
 
-/** Who uses it, and whether other groups have a colour of the same name. */
+/**
+ * Opens the colour editor in the whole right column: on a listed colour (from Edit this colour), or with `preset`
+ * null on a new one (＋ New colour). It stays on that colour whatever the stage does, until Cancel, Save or Delete.
+ */
+function openColourEditor(preset) {
+  const row = pickerRow();
+  if (!row) return;
+  closeEditor();
+  const group = row.group;
+  const fade = preset ? preset.fade ?? 0 : 3;
+  // Off has a level of 0 and no colour to dim, and a colour of several layers has no one brightness: no slider.
+  const level = !preset ? 1 : preset.canRecolour === false ? null : preset.level ?? null;
+  // A listed plain colour's White, Amber and UV can change too; a new colour starts without them.
+  const recolour = !preset || preset.canRecolour !== false;
+  const startExtras = preset && recolour ? presetExtras(preset) : { ...NO_EXTRAS };
+  // The colour as it is: its own hex (before its brightness), so Exact values show exactly what was typed or picked.
+  const startHex = preset && recolour ? presetHex(preset) : null;
+  colourEdit = { group: group.id, id: preset?.id ?? null, name: preset?.name ?? '', hex: null, startHex, level, startLevel: level, fade, startFade: fade, all: false, startExtras };
+  pendingEdit = null;
+  disarmDelete();
+  $('ceName').value = colourEdit.name;
+  $('ceBack').textContent = `‹ ${group.name}`;
+  $('ceBack').setAttribute('aria-label', `Back to ${group.name}'s colours`);
+  $('ceStrip').className = `strip2 ce-strip ${group.whiteOnly ? 'cct' : 'hue'}`;
+  $('ceStrip').setAttribute('aria-label', group.whiteOnly ? 'Pick the colour: warm to cool' : 'Pick the colour');
+  // The colour's place on the strip (the nearest to its hue), its saturation and exact values; a new colour has none until one is picked.
+  ceColour.set(startHex, true);
+  ceColour.fold(false);
+  buildEditExtras(recolour ? group : null, startExtras);
+  if (level !== null) showEditLevel(level);
+  $('ceDelRow').hidden = !preset;
+  $('colEdit').hidden = false;
+  markEditorOpen();
+  $('colEdit').scrollTop = 0;
+  renderEditor();
+}
+
+/** Back to the picker (the colour editor only); `keepPending` keeps waiting for a Save or Delete already sent. */
+function closeColourEditor(keepPending = false) {
+  colourEdit = null;
+  ceColour.cancel();
+  if (!keepPending) pendingEdit = null;
+  disarmDelete();
+  $('ceName').blur();
+  $('colEdit').hidden = true;
+  markEditorOpen();
+}
+
+/** An editor (colour or effect) or Individual lights open: it takes the whole right column, and Quick looks and Groups give way. */
+function markEditorOpen() {
+  $('colEdit').parentElement.classList.toggle('ce-open', !$('colEdit').hidden || !$('fxEdit').hidden || !$('manual').hidden);
+}
+
+/** Closes whichever editor is open (colour or effect). */
+function closeEditor(keepPending = false) {
+  closeColourEditor(keepPending);
+  closeEffectEditor();
+}
+
+/** Keeps the editor true to the show and to what has been picked: titles, swatch, the rows that apply, Used in, Delete. */
 function renderEditor() {
+  if (!colourEdit) return;
+  const group = editGroup();
   const p = editedPreset();
-  if (!p) {
-    if (colourEdit) closeEditor(true);
+  // The colour (or its group) went: deleted on another tablet, or by Undo.
+  if (!group || (colourEdit.id && !p)) {
+    closeColourEditor(true);
     return;
   }
-  const others = layout.groups.filter((g) => g.id !== picker.group).flatMap((g) => g.presets.filter((x) => x.name === p.name));
-  $('peSameWrap').hidden = !others.length;
-  if (!others.length) $('peSame').checked = false;
-  // A colour that points to a shared one can change that one instead, for every colour that points to it.
-  const shared = p.shared ?? null;
-  $('peSharedWrap').hidden = !shared;
-  if (!shared) $('peShared').checked = false;
-  if (shared) $('peSharedText').textContent = `Change it everywhere — shared colour, used by ${shared.groups} ${shared.groups === 1 ? 'group' : 'groups'}`;
-  // With a switch on, the change reaches more colours, so list where any of them is used.
-  // "Change it everywhere" only reaches the shared set with a new colour (brightness and fade stay per colour).
-  const affected = $('peSame').checked ? [p, ...others] : [p];
-  const used = shared && $('peShared').checked && colourEdit.colour ? [{ usedBy: shared.usedBy }, ...affected] : affected;
-  $('peUsed').textContent = usedText(used);
-  // An Off colour can be renamed but has no colour to change.
-  $('peStrip').hidden = p.canRecolour === false;
+  const isNew = !p;
+  // Renamed elsewhere (another tablet, Undo): an untouched name field follows.
+  if (!isNew && p.name !== colourEdit.name) {
+    if ($('ceName').value === colourEdit.name) $('ceName').value = p.name;
+    colourEdit.name = p.name;
+  }
+  $('ceTitle').textContent = isNew ? `New colour for ${group.name}` : `${p.name} on ${group.name}`;
+  // In Prepare a Save changes the colour in the list (and the draft) but never the lights: the stage keeps
+  // showing it as it was until it next takes that colour.
+  $('ceNote').textContent = isNew ? 'Trying colours here never changes the stage'
+    : prep.on ? 'Saving changes this colour; the lights change when the stage next uses it' : 'The stage changes only when you Save';
+
+  // The swatch: what Save would keep (nothing while there is no light in it).
+  const recolour = isNew || p.canRecolour !== false;
+  const colourChanged = !isNew && recolour && (hexChanged() || extrasChanged());
+  let look = null;
+  if (isNew || colourChanged) look = editReady() ? mixedColour(editHex(), editLevels()) : null;
+  else look = p.swatch ?? null;
+  const off = !look || look === '#000000';
+  $('ceSw').classList.toggle('off', off);
+  $('ceSw').style.background = off ? '' : shown(look) ?? look;
+  // The Brightness slider carries a little of the colour, as the group dimmers do.
+  ceLevel.dim.style.setProperty('--c', off ? '#6a7898' : shown(look) ?? look);
+
+  // Colour: not for Off or a colour of several layers (they can be renamed only). No colour: White, Amber or UV alone.
+  // Saturation: not on the warm-to-cool strip. Exact values: the colour as hex and R, G, B.
+  $('ceColourRow').hidden = !recolour;
+  $('ceSatRow').hidden = !recolour || group.whiteOnly;
+  $('ceExactRow').hidden = !recolour;
+  $('ceNoColour').hidden = !recolour || !editExtraRows.length;
+  const none = /^#0{6}$/i.test(editHex());
+  $('ceNoColour').classList.toggle('on', none);
+  $('ceNoColour').setAttribute('aria-pressed', String(none));
+  $('ceExtrasRow').hidden = !recolour || !editExtraRows.length;
   // Brightness: only where it can change (not Off, an effect or a colour of several layers).
-  $('peLevelRow').hidden = colourEdit.level === null;
+  $('ceLevelRow').hidden = colourEdit.level === null;
+
+  // Fade into it: the usual ones, and the colour's own when it isn't one of them.
+  const fades = COLOUR_FADES.includes(colourEdit.startFade) ? COLOUR_FADES : [...COLOUR_FADES, colourEdit.startFade].sort((a, b) => a - b);
+  buildChoice($('ceFade'), fades, fadeText, (v) => { colourEdit.fade = v; });
+  markChoice($('ceFade'), colourEdit.fade);
+
+  // Apply to: only this group, or every group with this colour: the other groups' colours of this name (name, colour,
+  // brightness, fade), and with a new colour the shared colour it points to. A new one: every group of its kind.
+  // Left out when no other group could be reached; "Every group" is unavailable while this edit can't reach another
+  // (a shared colour with no other of its name, until a colour or White, Amber or UV is changed).
+  const others = isNew ? [] : layout.groups.filter((g) => g.id !== group.id).flatMap((g) => g.presets.filter((x) => x.name === p.name));
+  const shared = isNew ? null : p.shared && p.shared.groups > 1 ? p.shared : null;
+  const kind = layout.groups.filter((g) => g.id !== group.id && !isSmoke(g) && g.whiteOnly === group.whiteOnly);
+  const showAll = isNew ? kind.length > 0 : others.length > 0 || !!shared;
+  const reachesMore = isNew ? kind.length > 0 : others.length > 0 || (!!shared && colourChanged);
+  if (!reachesMore) colourEdit.all = false;
+  $('ceApplyRow').hidden = !showAll;
+  const everyLabel = isNew ? (group.whiteOnly ? 'Every white-only group' : 'Every colour group') : `Every group with ${p.name}`;
+  buildChoice($('ceApply'), [false, true], (all) => (all ? everyLabel : `Only ${group.name}`), (all) => { colourEdit.all = all; });
+  markChoice($('ceApply'), colourEdit.all);
+  $('ceApply').children[1].disabled = !reachesMore;
+
+  // Used in: what Save will change. With every group, the other groups' colours of this name, and with a new
+  // colour (or White, Amber or UV) everything that uses the shared colour.
+  let used = [];
+  if (!isNew) {
+    const affected = colourEdit.all ? [p, ...others] : [p];
+    used = [...new Set([...affected.flatMap((x) => x.usedBy ?? []), ...(colourEdit.all && shared && colourChanged ? shared.usedBy : [])])];
+  }
+  $('ceUsed').textContent = usedInText(used);
+
+  // Save: the colour needs some light in it.
+  $('ceSave').disabled = pendingEdit !== null || !editReady();
+
+  // Delete: the server refuses a colour a song or quick look uses, and one the group shows (on stage, or in this tablet's draft).
+  if (!isNew) {
+    const users = p.usedBy ?? [];
+    const showing = [state, prep.on ? prep.state : null].some((st) => st?.groups?.[group.id]?.preset === p.id);
+    $('ceDelete').disabled = pendingEdit !== null || users.length > 0 || showing;
+    if (users.length || showing) disarmDelete();
+    $('ceDelNote').textContent = users.length
+      ? "It can't be deleted while a song or quick look uses it: give them another colour first."
+      : showing
+        ? `It can't be deleted while ${group.name} shows it.`
+        : 'No song or quick look uses it, so deleting it changes nothing else.';
+  }
 }
 
 function disarmDelete() {
   clearTimeout(deleteArmed);
   deleteArmed = 0;
-  for (const id of ['peDelete', 'feDelete']) {
-    $(id).classList.remove('armed');
-    $(id).textContent = 'Delete';
-  }
+  $('ceDelete').classList.remove('armed');
+  $('ceDelete').textContent = 'Delete colour';
+  $('feDelete').classList.remove('armed');
+  $('feDelete').textContent = 'Delete';
 }
 
-$('pEditBtn').addEventListener('click', () => setEditMode(!picker.edit));
-$('peCancel').addEventListener('click', () => closeEditor());
-$('peName').addEventListener('keydown', (ev) => {
+$('ceBack').addEventListener('click', () => closeEditor());
+$('ceCancel').addEventListener('click', () => closeEditor());
+$('ceName').addEventListener('keydown', (ev) => {
   ev.stopPropagation();
-  if (ev.key === 'Enter') $('peName').blur();
+  if (ev.key === 'Enter') $('ceName').blur();
 });
-$('peName').addEventListener('input', disarmDelete);
-$('peSame').addEventListener('change', renderEditor);
-$('peShared').addEventListener('change', renderEditor);
+$('ceName').addEventListener('input', disarmDelete);
 
-// Brightness: moves relative to where the finger starts, like the other sliders. Only the editor's pending value moves; Save sends it.
+// No colour: the colour comes off, so the colour can be White, Amber or UV alone.
+$('ceNoColour').addEventListener('click', () => {
+  if (!colourEdit) return;
+  colourEdit.hex = colourEdit.id ? '#000000' : null;
+  ceColour.set(colourEdit.hex);
+  disarmDelete();
+  renderEditor();
+});
+
+// Brightness: moves relative to where the finger starts, like the other sliders. Only the editor's value moves; Save sends it.
 {
   let startX = 0, startV = 0;
-  const dim = peLevel.dim;
+  const dim = ceLevel.dim;
   dim.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
     if (!colourEdit || colourEdit.level === null) return;
-    peLevel.dragging = true;
+    ceLevel.dragging = true;
     try { dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     dim.classList.add('ds-dragging');
     startX = ev.clientX;
-    startV = peLevel.value;
+    startV = ceLevel.value;
   });
   dim.addEventListener('pointermove', (ev) => {
-    if (!peLevel.dragging) return;
+    if (!ceLevel.dragging) return;
     showEditLevel(startV + (ev.clientX - startX) / dim.clientWidth);
     disarmDelete();
   });
   const end = () => {
-    peLevel.dragging = false;
+    ceLevel.dragging = false;
     dim.classList.remove('ds-dragging');
   };
   dim.addEventListener('pointerup', end);
   dim.addEventListener('pointercancel', end);
 }
-attachStrip($('peStrip'), $('peH'), () => (pickerRow() ? pickerRow().group.whiteOnly : null), (hex) => {
-  if (!colourEdit) return;
-  const first = !colourEdit.colour;
-  colourEdit.colour = hex;
-  $('peSw').style.background = hex;
-  disarmDelete();
-  // A new colour can widen "Used in" (with "Change it everywhere" on).
-  if (first) renderEditor();
+
+// The strip, Saturation and Exact values only change the editor: the stage changes when an edited colour that is lit
+// is saved, never while picking.
+const ceColour = colourTools({
+  strip: $('ceStrip'), handle: $('ceH'), sat: $('ceSat'), fold: $('ceFold'), exact: $('ceExact'), row: true,
+  whiteOnly: () => editGroup()?.whiteOnly ?? null,
+  onColour: (hex) => {
+    if (!colourEdit) return;
+    colourEdit.hex = hex;
+    disarmDelete();
+    renderEditor();
+  },
 });
 
-// A plain tap. Only what changed is sent; the editor closes when the server says yes.
-$('peSave').addEventListener('click', () => {
+/** The colour (#rrggbb) was changed from what the listed colour has (picking it again, or typing it, is no change). */
+const hexChanged = () => !!colourEdit?.hex && colourEdit.hex !== colourEdit.startHex;
+
+const editLevel = () => Math.min(1, Math.max(MIN_LEVEL, Math.round(colourEdit.level * 100) / 100));
+
+// A plain tap. Only what changed is sent; the editor goes back to the picker when the server says yes (one Undo step).
+$('ceSave').addEventListener('click', () => {
   if (!colourEdit || pendingEdit !== null) return;
-  const name = $('peName').value;
-  const cmd = { type: 'editColour', preset: colourEdit.id, sameName: $('peSame').checked && !$('peSameWrap').hidden };
-  if (name.trim() !== colourEdit.name) cmd.name = name;
-  if (colourEdit.colour && !$('peStrip').hidden) cmd.colour = colourEdit.colour;
-  if (colourEdit.level !== null && Math.abs(colourEdit.level - colourEdit.startLevel) >= 0.005) {
-    cmd.level = Math.min(1, Math.max(MIN_LEVEL, Math.round(colourEdit.level * 100) / 100));
+  const group = editGroup();
+  if (!group) return;
+  const name = $('ceName').value;
+  if (!colourEdit.id) {
+    if (!editReady()) return;
+    // No colour picked: the light is its White, Amber or UV alone, on a black colour.
+    const cmd = { type: 'addColour', group: group.id, colour: colourEdit.hex ?? '#000000', ...editLevels(), name, allGroups: colourEdit.all, fade: colourEdit.fade };
+    if (colourEdit.level !== null && colourEdit.level < 1) cmd.level = editLevel();
+    pendingEditToast = 'Added to colours';
+    pendingEdit = send(cmd);
+    renderEditor();
+    return;
   }
+  const p = editedPreset();
+  if (!p) return;
+  if (!editReady()) return;
+  // Every group: the other groups' colours of this name too (name, colour, White, Amber and UV, brightness and fade),
+  // and with a new colour (or White, Amber or UV), the shared colour it points to, so every colour that points to it follows.
+  const all = colourEdit.all && !$('ceApplyRow').hidden;
+  const cmd = { type: 'editColour', preset: colourEdit.id, sameName: all };
+  if (name.trim() !== colourEdit.name) cmd.name = name;
+  if (hexChanged() && !$('ceColourRow').hidden) cmd.colour = colourEdit.hex;
+  if (extrasChanged()) {
+    const now = editLevels();
+    for (const k of ['white', 'amber', 'uv']) if (Math.abs(now[k] - colourEdit.startExtras[k]) >= 0.005) cmd[k] = now[k];
+  }
+  const recoloured = cmd.colour !== undefined || cmd.white !== undefined || cmd.amber !== undefined || cmd.uv !== undefined;
+  if (colourEdit.level !== null && Math.abs(colourEdit.level - colourEdit.startLevel) >= 0.005) cmd.level = editLevel();
   if (colourEdit.fade !== colourEdit.startFade) cmd.fade = colourEdit.fade;
-  // "Change it everywhere" only means something with a new colour.
-  if (cmd.colour !== undefined && $('peShared').checked && !$('peSharedWrap').hidden) cmd.shared = true;
-  if (cmd.name === undefined && cmd.colour === undefined && cmd.level === undefined && cmd.fade === undefined) {
+  if (recoloured && all && p.shared) cmd.shared = true;
+  if (cmd.name === undefined && !recoloured && cmd.level === undefined && cmd.fade === undefined) {
     closeEditor();
     return;
   }
   pendingEditToast = 'Colour saved';
-  pendingEditNext = [];
   pendingEdit = send(cmd);
-  $('peSave').disabled = pendingEdit !== null;
+  renderEditor();
 });
 
-// First tap arms it ("Delete?"), the second one deletes. It disarms after a few seconds.
-$('peDelete').addEventListener('click', () => {
-  if (!colourEdit || pendingEdit !== null) return;
+// First tap arms it ("Tap again to delete"), the second one deletes. It disarms after a few seconds.
+$('ceDelete').addEventListener('click', () => {
+  if (!colourEdit?.id || pendingEdit !== null) return;
   if (!deleteArmed) {
     deleteArmed = setTimeout(disarmDelete, 4000);
-    $('peDelete').classList.add('armed');
-    $('peDelete').textContent = 'Delete?';
+    $('ceDelete').classList.add('armed');
+    $('ceDelete').textContent = 'Tap again to delete';
     return;
   }
   pendingEditToast = 'Colour deleted';
-  pendingEditNext = [];
   pendingEdit = send({ type: 'deleteColour', preset: colourEdit.id });
   disarmDelete();
+  renderEditor();
 });
 
-/** The server's answer to a Save or Delete in either editor: the next command if one is waiting, else done. */
+/** The server's answer to a Save or Delete in either editor: done (back to the picker), or kept open to fix. */
 function finishEdit(error) {
   pendingEdit = null;
-  let failed = !!error;
-  if (!failed && pendingEditNext.length) {
-    pendingEdit = send(pendingEditNext.shift());
-    if (pendingEdit !== null) return;
-    failed = true;
-  }
-  pendingEditNext = [];
-  $('peSave').disabled = false;
   $('feSave').disabled = false;
   $('feCopy').disabled = false;
-  if (!failed) {
+  if (!error) {
     closeEditor();
     toast(pendingEditToast, true);
+  } else {
+    renderEditor();
   }
 }
 
@@ -2581,11 +3283,20 @@ function newEffectLayer(choices) {
   return liveLayer({ effect: 'wave', colours, speed: { beats: 4 }, direction: 'ltr', waves: 1, size: 0.5, edge: 'soft', intensity: 1 });
 }
 
-/** Opens the editor on a listed effect, or empty (preset null) for a new one. */
-function openEffectEditor(preset) {
+/** Fine-tune (Waves, Size, Edges): folded each time the editor opens, open once tapped. */
+let fineOpen = false;
+/** The list open under its row: 'colours' (＋ Colour), 'base' (a base colour) or null. */
+let feTray = null;
+
+/**
+ * Opens the effect editor in the whole right column: on a listed effect, or (preset null) on a new one: a new wave,
+ * or `from`'s settings when given (All settings on a running effect that isn't in the list).
+ */
+function openEffectEditor(preset, from = null) {
   const row = pickerRow();
   if (!row) return;
-  const saved = preset ? liveLayer(preset.effect) : null;
+  closeEditor();
+  const saved = preset ? liveLayer(preset.effect) : from ? liveLayer(from) : null;
   // Yo-yo and meteor run in their first colour only (a ready-made one may list more): the editor shows that one,
   // and Save keeps just it, so `original` is the effect as saved.
   const opened = saved && ONE_COLOUR.has(saved.effect) ? { ...saved, colours: saved.colours.slice(0, 1) } : saved;
@@ -2593,36 +3304,48 @@ function openEffectEditor(preset) {
   const effect = opened ?? newEffectLayer(choices);
   effectEdit = { id: preset?.id ?? null, name: preset?.name ?? '', effect, original: effectSig(saved ?? effect), choices };
   pendingEdit = null;
-  pendingEditNext = [];
   disarmDelete();
+  fineOpen = false;
+  feTray = null;
+  const group = row.group;
   $('feName').value = effectEdit.name;
+  $('feBack').textContent = `‹ ${group.name}`;
+  $('feBack').setAttribute('aria-label', `Back to ${group.name}'s effects`);
+  $('fePrevLab').textContent = `Preview on ${group.name}`;
   $('feSave').disabled = false;
   $('feCopy').disabled = false;
-  $('feSave').textContent = preset ? 'Save' : 'Add';
-  $('feDelete').hidden = $('feCopy').hidden = $('feUsed').hidden = !preset;
-  $('fxEdit').hidden = false;
+  // Save as a copy and Delete are for a listed effect.
+  $('feMoreWrap').hidden = !preset;
+  showEffectMenu(false);
+  $('feUsed').hidden = !preset;
   closeOwnStrips();
+  $('fxEdit').hidden = false;
+  markEditorOpen();
+  $('fxEdit').scrollTop = 0;
   drawEffectEditor();
   startEffectStrip(picker.group);
   renderEffectEditor();
-  for (const b of $('fxGrid').children) b.classList.toggle('editing', preset ? b.dataset.preset === preset.id : b.classList.contains('newfx'));
-  $('fxEdit').scrollIntoView({ block: 'nearest' });
 }
 
 function closeEffectEditor() {
   effectEdit = null;
   effectMover.end();
   closeOwnStrips();
+  feTray = null;
+  showEffectMenu(false);
   stopEffectStrip();
   $('feName').blur();
   $('fxEdit').hidden = true;
-  for (const b of $('fxGrid').children) b.classList.remove('editing');
+  markEditorOpen();
 }
 
-/** Keeps "Used in …" true as the show changes; closes the editor if the effect is gone. */
+/** Keeps "Used in …" and the round's length true as the show and the tempo change; closes the editor if the effect is gone. */
 function renderEffectEditor() {
+  if (!effectEdit) return;
+  $('feNote').textContent = prep.on ? 'only here — after Save, the lights change when the stage next runs it' : "only here — the stage doesn't change until Save";
   followEffectStripClock();
-  if (!effectEdit || effectEdit.id === null) return;
+  drawSpeedNote();
+  if (effectEdit.id === null) return;
   const p = pickerRow()?.group.presets.find((x) => x.id === effectEdit.id);
   if (!p?.effect) {
     closeEffectEditor();
@@ -2631,54 +3354,161 @@ function renderEffectEditor() {
   $('feUsed').textContent = usedText([p]);
 }
 
-/** Draws what the editor holds: the swatch, the kind, the colours in order and the settings. */
+/** Draws what the editor holds: the kind, the colours in order (and their list), the base, the settings and Fine-tune. */
 function drawEffectEditor() {
   const { effect, choices } = effectEdit;
-  $('feSw').style.background = effectGradient(effect);
   for (const b of $('feKind').children) {
     const on = b.dataset.kind === effect.effect;
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
   const one = ONE_COLOUR.has(effect.effect);
+  const kindName = EFFECT_NAMES.find(([k]) => k === effect.effect)?.[1] ?? 'This effect';
   $('feColLab').textContent = one ? 'Colour' : 'Colours';
-  $('feColNote').textContent = one ? '· tap to choose' : '· tap to add or remove, hold and drag to change the order, 1 to 6';
-  const order = effect.colours.map(colourKey);
-  const box = $('feColours');
-  box.replaceChildren();
-  box.setAttribute('role', one ? 'radiogroup' : 'group');
-  box.setAttribute('aria-label', one ? 'Colour' : 'Colours');
+
+  // Colours: the chosen ones in the order they play, numbered (hold one and drag it onto another), then ＋ Colour.
+  const choiceOf = (c) => choices.find((x) => x.key === colourKey(c)) ?? { name: 'Own', swatch: c.hex };
+  const order = $('feColours');
+  order.replaceChildren();
+  order.setAttribute('role', 'group');
+  order.setAttribute('aria-label', one ? 'Colour' : 'Colours, in the order they play');
+  effect.colours.forEach((c, at) => {
+    const b = orderChip(choiceOf(c), one ? null : at + 1);
+    if (!one && effect.colours.length > 1) effectMover.wire(b, at);
+    // A tap opens the list (to take it out or add another); the click a drag ends with is not a tap.
+    b.addEventListener('click', () => { if (!effectMover.quiet()) showTray('colours'); });
+    order.append(b);
+  });
+  const add = el('button', 'fe-add', one ? 'Change colour' : '＋ Colour');
+  add.type = 'button';
+  add.setAttribute('aria-expanded', String(feTray === 'colours'));
+  add.classList.toggle('open', feTray === 'colours');
+  add.addEventListener('click', () => showTray(feTray === 'colours' ? null : 'colours'));
+  order.append(add);
+  const note = one ? `${kindName} runs in one colour` : effect.colours.length > 1 ? 'hold & drag to reorder' : '';
+  if (note) order.append(el('span', 'fe-note', note));
+
+  // The list: the group's colours and the effect's own; a tap adds or removes one (picks it, for one colour).
+  $('feTray').hidden = feTray !== 'colours';
+  $('feTrayLab').textContent = one ? 'Tap a colour to use it' : 'Tap to add or remove · 1 to 6 colours';
+  const keys = effect.colours.map(colourKey);
+  const list = $('feChoices');
+  list.replaceChildren();
+  list.setAttribute('role', one ? 'radiogroup' : 'group');
+  list.setAttribute('aria-label', one ? 'Colour' : 'Colours');
   for (const c of choices) {
-    const at = order.indexOf(c.key);
+    const at = keys.indexOf(c.key);
     const b = colourChip(c, at >= 0, one ? 'radio' : 'checkbox');
-    if (at >= 0 && !one) {
-      b.append(el('b', 'fenum', String(at + 1)));
-      effectMover.wire(b, at);
-    }
-    // The click a drag ends with is not a tap (also when it reaches a chip the drop has already replaced).
-    b.addEventListener('click', () => { if (!effectMover.quiet()) toggleEffectColour(c); });
-    box.append(b);
+    if (at >= 0 && !one) b.append(el('b', 'fenum', String(at + 1)));
+    b.addEventListener('click', () => toggleEffectColour(c));
+    list.append(b);
   }
   // Full only once a pick has ended: the strip must stay under the finger while it picks the sixth colour.
-  box.append(ownChip('feOwn', 'Pick an own colour for the effect', !one && effect.colours.length >= 6 && ownPick.place === null));
+  // Full only when the open box's own colour isn't one of the six: it must stay open while it changes the sixth.
+  list.append(ownChip('feOwn', 'Pick an own colour for the effect', !one && effect.colours.length >= 6 && ownPlace() < 0));
 
-  // The base: None, or one of the same colours, at its brightness.
+  // Base: None, a colour of the list or an own colour, at its brightness.
   const baseKey = effect.base ? colourKey(effect.base.colour) : null;
-  const bases = $('feBase');
+  const baseChoice = baseKey ? choices.find((c) => c.key === baseKey) ?? null : null;
+  const ownBase = !!effect.base && (!baseChoice || baseChoice.own);
+  const listedBase = effect.base && !ownBase ? baseChoice : null;
+  const seg = $('feBase');
+  seg.replaceChildren();
+  const segButton = (text, on, open, pick) => {
+    const b = el('button', null, text);
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(on));
+    b.classList.toggle('on', on);
+    if (open !== null) b.setAttribute('aria-expanded', String(open));
+    b.addEventListener('click', pick);
+    seg.append(b);
+    return b;
+  };
+  segButton('None', !effect.base, null, () => {
+    feTray = feTray === 'base' ? null : feTray;
+    closeOwnStrips();
+    setEffectBase(null);
+    drawEffectEditor();
+  });
+  const baseOpen = feTray === 'base';
+  const ownOpen = baseOpen && !$('feBaseOwnBox').hidden;
+  segButton(listedBase?.name ?? 'Colour', !!listedBase, baseOpen && !ownOpen, () => showTray(baseOpen && !ownOpen ? null : 'base'));
+  segButton('Own colour', ownBase, ownOpen, () => {
+    if (ownOpen) return showTray(null);
+    showTray('base');
+    openOwnStrip('feBaseOwn');
+    drawEffectEditor();
+  });
+  $('feBaseTray').hidden = !baseOpen;
+  const bases = $('feBaseChoices');
   bases.replaceChildren();
-  const none = colourChip({ name: 'None', swatch: null }, baseKey === null, 'radio');
-  none.addEventListener('click', () => setEffectBase(null));
-  bases.append(none);
   for (const c of choices) {
     if (c.key === OFF_KEY) continue;
     const b = colourChip(c, c.key === baseKey, 'radio');
-    b.addEventListener('click', () => setEffectBase(c.colour));
+    b.addEventListener('click', () => {
+      feTray = null;
+      closeOwnStrips();
+      setEffectBase(c.colour);
+      drawEffectEditor();
+    });
     bases.append(b);
   }
   bases.append(ownChip('feBaseOwn', 'Pick an own colour for the base'));
-  $('feBaseRow').hidden = !effect.base;
-  if (effect.base && !baseLevel.dragging) showLevel(baseLevel, effect.base.level);
+  // Its brightness: the fill carries the base colour; "Dark where the effect is dark" without one.
+  const dim = baseLevel.dim;
+  dim.classList.toggle('fe-off', !effect.base);
+  dim.setAttribute('aria-disabled', String(!effect.base));
+  $('feBaseLevelLab').hidden = !effect.base;
+  $('feBaseNone').hidden = !!effect.base;
+  if (effect.base) {
+    const sw = baseChoice?.swatch ?? effect.base.colour.hex;
+    dim.style.setProperty('--c', shown(sw) ?? sw);
+    if (!baseLevel.dragging) showLevel(baseLevel, effect.base.level);
+  } else {
+    baseLevel.slab.style.width = '0';
+    dim.removeAttribute('aria-valuenow');
+  }
+
   effectEditSettings.show(effect, shownState()?.tempo ?? 120);
+  drawSpeedNote();
+  drawFineTune();
+}
+
+/** Fine-tune's one-line summary ("Waves 2 · Size 50 % · Soft edges", the settings this effect uses) and its fold. */
+function drawFineTune() {
+  const { effect } = effectEdit;
+  const uses = effectUses(effect);
+  const parts = [];
+  if (uses.waves) parts.push(`Waves ${effect.waves}`);
+  if (uses.size) parts.push(`${uses.size} ${Math.round(effect.size * 100)} %`);
+  parts.push(effect.edge === 'hard' ? 'Hard edges' : 'Soft edges');
+  $('feFineSum').textContent = parts.join(' · ');
+  $('feFine').setAttribute('aria-expanded', String(fineOpen));
+  $('feFineArrow').textContent = fineOpen ? '▴' : '▾';
+  $('feFineBox').hidden = !fineOpen;
+}
+
+/**
+ * The round's length beside Speed: "one round = 2 s at 120 bpm" (or "one round = 10 s" for Free) at the tempo and speed
+ * the page shows (the draft's in Prepare). Once the strip's answer for this very effect is in, its rate (slowed by light
+ * safety, as on stage) gives the length, with "· slowed to stay safe" when it is.
+ */
+function drawSpeedNote() {
+  if (!effectEdit) return;
+  const effect = liveLayer(effectEdit.effect);
+  const { tempo, speed } = stripClock();
+  const asked = 'beats' in effect.speed ? (effect.speed.beats * 60) / (tempo * speed) : effect.speed.seconds / speed;
+  const answered = fxStrip.rate > 0 && Number.isFinite(fxStrip.rate) && fxStrip.answerFor === effectSig(effect) && fxStrip.clock === `${tempo}|${speed}`;
+  const round = answered ? Math.max(asked, 1 / fxStrip.rate) : asked;
+  $('feSpeedNote').textContent = roundText(effect, { round, slowed: round > asked * 1.01 });
+}
+
+/** Opens one list under its row ('colours' or 'base'), or none; an own colour strip that was open closes. */
+function showTray(name) {
+  feTray = name;
+  closeOwnStrips();
+  drawEffectEditor();
 }
 
 // ---- Hold and drag: hold a tile, then drop it on another to give it that place (effect colours, quick looks) ----
@@ -2807,8 +3637,8 @@ function holdToMove({ container, tileSelector, ghostClass, state, onDrop }) {
 /** An effect's chosen colours, held and dragged onto another to take its number. */
 const effectMover = holdToMove({
   container: $('feColours'),
-  tileSelector: '.fecol.movable',
-  ghostClass: 'fecol on fe-ghost',
+  tileSelector: '.fechip.movable',
+  ghostClass: 'fechip fe-ghost',
   // A drop applies only to the effect it was held on: any other change in between ends the hold.
   state: () => (effectEdit ? effectEdit.effect : null),
   onDrop(from, over, effect) {
@@ -2835,10 +3665,23 @@ function colourChip(c, on, role) {
   return b;
 }
 
-/** ＋ Own colour: opens (or closes) the colour strip under its row; `full` when there is no room for another colour. */
+/** A chosen colour in the Colours row: its number in the order (none for a one-colour effect), a round swatch and its name. */
+function orderChip(c, n) {
+  const b = el('button', 'fechip');
+  b.type = 'button';
+  if (n !== null) b.append(el('span', 'fechip-n', String(n)));
+  const sw = el('i');
+  if (!c.swatch || c.swatch === '#000000') sw.classList.add('off');
+  else sw.style.background = shown(c.swatch) ?? NEUTRAL;
+  b.append(sw, el('span', 'fechip-name', c.name));
+  if (n !== null) b.setAttribute('aria-label', `${n}: ${c.name}`);
+  return b;
+}
+
+/** ＋ Own colour: opens (or closes) its own colour box under its row; `full` when there is no room for another colour. */
 function ownChip(stripId, label, full = false) {
-  if (full) $(stripId).hidden = true;
-  const open = !$(stripId).hidden;
+  if (full && ownPick.strip === stripId) closeOwnStrips();
+  const open = !$(`${stripId}Box`).hidden;
   const b = el('button', 'fecol add', '＋ Own colour');
   b.type = 'button';
   b.disabled = full;
@@ -2856,15 +3699,21 @@ function ownChip(stripId, label, full = false) {
 /** Which colours the own colour strips hold: hues, or warm to cool for a white-only group. */
 const ownWhiteOnly = () => (pickerRow() ? pickerRow().group.whiteOnly : null);
 
+/** Opens an own colour box with nothing picked yet (the first change adds the colour), Exact values folded. */
 function openOwnStrip(id) {
-  const strip = $(id);
-  strip.className = `strip2 ${ownWhiteOnly() ? 'cct' : 'hue'} fe-own`;
-  strip.hidden = false;
-  $(`${id}H`).hidden = true;
+  closeOwnStrips();
+  $(id).className = `strip2 ${ownWhiteOnly() ? 'cct' : 'hue'} fe-own`;
+  Object.assign(ownPick, { strip: id, key: null, made: null });
+  ownTools[id].set(null, true);
+  ownTools[id].fold(false);
+  $(`${id}Box`).hidden = false;
 }
 
+/** Closes the own colour boxes; the colour a box made stays in the effect. */
 function closeOwnStrips() {
-  for (const id of ['feOwn', 'feBaseOwn']) $(id).hidden = true;
+  Object.assign(ownPick, { strip: null, key: null, made: null });
+  for (const t of Object.values(ownTools)) t.cancel();
+  for (const id of ['feOwn', 'feBaseOwn']) $(`${id}Box`).hidden = true;
 }
 
 function setEffectEdit(next) {
@@ -2884,7 +3733,11 @@ function setEffectEdit(next) {
 function toggleEffectColour(choice) {
   const { effect } = effectEdit;
   if (ONE_COLOUR.has(effect.effect)) {
+    // The one colour is picked: the list closes.
+    feTray = null;
+    closeOwnStrips();
     if (colourKey(effect.colours[0]) !== choice.key) setEffectEdit({ ...effect, colours: [{ ...choice.colour }] });
+    else drawEffectEditor();
     return;
   }
   const at = effect.colours.map(colourKey).indexOf(choice.key);
@@ -2912,11 +3765,12 @@ for (const [kind, text] of EFFECT_NAMES) {
 }
 
 // The same settings as the Effects tab shows for a running effect; here they only change what is being edited.
-const effectEditSettings = effectControls($('feSet'), (effect, how) => {
+const effectEditSettings = effectControls({ speed: $('feSpeed'), direction: $('feDir'), fine: $('feFineBox') }, (effect, how) => {
   if (!effectEdit || how === 'start') return;
   effectEdit.effect = effect;
   disarmDelete();
   if (how !== 'move') drawEffectEditor();
+  else drawFineTune();
   if (how === 'move' || how === 'end') effectStripDrag(how);
   else effectStripSoon();
 }, () => effectEdit?.effect ?? null);
@@ -2935,58 +3789,103 @@ function setEffectBase(colour) {
 }
 
 /**
- * The own colour strips. A touch adds an own colour at once (to the effect's colours, or as its
- * base); it follows the finger, and the strip closes when the finger lifts. Own colours join the
- * effect only, never the group's list.
+ * The own colour boxes (＋ Own colour, for the colours or the base): a strip, Saturation and Exact values. The first
+ * change adds an own colour (to the effect's colours, or as its base) and every change after it, while the box is
+ * open, changes that same colour; ＋ Own colour again (or another list) closes the box. Own colours join the effect
+ * only, never the group's list.
+ *
+ * The own colour pick in the open box: its strip's id (null: no box open), the key of the colour it gave the effect
+ * (null until the first change) and the choice it added to the list (null when the colour was in the list already).
  */
+const ownPick = { strip: null, key: null, made: null };
+
+/** The place in the effect's colours of the own colour the open box made, or -1. */
+function ownPlace() {
+  if (ownPick.strip !== 'feOwn' || !ownPick.key || !effectEdit) return -1;
+  return effectEdit.effect.colours.findIndex((c) => colourKey(c) === ownPick.key);
+}
+
 /**
- * The own colour pick under way: where the colour goes (its place in the colours, the end or the
- * only one; or the base), null when none; and the own colour it added, replaced as the finger moves.
+ * Puts `hex` in the effect as the open box's own colour: its place in the colours (a new one at the end, the only one
+ * for a yo-yo or meteor) or the base. False when it can't go there (no room, or the effect has it elsewhere already).
  */
-const ownPick = { place: null, made: null };
-{
-  const own = (stripId, put) => attachStrip($(stripId), $(`${stripId}H`), ownWhiteOnly, (hex, last) => {
-    const { place } = ownPick;
-    if (!effectEdit || place === null) return;
-    const { choices, effect } = effectEdit;
-    // A colour the effect already has elsewhere in its list is passed over: the list never holds one twice.
-    const key = colourKey({ hex });
-    const taken = stripId === 'feOwn' && effect.colours.some((c, i) => i !== place && colourKey(c) === key);
-    if (!taken) {
-      const { made } = ownPick;
-      if (made && choices.includes(made)) choices.splice(choices.indexOf(made), 1);
-      const count = choices.length;
-      const choice = addOwnChoice(choices, { hex });
-      ownPick.made = choices.length > count ? choice : null;
-      put(choice.colour, place);
-      disarmDelete();
+function putOwnColour(stripId, hex, last) {
+  const { choices, effect } = effectEdit;
+  const key = colourKey({ hex });
+  const colour = plainColour({ hex });
+  let next;
+  if (stripId === 'feOwn') {
+    const one = ONE_COLOUR.has(effect.effect);
+    let at = one ? 0 : ownPlace();
+    if (at < 0) at = effect.colours.length;
+    if (at >= 6) {
+      if (last) toast('An effect has at most six colours', true);
+      return false;
     }
-    if (last) {
-      if (taken && place >= effect.colours.length) toast('That colour is in the effect already', true);
-      ownPick.place = null;
-      closeOwnStrips();
+    // The list never holds a colour twice: one the effect already has elsewhere is passed over.
+    if (effect.colours.some((c, i) => i !== at && colourKey(c) === key)) {
+      if (last) toast('That colour is in the effect already', true);
+      return false;
     }
-    if (!taken || last) {
+    const colours = [...effect.colours];
+    colours[at] = colour;
+    next = { ...effect, colours };
+  } else {
+    next = { ...effect, base: { colour, level: effect.base?.level ?? 0.5 } };
+  }
+  // The choice this box added before goes when nothing uses it any more, so the list doesn't fill with every step.
+  const { made } = ownPick;
+  const uses = (k) => next.colours.some((c) => colourKey(c) === k) || (!!next.base && colourKey(next.base.colour) === k);
+  if (made && made.key !== key && choices.includes(made) && !uses(made.key)) choices.splice(choices.indexOf(made), 1);
+  const count = choices.length;
+  const choice = addOwnChoice(choices, colour);
+  if (choices.length > count) ownPick.made = choice;
+  else if (made?.key !== key) ownPick.made = null;
+  effectEdit.effect = next;
+  ownPick.key = key;
+  disarmDelete();
+  return true;
+}
+
+/** Every colour field's typing is taken now (see colourTools' flush), before a button acts on what the colour is. */
+function flushColours() {
+  // Any colour sends to the live stage: in Blackout a typed colour would light its group, so it is dropped there.
+  if (!prep.on && state?.look === 'blackout') anyColour.drop();
+  else anyColour.flush();
+  ceColour.flush();
+  for (const t of Object.values(ownTools)) t.flush();
+}
+
+// On iPad Safari a tap on a button leaves the focus in a field, so an R, G or B being typed would land after the tap
+// (or never, behind a closed editor): a finger or pen coming down on any button first takes what is typed (Save, Done,
+// Back, Cancel, a tile), before the button's own pointerdown starts a hold (Blackout, Flash, Puff, Save to the item),
+// so nothing typed is ever sent after a hold has done its job. A click with no pointerdown before it (a keyboard)
+// takes it then.
+const FLUSH_ON = 'button, a, [role="button"], [role="tab"]';
+let flushedDown = false;
+document.addEventListener('pointerdown', (ev) => {
+  flushedDown = ev.target instanceof Element && !!ev.target.closest(FLUSH_ON);
+  if (flushedDown) flushColours();
+}, true);
+document.addEventListener('click', (ev) => {
+  if (flushedDown) {
+    flushedDown = false;
+    return;
+  }
+  if (ev.target instanceof Element && ev.target.closest(FLUSH_ON)) flushColours();
+}, true);
+
+const ownTools = {};
+for (const stripId of ['feOwn', 'feBaseOwn']) {
+  ownTools[stripId] = colourTools({
+    strip: $(stripId), handle: $(`${stripId}H`), sat: $(`${stripId}Sat`), fold: $(`${stripId}Fold`), exact: $(`${stripId}Exact`),
+    whiteOnly: ownWhiteOnly,
+    onColour: (hex, last) => {
+      if (!effectEdit || ownPick.strip !== stripId) return;
+      if (!putOwnColour(stripId, hex, last) && !last) return;
       drawEffectEditor();
       effectStripDrag(last ? 'end' : 'move');
-    }
-  }, () => {
-    ownPick.place = null;
-    ownPick.made = null;
-    if (!effectEdit) return;
-    const { effect } = effectEdit;
-    const at = ONE_COLOUR.has(effect.effect) ? 0 : effect.colours.length;
-    // ＋ Own colour is unavailable then; this only guards a strip left open.
-    if (stripId === 'feOwn' && at >= 6) return;
-    ownPick.place = at;
-  });
-  own('feOwn', (colour, at) => {
-    const colours = [...effectEdit.effect.colours];
-    colours[at] = { ...colour };
-    effectEdit.effect = { ...effectEdit.effect, colours };
-  });
-  own('feBaseOwn', (colour) => {
-    effectEdit.effect = { ...effectEdit.effect, base: { colour: { ...colour }, level: effectEdit.effect.base?.level ?? 0.5 } };
+    },
   });
 }
 
@@ -3025,38 +3924,64 @@ const baseLevel = { dim: $('feBaseLevel'), slab: $('feBaseLevelSlab'), pct: $('f
   dim.addEventListener('pointercancel', end);
 }
 
+$('feBack').addEventListener('click', () => closeEditor());
 $('feCancel').addEventListener('click', () => closeEditor());
+$('feFine').addEventListener('click', () => {
+  if (!effectEdit) return;
+  fineOpen = !fineOpen;
+  drawFineTune();
+});
+
+/** ⋯: Save as a copy and Delete, in a small menu under the button. */
+function showEffectMenu(open) {
+  $('feMenu').hidden = !open;
+  $('feMore').setAttribute('aria-expanded', String(open));
+  $('feMore').classList.toggle('open', open);
+  if (!open && deleteArmed && effectEdit) disarmDelete();
+}
+$('feMore').addEventListener('click', () => showEffectMenu($('feMenu').hidden));
+// A touch anywhere else closes it.
+window.addEventListener('pointerdown', (ev) => {
+  if (!$('feMenu').hidden && !$('feMoreWrap').contains(ev.target)) showEffectMenu(false);
+}, true);
+// Escape closes it, and the keyboard goes back to ⋯ (as the Tempo menu's).
+$('feMoreWrap').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape' || $('feMenu').hidden) return;
+  showEffectMenu(false);
+  $('feMore').focus();
+});
 $('feName').addEventListener('keydown', (ev) => {
   ev.stopPropagation();
   if (ev.key === 'Enter') $('feName').blur();
 });
 $('feName').addEventListener('input', disarmDelete);
 
-/** Sends the commands one after the other: the next goes when the server has said yes to the one before. */
-function sendEffectEdit(cmds, doneText) {
+/** Sends the editor's one command; `doneText` is the toast when the server says yes. */
+function sendEffectEdit(cmd, doneText) {
   pendingEditToast = doneText;
-  pendingEditNext = cmds.slice(1);
-  pendingEdit = send(cmds[0]);
+  pendingEdit = send(cmd);
   $('feSave').disabled = $('feCopy').disabled = pendingEdit !== null;
 }
 
-// A plain tap. Only what changed is sent (the name, then the settings); the editor closes when the server says yes.
+// A plain tap. Only what changed is sent, in one command; the editor closes when the server says yes.
 $('feSave').addEventListener('click', () => {
   if (!effectEdit || pendingEdit !== null) return;
   const name = $('feName').value;
   const effect = liveLayer(effectEdit.effect);
   if (effectEdit.id === null) {
-    sendEffectEdit([{ type: 'addEffect', group: picker.group, name, effect }], 'Effect added');
+    sendEffectEdit({ type: 'addEffect', group: picker.group, name, effect }, 'Effect added');
     return;
   }
-  const cmds = [];
-  if (name.trim() !== effectEdit.name) cmds.push({ type: 'editColour', preset: effectEdit.id, name, sameName: false });
-  if (effectSig(effect) !== effectEdit.original) cmds.push({ type: 'editEffect', preset: effectEdit.id, effect });
-  if (!cmds.length) {
+  // One command, so one Undo step: new settings (with the new name, when there is one), or a new name alone.
+  const renamed = name.trim() !== effectEdit.name;
+  let cmd = null;
+  if (effectSig(effect) !== effectEdit.original) cmd = { type: 'editEffect', preset: effectEdit.id, effect, ...(renamed ? { name } : {}) };
+  else if (renamed) cmd = { type: 'editColour', preset: effectEdit.id, name, sameName: false };
+  if (!cmd) {
     closeEditor();
     return;
   }
-  sendEffectEdit(cmds, 'Effect saved');
+  sendEffectEdit(cmd, 'Effect saved');
 });
 
 // Save as a copy: a new effect with these settings; the original stays as it was. Under the same name it becomes "… copy".
@@ -3064,22 +3989,23 @@ $('feCopy').addEventListener('click', () => {
   if (!effectEdit || effectEdit.id === null || pendingEdit !== null) return;
   let name = $('feName').value.trim();
   if (name === effectEdit.name) name = `${name} copy`;
-  sendEffectEdit([{ type: 'addEffect', group: picker.group, name, effect: liveLayer(effectEdit.effect) }], 'Saved as a copy');
+  showEffectMenu(false);
+  sendEffectEdit({ type: 'addEffect', group: picker.group, name, effect: liveLayer(effectEdit.effect) }, 'Saved as a copy');
 });
 
-// First tap arms it ("Delete?"), the second one deletes. A song or quick look that uses it refuses, and the toast names them.
+// First tap arms it ("Tap again to delete"), the second one deletes. A song or quick look that uses it refuses, and the toast names them.
 $('feDelete').addEventListener('click', () => {
   if (!effectEdit || effectEdit.id === null || pendingEdit !== null) return;
   if (!deleteArmed) {
     deleteArmed = setTimeout(disarmDelete, 4000);
     $('feDelete').classList.add('armed');
-    $('feDelete').textContent = 'Delete?';
+    $('feDelete').textContent = 'Tap again to delete';
     return;
   }
   pendingEditToast = 'Effect deleted';
-  pendingEditNext = [];
   pendingEdit = send({ type: 'deleteColour', preset: effectEdit.id });
   disarmDelete();
+  showEffectMenu(false);
 });
 
 // ---- The effect editor's strip: the effect as it is being edited, moving along the group's lights ----
@@ -3105,6 +4031,8 @@ function stopEffectStrip() {
   fxStrip.clock = null;
   fxStrip.failed = false;
   fxStrip.drawn = null;
+  fxStrip.rate = 0;
+  fxStrip.answerFor = null;
 }
 
 /** Shows the edited effect a moment after the last change. */
@@ -3155,8 +4083,8 @@ function followEffectStripClock() {
 }
 
 /**
- * The tempo and speed dial the page shows: the draft's in Blind, else the stage's. The strip runs
- * at these. (The effect editor is hidden in Preview.)
+ * The tempo and speed dial the page shows: the draft's in Prepare, else the stage's. The strip runs
+ * at these.
  */
 function stripClock() {
   const shown = shownState();
@@ -3168,11 +4096,12 @@ async function loadEffectStrip() {
   const seq = ++fxStrip.seq;
   fxStrip.askedAt = performance.now();
   let answer = null, refused = false;
+  const effect = liveLayer(effectEdit.effect);
   try {
     const res = await fetch('/api/effect-preview', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ group: fxStrip.group, effect: liveLayer(effectEdit.effect), ...stripClock() }),
+      body: JSON.stringify({ group: fxStrip.group, effect, ...stripClock() }),
     });
     if (res.ok) answer = await res.json();
     // A 4xx is the server saying no to this effect: asking again changes nothing until the effect does.
@@ -3198,6 +4127,10 @@ async function loadEffectStrip() {
   fxStrip.segments = answer.segments;
   fxStrip.fixtures = answer.fixtures;
   fxStrip.clock = `${answer.tempo}|${answer.speed}`;
+  // How fast it runs there (light safety may slow it), for the round's length beside Speed.
+  fxStrip.rate = answer.rate ?? 0;
+  fxStrip.answerFor = effectSig(effect);
+  drawSpeedNote();
 }
 
 /** Draws only when the frame to show changes (about 20 times a second), not at the display's rate. */
@@ -3252,6 +4185,730 @@ function drawEffectStrip(frame) {
   return true;
 }
 
+// ---- Individual lights: single lights (or one segment of a bar) held at a colour and level until released ----
+// Manual control of the live stage (never a Prepare draft): `manual`, `release` and `releaseAll` with fixture and
+// segment targets. Only when operators have manual control (Settings). What is held comes from the live state
+// (`state.held`, and `manual` on a group); the plan draws what each light shows now from the live picture.
+
+/** Said when Individual lights is tapped in Prepare. */
+const MANUAL_LIVE_ONLY = 'Individual lights work on the live stage only. Switch to Live to use them.';
+
+/**
+ * The panel while it is open. `fixtures`: the picked lights' ids, in the order they were picked. `segments`: the picked
+ * segments (as the engine numbers them) of the one bar picked; empty for the whole of each light.
+ */
+const manualSel = { open: false, fixtures: [], segments: [] };
+/** One entry per light on the plan: { f, first, group, button, cells, dot, vert, round }; `cells` in their places along it. */
+let manualFix = [];
+/** The segment row's buttons, for the one bar picked: { segment, button, cell, dot }; `segRowFor` is that bar's id. */
+let manualSegs = [];
+let segRowFor = null;
+/** The colour circles on show and the groups they came from (to rebuild only when that changes). */
+let manualColours = [];
+let manualColoursKey = null;
+/** The level slider: { value, dragging, holdUntil }. */
+const manualLevel = { dim: $('mLevel'), slab: $('mLevelSlab'), pct: $('mLevelPct'), value: 0, dragging: false, holdUntil: 0 };
+
+/** Lights that are smoke machines (in a smoke group): manual control can't hold them, so they aren't on the plan. */
+function smokeFixtures() {
+  const out = new Set();
+  for (const g of layout?.groups ?? []) if (isSmoke(g)) for (const id of layout.members?.[g.id] ?? []) out.add(id);
+  return out;
+}
+
+/** The first light group a fixture is in (what it runs when nothing holds it), or undefined. */
+const lightGroupOf = (id) => lightGroups().find((g) => (layout.members?.[g.id] ?? []).includes(id));
+
+/** A light's short name on the plan: the first word of its name ("B3" for "B3 SonicPulse LED Bar 10"). */
+const shortName = (f) => (f.name || f.id).trim().split(/\s+/)[0] || f.id;
+
+/**
+ * A colour as manual control holds it: brightest channel at full, with what it would send and how it looks (`display`,
+ * White, Amber and UV mixed in). `off` when it has no light at all.
+ */
+function normalLight(hex, { white = 0, amber = 0, uv = 0 } = {}) {
+  const n = parseInt(hex.slice(1), 16);
+  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255);
+  const m = Math.max(...rgb, white, amber, uv);
+  if (m < 0.004) return { off: true, hex: '#000000', white: 0, amber: 0, uv: 0, display: '#000000', bright: 0 };
+  const full = `#${rgb.map((v) => Math.round((v / m) * 255).toString(16).padStart(2, '0')).join('')}`;
+  const extras = { white: white / m, amber: amber / m, uv: uv / m };
+  return { off: false, hex: full, ...extras, display: mixedColour(full, extras), bright: m };
+}
+
+/** Two colours from normalLight() that are the same but for rounding (a colour kept at half brightness, scaled back up). */
+function sameLight(a, b) {
+  if (a.off || b.off) return a.off === b.off;
+  const parts = (c) => {
+    const n = parseInt(c.hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255).concat([c.white, c.amber, c.uv]);
+  };
+  const x = parts(a), y = parts(b);
+  return x.every((v, k) => Math.abs(v - y[k]) < 0.03);
+}
+
+/** The held entry for a light (segment null: the whole light) in the live state, or null. */
+const heldOf = (fixture, segment = null) => state?.held?.find((h) => h.fixture === fixture && h.segment === segment) ?? null;
+const heldSegmentsOf = (fixture) => (state?.held ?? []).filter((h) => h.fixture === fixture && h.segment !== null);
+
+/** Every light held one way or another: on its own, by a segment, or by its group (from another desk or the API). */
+function heldFixtures() {
+  const out = new Set((state?.held ?? []).map((h) => h.fixture));
+  for (const g of lightGroups()) if (state?.groups?.[g.id]?.manual) for (const id of layout.members?.[g.id] ?? []) out.add(id);
+  return out;
+}
+
+/**
+ * What a light (or one segment) shows now, as this panel works with it: { display, level, name, held }. Held: its colour
+ * and level. Otherwise its group's: the colour it runs and the level it shows (the group's dimmer times the colour's brightness).
+ */
+function lightNow(fixture, segment = null) {
+  const h = (segment !== null ? heldOf(fixture, segment) : null) ?? heldOf(fixture);
+  if (h) {
+    const circle = manualColours.find((c) => !c.off && c.display === h.colour);
+    // (The name of the circle it was set with; a strip colour is "Custom".)
+    return { display: h.colour, light: null, level: h.level, name: h.level > 0 ? circle?.name ?? 'Custom' : 'Off', held: true };
+  }
+  // A group under manual control (from another desk or the API) owns its lights: they show its hold, times its dimmer.
+  const groups = lightGroups().filter((x) => (layout.members?.[x.id] ?? []).includes(fixture));
+  const heldGroup = groups.find((x) => state?.groups?.[x.id]?.manual && state.groups[x.id].hold);
+  if (heldGroup) {
+    const { hold, level = 1 } = state.groups[heldGroup.id];
+    const shows = clamp01(hold.level * level);
+    const circle = manualColours.find((c) => !c.off && c.display === hold.colour);
+    return { display: hold.colour, light: null, level: shows, name: shows > 0 ? circle?.name ?? 'Custom' : 'Off', held: true };
+  }
+  const g = groups[0];
+  const s = g ? state?.groups?.[g.id] : null;
+  if (!g || !s) return { display: '#000000', light: null, level: 0, name: 'Off', held: false };
+  const run = runningLight(g, s);
+  const c = normalLight(run.colour, run);
+  const info = presetInfo(g, s);
+  return { display: c.display, light: c.off ? null : c, level: clamp01((s.level ?? 0) * c.bright), name: c.off ? 'Off' : info.name, held: false };
+}
+
+/** What a send goes to: the picked segments of the one bar picked, else each picked light. */
+function manualTargets() {
+  if (manualSel.segments.length && manualSel.fixtures.length === 1) {
+    const fixture = manualSel.fixtures[0];
+    return manualSel.segments.map((segment) => ({ fixture, segment }));
+  }
+  return manualSel.fixtures.map((fixture) => ({ fixture }));
+}
+
+/** The groups of the picked lights (every light group when nothing is picked), for the colour circles. */
+function pickedGroups() {
+  if (!manualSel.fixtures.length) return lightGroups();
+  return lightGroups().filter((g) => manualSel.fixtures.some((id) => (layout.members?.[g.id] ?? []).includes(id)));
+}
+
+function openManual() {
+  if (!layout?.manualForOperators || phoneQuery.matches) return;
+  if (prep.on) {
+    toast(MANUAL_LIVE_ONLY, true);
+    return;
+  }
+  closePicker();
+  closeSheet();
+  manualSel.open = true;
+  $('manual').hidden = false;
+  markEditorOpen();
+  buildManual();
+  renderManual();
+  $('manual').scrollTop = 0;
+}
+
+/** Done: the panel goes, and the pick with it (it opens on a fresh pick). The lights stay held. */
+function closeManual() {
+  if (!manualSel.open) return;
+  manualSel.open = false;
+  manualSel.fixtures = [];
+  manualSel.segments = [];
+  manualLevel.dragging = false;
+  $('manual').hidden = true;
+  showManualStrip(false);
+  markEditorOpen();
+}
+
+function showManualStrip(open) {
+  $('mAny').hidden = !open;
+  $('mAnyBtn').setAttribute('aria-expanded', String(open));
+  if (!open) $('mAnyH').hidden = true;
+}
+
+/** The Pick chips and the plan, from the layout; the plan's places come from Patch, as the stage view draws them. */
+function buildManual() {
+  if (!layout) return;
+  const smoke = smokeFixtures();
+  // Where each light's segments start in the visualiser's frames (every fixture counts, smoke machines too).
+  let at = 0;
+  const planned = [];
+  for (const f of layout.fixtures) {
+    const first = at;
+    at += Math.max(1, f.segments ?? 1);
+    if (!smoke.has(f.id)) planned.push({ f, first });
+  }
+  const known = new Set(planned.map((p) => p.f.id));
+  manualSel.fixtures = manualSel.fixtures.filter((id) => known.has(id));
+  // A re-patch can take segments away: picked ones the light no longer has go.
+  const onePicked = manualSel.fixtures.length === 1 ? planned.find((p) => p.f.id === manualSel.fixtures[0]) : null;
+  const segCount = onePicked ? Math.max(1, onePicked.f.segments ?? 1) : 0;
+  manualSel.segments = segCount > 1 ? manualSel.segments.filter((k) => k < segCount) : [];
+
+  const chips = $('mGroups');
+  chips.replaceChildren();
+  const pickChip = (name, ids) => {
+    const b = el('button', 'ce-chip', name);
+    b.dataset.ids = ids.join(' ');
+    b.addEventListener('click', () => {
+      manualSel.fixtures = [...ids];
+      manualSel.segments = [];
+      renderManual();
+    });
+    chips.append(b);
+  };
+  pickChip('All', planned.map((p) => p.f.id));
+  for (const g of lightGroups()) {
+    const ids = (layout.members?.[g.id] ?? []).filter((id) => known.has(id));
+    if (ids.length) pickChip(g.name, ids);
+  }
+
+  const plan = $('mPlan');
+  for (const old of manualFix) old.button.remove();
+  // Beams' cones go under every button, as the stage view draws them under every light.
+  let cones = plan.querySelector('.m-cones');
+  if (!cones) {
+    cones = document.createElementNS(SVG_NS, 'svg');
+    cones.classList.add('m-cones');
+    cones.setAttribute('aria-hidden', 'true');
+    plan.prepend(cones);
+  }
+  cones.replaceChildren();
+  manualFix = planned.map(({ f, first }, k) => {
+    const segs = Math.max(1, f.segments ?? 1);
+    // As the stage view draws it (a light in a smoke group is never here; a lone "smoke" light is a spot).
+    const stored = f.shape ?? (f.w || f.h ? 'bar' : 'dot');
+    const shape = stored === 'bar' || stored === 'outline' || stored === 'beam' ? stored : 'dot';
+    const button = el('button', 'mfix');
+    const wrap = el('span', 'mshape');
+    let vis, cells, cone = null;
+    if (shape === 'outline') {
+      // A strip round something: one stroke per segment, clockwise from the top left (placed in placeManual).
+      vis = document.createElementNS(SVG_NS, 'svg');
+      vis.classList.add('mvis', 'outline');
+      cells = Array.from({ length: segs }, () => document.createElementNS(SVG_NS, 'polyline'));
+      vis.append(...cells);
+    } else {
+      vis = el('span', 'mvis');
+      // One cell per segment, in its place: segment 0 at the bar's start, at its end when hung reversed.
+      cells = Array.from({ length: segs }, () => el('i'));
+      const order = Array.from({ length: segs }, (_, s) => (f.reversed ? segs - 1 - s : s));
+      vis.append(...order.map((s) => cells[s]));
+    }
+    if (shape === 'beam') {
+      const id = `mcone${k}`;
+      const grad = document.createElementNS(SVG_NS, 'linearGradient');
+      grad.id = id;
+      grad.setAttribute('gradientUnits', 'userSpaceOnUse');
+      const stops = [0, 1].map((offset) => {
+        const s = document.createElementNS(SVG_NS, 'stop');
+        s.setAttribute('offset', String(offset));
+        s.setAttribute('stop-opacity', '0');
+        grad.append(s);
+        return s;
+      });
+      const poly = document.createElementNS(SVG_NS, 'polygon');
+      poly.setAttribute('fill', `url(#${id})`);
+      cones.append(grad, poly);
+      cone = { grad, stops, poly, painted: null };
+    }
+    wrap.append(vis);
+    const dot = el('span', 'mdot');
+    dot.hidden = true;
+    button.append(wrap, el('span', 'mname', shortName(f)), dot);
+    button.addEventListener('click', () => {
+      const k = manualSel.fixtures.indexOf(f.id);
+      if (k >= 0) manualSel.fixtures.splice(k, 1); else manualSel.fixtures.push(f.id);
+      manualSel.segments = [];
+      renderManual();
+    });
+    plan.append(button);
+    return { f, first, group: lightGroupOf(f.id), button, shape, wrap, vis, cells, cone, dot, painted: [] };
+  });
+  placeManual();
+  segRowFor = null;
+  manualColoursKey = null;
+}
+
+/**
+ * Puts each light's button where the stage plan has it, sized to the light, 44 px at least: a bar at its length and
+ * turned to its angle (the button takes the space it covers), an outline at its size, a spot or beam an 18 px circle.
+ */
+function placeManual() {
+  const plan = $('mPlan');
+  const W = plan.clientWidth, H = plan.clientHeight;
+  if (!W || !H) return;
+  const padX = 30, padTop = 30, padBottom = 30;
+  const iw = W - 2 * padX, ih = H - padTop - padBottom;
+  const toPx = (p) => [padX + p.x * iw, padTop + p.y * ih];
+  for (const m of manualFix) {
+    const { f } = m;
+    const [cx, cy] = toPx(f);
+    // The light's drawing (vw × vh, turned by `turn` degrees) and the space it covers on the plan (bw × bh).
+    let vw = 18, vh = 18, turn = 0;
+    if (m.shape === 'bar') {
+      const [a, b] = barEnds(f).map(toPx);
+      vw = Math.max(8, Math.hypot(b[0] - a[0], b[1] - a[1]));
+      vh = Math.min(12, Math.max(6, barAxis(f).thickness * ih));
+      turn = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+    } else if (m.shape === 'outline') {
+      vw = Math.max(14, (f.w ?? 0) * iw);
+      vh = Math.max(14, (f.h ?? 0) * ih);
+    }
+    const t = (turn * Math.PI) / 180, cos = Math.abs(Math.cos(t)), sin = Math.abs(Math.sin(t));
+    const bw = vw * cos + vh * sin, bh = vw * sin + vh * cos;
+    m.button.classList.toggle('round', m.shape === 'dot' || m.shape === 'beam');
+    Object.assign(m.wrap.style, { width: `${bw}px`, height: `${bh}px` });
+    Object.assign(m.vis.style, {
+      width: `${vw}px`, height: `${vh}px`, left: `${(bw - vw) / 2}px`, top: `${(bh - vh) / 2}px`,
+      transform: turn ? `rotate(${turn}deg)` : '',
+    });
+    if (m.shape === 'outline') {
+      m.vis.setAttribute('viewBox', `0 0 ${vw} ${vh}`);
+      outlineCells({ left: 1.5, top: 1.5, width: vw - 3, height: vh - 3 }, m.cells.length, f.reversed).forEach((points, s) => {
+        m.cells[s].setAttribute('points', points.map((p) => p.join(',')).join(' '));
+      });
+    }
+    // The light, 5 px, then its 11 px name; the light's middle sits at its place on the plan.
+    const content = bh + 16;
+    // A bar's button is as long as the bar (and a little), so bars hung end to end keep apart.
+    const w = Math.max(44, bw + 8);
+    const h = Math.max(44, content + 8);
+    m.box = { cx, cy, left: cx - w / 2, top: cy - bh / 2 - (h - content) / 2, w, h, lift: bh / 2 + (h - content) / 2 };
+  }
+  spreadBoxes(manualFix.filter((m) => m.box.w <= 44).map((m) => m.box));
+  separateBoxes(manualFix.map((m) => m.box), W, H);
+  const cones = plan.querySelector('.m-cones');
+  cones?.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  for (const m of manualFix) {
+    const { left, top, w, h } = m.box;
+    Object.assign(m.button.style, { left: `${left}px`, top: `${top}px`, width: `${w}px`, height: `${h}px` });
+    if (m.cone) {
+      // The cone starts at the lamp's circle, wherever its button had to move to.
+      const dx = left + w / 2 - m.box.cx, dy = top + m.box.lift - m.box.cy;
+      const c = beamCone(m.f);
+      const at = (p) => toPx(p).map((v, k) => v + (k ? dy : dx));
+      m.cone.poly.setAttribute('points', [c.lamp, c.left, c.right].map((p) => at(p).join(',')).join(' '));
+      const [[x1, y1], [x2, y2]] = [at(c.lamp), at(c.tip)];
+      Object.entries({ x1, y1, x2, y2 }).forEach(([k, v]) => m.cone.grad.setAttribute(k, String(v)));
+    }
+  }
+}
+
+/**
+ * Any two buttons that still overlap (a short bar just over a long one, a side bar over the end of a row) move apart
+ * the short way: the smaller one moves (both half way when they are the same size), inside the plan. No two 44 px
+ * targets overlap, and each light stays as near its place as that allows.
+ */
+function separateBoxes(boxes, W, H) {
+  const gap = 2;
+  const clamp = (b) => {
+    b.left = Math.min(Math.max(2, b.left), W - b.w - 2);
+    b.top = Math.min(Math.max(2, b.top), H - b.h - 2);
+  };
+  boxes.forEach(clamp);
+  for (let pass = 0; pass < 80; pass++) {
+    let moved = false;
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i], b = boxes[j];
+        const ox = Math.min(a.left + a.w, b.left + b.w) - Math.max(a.left, b.left) + gap;
+        const oy = Math.min(a.top + a.h, b.top + b.h) - Math.max(a.top, b.top) + gap;
+        if (ox <= gap || oy <= gap) continue;
+        moved = true;
+        const across = ox < oy;
+        const centre = (x) => (across ? x.left + x.w / 2 : x.top + x.h / 2);
+        // Which way each goes: away from the other (by list order when they sit on the same spot).
+        const dir = centre(a) < centre(b) || (centre(a) === centre(b) && i < j) ? -1 : 1;
+        const sizeA = a.w * a.h, sizeB = b.w * b.h;
+        const shareA = sizeA === sizeB ? 0.5 : sizeA < sizeB ? 1 : 0;
+        const by = across ? ox : oy;
+        const key = across ? 'left' : 'top';
+        a[key] += dir * by * shareA;
+        b[key] -= dir * by * (1 - shareA);
+        clamp(a);
+        clamp(b);
+      }
+    }
+    if (!moved) break;
+  }
+}
+
+/**
+ * Small lights in a row closer together than a button is wide (a row of spot lights) move apart just enough for one
+ * 44 px button each, the row staying centred where they are.
+ */
+function spreadBoxes(boxes) {
+  const gap = 2;
+  const rows = [];
+  for (const b of [...boxes].sort((x, y) => x.left - y.left)) {
+    const row = rows.find((r) => {
+      const last = r[r.length - 1];
+      return Math.abs(b.cy - last.cy) < 8 && b.left < last.left + last.w + gap;
+    });
+    if (!row) {
+      rows.push([b]);
+      continue;
+    }
+    const last = row[row.length - 1];
+    b.left = last.left + last.w + gap;
+    row.push(b);
+  }
+  for (const row of rows) {
+    if (row.length < 2) continue;
+    const shift = row.reduce((sum, b) => sum + b.cx - (b.left + b.w / 2), 0) / row.length;
+    for (const b of row) b.left += shift;
+  }
+}
+if ('ResizeObserver' in window) new ResizeObserver(() => { if (manualSel.open) placeManual(); }).observe($('mPlan'));
+
+/** A light's colour as the stage shows it now (from the live picture), or '' for a dark one (the faint shape shows). */
+function visualColour(index) {
+  const v = visual;
+  const [r, g, b] = shownRgb(v[index * 3] ?? 0, v[index * 3 + 1] ?? 0, v[index * 3 + 2] ?? 0);
+  return Math.max(r, g, b) < 10 ? '' : `rgb(${r},${g},${b})`;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+/** A dark light on the plan: a faint shape. */
+const DARK_SHAPE = 'rgba(148, 163, 184, 0.12)';
+
+/**
+ * A beam's cone as the stage view draws it: the light's colour, at most 22 % at the lamp and gone at the tip. When the
+ * light is off, a faint grey cone still shows where it points.
+ */
+function paintCone(cone, index) {
+  const [r, g, b] = shownRgb(visual[index * 3] ?? 0, visual[index * 3 + 1] ?? 0, visual[index * 3 + 2] ?? 0);
+  const lit = Math.max(r, g, b) / 255;
+  const [colour, alpha] = lit > 0.02 ? [`rgb(${r},${g},${b})`, 0.22 * lit] : ['rgb(148,163,184)', 0.06];
+  const key = `${colour} ${alpha.toFixed(3)}`;
+  if (cone.painted === key) return;
+  cone.painted = key;
+  cone.stops[0].setAttribute('stop-color', colour);
+  cone.stops[0].setAttribute('stop-opacity', alpha.toFixed(3));
+  cone.stops[1].setAttribute('stop-color', colour);
+}
+
+/** Each light's cells (and the segment row's) in the colours the stage shows now; only what changed is touched. */
+function paintManual() {
+  if (!manualSel.open) return;
+  for (const m of manualFix) {
+    m.cells.forEach((cell, s) => {
+      const c = visualColour(m.first + s);
+      if (m.painted[s] !== c) {
+        m.painted[s] = c;
+        // An outline's cells are strokes; a dark one is the faint shape, as elsewhere on the plan.
+        if (m.shape === 'outline') cell.style.stroke = c || DARK_SHAPE;
+        else cell.style.background = c;
+      }
+    });
+    if (m.cone) paintCone(m.cone, m.first);
+  }
+  const bar = manualFix.find((m) => m.f.id === segRowFor);
+  if (bar) for (const s of manualSegs) s.cell.style.background = visualColour(bar.first + s.segment);
+}
+
+/** The segment row for the one bar picked (nothing for a light of one segment, or several lights). */
+function buildSegRow() {
+  const one = manualSel.fixtures.length === 1 ? manualFix.find((m) => m.f.id === manualSel.fixtures[0]) : null;
+  const id = one && one.cells.length > 1 ? one.f.id : null;
+  $('mSegRow').hidden = !id;
+  if (id === segRowFor) return;
+  segRowFor = id;
+  const row = $('mSegs');
+  row.replaceChildren();
+  manualSegs = [];
+  if (!one || !id) return;
+  const segs = one.cells.length;
+  $('mSegOf').textContent = `Segments of ${shortName(one.f)}`;
+  row.setAttribute('aria-label', `Segments of ${one.f.name}`);
+  for (let k = 0; k < segs; k++) {
+    // Left to right (top to bottom) as on the bar: reversed bars number their segments from the other end.
+    const segment = one.f.reversed ? segs - 1 - k : k;
+    const button = el('button', 'mseg');
+    const cell = el('i');
+    const dot = el('span', 'mdot');
+    dot.hidden = true;
+    button.append(cell, dot);
+    button.addEventListener('click', () => {
+      const n = manualSel.segments.indexOf(segment);
+      if (n >= 0) manualSel.segments.splice(n, 1); else manualSel.segments.push(segment);
+      renderManual();
+    });
+    row.append(button);
+    manualSegs.push({ segment, button, cell, dot, place: k });
+  }
+}
+
+/** The colour circles: the picked lights' group colours (one of each), faded while nothing is picked. */
+function buildManualColours() {
+  const groups = pickedGroups();
+  const key = groups.map((g) => g.id).join(' ');
+  if (key === manualColoursKey) return;
+  manualColoursKey = key;
+  manualColours = [];
+  for (const g of groups) {
+    for (const p of g.presets) {
+      if (p.effect || !p.light) continue;
+      const c = normalLight(p.light.hex, p.light);
+      // One circle per colour: "Silti 50%" is "Silti 3200K" at half, and this panel's level does the dimming.
+      if (manualColours.some((x) => sameLight(x, c))) continue;
+      manualColours.push({ name: p.name, ...c });
+    }
+  }
+  // Off last, as in the colour lists.
+  manualColours.sort((a, b) => Number(a.off) - Number(b.off));
+  const pal = $('mPal');
+  pal.replaceChildren();
+  for (const c of manualColours) {
+    const b = el('button', c.off ? 'mcol off' : 'mcol');
+    if (!c.off) b.style.background = tint(c.display, 0.82);
+    b.setAttribute('aria-label', c.name);
+    b.title = c.name;
+    b.addEventListener('click', () => pickManualColour(c));
+    c.button = b;
+    pal.append(b);
+  }
+}
+
+/**
+ * Hold the picked lights (or segments) at a colour. Each keeps its own level; a dark one comes up at the colour's own
+ * brightness. Off keeps the colour and takes the level to 0. A whole light's colour replaces its held segments' (they fade back to it).
+ */
+function sendManualColour(c) {
+  const targets = manualTargets();
+  if (!targets.length) {
+    toast('Tap lights on the plan to pick them first.', true);
+    return;
+  }
+  if (blackedOut()) return;
+  // A whole light's held segments fade back to its new colour, in the same change.
+  const releaseSegments = targets.some((t) => t.segment === undefined) || undefined;
+  if (c.off) {
+    sendManual({ type: 'manual', targets, intensity: 0, releaseSegments });
+    return;
+  }
+  // One command for each level among the targets (usually one): each keeps its own, a dark one comes up at the colour's.
+  const byLevel = new Map();
+  for (const target of targets) {
+    const now = lightNow(target.fixture, target.segment ?? null);
+    const level = Math.round((now.level >= 0.05 ? now.level : c.bright) * 1000) / 1000;
+    if (!byLevel.has(level)) byLevel.set(level, []);
+    byLevel.get(level).push(target);
+  }
+  const extras = Object.fromEntries(['white', 'amber', 'uv'].filter((k) => c[k] > 0.001).map((k) => [k, Math.round(c[k] * 1000) / 1000]));
+  for (const [intensity, list] of byLevel) {
+    sendManual({ type: 'manual', targets: list, colour: c.hex, ...extras, intensity, releaseSegments });
+  }
+}
+
+/** The refs of Individual lights' commands the server hasn't answered yet (their errors get plain words). */
+const manualRefs = new Set();
+function sendManual(cmd) {
+  const r = send(cmd);
+  if (r !== null) manualRefs.add(r);
+  return r;
+}
+
+/** What to say when the server refuses an Individual lights change; never its own wording. */
+function manualProblem(error) {
+  if (/not enabled/.test(error)) return 'Individual lights are turned off in Settings.';
+  return "Those lights couldn't be changed. Pick them again and try once more.";
+}
+
+/** Blackout is on: the lights stay off until a song or Basic lights, so this panel changes nothing meanwhile. */
+const blackedOut = () => state?.look === 'blackout';
+
+function pickManualColour(c) {
+  sendManualColour(c);
+  renderManual();
+}
+
+/**
+ * The level for every picked target; a whole light's held segments follow it, so the whole bar dims. A level never
+ * changes a light's colour: one not held yet is held at the colour it shows now (one command per colour, usually one).
+ */
+function sendManualLevel(v) {
+  if (blackedOut()) return;
+  const intensity = Math.round(clamp01(v) * 1000) / 1000;
+  const targets = manualTargets();
+  for (const t of manualTargets()) {
+    if (t.segment === undefined) for (const h of heldSegmentsOf(t.fixture)) targets.push({ fixture: h.fixture, segment: h.segment });
+  }
+  if (!targets.length) return;
+  // Held ones keep their colour by themselves; the rest take the colour they show (an effect's first colour).
+  const held = [];
+  const byColour = new Map();
+  for (const t of targets) {
+    const now = lightNow(t.fixture, t.segment ?? null);
+    if (now.held || !now.light) {
+      held.push(t);
+      continue;
+    }
+    const c = now.light;
+    const extras = Object.fromEntries(['white', 'amber', 'uv'].filter((k) => c[k] > 0.001).map((k) => [k, Math.round(c[k] * 1000) / 1000]));
+    const key = JSON.stringify([c.hex, extras]);
+    if (!byColour.has(key)) byColour.set(key, { colour: c.hex, extras, targets: [] });
+    byColour.get(key).targets.push(t);
+  }
+  // Usually one command for them all, changed in one frame.
+  if (held.length) sendManual({ type: 'manual', targets: held, intensity });
+  for (const { colour, extras, targets: list } of byColour.values()) sendManual({ type: 'manual', targets: list, colour, ...extras, intensity });
+}
+
+function showManualLevel(v) {
+  const p = clamp01(v);
+  manualLevel.value = p;
+  manualLevel.slab.style.width = `${p * 100}%`;
+  manualLevel.pct.textContent = `${Math.round(p * 100)} %`;
+  manualLevel.pct.classList.toggle('zero', p === 0);
+  manualLevel.dim.setAttribute('aria-valuenow', String(Math.round(p * 100)));
+}
+
+// The level moves relative to where the finger starts, as the group dimmers; nothing happens with nothing picked.
+(() => {
+  const m = manualLevel;
+  const out = throttle(sendManualLevel);
+  let startX = 0, startV = 0;
+  m.dim.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    if (!manualTargets().length || blackedOut()) return;
+    m.dragging = true;
+    try { m.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+    m.dim.classList.add('ds-dragging');
+    startX = ev.clientX;
+    startV = m.value;
+  });
+  m.dim.addEventListener('pointermove', (ev) => {
+    if (!m.dragging) return;
+    showManualLevel(startV + (ev.clientX - startX) / m.dim.clientWidth);
+    out.push(m.value);
+  });
+  const end = () => {
+    if (!m.dragging) return;
+    m.dragging = false;
+    m.dim.classList.remove('ds-dragging');
+    m.holdUntil = performance.now() + 600;
+    if (m.value !== startV) out.end(m.value);
+  };
+  m.dim.addEventListener('pointerup', end);
+  m.dim.addEventListener('pointercancel', end);
+})();
+
+// Any colour …: a strip under the circles (warm to cool when every picked light is white only). Moves are throttled; the last one always goes.
+(() => {
+  const out = throttle((hex) => sendManualColour(normalLight(hex)));
+  const whiteOnly = () => {
+    if (!manualTargets().length || blackedOut()) return null;
+    return pickedGroups().every((g) => g.whiteOnly);
+  };
+  attachStrip($('mAny'), $('mAnyH'), whiteOnly, (hex, last) => (last ? out.end(hex) : out.push(hex)), () => {
+    if (!manualTargets().length) toast('Tap lights on the plan to pick them first.', true);
+  });
+})();
+
+$('mAnyBtn').addEventListener('click', () => showManualStrip($('mAny').hidden));
+$('manualBtn').addEventListener('click', openManual);
+$('mBack').addEventListener('click', closeManual);
+$('mDone').addEventListener('click', closeManual);
+$('mNone').addEventListener('click', () => {
+  manualSel.fixtures = [];
+  manualSel.segments = [];
+  renderManual();
+});
+// Release picked: the picked segments, or each picked light with any segments of it that are held.
+$('mRelease').addEventListener('click', () => {
+  const targets = manualTargets();
+  if (!targets.length || blackedOut()) return;
+  sendManual({ type: 'release', targets, releaseSegments: true });
+  manualSel.segments = [];
+  renderManual();
+});
+$('mReleaseAll').addEventListener('click', () => {
+  if (!blackedOut()) sendManual({ type: 'releaseAll' });
+});
+
+/** Keeps the panel true to the live state and the pick: chips, the plan's picks and dots, segments, summary, colours, level. */
+function renderManual() {
+  if (!manualSel.open || !layout || !state) return;
+  const picked = new Set(manualSel.fixtures);
+  for (const chip of $('mGroups').children) {
+    const ids = chip.dataset.ids ? chip.dataset.ids.split(' ') : [];
+    chip.classList.toggle('on', ids.length > 0 && ids.length === picked.size && ids.every((id) => picked.has(id)));
+  }
+  const held = heldFixtures();
+  buildManualColours();
+  for (const m of manualFix) {
+    const on = picked.has(m.f.id);
+    m.button.classList.toggle('on', on);
+    m.button.setAttribute('aria-pressed', String(on));
+    m.dot.hidden = !held.has(m.f.id);
+    const now = lightNow(m.f.id);
+    m.button.setAttribute('aria-label', `${m.f.name}, ${m.group?.name ?? 'no group'}, ${now.name} ${Math.round(now.level * 100)} %${held.has(m.f.id) ? ', held' : ''}`);
+  }
+  buildSegRow();
+  const bar = manualFix.find((m) => m.f.id === segRowFor);
+  for (const s of manualSegs) {
+    const on = manualSel.segments.includes(s.segment);
+    s.button.classList.toggle('on', on);
+    s.button.setAttribute('aria-pressed', String(on));
+    const h = heldOf(segRowFor, s.segment);
+    s.dot.hidden = !h;
+    s.button.setAttribute('aria-label', `${shortName(bar.f)} segment ${s.place + 1}${h ? ', held' : ''}`);
+  }
+
+  // The summary, and what the first picked target shows (its colour circle, the level).
+  const targets = manualTargets();
+  const first = targets[0];
+  const now = first ? lightNow(first.fixture, first.segment ?? null) : null;
+  const n = manualSel.fixtures.length;
+  const segs = manualSel.segments.length;
+  $('mSelTitle').textContent = n
+    ? `${n} ${n > 1 ? 'lights' : 'light'} picked${segs && bar ? ` · ${segs} of ${bar.cells.length} segments` : ''}`
+    : 'Tap lights on the plan to pick them';
+  const names = manualSel.fixtures.map((id) => shortName(manualFix.find((m) => m.f.id === id)?.f ?? { id }));
+  $('mSelNames').textContent = n ? `${names.join(', ')} · ${now.name}` : 'or pick a whole group above';
+  const dark = blackedOut();
+  $('mBlackNote').hidden = !dark;
+  $('mPal').classList.toggle('idle', !n || dark);
+  for (const c of manualColours) c.button.disabled = dark;
+  $('mAnyBtn').disabled = dark;
+  if (dark && !$('mAny').hidden) showManualStrip(false);
+  for (const c of manualColours) {
+    // A held light by its exact colour; one its group drives by the colour it runs (at whatever brightness).
+    const on = !!now && (c.off ? now.level === 0 : now.level > 0 && (now.light ? sameLight(c, now.light) : c.display === now.display));
+    c.button.classList.toggle('on', on);
+    c.button.setAttribute('aria-pressed', String(on));
+  }
+  const whiteOnly = n > 0 && pickedGroups().every((g) => g.whiteOnly);
+  $('mAny').className = `strip2 m-any ${whiteOnly ? 'cct' : 'hue'}`;
+  $('mAny').setAttribute('aria-label', whiteOnly ? 'Any white, warm to cool' : 'Any colour');
+  $('mAnyBtn').textContent = whiteOnly ? 'Any white …' : 'Any colour …';
+  manualLevel.dim.classList.toggle('idle', !n || dark);
+  manualLevel.dim.setAttribute('aria-disabled', String(dark));
+  manualLevel.dim.style.setProperty('--c', now && now.level > 0 ? shown(now.display) : '#5a6478');
+  if (!manualLevel.dragging && performance.now() >= manualLevel.holdUntil) showManualLevel(now?.level ?? 0);
+
+  // Release picked: while something picked is held. Release all: every light held, however it was taken.
+  const pickedHeld = targets.some((t) => (t.segment === undefined
+    ? !!heldOf(t.fixture) || heldSegmentsOf(t.fixture).length > 0
+    : !!heldOf(t.fixture, t.segment)));
+  $('mRelease').disabled = !pickedHeld || dark;
+  $('mReleaseAll').textContent = `Release all · ${held.size}`;
+  $('mReleaseAll').disabled = held.size === 0 || dark;
+  paintManual();
+}
+
 // ---- Quick looks: tabs and grid ----
 
 let quickTab = 'plain';
@@ -3281,8 +4938,9 @@ function buildQuick() {
     // A thin strip along the bottom: one block per group, the colour this quick look gives it.
     const strip = el('span', 'qstrip');
     for (const { colour, name } of stripBlocks(q.colours)) {
-      const block = el('i');
-      if (colour) block.style.background = shown(colour);
+      // Faint for a group the quick look leaves alone, grey for one it turns off.
+      const block = el('i', colour === '#000000' ? 'off' : null);
+      if (colour && colour !== '#000000') block.style.background = tint(colour, 0.8);
       block.title = name;
       strip.append(block);
     }
@@ -3294,27 +4952,26 @@ function buildQuick() {
       b.classList.toggle('editing', qs.open && qs.look === q.id);
       b.setAttribute('aria-label', `Edit ${q.name}`);
     }
-    // Edit on: the quick look opens in the sheet. In Preview its groups go into the selected item, not on stage.
+    // Edit on: the quick look opens in the sheet. Otherwise it goes on stage (in Prepare, in the draft).
     b.addEventListener('click', () => {
       if (quickEditing) openSheet(q);
-      else if (!preview.on) sendStage({ type: 'quickLook', id: q.id });
-      else if (preview.item) send({ type: 'itemQuickLook', item: preview.item, look: q.id });
+      else sendStage({ type: 'quickLook', id: q.id });
     });
     if (quickEditing) quickMover.wire(b, at);
     grid.append(b);
   });
   if (!mine.length) grid.append(el('span', 'qnone', 'None yet.'));
-  const add = el('button', 'ql newq', '＋ Save stage as quick look');
+  const add = el('button', 'ql newq');
+  add.append('＋ Save stage', el('br'), 'as a look');
   add.addEventListener('click', () => openSheet());
   grid.append(add);
 }
 
-/** Edit on or off. On, Preview goes off (as for the running order's Edit); Blind can stay on. Off closes the edit sheet. */
+/** Edit on or off; Prepare can stay on. Off closes the edit sheet. */
 function setQuickEditing(on) {
   if (on === quickEditing) return;
-  if (on) setPreview(false);
   quickEditing = on;
-  $('qEditBtn').textContent = on ? 'Done' : 'Edit';
+  $('qEditBtn').textContent = on ? 'Done' : 'Edit looks';
   $('qEditBtn').classList.toggle('on', on);
   $('qEditBtn').setAttribute('aria-pressed', String(on));
   if (!on && qs.look) closeSheet();
@@ -3362,6 +5019,10 @@ function openSheet(q) {
   $('qsTitle').textContent = q ? 'Edit quick look' : 'New quick look from the stage';
   $('qsDelete').hidden = !q;
   $('qsStageRow').hidden = !q;
+  // Its controller key, once it exists (a new quick look gets one after Save, from its Edit).
+  const keyed = !!q && showsChip({ kind: 'quickLook', id: q.id });
+  $('qsKeyRow').hidden = !keyed;
+  $('qsKeyLine').replaceChildren(...(keyed ? [keyChip({ kind: 'quickLook', id: q.id }, q.name)] : []));
   $('qsGroupsNote').textContent = q ? '· tap a group to leave it out or to add it' : '· tap a group to leave it out; left-out groups keep what they have';
   buildSheetGroups();
   $('qSheet').hidden = false;
@@ -3370,6 +5031,7 @@ function openSheet(q) {
 }
 
 function closeSheet() {
+  if (keyLearn.does?.kind === 'quickLook') stopLearn();
   qs.open = false;
   qs.look = null;
   qs.orig = null;
@@ -3493,7 +5155,7 @@ function renderSheet() {
     $('qsStage').checked = qs.stage;
     const added = quickGroupsNew();
     const names = added.map((id) => layout.groups.find((g) => g.id === id)?.name ?? id);
-    const from = blind.on ? 'the Blind draft' : 'the stage';
+    const from = prep.on ? 'the draft' : 'the stage';
     const many = names.length > 1;
     $('qsStageNote').textContent = !names.length
       ? `Replaces what this quick look gives its groups with what ${from} has now.`
@@ -3661,8 +5323,10 @@ function wireHold(b, groups) {
 
 function buildFlash() {
   flashAllOff();
+  // A rebuild can change how many buttons there are: fit the bar again once they are in.
+  queueMicrotask(fitBottomBar);
   const root = $('flashArea');
-  root.replaceChildren(el('span', 'flash-label', 'Flash'));
+  root.replaceChildren(el('span', 'flash-label ds-caps', 'Flash'));
   // Smoke machines have Puff in the details instead, and "All" never includes them.
   const lights = lightGroups();
   const labels = flashLabels(lights);
@@ -3696,9 +5360,8 @@ function drawStage() {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  // In Preview the picture is the selected item settled, never the stage: dark until it has come.
-  // In Blind it is the draft, moving like the stage would: dark until its first frame.
-  const shownVisual = preview.on ? previewVisual ?? NO_VISUAL : blind.on ? blind.visual ?? NO_VISUAL : visual;
+  // In Prepare it is the draft, moving like the stage would: dark until its first frame.
+  const shownVisual = prep.on ? prep.visual ?? NO_VISUAL : visual;
   const pad = 14, r = Math.max(5, Math.min(9, h / 16));
   const iw = w - 2 * pad, ih = h - 2 * pad;
   const toPx = (p) => [pad + p.x * iw, pad + p.y * ih];
@@ -3850,13 +5513,20 @@ function drawStage() {
     ctx.strokeStyle = '#3a3f48';
     ctx.stroke();
   }
-  if ((preview.on || blind.on) && pictureLabel) {
-    // So the picture can't be mistaken for the real stage.
-    ctx.font = pictureLabel.font;
-    ctx.fillStyle = pictureLabel.colour;
-    ctx.textBaseline = 'top';
-    ctx.fillText(preview.on ? 'Preview' : 'Blind', 10, 8);
-  }
+  // A small label at the bottom right, so the picture can't be mistaken for something else: "Live", "Off" during
+  // Blackout, or in violet "Draft · <name>" while preparing.
+  if (!pictureLabel) readPictureLabel();
+  const draft = prep.on ? shownState() : null;
+  const off = !prep.on && state?.look === 'blackout';
+  const text = (prep.on ? `Draft · ${draft?.look ? lookName(draft.look) : '—'}` : off ? 'Off' : 'Live').toUpperCase();
+  ctx.font = pictureLabel.font;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0.9px';
+  ctx.fillStyle = prep.on ? pictureLabel.prep : off ? pictureLabel.off : pictureLabel.live;
+  ctx.textBaseline = 'bottom';
+  ctx.textAlign = 'right';
+  ctx.fillText(text, w - 8, h - 6, w - 16);
+  ctx.textAlign = 'start';
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 }
 
 window.addEventListener('resize', drawStage);
@@ -3894,6 +5564,12 @@ let toastTimer = 0;
 /** Shows a short message: a problem, or with `quiet` a plain confirmation. */
 function toast(text, quiet = false) {
   const t = $('toast');
+  // The same message again (a drag refused at every move) just stays up a little longer.
+  if (!t.hidden && t.textContent === text) {
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (t.hidden = true), 3500);
+    return;
+  }
   t.textContent = text;
   t.classList.toggle('quiet', quiet);
   t.hidden = false;
@@ -3920,6 +5596,34 @@ keepAwake();
 // the bottom bar to the top of Groups. See docs/superpowers/specs/2026-10-19-phone-remote-design.md.
 
 const phoneQuery = window.matchMedia('(max-width: 700px), (max-height: 500px)');
+const midQuery = window.matchMedia('(min-width: 701px) and (max-width: 1079px) and (min-height: 501px)');
+
+/**
+ * The bottom bar on two lines (Flash above Master and the buttons): always between a phone and the iPad in
+ * landscape, and on the iPad when the Flash buttons don't fit on the bar's one line (many light groups, a wider
+ * font). Never on the phone, where Flash sits in Groups.
+ */
+function fitBottomBar() {
+  const body = document.body;
+  if (phoneQuery.matches || midQuery.matches) {
+    body.classList.toggle('bar-two-rows', !phoneQuery.matches);
+    return;
+  }
+  // Measure on one line (no paint happens in between).
+  body.classList.remove('bar-two-rows');
+  const area = $('flashArea');
+  if (area.scrollWidth > area.clientWidth + 1) body.classList.add('bar-two-rows');
+}
+window.addEventListener('resize', fitBottomBar);
+midQuery.addEventListener('change', fitBottomBar);
+// Inter arrives after the first paint (font-display: swap), and widens the Flash names: check again when it has
+// loaded (each 'loadingdone' is a font that finished; `ready` covers one that loaded before this ran). The stage
+// view's label is drawn in it too.
+document.fonts?.ready.then(fitBottomBar);
+document.fonts?.addEventListener?.('loadingdone', () => {
+  fitBottomBar();
+  drawStage();
+});
 
 function setPhoneTab(tab) {
   document.body.dataset.tab = tab;
@@ -3939,20 +5643,20 @@ function applyPhone() {
   if (phone) {
     $('details').insertBefore(tempo, $('groupRows'));
     $('details').insertBefore(flash, $('groupRows'));
-    // Editing belongs to the iPad: the running order's, and the colour list's (its buttons are hidden here,
-    // and in Edit a swatch tap opens the editor instead of setting the colour).
+    // Editing belongs to the iPad: the running order's, and the colour picker's editors (their buttons are hidden here).
     if (editing) setEditing(false);
     if (quickEditing) setQuickEditing(false);
-    // No Preview or Blind on the phone: it stays a remote for the live stage.
-    setPreview(false);
-    setBlind(false);
-    if (picker.edit) setEditMode(false);
+    // No Prepare on the phone: it stays a remote for the live stage.
+    setPrepare(false);
+    if (picker.group) closeEditor();
     closeSheet();
+    closeManual();
   } else {
     if (flash.parentElement !== $('masterFader').parentElement) $('masterFader').after(flash);
     if (tempo.parentElement !== $('quiet')) $('fadeButton').parentElement.after(tempo);
   }
   showTempoMenu(false);
+  fitBottomBar();
   if (!document.body.dataset.tab) setPhoneTab('order');
 }
 

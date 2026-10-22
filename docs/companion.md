@@ -129,13 +129,13 @@ If Light Runner is not reachable, the variable keeps its last value and the conn
 
 ## APC mini
 
-Plug the Akai APC mini into the computer that runs Light Runner (USB). Light Runner finds it within about 2 seconds, and finds it again if it is unplugged and plugged back in. Settings shows one of:
+Plug the Akai APC mini into the computer that runs Light Runner (USB). Light Runner finds it within about 2 seconds, and finds it again if it is unplugged and plugged back in. Settings › Controller keys › Devices shows:
 
-- "APC mini: connected (mk2)" or "(older model)": working.
-- "APC mini: not connected": plug it in, or try another USB port or cable.
-- "APC mini: MIDI support isn't installed on this computer": the optional MIDI add-on is missing. Run `npm install` in the Light Runner folder on that computer (on the church Mac, Node is Homebrew's keg-only copy, so use `/opt/homebrew/opt/node@24/bin/npm install`, or put `/opt/homebrew/opt/node@24/bin` on the PATH first). If the line still says it, note what the install printed and report it.
+- "APC mini mk2" with "mk2 · connected" (or "APC MINI" with "older model · connected"): working. Its Listen switch must be on.
+- The APC isn't in the list: plug it in, or try another USB port or cable.
+- "MIDI support isn't installed on this computer, so controllers can't be used.": the optional MIDI add-on is missing. Run `npm install` in the Light Runner folder on that computer (on the church Mac, Node is Homebrew's keg-only copy, so use `/opt/homebrew/opt/node@24/bin/npm install`, or put `/opt/homebrew/opt/node@24/bin` on the PATH first). If the line still says it, note what the install printed and report it.
 
-Each pad column sits above its fader, so one column is one light group (the operator page's order; smoke machines are left out).
+This is the APC mini's **standard layout**. It works with no setup, and any key you assign yourself (see Controller keys below) does its new job instead. Each pad column sits above its fader, so one column is one light group (the operator page's order; smoke machines are left out).
 
 | Part | Does |
 | --- | --- |
@@ -166,6 +166,30 @@ Things to know:
 7. **Unplugging.** Hold a Flash button and unplug the APC: the Flash should go out. Then unplug it and plug it back in slowly (wait for Settings to say "not connected" first), and again unplug and plug it back in quickly (under 2 seconds). After each, check that the pads light up again (a quick replug can take up to 10 seconds to show them), and that pads, buttons and faders still work. Report what you saw each time.
 
 What to report: a short note on each of the seven, plus the model and how it showed up in Settings. If the pads stay dark while Settings says connected, that is the useful one to report, and say which model it is. Two things have not been checked on real hardware: the older model's note numbers come from published community mappings (they may differ), and the mk2's colour message follows Akai's protocol document but has not been tried on a real mk2. The server's terminal also prints lines that start with "APC mini:" when something goes wrong (copy those into your report).
+
+## Controller keys (any MIDI controller)
+
+Any MIDI controller plugged into the Light Runner computer can run the lights: an APC mini, a nanoKONTROL, a pad controller. You choose what each key, fader or knob does by pressing it; nobody types MIDI numbers.
+
+- **Assign a key:** tap **Assign a key** next to the action, then press the key on the controller within 10 seconds. The key is named by the controller and its place, such as "APC mini mk2 · pad 1,3" (pads count rows from the top and columns from the left) or "nanoKONTROL2 · control 16". **Clear** takes it off.
+- **Where:** Settings › Controller keys has the fixed actions: Next, Back to saved, Undo, Basic lights, Blackout (hold 1 second), Flash all and Flash per group (while held), Master and each group's level (faders and knobs only), a fade knob that sweeps Auto, Instant, 1, 2, 3, 5 and 10 s, a key per fade time, Tap, and Tempo ×2 and ÷2. **Songs** get their key on the operator page in running-order **Edit list** (the Key chip beside each name, Basic lights too), and **quick looks** in their **Edit** sheet (Controller key).
+- **One key, one job:** a key that already did something moves to the new job, with a quiet note ("Pad 2,3 was Song 4; it is now Prayer."). Each thing has one key: assigning another replaces it.
+- **A song keeps its key** when you move it in the running order. Deleting a song or a quick look frees its key; Undo brings both back.
+- **The APC mini's standard layout** stays for every key you haven't assigned, while "Use the standard APC mini layout for keys I haven't assigned" is on. Its top rows still follow the running order by place. **Reset to the APC mini layout** (tap it twice) takes away every key assigned on the APC mini, songs' and quick looks' too; keys on other controllers stay. The show as it was is kept in Settings › Backups (Clear keeps one too).
+- **Who may change keys:** on the operator page anyone can give songs and quick looks their keys: a pad or a button (a fader or knob moved meanwhile does nothing). While the standard layout is on, the APC mini's faders, side buttons and the Flash buttons under the pads keep their jobs: only the programmer can give one of them to a song. The other keys, Reset and the switches are in Settings, behind the programmer PIN when one is set. Song and quick-look keys are steps on the bottom bar's Undo; changes made in Settings are not.
+- **Devices:** Light Runner opens every MIDI input the computer has, not only controllers you plugged in: on a Mac that includes the IAC Driver and Network Session ports when they are switched on in Audio MIDI Setup. Each is listed with a **Listen** switch. Off, Light Runner lets go of it (another program can use it then); switch off any that aren't controllers. The switches belong to this computer: importing a show file keeps them.
+- **Two identical controllers** (two nanoKONTROL2s) have the same name, so they share their keys: a key assigned on one works on the other too.
+- Faders and knobs pick up, as the APC's do. Keys always act on the real stage, never on an iPad's Prepare. The keys are saved in the show, so they travel with an exported show file.
+- **Lights on the pads** only on the APC mini: a pad assigned to a song lights like a running-order pad (on stage bright, next dim), one assigned to a quick look lights while the stage runs it. Other controllers get no lights.
+
+### What to check when you try it
+
+1. Plug the controller in: within a few seconds it is in Settings › Controller keys › Devices.
+2. Tap Assign a key for Next and press a button: the row says the controller and the button, and pressing it again starts the next song.
+3. Give a fader Master: it does nothing until it reaches where Master is, then follows.
+4. Give a knob the fade time knob: turning it fully left is Auto, fully right 10 s; the Fade button on the iPad follows.
+5. In running-order Edit, give a song a key, move the song, and check the key still starts it.
+6. Unplug the controller and plug it back in: its keys still work. If they don't, note what Devices calls it before and after: the name it gives the computer may have changed.
 
 ## OSC
 

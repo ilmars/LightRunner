@@ -3,163 +3,243 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0F1625">
+  <meta name="theme-color" content="#090F1C">
   <title>Light Runner Settings</title>
+  <link rel="icon" href="/shared/icon-16.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/shared/icon-180.png">
   <link rel="stylesheet" href="/shared/theme.css">
+  <link rel="stylesheet" href="/shared/programmer.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="top">
-    <a class="back" href="/operator/">← Operator</a>
-    <h1>Settings</h1>
-    <nav class="nav"><a href="/patch/">Patch</a><a href="/settings/" aria-current="page">Settings</a></nav>
-    <span id="status" class="pill"></span>
-    <button id="logout" class="ghost" hidden>Log out</button>
-  </header>
+  <div class="appbar-wrap">
+    <header class="appbar">
+      <h1 class="appbar-title"><img src="/shared/icon.svg" alt="" width="26" height="26"><span class="appbar-name"><span class="ds-caps">Light Runner</span><b>Settings</b></span></h1>
+      <span class="grow"></span>
+      <!-- Only while something is wrong with the lights. -->
+      <span id="status" class="ds-pill ds-pill--warn" role="status" hidden>● <span class="long"></span><span class="short"></span></span>
+      <!-- While the server doesn't answer: the page keeps trying by itself. -->
+      <span id="offline" class="ds-pill offline" role="status" title="Light Runner isn't answering. The page keeps trying and carries on by itself." hidden>● Not connected</span>
+      <nav class="applinks" aria-label="Pages"><a href="/operator/">Operator</a><a href="/patch/">Patch</a><a href="/settings/" aria-current="page">Settings</a></nav>
+      <span id="clock" class="clock"></span>
+      <button id="logout" class="ds-btn ds-btn--quiet" type="button" hidden>Log out</button>
+    </header>
+  </div>
 
   <!-- PIN entry when a PIN is set -->
-  <section id="login" class="login" hidden>
-    <h2>Programmer PIN</h2>
-    <p class="hint">Settings change how the whole rig works, so they are behind a PIN.</p>
+  <section id="login" class="login ds-panel" hidden>
+    <h2 class="ds-caps">Programmer PIN</h2>
+    <p class="card-desc">Settings change how the whole rig works, so they are behind a PIN.</p>
     <form id="loginForm">
-      <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" pattern="\d{4,6}" maxlength="6" placeholder="••••" required>
-      <button class="primary">Unlock</button>
+      <input id="pin" class="ds-field" type="password" inputmode="numeric" autocomplete="current-password" pattern="\d{4,6}" maxlength="6" placeholder="••••" required>
+      <button class="ds-btn ds-btn--primary">Unlock</button>
     </form>
     <p id="loginError" class="error"></p>
   </section>
 
-  <main id="main" hidden>
-    <section class="card compare span2" id="comparePanel" hidden>
+  <main id="main" class="page settings" hidden>
+    <section class="card ds-panel compare span2" id="comparePanel" hidden>
       <div class="card-head">
-        <h2>Compare with <span id="compareName"></span></h2>
-        <button id="compareCancel" class="ghost small">Cancel</button>
+        <div class="card-title">
+          <h2 class="ds-caps">Compare with a file</h2>
+          <p class="card-desc"><b id="compareName"></b>: tick the changes to take into this show.</p>
+        </div>
+        <button id="compareCancel" class="ds-btn ds-btn--quiet" type="button">Cancel</button>
       </div>
       <p class="hint" id="compareSummary"></p>
       <div class="row wrap">
-        <button id="compareAll" class="ghost small" type="button">Tick all</button>
-        <button id="compareNone" class="ghost small" type="button">Untick all</button>
+        <button id="compareAll" class="ds-btn ds-btn--quiet" type="button">Tick all</button>
+        <button id="compareNone" class="ds-btn ds-btn--quiet" type="button">Untick all</button>
       </div>
       <div id="compareList" class="compare-list"></div>
       <p class="warn" id="compareError"></p>
-      <div class="row">
-        <button id="compareApply" class="primary" type="button">Apply selected</button>
+      <div class="row wrap">
+        <button id="compareApply" class="ds-btn ds-btn--primary" type="button">Apply selected</button>
         <span class="hint">The current show is kept as a backup. PIN and DMX output settings are not changed.</span>
       </div>
     </section>
 
-    <section class="card span2" id="outputCard">
+    <section class="card ds-panel span2" id="outputCard">
       <div class="card-head">
-        <h2>DMX output</h2>
-        <label class="switch big">
+        <div class="card-title">
+          <h2 class="ds-caps">DMX output</h2>
+          <p class="card-desc">Where Light Runner sends the commands for the lights.</p>
+        </div>
+        <label class="ds-switch ds-switch--ok send-dmx">
           <input id="outputEnabled" type="checkbox">
-          <span class="track"><span class="knob"></span></span>
+          <span class="ds-switch-track"></span>
           <span class="switch-label">Send DMX</span>
         </label>
       </div>
-      <p class="hint" id="enabledHint">Turn this off while another desk (for example Lightkey) controls the lights. Light Runner keeps running and the stage view keeps working.</p>
+      <p class="hint" id="enabledHint">Turn Send DMX off while another desk (for example Lightkey) controls the lights. Light Runner keeps running and the stage view keeps working.</p>
       <p class="warn" id="outputProblem"></p>
       <p class="warn" id="forcedOff" hidden>This server was started with DMX output forced off (LIGHT_RUNNER_OUTPUT=none), so nothing is sent whatever you choose here.</p>
 
-      <div class="segmented" role="radiogroup" aria-label="Output type">
-        <label><input type="radio" name="kind" value="artnet"><span>Art-Net</span></label>
-        <label><input type="radio" name="kind" value="sacn"><span>sACN (E1.31)</span></label>
-        <label><input type="radio" name="kind" value="enttec"><span>ENTTEC USB</span></label>
-      </div>
+      <div class="output-grid">
+        <div class="output-main">
+          <div class="field">
+            <span class="label">Output type</span>
+            <div class="ds-seg" role="radiogroup" aria-label="Output type">
+              <label><input type="radio" name="kind" value="artnet"><span>Art-Net</span></label>
+              <label><input type="radio" name="kind" value="sacn"><span>sACN (E1.31)</span></label>
+              <label><input type="radio" name="kind" value="enttec"><span>ENTTEC USB</span></label>
+            </div>
+          </div>
 
-      <div class="kind" data-kind="artnet">
-        <div class="field">
-          <label for="artnetHost">Node IP address</label>
-          <div class="row">
-            <input id="artnetHost" type="text" inputmode="decimal" placeholder="192.168.0.114 or 255.255.255.255 to broadcast">
-            <button id="findNodes" class="ghost" type="button">Find nodes</button>
+          <div class="kind" data-kind="artnet">
+            <div class="field">
+              <label for="artnetHost">Node IP address</label>
+              <div class="row">
+                <input id="artnetHost" class="ds-field" type="text" inputmode="decimal" placeholder="192.168.0.114 or 255.255.255.255 to broadcast">
+                <button id="findNodes" class="ds-btn" type="button">Find nodes</button>
+              </div>
+            </div>
+            <div id="nodes" class="nodes"></div>
+          </div>
+
+          <div class="kind" data-kind="sacn">
+            <div class="field">
+              <span class="label">Send to</span>
+              <div class="ds-seg">
+                <label><input type="radio" name="sacnMode" value="multicast"><span>Multicast</span></label>
+                <label><input type="radio" name="sacnMode" value="unicast"><span>One receiver</span></label>
+              </div>
+            </div>
+            <div class="field" id="sacnHostField">
+              <label for="sacnHost">Receiver IP address</label>
+              <input id="sacnHost" class="ds-field" type="text" inputmode="decimal" placeholder="192.168.0.114">
+            </div>
+            <div class="field narrow">
+              <label for="sacnPriority">Priority</label>
+              <input id="sacnPriority" class="ds-field" type="number" min="1" max="200" step="1">
+              <span class="hint">100 is normal. A receiver hearing two sources follows the higher one.</span>
+            </div>
+          </div>
+
+          <div class="kind" data-kind="enttec">
+            <div class="field">
+              <label for="enttecPort">USB port</label>
+              <div class="row">
+                <select id="enttecPort" class="ds-field"></select>
+                <button id="refreshPorts" class="ds-btn" type="button">Refresh</button>
+              </div>
+              <span class="hint">ENTTEC DMX USB Pro or compatible. It sends one universe: the first one that uses this output.</span>
+            </div>
+          </div>
+
+          <div class="field narrow" id="universeField">
+            <label for="universe">Universe</label>
+            <input id="universe" class="ds-field" type="number" min="0" max="32767" step="1">
+            <span class="hint" id="universeHint"></span>
           </div>
         </div>
-        <div id="nodes" class="nodes"></div>
-      </div>
 
-      <div class="kind" data-kind="sacn">
-        <div class="field">
-          <span class="label">Send to</span>
-          <div class="segmented small">
-            <label><input type="radio" name="sacnMode" value="multicast"><span>Multicast</span></label>
-            <label><input type="radio" name="sacnMode" value="unicast"><span>One receiver</span></label>
-          </div>
+        <div class="routes sub" id="routes">
+          <h3 class="ds-caps">Universes</h3>
+          <p class="hint">Each universe goes to the default output unless you give it its own.</p>
+          <p class="warn" id="unsent"></p>
+          <div id="routeList" class="route-list"></div>
+          <button id="addUniverse" class="ds-add add-universe" type="button">＋ Add a universe</button>
         </div>
-        <div class="field" id="sacnHostField">
-          <label for="sacnHost">Receiver IP address</label>
-          <input id="sacnHost" type="text" inputmode="decimal" placeholder="192.168.0.114">
-        </div>
-        <div class="field narrow">
-          <label for="sacnPriority">Priority</label>
-          <input id="sacnPriority" type="number" min="1" max="200" step="1">
-          <span class="hint">100 is normal. A receiver hearing two sources follows the higher one.</span>
-        </div>
-      </div>
-
-      <div class="kind" data-kind="enttec">
-        <div class="field">
-          <label for="enttecPort">USB port</label>
-          <div class="row">
-            <select id="enttecPort"></select>
-            <button id="refreshPorts" class="ghost" type="button">Refresh</button>
-          </div>
-          <span class="hint">ENTTEC DMX USB Pro or compatible. It sends one universe: the first one that uses this output.</span>
-        </div>
-      </div>
-
-      <div class="field narrow" id="universeField">
-        <label for="universe">Universe</label>
-        <input id="universe" type="number" min="0" max="32767" step="1">
-        <span class="hint" id="universeHint"></span>
-      </div>
-
-      <div class="routes" id="routes">
-        <h3>Universes</h3>
-        <p class="hint">Each universe goes to the default output above unless you give it its own.</p>
-        <p class="warn" id="unsent"></p>
-        <div id="routeList" class="route-list"></div>
-        <button id="addUniverse" class="ghost add-universe" type="button">＋ Add a universe</button>
       </div>
     </section>
 
-    <section class="card">
-      <h2>Operator page</h2>
-      <label class="switch">
+    <section class="card ds-panel">
+      <div class="card-head">
+        <div class="card-title">
+          <h2 class="ds-caps">Operator page</h2>
+          <p class="card-desc">What the volunteers' page lets them do.</p>
+        </div>
+      </div>
+      <label class="ds-switch">
         <input id="manualForOperators" type="checkbox">
-        <span class="track"><span class="knob"></span></span>
+        <span class="ds-switch-track"></span>
         <span class="switch-label">Operators may use manual control</span>
       </label>
       <p class="hint">Basic lights is set from the operator page: start it, set the stage, then hold Save.</p>
     </section>
 
-    <section class="card" id="oscCard">
-      <h2>OSC</h2>
-      <label class="switch">
+    <section class="card ds-panel" id="contactCard">
+      <div class="card-head">
+        <div class="card-title">
+          <h2 class="ds-caps">Who to call</h2>
+          <p class="card-desc">Shown to the volunteers when the lights have a problem. Left out when empty.</p>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label for="contactName">Name</label>
+          <input id="contactName" class="ds-field" type="text" maxlength="60" autocomplete="off" placeholder="The lighting lead">
+        </div>
+        <div class="field">
+          <label for="contactPhone">Phone</label>
+          <input id="contactPhone" class="ds-field" type="tel" maxlength="40" autocomplete="off" placeholder="+371 …">
+        </div>
+      </div>
+    </section>
+
+    <section class="card ds-panel" id="oscCard">
+      <div class="card-head">
+        <div class="card-title">
+          <h2 class="ds-caps">OSC</h2>
+          <p class="card-desc">Let other programs, like ProPresenter, control the lights.</p>
+        </div>
+      </div>
+      <label class="ds-switch">
         <input id="oscEnabled" type="checkbox">
-        <span class="track"><span class="knob"></span></span>
+        <span class="ds-switch-track"></span>
         <span class="switch-label">Let other programs control the lights</span>
       </label>
-      <p class="hint">Let other programs (like ProPresenter) control the lights over the network. They send messages such as /lightrunner/next or /lightrunner/group/2/level 0.5 to this computer.</p>
+      <p class="hint">They send messages over the network to this computer, such as /lightrunner/next or /lightrunner/group/2/level 0.5.</p>
       <div class="field narrow" id="oscPortField">
         <label for="oscPort">Port</label>
-        <input id="oscPort" type="number" min="1024" max="65535" step="1">
+        <input id="oscPort" class="ds-field" type="number" min="1024" max="65535" step="1">
         <span class="hint">8000 unless the other program needs another.</span>
       </div>
       <p class="warn" id="oscProblem"></p>
     </section>
 
-    <section class="card" id="apcCard">
-      <h2>APC mini</h2>
-      <p id="apcStatus">APC mini: not connected</p>
-      <p class="hint">Plug an Akai APC mini into this computer and it is found within a few seconds. Faders 1–8 dim the groups and fader 9 is Master. The top two rows of pads start the songs, the rows below pick each group's colours.</p>
+    <section class="card ds-panel span2" id="keysCard">
+      <div class="card-head">
+        <div class="card-title">
+          <h2 class="ds-caps">Controller keys</h2>
+          <p class="card-desc">What the keys, faders and knobs on a MIDI controller do. Tap Assign a key, then press the key on the controller.</p>
+        </div>
+      </div>
+      <p id="keysNoMidi" class="hint" hidden>MIDI support isn't installed on this computer, so controllers can't be used. Run npm install in the Light Runner folder on this computer, then start Light Runner again.</p>
+      <div class="keys-top" id="keysTop">
+        <div class="sub keys-devices">
+          <h3 class="ds-caps">Devices</h3>
+          <p class="hint">Controllers plugged into this computer are found within a few seconds. Light Runner listens to each one that is switched on.</p>
+          <div id="keysDevices" class="keys-device-list"></div>
+        </div>
+        <div class="sub keys-apc">
+          <h3 class="ds-caps">APC mini layout</h3>
+          <label class="ds-switch">
+            <input id="apcLayout" type="checkbox">
+            <span class="ds-switch-track"></span>
+            <span class="switch-label">Use the standard APC mini layout for keys I haven't assigned</span>
+          </label>
+          <p class="hint">Faders 1–8 dim the groups and fader 9 is Master. The top two rows of pads start the running order by place, the rows below pick each group's colours. A key you assign on the APC mini does its new job instead.</p>
+          <div class="row wrap"><button id="apcReset" class="ds-btn ds-btn--quiet" type="button">Reset to the APC mini layout</button></div>
+        </div>
+      </div>
+      <p id="keysNote" class="keys-note" role="status"></p>
+      <div id="keysList" class="keys-list"></div>
+      <p id="keysHint" class="hint">Songs and quick looks get their keys where they are edited on the operator page: Edit list, and a quick look's Edit.</p>
     </section>
 
-    <section class="card">
-      <h2>Engine</h2>
+    <section class="card ds-panel">
+      <div class="card-head">
+        <div class="card-title">
+          <h2 class="ds-caps">Engine</h2>
+          <p class="card-desc">How often the lights are updated, and how fades look near dark.</p>
+        </div>
+      </div>
       <div class="grid2">
         <div class="field">
           <label for="frameRate">Frame rate</label>
-          <select id="frameRate">
+          <select id="frameRate" class="ds-field">
             <option value="25">25 fps</option>
             <option value="30">30 fps</option>
             <option value="40">40 fps (recommended)</option>
@@ -168,79 +248,92 @@
         </div>
         <div class="field">
           <label for="gamma">Dimming curve (gamma)</label>
-          <input id="gamma" type="number" min="1" max="4" step="0.1">
+          <input id="gamma" class="ds-field" type="number" min="1" max="4" step="0.1">
           <span class="hint">2.2 makes slow fades look even near dark. 1 is linear.</span>
         </div>
       </div>
     </section>
 
-    <section class="card" id="oflCard">
+    <section class="card ds-panel" id="oflCard">
       <div class="card-head">
-        <h2>Fixture database</h2>
-        <span id="oflPill" class="pill"></span>
+        <div class="card-title">
+          <h2 class="ds-caps">Fixture database</h2>
+          <p class="card-desc">Free fixture definitions, so Patch can find fixtures without internet.</p>
+        </div>
+        <span id="oflPill" class="ds-pill"></span>
       </div>
-      <p class="hint">The <a href="https://open-fixture-library.org" target="_blank" rel="noopener">Open Fixture Library</a>: free DMX definitions for hundreds of fixtures. Download it once and the Patch page can browse and search it without internet.</p>
+      <p class="hint">The <a href="https://open-fixture-library.org" target="_blank" rel="noopener">Open Fixture Library</a> has DMX definitions for hundreds of fixtures. Download it once and the Patch page can browse and search it without internet.</p>
       <p id="oflState"></p>
-      <div class="row wrap"><button id="oflDownload" class="ghost" type="button">Download database</button></div>
+      <div class="row wrap"><button id="oflDownload" class="ds-btn" type="button">Download database</button></div>
       <p class="warn" id="oflError"></p>
-      <div id="oflUpdate" class="ofl-update" hidden>
+      <div id="oflUpdate" class="ofl-update sub" hidden>
         <p id="oflUpdateSummary"></p>
         <details id="oflAdded"><summary></summary><ul></ul></details>
         <details id="oflChanged"><summary></summary><ul></ul></details>
         <details id="oflRemoved"><summary></summary><ul></ul></details>
         <p class="hint">Fixture types already in your show keep their channels. To use a changed definition, add it again from Patch.</p>
         <div class="row">
-          <button id="oflInstall" class="primary" type="button">Install update</button>
-          <button id="oflDiscard" class="ghost" type="button">Not now</button>
+          <button id="oflInstall" class="ds-btn ds-btn--primary" type="button">Install update</button>
+          <button id="oflDiscard" class="ds-btn ds-btn--quiet" type="button">Not now</button>
         </div>
       </div>
     </section>
 
-    <section class="card span2">
-      <h2>Show</h2>
+    <section class="card ds-panel">
+      <div class="card-head">
+        <div class="card-title">
+          <h2 class="ds-caps">Show</h2>
+          <p class="card-desc">The show's name, a copy to keep, and the backups.</p>
+        </div>
+      </div>
       <div class="field">
         <label for="showName">Name</label>
-        <input id="showName" type="text">
+        <input id="showName" class="ds-field" type="text">
       </div>
       <p class="hint" id="showSummary"></p>
       <div class="row wrap">
-        <a class="ghost button" href="/api/show" download>Export show file</a>
-        <label class="ghost button">Compare with a file…<input id="importFile" type="file" accept=".json,.lightkeyproj,application/json" hidden></label>
+        <a class="ds-btn" href="/api/show" download>Export show file</a>
+        <label class="ds-btn">Compare with a file…<input id="importFile" type="file" accept=".json,.lightkeyproj,application/json" hidden></label>
       </div>
       <details class="backups">
-        <summary>Backups <span id="backupCount" class="count"></span></summary>
+        <summary><span class="ds-caps">Backups</span> <span id="backupCount" class="count"></span></summary>
         <p class="hint">A copy is kept every time the show is saved; the last 20 are kept. A backup from before a group was marked as a smoke machine brings it back as a light: mark it again in Patch.</p>
         <ul id="backupList"></ul>
       </details>
     </section>
 
-    <section class="card">
-      <h2>Programmer PIN</h2>
+    <section class="card ds-panel">
+      <div class="card-head">
+        <div class="card-title">
+          <h2 class="ds-caps">Programmer PIN</h2>
+          <p class="card-desc">Keeps Patch and Settings for the people who set up the rig.</p>
+        </div>
+      </div>
       <p class="hint" id="pinState"></p>
       <form id="pinForm" class="grid2">
         <div class="field" id="currentPinField">
           <label for="currentPin">Current PIN</label>
-          <input id="currentPin" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password">
+          <input id="currentPin" class="ds-field" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password">
         </div>
         <div class="field">
           <label for="newPin">New PIN (4–6 digits)</label>
-          <input id="newPin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password">
+          <input id="newPin" class="ds-field" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password">
         </div>
         <div class="row">
-          <button class="ghost" id="savePin">Set PIN</button>
-          <button class="ghost danger" id="removePin" type="button" hidden>Remove PIN</button>
+          <button class="ds-btn" id="savePin">Set PIN</button>
+          <button class="ds-btn ds-btn--danger" id="removePin" type="button" hidden>Remove PIN</button>
         </div>
       </form>
     </section>
   </main>
 
-  <footer id="saveBar" class="save-bar" hidden>
-    <span>Unsaved changes</span>
-    <button id="discard" class="ghost">Discard</button>
-    <button id="save" class="primary">Save</button>
+  <footer id="saveBar" class="savebar" hidden>
+    <span class="unsaved">Unsaved changes</span>
+    <button id="discard" class="ds-btn ds-btn--quiet" type="button">Discard</button>
+    <button id="save" class="ds-btn ds-btn--primary" type="button">Save</button>
   </footer>
 
-  <div id="toast" class="toast" hidden></div>
+  <div id="toast" class="ds-toast" role="status" hidden></div>
   <script type="module" src="settings.js"></script>
 </body>
 </html>
