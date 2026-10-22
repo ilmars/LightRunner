@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -110,9 +110,18 @@ test('the server keeps running when the launcher goes away, and the next launche
       nodePath: process.execPath, appDir: root, dataDir: dir, env,
       spawn: () => { throw new Error('a second server must not be started'); },
     });
-    await next.start({ port, testMode: true });
+    // Asked for another port, it still finds the one on this data folder.
+    await next.start({ port: port + 1, testMode: true });
     assert.equal(next.status, 'running-elsewhere');
     assert.equal(next.port, port);
+
+    // And can stop it cleanly with the marker's token: the stage is saved and the marker removed.
+    assert.equal(await next.stopElsewhere(), true, next.message ?? '');
+    assert.equal(next.status, 'stopped');
+    for (let i = 0; i < 40 && alive(pid); i++) await tick(250);
+    assert.equal(alive(pid), false);
+    assert.equal(existsSync(join(dir, 'server.json')), false);
+    assert.equal(existsSync(join(dir, 'runtime.json')), true);
   } finally {
     try {
       process.kill(pid);

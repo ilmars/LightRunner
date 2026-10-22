@@ -4,6 +4,8 @@ import { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
 import { PassThrough } from 'node:stream';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ServerProcess, probePort } from '../src/server-process.js';
 
@@ -19,6 +21,10 @@ class FakeChild extends EventEmitter {
     this.killed = false;
     this.pid = 4242;
     this.connected = true;
+    /** @type {number | null} */
+    this.exitCode = null;
+    /** @type {string | null} */
+    this.signalCode = null;
   }
   send(message, callback) {
     this.sent.push(message);
@@ -33,6 +39,8 @@ class FakeChild extends EventEmitter {
   /** The child ends: its pipes close, then 'exit' and 'close' as Node sends them. */
   exit(code, signal = null) {
     this.connected = false;
+    this.exitCode = code;
+    this.signalCode = signal;
     this.stdout.end();
     this.stderr.end();
     setImmediate(() => {
@@ -376,17 +384,296 @@ test('a free port starts the server', async () => {
   assert.equal(sp.status, 'starting');
 });
 
-test('a program on the port that never answers is left to the server to report', async () => {
+
+/** A raw TCP server: `onSocket` decides what it does with each connection. */
+async function tcpServer(onSocket) {
   const sockets = [];
-  const tcp = createTcpServer((s) => sockets.push(s));
+  const tcp = createTcpServer((s) => { sockets.push(s); onSocket(s); });
   await new Promise((resolve) => tcp.listen(0, '127.0.0.1', () => resolve(undefined)));
   const { port } = /** @type {any} */ (tcp.address());
+  return { port, close: () => { for (const s of sockets) s.destroy(); tcp.close(); } };
+}
+
+test('a program that takes the connection and never answers is busy, and nothing is started', async () => {
+  const tcp = await tcpServer(() => {});
   try {
     const started = Date.now();
-    assert.equal(await probePort(port, { timeoutMs: 100 }), 'none');
+    assert.equal(await probePort(tcp.port, { timeoutMs: 100 }), 'busy');
     assert.ok(Date.now() - started < 2000);
+    const { sp, fake } = make({ probe: (port) => probePort(port, { timeoutMs: 100 }) });
+    await sp.start({ port: tcp.port, testMode: false });
+    assert.equal(sp.status, 'failed');
+    assert.equal(sp.code, 'port-in-use');
+    assert.equal(sp.message, `Port ${tcp.port} is in use by a program that is not answering`);
+    assert.equal(fake.calls.length, 0);
   } finally {
-    for (const s of sockets) s.destroy();
     tcp.close();
+  }
+});
+
+test('a program that takes the connection and drops it is another program', async () => {
+  const tcp = await tcpServer((s) => s.destroy());
+  try {
+    assert.equal(await probePort(tcp.port), 'other');
+  } finally {
+    tcp.close();
+  }
+});
+
+test('Light Runner is known by its x-light-runner header first', async () => {
+  const { server, port } = await httpServer((req, res) => { res.setHeader('x-light-runner', '0.2.0'); res.end('not even JSON'); });
+  try {
+    assert.equal(await probePort(port), 'light-runner');
+  } finally {
+    server.close();
+  }
+});
+
+// The data folder's marker (server.json).
+
+function dataDirWith(marker) {
+  const dir = mkdtempSync(join(tmpdir(), 'lr-launcher-marker-'));
+  if (marker) writeFileSync(join(dir, 'server.json'), JSON.stringify(marker));
+  return dir;
+}
+
+const TOKEN = 'ab'.repeat(32);
+
+test('a Light Runner running on this data folder is found by its marker, whatever port was asked', async () => {
+  const dir = dataDirWith({ pid: process.pid, port: 9123, token: TOKEN, startedAt: '2026-10-22T08:00:00.000Z' });
+  try {
+    const asked = [];
+    const { sp, fake, seen } = make({ dataDir: dir, probe: async (port) => { asked.push(port); return port === 9123 ? 'light-runner' : 'none'; } });
+    await sp.start({ port: 8080, testMode: false });
+    assert.equal(sp.status, 'running-elsewhere');
+    assert.equal(sp.port, 9123);
+    assert.deepEqual(asked, [9123]);
+    assert.equal(fake.calls.length, 0);
+    // Start again does nothing while it runs elsewhere.
+    await sp.start({ port: 8080, testMode: false });
+    assert.equal(fake.calls.length, 0);
+    assert.deepEqual(asked, [9123]);
+    assert.deepEqual(seen, ['starting', 'running-elsewhere']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a marker left behind (nothing answers, or its process is gone) is passed over', async () => {
+  for (const pid of [process.pid, 2 ** 22 + 12345]) {
+    const dir = dataDirWith({ pid, port: 9123, token: TOKEN, startedAt: '2026-10-22T08:00:00.000Z' });
+    try {
+      const { sp, fake } = make({ dataDir: dir, probe: async (port) => (pid === process.pid || port !== 9123 ? 'none' : 'light-runner') });
+      await sp.start({ port: 8080, testMode: false });
+      assert.equal(fake.calls.length, 1, `pid ${pid}`);
+      assert.equal(fake.calls[0].options.env.PORT, '8080');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('a Light Runner on this data folder that is not answering is reported, nothing started', async () => {
+  const dir = dataDirWith({ pid: process.pid, port: 9123, token: TOKEN, startedAt: '2026-10-22T08:00:00.000Z' });
+  try {
+    const { sp, fake } = make({ dataDir: dir, probe: async (port) => (port === 9123 ? 'busy' : 'none') });
+    await sp.start({ port: 8080, testMode: false });
+    assert.equal(sp.status, 'failed');
+    assert.equal(sp.code, 'port-in-use');
+    assert.equal(sp.port, 9123);
+    assert.match(sp.message, /already running on port 9123 but is not answering/);
+    assert.equal(fake.calls.length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a server that says Light Runner is already running on this data folder is shown as running elsewhere', async () => {
+  const { sp, fake } = make();
+  await sp.start({ port: 8080, testMode: false });
+  fake.last().emit('message', { type: 'error', code: 'already-running', port: 9123, message: 'Light Runner is already running on this computer (port 9123), with the same data folder' });
+  fake.last().exit(2);
+  await until(sp, 'running-elsewhere');
+  assert.equal(sp.port, 9123);
+  await tick(40);
+  assert.equal(fake.calls.length, 1);
+});
+
+// Restarts, stopping and listeners.
+
+test('a server that ran well for a while gets its one restart back; a crash loop still gets one', async () => {
+  let now = 0;
+  const { sp, fake } = make({ now: () => now, stableMs: 600_000 });
+  await sp.start({ port: 8080, testMode: false });
+  fake.last().ready(8080);
+  now = 20 * 60_000;
+  fake.last().exit(1);
+  await tick(40);
+  assert.equal(fake.calls.length, 2, 'restarted after the first crash');
+  fake.last().ready(8080);
+  now += 30 * 60_000;
+  fake.last().exit(1);
+  await tick(40);
+  assert.equal(fake.calls.length, 3, 'up 30 minutes: restarted again');
+  fake.last().ready(8080);
+  now += 5_000;
+  fake.last().exit(1);
+  await until(sp, 'failed');
+  await tick(40);
+  assert.equal(fake.calls.length, 3, 'up 5 s: not restarted again');
+  assert.equal(sp.code, 'crashed');
+});
+
+test('stop gives up when the server cannot be ended, instead of waiting for ever', async () => {
+  const { sp, fake } = make({ stopTimeoutMs: 30, killWaitMs: 30 });
+  await sp.start({ port: 8080, testMode: false });
+  const child = fake.last();
+  child.kill = () => { throw new Error('kill failed'); };
+  child.ready(8080);
+  const started = Date.now();
+  await sp.stop();
+  assert.ok(Date.now() - started < 1000);
+  assert.equal(sp.status, 'failed');
+  assert.equal(sp.code, 'stop-failed');
+  // A close that comes much later changes nothing.
+  child.emit('close', 0, null);
+  assert.equal(sp.status, 'failed');
+});
+
+test('stop of a server that has already ended (no close yet) finishes at once', async () => {
+  const { sp, fake } = make({ stopTimeoutMs: 5000 });
+  await sp.start({ port: 8080, testMode: false });
+  const child = fake.last();
+  child.ready(8080);
+  child.exitCode = 0;
+  const started = Date.now();
+  await sp.stop();
+  assert.ok(Date.now() - started < 1000);
+  assert.equal(sp.status, 'stopped');
+});
+
+test('requestStop asks the server to stop at once, without waiting (the computer is shutting down)', async () => {
+  const { sp, fake } = make();
+  assert.equal(sp.requestStop(), false);
+  await sp.start({ port: 8080, testMode: false });
+  const child = fake.last();
+  child.ready(8080);
+  assert.equal(sp.requestStop(), true);
+  assert.deepEqual(child.sent, [{ type: 'shutdown' }]);
+  child.exit(0);
+  await until(sp, 'stopped');
+  await tick(40);
+  assert.equal(fake.calls.length, 1);
+});
+
+test('a listener that throws does not stop the others hearing', async () => {
+  const { sp, fake, seen } = make();
+  const errors = [];
+  const consoleError = console.error;
+  console.error = (...args) => errors.push(args);
+  try {
+    const off = sp.onChange(() => { throw new Error('window gone'); });
+    const later = [];
+    sp.onChange((s) => later.push(s.status));
+    await sp.start({ port: 8080, testMode: false });
+    fake.last().ready(8080);
+    off();
+    assert.deepEqual(seen, ['starting', 'running']);
+    assert.deepEqual(later, ['starting', 'running']);
+    assert.equal(errors.length, 2);
+  } finally {
+    console.error = consoleError;
+  }
+});
+
+// Stopping a Light Runner this launcher didn't start, with the marker's token.
+
+/** A stand-in for a running Light Runner: answers /api/state and, with the token, POST /api/launcher/stop. */
+async function fakeLightRunner({ token = TOKEN, goesQuiet = true } = {}) {
+  const asked = [];
+  const sockets = new Set();
+  const server = createServer((req, res) => {
+    if (req.url === '/api/state') {
+      res.setHeader('x-light-runner', '0.2.0');
+      res.setHeader('content-type', 'application/json');
+      return res.end(JSON.stringify(lightRunnerState));
+    }
+    if (req.method === 'POST' && req.url === '/api/launcher/stop') {
+      asked.push({ authorization: req.headers.authorization, host: req.headers.host });
+      const ok = req.headers.authorization === `Bearer ${token}`;
+      res.statusCode = ok ? 202 : 401;
+      res.end(JSON.stringify(ok ? { stopping: true } : { error: 'wrong token' }));
+      if (ok && goesQuiet) setTimeout(() => { server.close(); for (const s of sockets) s.destroy(); }, 50);
+      return;
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+  server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(undefined)));
+  const { port } = /** @type {any} */ (server.address());
+  return { port, asked, close: () => { server.close(); for (const s of sockets) s.destroy(); } };
+}
+
+test('stopElsewhere stops the Light Runner on this data folder with its token and waits until it is gone', async () => {
+  const lr = await fakeLightRunner();
+  const dir = dataDirWith({ pid: process.pid, port: lr.port, token: TOKEN, startedAt: '2026-10-22T08:00:00.000Z' });
+  try {
+    const { sp, fake } = make({ dataDir: dir, probe: undefined });
+    await sp.start({ port: 8080, testMode: false });
+    assert.equal(sp.status, 'running-elsewhere');
+    assert.equal(await sp.stopElsewhere(), true);
+    assert.equal(sp.status, 'stopped');
+    assert.deepEqual(lr.asked, [{ authorization: `Bearer ${TOKEN}`, host: `127.0.0.1:${lr.port}` }]);
+    assert.equal(await probePort(lr.port), 'none');
+    // The token is never written to the log.
+    assert.equal(sp.lastLines.some((l) => l.includes(TOKEN)), false);
+    assert.equal(fake.calls.length, 0);
+  } finally {
+    lr.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('stopElsewhere without a marker, or refused, says so and leaves it running', async () => {
+  const lr = await fakeLightRunner({ token: 'cd'.repeat(32) });
+  const noMarker = dataDirWith(null);
+  const wrong = dataDirWith({ pid: process.pid, port: lr.port, token: TOKEN, startedAt: '2026-10-22T08:00:00.000Z' });
+  try {
+    const a = make({ dataDir: noMarker, probe: undefined }).sp;
+    await a.start({ port: lr.port, testMode: false });
+    assert.equal(a.status, 'running-elsewhere');
+    assert.equal(await a.stopElsewhere(), false);
+    assert.equal(a.status, 'running-elsewhere');
+    assert.match(a.message, /can.t be stopped from here/);
+
+    const b = make({ dataDir: wrong, probe: undefined }).sp;
+    await b.start({ port: 8080, testMode: false });
+    assert.equal(b.status, 'running-elsewhere');
+    assert.equal(await b.stopElsewhere(), false);
+    assert.equal(b.status, 'running-elsewhere');
+    assert.match(b.message, /refused to stop/);
+    assert.equal(await probePort(lr.port), 'light-runner');
+  } finally {
+    lr.close();
+    rmSync(noMarker, { recursive: true, force: true });
+    rmSync(wrong, { recursive: true, force: true });
+  }
+});
+
+test('stopElsewhere gives up when the server does not go away in time', async () => {
+  const lr = await fakeLightRunner({ goesQuiet: false });
+  const dir = dataDirWith({ pid: process.pid, port: lr.port, token: TOKEN, startedAt: '2026-10-22T08:00:00.000Z' });
+  try {
+    const { sp } = make({ dataDir: dir, probe: undefined });
+    await sp.start({ port: 8080, testMode: false });
+    const started = Date.now();
+    assert.equal(await sp.stopElsewhere({ waitMs: 300 }), false);
+    assert.ok(Date.now() - started < 3000);
+    assert.equal(sp.status, 'running-elsewhere');
+    assert.match(sp.message, /did not stop/);
+  } finally {
+    lr.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
