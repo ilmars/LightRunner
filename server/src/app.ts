@@ -138,6 +138,8 @@ export class App {
   private stopping = false;
   /** The token in this server's server.json (claimData), the key to the launcher's stop. */
   private markerToken: string | null = null;
+  /** Pages open on other computers (iPads, phones): the launcher's note about the firewall goes once one has come. */
+  private remotePages = new Set<WebSocket>();
   private nextId = 1;
   private pending = new Map<number, (value: unknown) => void>();
   private layout: OperatorLayout | null = null;
@@ -261,7 +263,15 @@ export class App {
         return;
       }
       const role: Role = this.isProgrammer(req) ? 'programmer' : 'operator';
-      this.wss!.handleUpgrade(req, socket, head, (ws) => this.onSocket(ws, role));
+      const from = req.socket.remoteAddress ?? '';
+      const remote = !(from.startsWith('127.') || from === '::1' || from.startsWith('::ffff:127.'));
+      this.wss!.handleUpgrade(req, socket, head, (ws) => {
+        if (remote) {
+          this.remotePages.add(ws);
+          ws.on('close', () => this.remotePages.delete(ws));
+        }
+        this.onSocket(ws, role);
+      });
     });
     // A tablet that drops off the network never closes its socket; ping each one and drop it
     // after two missed answers, so its Flash goes out like on a clean close.
@@ -1752,6 +1762,10 @@ export class App {
         return json(res, 200, this.companion());
       case 'GET /state':
         res.setHeader('x-light-runner', this.opts.version ?? 'dev');
+        // Its pid, so a launcher (and a second server) knows it is the one in server.json.
+        res.setHeader('x-light-runner-pid', String(process.pid));
+        // How many pages are open on other computers, so the launcher knows an iPad has reached it.
+        res.setHeader('x-light-runner-remote-pages', String(this.remotePages.size));
         return json(res, 200, this.latestState);
       case 'GET /apc':
         return json(res, 200, this.apcStatus());

@@ -14,7 +14,15 @@ import { AlreadyRunning } from './marker.ts';
 import { FakeMidi, loadMidi } from './midi.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const version = (JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { version?: string }).version ?? 'dev';
+function readVersion(): string {
+  try {
+    const v = (JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { version?: unknown }).version;
+    return typeof v === 'string' && v ? v : 'dev';
+  } catch {
+    return 'dev';
+  }
+}
+const version = readVersion();
 
 let fakeMidi: FakeMidi | undefined;
 if (process.env.LIGHT_RUNNER_FAKE_MIDI === '1') {

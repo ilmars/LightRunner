@@ -25,7 +25,7 @@ export function markerPath(dataDir: string): string {
 /** The marker in this data folder, or null when there is none or it can't be read. */
 export function readMarker(dataDir: string): Marker | null {
   try {
-    const m = JSON.parse(readFileSync(markerPath(dataDir), 'utf8').replace(/^﻿/, '')) as Partial<Marker> | null;
+    const m = JSON.parse(readFileSync(markerPath(dataDir), 'utf8').replace(/^\uFEFF/, '')) as Partial<Marker> | null;
     if (!m || typeof m !== 'object') return null;
     if (!Number.isInteger(m.pid) || !Number.isInteger(m.port) || typeof m.token !== 'string' || typeof m.startedAt !== 'string') return null;
     return { pid: m.pid!, port: m.port!, token: m.token, startedAt: m.startedAt };
@@ -34,8 +34,15 @@ export function readMarker(dataDir: string): Marker | null {
   }
 }
 
-/** Write the marker atomically, readable only by this user where the system allows it (the token is a key). */
-export function writeMarker(dataDir: string, marker: Marker): void {
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Write the marker atomically, readable only by this user where the system allows it (the token is a key).
+ * `rename` is for tests.
+ */
+export function writeMarker(dataDir: string, marker: Marker, rename: (from: string, to: string) => void = renameSync): void {
   const path = markerPath(dataDir);
   const tmp = `${path}.tmp`;
   rmSync(tmp, { force: true });
@@ -46,7 +53,20 @@ export function writeMarker(dataDir: string, marker: Marker): void {
   } finally {
     closeSync(fd);
   }
-  renameSync(tmp, path);
+  // Windows can refuse a rename for a moment while something (a virus scanner, a backup) has the file open.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rename(tmp, path);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (attempt >= 2 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) {
+        rmSync(tmp, { force: true });
+        throw e;
+      }
+      pause(100);
+    }
+  }
 }
 
 /** Remove the marker, if it is still this server's. */
@@ -67,8 +87,9 @@ function processAlive(pid: number): boolean {
 /**
  * Ask `GET /api/state` on this computer's port. Light Runner says so in its `x-light-runner` header (an older one
  * is known by the shape of its state). Nothing listening is 'none'; a connection that doesn't answer in time 'busy'.
+ * With `pid`, only the Light Runner whose `x-light-runner-pid` header is that pid counts: another one is 'other'.
  */
-export function probePort(port: number, timeoutMs = 1500): Promise<PortAnswer> {
+export function probePort(port: number, { timeoutMs = 1500, pid }: { timeoutMs?: number; pid?: number } = {}): Promise<PortAnswer> {
   return new Promise((resolve) => {
     let connected = false;
     let done = false;
@@ -80,6 +101,7 @@ export function probePort(port: number, timeoutMs = 1500): Promise<PortAnswer> {
       resolve(answer);
     };
     const req = request({ host: '127.0.0.1', port, path: '/api/state', method: 'GET' }, (res) => {
+      if (pid !== undefined) return finish(res.headers['x-light-runner'] && res.headers['x-light-runner-pid'] === String(pid) ? 'light-runner' : 'other');
       if (res.headers['x-light-runner']) return finish('light-runner');
       let body = '';
       res.setEncoding('utf8');
@@ -105,13 +127,17 @@ function looksLikeState(body: string): boolean {
 
 /**
  * The marker of a server still running on this data folder, or null when there is none or it was left behind
- * (its process is gone, or its port has nothing or another program on it). A server that is there but doesn't
- * answer in time counts as running: two engines on one show must never happen.
+ * (its process is gone, or its port has nothing, another program or another Light Runner on it: the pid it gives
+ * must be the marker's, as a pid can be used again). A server that is there but doesn't answer in time counts as
+ * running: two engines on one show must never happen.
  */
-export async function liveMarker(dataDir: string, probe: (port: number) => Promise<PortAnswer> = probePort): Promise<Marker | null> {
+export async function liveMarker(
+  dataDir: string,
+  probe: (port: number, options: { pid: number }) => Promise<PortAnswer> = (port, options) => probePort(port, options),
+): Promise<Marker | null> {
   const marker = readMarker(dataDir);
   if (!marker || marker.pid <= 0 || !processAlive(marker.pid)) return null;
-  const answer = await probe(marker.port);
+  const answer = await probe(marker.port, { pid: marker.pid });
   return answer === 'light-runner' || answer === 'busy' ? marker : null;
 }
 
