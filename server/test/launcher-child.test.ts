@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -97,5 +97,35 @@ test('a server that finds its port taken says so over IPC and exits with code 2'
     second?.child.kill();
     rmSync(dirA, { recursive: true, force: true });
     rmSync(dirB, { recursive: true, force: true });
+  }
+});
+
+test('a second server on the same data folder says Light Runner is already running, before it starts its engine', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lr-launcher-'));
+  const portA = await freePort();
+  const portB = await freePort();
+  const first = startChild(dir, portA);
+  let second: ReturnType<typeof startChild> | undefined;
+  try {
+    await first.message('ready');
+    const marker = JSON.parse(readFileSync(join(dir, 'server.json'), 'utf8'));
+    assert.equal(marker.port, portA);
+    second = startChild(dir, portB);
+    const error = await second.message('error');
+    assert.equal(error.code, 'already-running');
+    assert.equal(error.port, portA);
+    assert.equal(await second.exited, 2, second.log());
+    // It never loaded the show (that comes before the engine starts).
+    assert.doesNotMatch(second.log(), /Loaded show/);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'server.json'), 'utf8')), marker);
+
+    first.child.send({ type: 'shutdown' });
+    assert.equal(await first.exited, 0, first.log());
+    assert.equal(existsSync(join(dir, 'server.json')), false, 'a clean stop removes the marker');
+  } finally {
+    first.child.kill();
+    second?.child.kill();
+    await first.exited;
+    rmSync(dir, { recursive: true, force: true });
   }
 });
