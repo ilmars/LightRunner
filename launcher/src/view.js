@@ -14,12 +14,12 @@
  * }} Words
  */
 
-export const PORT_MIN = 1024;
-export const PORT_MAX = 65535;
+import { PORT_MAX, PORT_MIN } from './config.js';
+
+export { PORT_MAX, PORT_MIN };
 
 /**
- * A port typed into the window: a whole number from 1024 to 65535 (lower ones need an administrator on some systems
- * and are taken by other services).
+ * A port typed into the window: a whole number from 1024 to 65535 (as the settings file takes).
  * @param {unknown} text
  * @returns {{ port: number, error?: undefined } | { port?: undefined, error: string }}
  */

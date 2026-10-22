@@ -9,6 +9,10 @@ import { dirname } from 'node:path';
  * @typedef {{ port: number, startAtLogin: boolean, testMode: boolean, address: string | null, ipadSeen: boolean }} LauncherConfig
  */
 
+/** The ports Light Runner can be given (lower ones need an administrator on some systems and belong to other services). */
+export const PORT_MIN = 1024;
+export const PORT_MAX = 65535;
+
 /** @type {Readonly<LauncherConfig>} */
 export const DEFAULT_CONFIG = Object.freeze({ port: 8080, startAtLogin: true, testMode: false, address: null, ipadSeen: false });
 
@@ -21,7 +25,7 @@ function normalise(value) {
   const v = value && typeof value === 'object' && !Array.isArray(value) ? /** @type {Record<string, unknown>} */ (value) : {};
   const port = v.port;
   return {
-    port: typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535 ? port : DEFAULT_CONFIG.port,
+    port: typeof port === 'number' && Number.isInteger(port) && port >= PORT_MIN && port <= PORT_MAX ? port : DEFAULT_CONFIG.port,
     startAtLogin: typeof v.startAtLogin === 'boolean' ? v.startAtLogin : DEFAULT_CONFIG.startAtLogin,
     testMode: typeof v.testMode === 'boolean' ? v.testMode : DEFAULT_CONFIG.testMode,
     address: typeof v.address === 'string' && v.address ? v.address : DEFAULT_CONFIG.address,

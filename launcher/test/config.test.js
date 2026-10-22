@@ -66,10 +66,13 @@ test('a setting that is wrong falls back to its default, the others are kept', (
     const file = join(dir, 'launcher.json');
     writeFileSync(file, JSON.stringify({ port: 'eighty', startAtLogin: false, testMode: 'yes', address: 12 }));
     assert.deepEqual(loadConfig(file), { port: 8080, startAtLogin: false, testMode: false, address: null, ipadSeen: false });
-    for (const port of [0, -1, 65536, 80.5, null]) {
+    // The window takes 1024 to 65535; a file edited by hand gets no other.
+    for (const port of [0, -1, 80, 1023, 65536, 80.5, null]) {
       writeFileSync(file, JSON.stringify({ port }));
       assert.equal(loadConfig(file).port, 8080, `port ${port}`);
     }
+    writeFileSync(file, JSON.stringify({ port: 1024 }));
+    assert.equal(loadConfig(file).port, 1024);
     writeFileSync(file, JSON.stringify({ port: 65535, address: '' }));
     assert.deepEqual(loadConfig(file), { ...DEFAULT_CONFIG, port: 65535 });
   } finally {
