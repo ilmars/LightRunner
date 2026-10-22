@@ -31,7 +31,7 @@ import { keyLabel, keyPlace } from './keynames.ts';
 import type { FakeMidi, MidiPorts } from './midi.ts';
 import { operatorLayout, type OperatorLayout } from './layout.ts';
 import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from './messages.ts';
-import { isLocalAddress } from './net.ts';
+import { isLocalAddress, isThisComputer } from './net.ts';
 import { AlreadyRunning, liveMarker, removeMarker, writeMarker } from './marker.ts';
 import { RuntimeSaver, Store } from './store.ts';
 
@@ -263,8 +263,7 @@ export class App {
         return;
       }
       const role: Role = this.isProgrammer(req) ? 'programmer' : 'operator';
-      const from = req.socket.remoteAddress ?? '';
-      const remote = !(from.startsWith('127.') || from === '::1' || from.startsWith('::ffff:127.'));
+      const remote = !isThisComputer(req.socket.remoteAddress);
       this.wss!.handleUpgrade(req, socket, head, (ws) => {
         if (remote) {
           this.remotePages.add(ws);

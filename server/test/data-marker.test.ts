@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import { App } from '../src/app.ts';
 import { liveMarker, probePort, readMarker, writeMarker } from '../src/marker.ts';
+import { isThisComputer } from '../src/net.ts';
 
 // One server per data folder: the server.json marker, and the launcher's stop.
 
@@ -279,7 +280,7 @@ test('writing the marker tries again when Windows holds the file for a moment', 
   }
 });
 
-test('GET /api/state says how many pages are open on other computers', async (t) => {
+test('GET /api/state says how many pages are open on other computers (not this one’s)', async (t) => {
   const lan = Object.values(networkInterfaces()).flat().find((a) => a && a.family === 'IPv4' && !a.internal && !a.address.startsWith('169.254.'));
   if (!lan) { t.skip('this computer has no network address'); return; }
   const dir = tempDir();
@@ -295,15 +296,30 @@ test('GET /api/state says how many pages are open on other computers', async (t)
     assert.equal(await count(), '0');
     const here = await open('127.0.0.1');
     assert.equal(await count(), '0', 'a page on this computer is not an iPad');
-    // The connection comes from this computer's network address, as one from an iPad would.
-    const ipad = await open(lan.address);
-    assert.equal(await count(), '1');
-    await new Promise((resolve) => { ipad.once('close', resolve); ipad.close(); });
-    await new Promise((r) => setTimeout(r, 50));
-    assert.equal(await count(), '0');
+    // A browser on the server computer itself, opened on its network address, isn't an iPad either. (One from
+    // another computer is counted: see isThisComputer.)
+    const own = await open(lan.address);
+    assert.equal(await count(), '0', 'a page on this computer’s own network address is not an iPad');
+    own.close();
     here.close();
   } finally {
     await app.stop();
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a page is from this computer when it comes from loopback or one of its own network addresses', () => {
+  const interfaces = {
+    'Wi-Fi': [
+      { address: '192.168.0.195', family: 'IPv4', internal: false },
+      { address: 'fe80::1c2a:3b4c:5d6e:7f80', family: 'IPv6', internal: false, scopeid: 12 },
+    ],
+    Loopback: [{ address: '127.0.0.1', family: 'IPv4', internal: true }],
+  } as unknown as ReturnType<typeof networkInterfaces>;
+  for (const own of ['127.0.0.1', '127.0.0.5', '::1', '::ffff:127.0.0.1', '192.168.0.195', '::ffff:192.168.0.195', 'fe80::1c2a:3b4c:5d6e:7f80', 'fe80::1c2a:3b4c:5d6e:7f80%12']) {
+    assert.equal(isThisComputer(own, interfaces), true, own);
+  }
+  for (const other of ['192.168.0.42', '::ffff:192.168.0.42', '10.0.0.5', 'fe80::1', '', undefined]) {
+    assert.equal(isThisComputer(other, interfaces), false, String(other));
   }
 });
