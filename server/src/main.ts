@@ -51,6 +51,9 @@ const send = process.send ? (message: object) => void process.send!(message) : u
 if (send) process.on('message', (message) => {
   if ((message as { type?: unknown } | null)?.type === 'shutdown') void shutdown('shutdown message');
 });
+// If the launcher goes away without stopping us (it crashed), the lights keep running and the next launcher finds
+// this server. The launcher was reading our log, so a log line then fails to write: that must not stop the server.
+if (send) for (const stream of [process.stdout, process.stderr]) stream.on('error', () => {});
 
 try {
   await app.start();
