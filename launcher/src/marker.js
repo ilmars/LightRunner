@@ -15,7 +15,7 @@ export const MARKER_FILE = 'server.json';
  */
 export function readMarker(dataDir) {
   try {
-    const m = JSON.parse(readFileSync(join(dataDir, MARKER_FILE), 'utf8').replace(/^﻿/, ''));
+    const m = JSON.parse(readFileSync(join(dataDir, MARKER_FILE), 'utf8').replace(/^\uFEFF/, ''));
     if (!m || typeof m !== 'object') return null;
     if (!Number.isInteger(m.pid) || !Number.isInteger(m.port) || typeof m.token !== 'string' || typeof m.startedAt !== 'string') return null;
     return { pid: m.pid, port: m.port, token: m.token, startedAt: m.startedAt };

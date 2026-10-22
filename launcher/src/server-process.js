@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { processAlive, readMarker } from './marker.js';
 
 /** @typedef {'starting' | 'running' | 'running-elsewhere' | 'stopped' | 'failed'} Status */
-/** @typedef {'port-in-use' | 'start-failed' | 'crashed' | 'stop-failed'} FailCode */
+/** @typedef {'port-in-use' | 'not-answering' | 'start-failed' | 'crashed' | 'stop-failed'} FailCode */
 /** @typedef {{ status: Status, code: FailCode | null, message: string | null, port: number | null }} Snapshot */
 /** @typedef {'light-runner' | 'other' | 'busy' | 'none'} PortAnswer */
 
@@ -24,11 +24,13 @@ const sleep = (/** @type {number} */ ms) => new Promise((resolve) => setTimeout(
  * - 'other': another program (it answers otherwise, or takes the connection and drops it);
  * - 'busy': something took the connection but didn't answer in time;
  * - 'none': nothing is listening.
+ * With `pid`, only the Light Runner whose `x-light-runner-pid` header is that pid counts (the one in a marker; a
+ * pid can be used again): another Light Runner is 'other'.
  * @param {number} port
- * @param {{ host?: string, timeoutMs?: number }} [options]
+ * @param {{ host?: string, timeoutMs?: number, pid?: number }} [options]
  * @returns {Promise<PortAnswer>}
  */
-export function probePort(port, { host = '127.0.0.1', timeoutMs = 1500 } = {}) {
+export function probePort(port, { host = '127.0.0.1', timeoutMs = 1500, pid } = {}) {
   return new Promise((resolve) => {
     let connected = false;
     let done = false;
@@ -41,6 +43,7 @@ export function probePort(port, { host = '127.0.0.1', timeoutMs = 1500 } = {}) {
       resolve(answer);
     };
     const req = request({ host, port, path: '/api/state', method: 'GET', headers: { accept: 'application/json' } }, (res) => {
+      if (pid !== undefined) return finish(res.headers['x-light-runner'] && res.headers['x-light-runner-pid'] === String(pid) ? 'light-runner' : 'other');
       if (res.headers['x-light-runner']) return finish('light-runner');
       let body = '';
       res.setEncoding('utf8');
@@ -92,7 +95,7 @@ export class ServerProcess {
    * @param {{
    *   nodePath: string, appDir: string, dataDir: string,
    *   spawn?: typeof childSpawn,
-   *   probe?: (port: number) => Promise<PortAnswer>,
+   *   probe?: (port: number, options?: { pid?: number }) => Promise<PortAnswer>,
    *   env?: NodeJS.ProcessEnv,
    *   stopTimeoutMs?: number,
    *   killWaitMs?: number,
@@ -121,7 +124,8 @@ export class ServerProcess {
     this.now = now;
     /** @type {Status} */
     this.status = 'stopped';
-    /** Why it failed: `port-in-use`, `start-failed`, `crashed` or `stop-failed`; null otherwise. @type {FailCode | null} */
+    /** Why it failed: `port-in-use`, `not-answering` (a Light Runner on this data folder that doesn't answer),
+     * `start-failed`, `crashed` or `stop-failed`; null otherwise. @type {FailCode | null} */
     this.code = null;
     /** Plain words for a failure (the server's own, or the launcher's). @type {string | null} */
     this.message = null;
@@ -178,11 +182,11 @@ export class ServerProcess {
 
     const marker = readMarker(this.dataDir);
     if (marker && processAlive(marker.pid)) {
-      const answer = await this.probe(marker.port);
+      const answer = await this.probe(marker.port, { pid: marker.pid });
       if (generation !== this.generation) return;
       if (answer === 'light-runner') return this.elsewhere(marker.port);
       if (answer === 'busy') {
-        return this.set('failed', 'port-in-use', `Light Runner is already running on port ${marker.port} but is not answering`, marker.port);
+        return this.set('failed', 'not-answering', `Light Runner is already running on port ${marker.port} but is not answering`, marker.port);
       }
     }
 
@@ -192,6 +196,26 @@ export class ServerProcess {
     else if (answer === 'other') this.set('failed', 'port-in-use', `Port ${port} is already in use by another program`, port);
     else if (answer === 'busy') this.set('failed', 'port-in-use', `Port ${port} is in use by a program that is not answering`, port);
     else this.run();
+  }
+
+  /**
+   * While a Light Runner this launcher didn't start runs (or one on this data folder isn't answering), ask its port
+   * again: when nothing answers there any more it has gone (`stopped`); one that answers again is `running-elsewhere`.
+   * Call it every few seconds. Does nothing in any other status.
+   */
+  async recheck() {
+    if (this.child || (this.status !== 'running-elsewhere' && this.code !== 'not-answering')) return;
+    const generation = this.generation;
+    const port = /** @type {number} */ (this.port);
+    const answer = await this.probe(port);
+    if (generation !== this.generation || this.child) return;
+    if (this.status !== 'running-elsewhere' && this.code !== 'not-answering') return;
+    if (answer === 'none') {
+      this.note(`The Light Runner on port ${port} has stopped`);
+      this.set('stopped', null, null, port);
+    } else if (answer === 'light-runner' && this.status !== 'running-elsewhere') {
+      this.elsewhere(port);
+    }
   }
 
   /** @param {number} port */
@@ -293,8 +317,14 @@ export class ServerProcess {
     };
     if (this.child) return refuse('This launcher is running Light Runner itself; use Stop');
     const marker = readMarker(this.dataDir);
-    if (!marker) return refuse(`The Light Runner on port ${this.port} was started for another data folder, so it can't be stopped from here`);
-    if ((await this.probe(marker.port)) !== 'light-runner') return refuse(`Light Runner on port ${marker.port} is not answering`);
+    const another = `The Light Runner on port ${this.port} was started for another data folder, so it can't be stopped from here`;
+    if (!marker) return refuse(another);
+    const answer = await this.probe(marker.port, { pid: marker.pid });
+    if (answer !== 'light-runner') {
+      // The marker is left from an earlier server; the one running is another (or none answers at all).
+      if (answer === 'other' && (await this.probe(this.port ?? marker.port)) === 'light-runner') return refuse(another);
+      return refuse(`Light Runner on port ${marker.port} is not answering`);
+    }
     let status;
     try {
       status = await askToStop(marker.port, marker.token);

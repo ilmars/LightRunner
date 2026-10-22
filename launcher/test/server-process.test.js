@@ -479,7 +479,7 @@ test('a Light Runner on this data folder that is not answering is reported, noth
     const { sp, fake } = make({ dataDir: dir, probe: async (port) => (port === 9123 ? 'busy' : 'none') });
     await sp.start({ port: 8080, testMode: false });
     assert.equal(sp.status, 'failed');
-    assert.equal(sp.code, 'port-in-use');
+    assert.equal(sp.code, 'not-answering');
     assert.equal(sp.port, 9123);
     assert.match(sp.message, /already running on port 9123 but is not answering/);
     assert.equal(fake.calls.length, 0);
@@ -589,12 +589,13 @@ test('a listener that throws does not stop the others hearing', async () => {
 // Stopping a Light Runner this launcher didn't start, with the marker's token.
 
 /** A stand-in for a running Light Runner: answers /api/state and, with the token, POST /api/launcher/stop. */
-async function fakeLightRunner({ token = TOKEN, goesQuiet = true } = {}) {
+async function fakeLightRunner({ token = TOKEN, goesQuiet = true, pid = process.pid } = {}) {
   const asked = [];
   const sockets = new Set();
   const server = createServer((req, res) => {
     if (req.url === '/api/state') {
       res.setHeader('x-light-runner', '0.2.0');
+      res.setHeader('x-light-runner-pid', String(pid));
       res.setHeader('content-type', 'application/json');
       return res.end(JSON.stringify(lightRunnerState));
     }
@@ -674,6 +675,64 @@ test('stopElsewhere gives up when the server does not go away in time', async ()
     assert.match(sp.message, /did not stop/);
   } finally {
     lr.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a marker counts only when the Light Runner on its port has its pid', async () => {
+  // process.ppid is alive (it started these tests), but the Light Runner on the port says it is process.pid.
+  const lr = await fakeLightRunner();
+  const dir = dataDirWith({ pid: process.ppid, port: lr.port, token: TOKEN, startedAt: '2026-10-22T08:00:00.000Z' });
+  try {
+    assert.equal(await probePort(lr.port, { pid: process.pid }), 'light-runner');
+    assert.equal(await probePort(lr.port, { pid: process.ppid }), 'other');
+    // Asked for another port, it starts its own server: the marker is someone else's left-over.
+    const a = make({ dataDir: dir, probe: undefined });
+    await a.sp.start({ port: await freePort(), testMode: false });
+    assert.equal(a.fake.calls.length, 1);
+    // Asked for that port, the Light Runner there is shown as running, but it can't be stopped from here.
+    const b = make({ dataDir: dir, probe: undefined });
+    await b.sp.start({ port: lr.port, testMode: false });
+    assert.equal(b.sp.status, 'running-elsewhere');
+    assert.equal(await b.sp.stopElsewhere(), false);
+    assert.match(b.sp.message, /another data folder/);
+    assert.deepEqual(lr.asked, [], 'never sent the token to it');
+  } finally {
+    lr.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('recheck notices when the Light Runner running elsewhere has gone, or answers again', async () => {
+  let answer = 'light-runner';
+  const dir = dataDirWith({ pid: process.pid, port: 9123, token: TOKEN, startedAt: '2026-10-22T08:00:00.000Z' });
+  try {
+    const { sp, fake, seen } = make({ dataDir: dir, probe: async () => answer });
+    await sp.start({ port: 8080, testMode: false });
+    assert.equal(sp.status, 'running-elsewhere');
+    await sp.recheck();
+    assert.equal(sp.status, 'running-elsewhere');
+    answer = 'none';
+    await sp.recheck();
+    assert.equal(sp.status, 'stopped');
+    assert.equal(sp.port, 9123);
+    // Stopped: nothing more is asked, and nothing was started.
+    answer = 'light-runner';
+    await sp.recheck();
+    assert.equal(sp.status, 'stopped');
+    assert.equal(fake.calls.length, 0);
+
+    // One that isn't answering: it comes back, or goes.
+    answer = 'busy';
+    await sp.start({ port: 8080, testMode: false });
+    assert.equal(sp.code, 'not-answering');
+    await sp.recheck();
+    assert.equal(sp.code, 'not-answering');
+    answer = 'light-runner';
+    await sp.recheck();
+    assert.equal(sp.status, 'running-elsewhere');
+    assert.deepEqual(seen, ['starting', 'running-elsewhere', 'stopped', 'starting', 'failed', 'running-elsewhere']);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -43,7 +43,7 @@ export function loadConfig(file) {
   let parsed = null;
   try {
     // Notepad saves with a byte order mark.
-    parsed = JSON.parse(text.replace(/^﻿/, ''));
+    parsed = JSON.parse(text.replace(/^\uFEFF/, ''));
   } catch {}
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     try {
