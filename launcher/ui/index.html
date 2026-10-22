@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Light Runner</title>
+  <!-- theme.css, its fonts and the icon are copied from web/shared by scripts/stage-app.mjs. -->
+  <link rel="stylesheet" href="shared/theme.css">
+  <link rel="stylesheet" href="launcher.css">
+  <script type="module" src="launcher.js"></script>
+</head>
+<body>
+  <main class="lr">
+    <header class="top">
+      <img class="icon" src="shared/icon.svg" alt="" width="36" height="36">
+      <div class="title">
+        <div class="ds-caps">Light Runner</div>
+        <h1 id="headline" role="status">Starting…</h1>
+      </div>
+      <span id="testPill" class="ds-pill" hidden>Test mode</span>
+      <span id="problem" class="ds-pill ds-pill--warn" hidden></span>
+    </header>
+
+    <section class="ds-panel card" id="reach" aria-labelledby="reachLabel">
+      <div class="ds-caps" id="reachLabel">For the iPads</div>
+      <div id="url" class="url"></div>
+      <div class="reach">
+        <div class="reach-text">
+          <p class="hint">Open it in Safari on the iPad, or point the iPad's camera at the code.</p>
+          <label id="pickRow" class="pick" hidden>
+            <span class="ds-label">Network</span>
+            <select id="pick" class="ds-field"></select>
+          </label>
+          <p id="noNetwork" class="hint" hidden>This computer isn't on a network, so the iPads can't reach it yet.</p>
+          <p id="firewall" class="firewall" hidden>If Windows asks, allow Light Runner on private networks, so the iPads can reach it</p>
+        </div>
+        <img id="qr" class="qr" alt="Code for the iPad's camera: the address above" width="152" height="152" hidden>
+      </div>
+    </section>
+
+    <section id="notice" class="notice" hidden>
+      <p id="noticeText" class="notice-text"></p>
+      <p id="noticeDetail" class="notice-detail"></p>
+      <pre id="lines" class="lines" hidden></pre>
+      <div class="notice-actions" id="elsewhereActions" hidden>
+        <button id="stopElsewhere" class="ds-btn">Stop it</button>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button id="openOperator" class="ds-btn">Open the operator page</button>
+      <button id="openSettings" class="ds-btn">Open Settings</button>
+      <span class="grow"></span>
+      <button id="startStop" class="ds-btn ds-btn--quiet">Stop</button>
+    </div>
+
+    <section class="ds-panel card settings" aria-labelledby="settingsLabel">
+      <div class="ds-caps" id="settingsLabel">Settings</div>
+      <form id="portForm" class="port-row">
+        <label for="port">Port</label>
+        <input id="port" class="ds-field" inputmode="numeric" autocomplete="off" maxlength="5" aria-describedby="portNote">
+        <button id="applyPort" class="ds-btn ds-btn--quiet" type="submit">Change</button>
+      </form>
+      <p id="portNote" class="field-note" hidden></p>
+      <label class="ds-switch">
+        <input type="checkbox" id="startAtLogin">
+        <span class="ds-switch-track"></span>
+        Start when the computer starts
+      </label>
+      <label class="ds-switch">
+        <input type="checkbox" id="testMode">
+        <span class="ds-switch-track"></span>
+        Test mode: don't send to the lights
+      </label>
+      <p id="saveError" class="field-note bad" hidden></p>
+    </section>
+
+    <footer class="foot">
+      <span id="version"></span>
+      <a id="newer" href="#" hidden></a>
+    </footer>
+  </main>
+</body>
+</html>

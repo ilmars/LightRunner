@@ -1,0 +1,60 @@
+# The Light Runner installers: a .dmg for the Mac (the build machine's own processor) and a per-user Setup.exe
+# for Windows (x64). Build with `npm run dist` (see README.md); the version comes from the root package.json.
+appId: com.github.ilmars.lightrunner
+productName: Light Runner
+copyright: Light Runner contributors
+directories:
+  output: dist
+  buildResources: resources
+# The window's code in the asar; the server and its Node beside it (scripts/stage-app.mjs made build/app).
+files:
+  - main.js
+  - preload.js
+  - package.json
+  - src/**
+  - ui/**
+  - assets/**
+extraResources:
+  - from: build/app
+    to: lightrunner
+    filter: ["**/*"]
+asar: true
+# The window is in English: leave out Chromium's other languages (about 45 MB).
+electronLanguages: [en-US]
+# The server's own native add-ons (MIDI, serial) run on the bundled Node, not on Electron: nothing to rebuild.
+npmRebuild: false
+nodeGypRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icon.png
+  # Unsigned for now (owner's decision): Windows' SmartScreen asks once, "More info > Run anyway".
+nsis:
+  # Per-user, no questions: it installs, puts Light Runner on the desktop and in the Start menu, and opens it.
+  oneClick: true
+  perMachine: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Light Runner
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  artifactName: Light Runner Setup ${version}.exe
+  # Stops a running Light Runner cleanly (the stage is saved) before the files are replaced; see installer.nsh.
+  include: resources/installer.nsh
+
+mac:
+  target:
+    - target: dmg
+  category: public.app-category.utilities
+  icon: resources/icon-mac.png
+  # Unsigned for now (owner's decision): an ad-hoc signature, so Apple Silicon runs it; right-click > Open once.
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extendInfo:
+    NSLocalNetworkUsageDescription: Light Runner sends to the lights and talks to the iPads on this network.
+dmg:
+  artifactName: Light Runner ${version} ${arch}.dmg
+  title: Light Runner ${version}

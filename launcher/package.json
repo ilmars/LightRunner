@@ -1,11 +1,25 @@
 {
   "name": "light-runner-launcher",
+  "productName": "Light Runner",
   "version": "0.0.0",
   "private": true,
   "description": "The Light Runner window for Mac and Windows: starts the server and shows the address for the iPads. Its version is set from the root package.json when the app is built.",
   "license": "MIT",
   "type": "module",
+  "main": "main.js",
+  "author": "Ilmārs",
   "scripts": {
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "start": "node scripts/stage-app.mjs --ui && electron .",
+    "stage": "node scripts/stage-app.mjs",
+    "dist": "node scripts/dist.mjs",
+    "icons": "electron scripts/make-icons.mjs"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.15.3"
   }
 }
