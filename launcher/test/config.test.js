@@ -12,8 +12,8 @@ function tempDir() {
 test('a missing settings file gives the defaults: port 8080, start at login on, test mode off', () => {
   const dir = tempDir();
   try {
-    assert.deepEqual(loadConfig(join(dir, 'launcher.json')), { port: 8080, startAtLogin: true, testMode: false, address: null });
-    assert.deepEqual(DEFAULT_CONFIG, { port: 8080, startAtLogin: true, testMode: false, address: null });
+    assert.deepEqual(loadConfig(join(dir, 'launcher.json')), { port: 8080, startAtLogin: true, testMode: false, address: null, ipadSeen: false });
+    assert.deepEqual(DEFAULT_CONFIG, { port: 8080, startAtLogin: true, testMode: false, address: null, ipadSeen: false });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -36,7 +36,7 @@ test('settings are saved and read back', () => {
   const dir = tempDir();
   try {
     const file = join(dir, 'launcher.json');
-    const config = { port: 8090, startAtLogin: false, testMode: true, address: '192.168.0.195' };
+    const config = { port: 8090, startAtLogin: false, testMode: true, address: '192.168.0.195', ipadSeen: true };
     saveConfig(file, config);
     assert.deepEqual(loadConfig(file), config);
     // Nothing is left behind by the atomic write.
@@ -65,7 +65,7 @@ test('a setting that is wrong falls back to its default, the others are kept', (
   try {
     const file = join(dir, 'launcher.json');
     writeFileSync(file, JSON.stringify({ port: 'eighty', startAtLogin: false, testMode: 'yes', address: 12 }));
-    assert.deepEqual(loadConfig(file), { port: 8080, startAtLogin: false, testMode: false, address: null });
+    assert.deepEqual(loadConfig(file), { port: 8080, startAtLogin: false, testMode: false, address: null, ipadSeen: false });
     for (const port of [0, -1, 65536, 80.5, null]) {
       writeFileSync(file, JSON.stringify({ port }));
       assert.equal(loadConfig(file).port, 8080, `port ${port}`);
@@ -81,8 +81,8 @@ test('a settings file saved with a byte order mark (Notepad) is read', () => {
   const dir = tempDir();
   try {
     const file = join(dir, 'launcher.json');
-    writeFileSync(file, `\uFEFF${JSON.stringify({ port: 8095, startAtLogin: false, testMode: true, address: null })}`);
-    assert.deepEqual(loadConfig(file), { port: 8095, startAtLogin: false, testMode: true, address: null });
+    writeFileSync(file, `\uFEFF${JSON.stringify({ port: 8095, startAtLogin: false, testMode: true, address: null, ipadSeen: true })}`);
+    assert.deepEqual(loadConfig(file), { port: 8095, startAtLogin: false, testMode: true, address: null, ipadSeen: true });
     assert.deepEqual(readdirSync(dir), ['launcher.json']);
   } finally {
     rmSync(dir, { recursive: true, force: true });

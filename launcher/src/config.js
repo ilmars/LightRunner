@@ -1,15 +1,16 @@
 // The launcher's own settings (launcher.json in the data folder): the port, Start when the computer starts,
-// Test mode and the address chosen for the iPads. The show and its settings stay the server's.
+// Test mode, the address chosen for the iPads and whether an iPad has reached it yet. The show and its settings
+// stay the server's.
 
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 /**
- * @typedef {{ port: number, startAtLogin: boolean, testMode: boolean, address: string | null }} LauncherConfig
+ * @typedef {{ port: number, startAtLogin: boolean, testMode: boolean, address: string | null, ipadSeen: boolean }} LauncherConfig
  */
 
 /** @type {Readonly<LauncherConfig>} */
-export const DEFAULT_CONFIG = Object.freeze({ port: 8080, startAtLogin: true, testMode: false, address: null });
+export const DEFAULT_CONFIG = Object.freeze({ port: 8080, startAtLogin: true, testMode: false, address: null, ipadSeen: false });
 
 /**
  * Keep the settings that make sense; anything else gets its default.
@@ -24,6 +25,7 @@ function normalise(value) {
     startAtLogin: typeof v.startAtLogin === 'boolean' ? v.startAtLogin : DEFAULT_CONFIG.startAtLogin,
     testMode: typeof v.testMode === 'boolean' ? v.testMode : DEFAULT_CONFIG.testMode,
     address: typeof v.address === 'string' && v.address ? v.address : DEFAULT_CONFIG.address,
+    ipadSeen: typeof v.ipadSeen === 'boolean' ? v.ipadSeen : DEFAULT_CONFIG.ipadSeen,
   };
 }
 

@@ -318,7 +318,8 @@ export class ServerProcess {
     if (this.child) return refuse('This launcher is running Light Runner itself; use Stop');
     const marker = readMarker(this.dataDir);
     const another = `The Light Runner on port ${this.port} was started for another data folder, so it can't be stopped from here`;
-    if (!marker) return refuse(another);
+    // No marker, one left by a server that has gone, or one for another port: the Light Runner there isn't this folder's.
+    if (!marker || !processAlive(marker.pid) || (this.port !== null && marker.port !== this.port)) return refuse(another);
     const answer = await this.probe(marker.port, { pid: marker.pid });
     if (answer !== 'light-runner') {
       // The marker is left from an earlier server; the one running is another (or none answers at all).

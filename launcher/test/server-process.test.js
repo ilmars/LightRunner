@@ -736,3 +736,25 @@ test('recheck notices when the Light Runner running elsewhere has gone, or answe
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('stopElsewhere leaves a Light Runner alone when the marker is a left-over or for another port', async () => {
+  const lr = await fakeLightRunner();
+  try {
+    // A marker whose process has gone, and one for another port, both with the right token for this Light Runner.
+    for (const marker of [{ pid: 2 ** 22 + 12345, port: lr.port }, { pid: process.pid, port: lr.port + 1 }]) {
+      const dir = dataDirWith({ ...marker, token: TOKEN, startedAt: '2026-10-22T08:00:00.000Z' });
+      try {
+        const { sp } = make({ dataDir: dir, probe: undefined });
+        await sp.start({ port: lr.port, testMode: false });
+        assert.equal(sp.status, 'running-elsewhere');
+        assert.equal(await sp.stopElsewhere(), false);
+        assert.match(sp.message, new RegExp(`port ${lr.port} was started for another data folder`));
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+    assert.deepEqual(lr.asked, [], 'never sent the token to it');
+  } finally {
+    lr.close();
+  }
+});
