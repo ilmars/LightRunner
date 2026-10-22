@@ -7,6 +7,7 @@
 
 import { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, powerMonitor, shell } from 'electron';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { uptime } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import QRCode from 'qrcode';
@@ -14,15 +15,16 @@ import { loadConfig, saveConfig } from './src/config.js';
 import { processAlive, readMarker } from './src/marker.js';
 import { lanAddresses, pickAddress } from './src/net.js';
 import { ServerProcess } from './src/server-process.js';
-import { newerVersion } from './src/version.js';
+import { fetchLatestTag, latestTag, newerVersion } from './src/version.js';
 import { checkPort, describe } from './src/view.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
+/** The window's page. */
+const pageUrl = pathToFileURL(join(here, 'ui', 'index.html')).href;
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 const RELEASES_PAGE = 'https://github.com/ilmars/LightRunner/releases/latest';
 const RELEASES_API = 'https://api.github.com/repos/ilmars/LightRunner/releases/latest';
-const DAY = 24 * 60 * 60 * 1000;
 const sleep = (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms));
 
 // The server's files and the Node that runs it: inside the app when installed (resources/lightrunner, outside the
@@ -54,29 +56,40 @@ const server = new ServerProcess({ nodePath, appDir, dataDir, stopTimeoutMs: 450
 
 // ---- Stopping it all: `--quit` ----
 
-/** For --quit: wait (at most 20 s) until the other launcher and its server have gone. */
-async function waitUntilGone() {
-  const deadline = Date.now() + 20_000;
+/**
+ * Wait (at most `ms`) until this process has gone.
+ * @param {number} pid
+ * @param {number} ms
+ */
+async function waitForExit(pid, ms) {
+  const deadline = Date.now() + ms;
+  while (pid > 0 && processAlive(pid) && Date.now() < deadline) await sleep(200);
+}
+
+/**
+ * For --quit while another launcher runs: it has been asked to quit, and stops the server it started. Wait for it,
+ * then stop a server it was only showing (one running elsewhere on this data folder), so nothing of Light Runner is
+ * left running for the installer.
+ */
+async function quitOtherLauncher() {
   let launcherPid = 0;
   try {
     launcherPid = Number(readFileSync(pidFile, 'utf8').trim()) || 0;
   } catch {}
-  while (Date.now() < deadline) {
-    const marker = readMarker(dataDir);
-    if (!(launcherPid && processAlive(launcherPid)) && !(marker && processAlive(marker.pid))) return;
-    await sleep(250);
-  }
+  // Taken now: the file goes when its server stops, the process may take a moment longer.
+  const serverPid = readMarker(dataDir)?.pid ?? 0;
+  await waitForExit(launcherPid, 12_000);
+  await stopLeftServer();
+  await waitForExit(serverPid, 3_000);
 }
 
-/** For --quit when no launcher runs. */
+/** For --quit: stop a server still running on this data folder without its launcher (with its marker's token). */
 async function stopLeftServer() {
-  setTimeout(() => app.exit(0), 25_000).unref();
   const marker = readMarker(dataDir);
-  if (marker && processAlive(marker.pid)) {
-    server.port = marker.port;
-    await server.stopElsewhere();
-    await waitUntilGone();
-  }
+  if (!marker || !processAlive(marker.pid)) return;
+  server.port = marker.port;
+  await server.stopElsewhere();
+  await waitForExit(marker.pid, 5_000);
 }
 
 // ---- The launcher ----
@@ -171,21 +184,50 @@ async function main() {
     problemWords = appbar.problemWords;
   } catch {}
 
-  // The first start writes the settings and puts Light Runner in the login items (on by default).
-  if (firstStart) {
-    save({});
-    setLoginItem(config.startAtLogin);
-  }
-  const startHidden = process.argv.includes('--hidden') || (isMac && app.getLoginItemSettings().wasOpenedAtLogin);
+  // The first start writes the settings. Every start puts Light Runner in the login items, or takes it out, as the
+  // setting says: after a reinstall, or a change in Task Manager or System Settings, the box still tells the truth.
+  if (firstStart) save({});
+  setLoginItem(config.startAtLogin);
+  const startHidden = startedAtLogin();
 
-  ipcMain.handle('launcher:view', () => view());
-  ipcMain.handle('launcher:act', (_event, action, value) => act(String(action), value));
+  // Only the window's own page may ask: not another frame, not a page it was somehow sent to.
+  const fromWindow = (/** @type {Electron.IpcMainInvokeEvent} */ event) => {
+    const frame = event.senderFrame;
+    if (!win || !frame || frame !== win.webContents.mainFrame) return false;
+    try {
+      const url = new URL(frame.url);
+      url.hash = '';
+      url.search = '';
+      return url.href === pageUrl;
+    } catch {
+      return false;
+    }
+  };
+  ipcMain.handle('launcher:view', (event) => {
+    if (!fromWindow(event)) throw new Error('not the launcher window');
+    return view();
+  });
+  ipcMain.handle('launcher:act', (event, action, value) => {
+    if (!fromWindow(event)) throw new Error('not the launcher window');
+    return act(String(action), value);
+  });
   server.onChange(() => push());
 
   setMenus();
   createTray();
   createWindow(!startHidden);
   if (startHidden && isMac) app.dock?.hide();
+  // Started at login and it can't run (the port is taken, another one isn't answering ...): show why, so it is seen
+  // before the service rather than during it.
+  if (startHidden) {
+    const off = server.onChange((s) => {
+      if (s.status === 'running' || s.status === 'running-elsewhere') off();
+      else if (s.status === 'failed') {
+        off();
+        showWindow();
+      }
+    });
+  }
 
   await server.start({ port: config.port, testMode: config.testMode });
   setInterval(readLive, 2000);
@@ -214,7 +256,22 @@ function setLoginItem(on) {
   // Only the installed app goes in the login items, never Electron itself while developing.
   if (!app.isPackaged) return;
   if (isWindows) app.setLoginItemSettings({ openAtLogin: on, path: process.execPath, args: ['--hidden'], name: 'Light Runner' });
-  else app.setLoginItemSettings({ openAtLogin: on });
+  // The Mac's login items take no arguments; openAsHidden still works before macOS 13.
+  else app.setLoginItemSettings({ openAtLogin: on, openAsHidden: true });
+}
+
+/**
+ * Was this start the login item's (so the window stays hidden)? Windows passes --hidden. The Mac says so with
+ * wasOpenedAtLogin, which macOS 13 and later may not set for a login item; then, with the login item on, a start in
+ * the first three minutes after the computer started is taken as the login one. A wrong guess only hides the
+ * window: opening Light Runner again (Finder, the Dock, the menu bar icon) shows it.
+ */
+function startedAtLogin() {
+  if (process.argv.includes('--hidden')) return true;
+  if (!isMac || !app.isPackaged) return false;
+  const login = app.getLoginItemSettings();
+  if (login.wasOpenedAtLogin || login.wasOpenedAsHidden) return true;
+  return config.startAtLogin && uptime() < 180;
 }
 
 // ---- Window, tray, menus ----
@@ -250,7 +307,7 @@ function createWindow(show) {
   });
   win.on('show', () => push());
   if (show) win.once('ready-to-show', () => win?.show());
-  void win.loadFile(join(here, 'ui', 'index.html'));
+  void win.loadURL(pageUrl);
 }
 
 function showWindow() {
@@ -525,31 +582,10 @@ function act(action, value) {
 
 // ---- A newer version ----
 
-/** Ask GitHub for the latest release at most once a day; say nothing when offline or when there is none. */
+/** Ask GitHub for the latest release at most once a day (src/version.js); say nothing when offline or when there is none. */
 async function checkForUpdate() {
   if (!app.isPackaged) return;
-  /** @type {{ checkedAt?: number, latest?: string }} */
-  let cache = {};
-  try {
-    cache = JSON.parse(readFileSync(updateFile, 'utf8')) ?? {};
-  } catch {}
-  let latest = typeof cache.latest === 'string' ? cache.latest : null;
-  try {
-    mkdirSync(dirname(updateFile), { recursive: true });
-  } catch {}
-  if (!(typeof cache.checkedAt === 'number' && Date.now() - cache.checkedAt < DAY && Date.now() >= cache.checkedAt)) {
-    try {
-      writeFileSync(updateFile, JSON.stringify({ checkedAt: Date.now(), latest }));
-    } catch {}
-    try {
-      const res = await fetch(RELEASES_API, { headers: { accept: 'application/vnd.github+json', 'user-agent': `Light Runner launcher ${version}` }, signal: AbortSignal.timeout(10_000) });
-      if (res.ok) {
-        const tag = (await res.json())?.tag_name;
-        latest = typeof tag === 'string' ? tag : null;
-        writeFileSync(updateFile, JSON.stringify({ checkedAt: Date.now(), latest }));
-      }
-    } catch {}
-  }
+  const latest = await latestTag({ cacheFile: updateFile, fetchLatest: () => fetchLatestTag(fetch, RELEASES_API, `Light Runner launcher ${version}`) });
   const found = latest ? newerVersion(version, latest) : null;
   if (found !== (newer?.version ?? null)) {
     newer = found ? { version: found } : null;
@@ -564,11 +600,16 @@ const quitRequest = process.argv.includes('--quit');
 if (quitRequest) app.disableHardwareAcceleration();
 if (!app.requestSingleInstanceLock({ quit: quitRequest })) {
   // Another launcher runs: it has been told (it shows its window, or quits for --quit).
-  if (quitRequest) void waitUntilGone().then(() => app.exit(0));
-  else app.exit(0);
+  if (quitRequest) {
+    setTimeout(() => app.exit(0), 25_000).unref();
+    void quitOtherLauncher().finally(() => app.exit(0));
+  } else {
+    app.exit(0);
+  }
 } else if (quitRequest) {
   // No launcher runs, but a server left by one may: stop it with its marker's token.
-  void stopLeftServer().then(() => app.exit(0));
+  setTimeout(() => app.exit(0), 25_000).unref();
+  void stopLeftServer().finally(() => app.exit(0));
 } else {
   void main();
 }

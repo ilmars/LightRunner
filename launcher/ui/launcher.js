@@ -9,6 +9,8 @@ const $ = (/** @type {string} */ id) => /** @type {any} */ (document.getElementB
 let current = null;
 /** The port typed but not yet changed: a new view doesn't overwrite it. */
 let portDirty = false;
+/** The action under way ('start-stop', 'stop-elsewhere'): its button waits, whatever a new view says. */
+let busy = '';
 
 /** @param {HTMLElement} el @param {string} text */
 function setText(el, text) {
@@ -66,7 +68,10 @@ function render(v) {
   setText(startStop, v.button === 'stop' ? 'Stop' : 'Start');
   startStop.classList.toggle('ds-btn--primary', v.button === 'start');
   startStop.classList.toggle('ds-btn--quiet', v.button !== 'start');
-  startStop.disabled = v.button === 'start' && !v.canStart;
+  startStop.disabled = busy === 'start-stop' || (v.button === 'start' && !v.canStart);
+  const stopIt = $('stopElsewhere');
+  stopIt.disabled = busy === 'stop-elsewhere';
+  setText(stopIt, busy === 'stop-elsewhere' ? 'Stopping…' : 'Stop it');
 
   // Settings.
   const port = $('port');
@@ -104,26 +109,23 @@ function portNote(text) {
 
 $('openOperator').addEventListener('click', () => void act('open-operator'));
 $('openSettings').addEventListener('click', () => void act('open-settings'));
-$('startStop').addEventListener('click', async (/** @type {Event} */ e) => {
-  const button = /** @type {HTMLButtonElement} */ (e.currentTarget);
-  button.disabled = true;
+/**
+ * Run an action with its button waiting; afterwards the view as it is now decides what the buttons are.
+ * @param {string} which @param {string} action
+ */
+async function withButton(which, action) {
+  if (busy) return;
+  busy = which;
+  if (current) render(current);
   try {
-    await act(current?.button === 'stop' ? 'stop' : 'start');
+    await act(action);
   } finally {
-    button.disabled = false;
+    busy = '';
+    render(await api.view());
   }
-});
-$('stopElsewhere').addEventListener('click', async (/** @type {Event} */ e) => {
-  const button = /** @type {HTMLButtonElement} */ (e.currentTarget);
-  button.disabled = true;
-  setText(button, 'Stopping…');
-  try {
-    await act('stop-elsewhere');
-  } finally {
-    button.disabled = false;
-    setText(button, 'Stop it');
-  }
-});
+}
+$('startStop').addEventListener('click', () => void withButton('start-stop', current?.button === 'stop' ? 'stop' : 'start'));
+$('stopElsewhere').addEventListener('click', () => void withButton('stop-elsewhere', 'stop-elsewhere'));
 $('pick').addEventListener('change', (/** @type {Event} */ e) => void act('address', /** @type {HTMLSelectElement} */ (e.target).value));
 $('port').addEventListener('input', () => {
   portDirty = $('port').value.trim() !== String(current?.configPort ?? '');
