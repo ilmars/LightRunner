@@ -150,7 +150,7 @@ Things to know:
 
 - **Faders pick up.** A fader only takes over once it reaches the level it controls (it passes it, or gets within 2 %). Until then moving it does nothing, so a light never jumps. After a song starts, every fader waits again until you move it to its new level. After someone changes a group's level on the iPad (or elsewhere), only that group's fader waits.
 - **Blackout needs a 1 second hold**, the same as on the iPad, and it does not toggle. To get the lights back, start a song, Basic lights or Next.
-- **The APC always works on the real stage.** Blind (a draft on one iPad) doesn't affect it.
+- **The APC always works on the real stage.** Prepare (a draft on one iPad) doesn't affect it.
 - **If the APC is unplugged while a Flash button is held**, the Flash goes out. A Flash also goes out by itself after 15 seconds, so a button held down for a long time stops flashing.
 - **The lights on the pads** always show the live stage, including changes made on any iPad.
 - **mk2 and the older model** are told apart by the name the APC gives the computer. The mk2 shows each colour's real colour on its pads. The older model has only green, red and yellow lights: green is on stage or running, yellow is next (and the colours you can pick), dark is every other song.

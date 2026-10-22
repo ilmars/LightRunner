@@ -186,6 +186,7 @@ More detail:
 - [docs/SPEC.md](docs/SPEC.md): the product spec
 - [docs/STATUS.md](docs/STATUS.md): what's built, what's next, known issues
 - [docs/DECISIONS.md](docs/DECISIONS.md): choices made and why
+- [docs/running-a-service.md](docs/running-a-service.md): setting up and running the lights for a service
 - [docs/companion.md](docs/companion.md): Stream Deck, APC mini, controller keys and OSC
 - [docs/design-system.md](docs/design-system.md): the pages' colours, type and brightness rules
 - [CLAUDE.md](CLAUDE.md): project briefing (also read by Claude Code)
