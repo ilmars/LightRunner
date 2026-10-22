@@ -18,9 +18,24 @@ extraResources:
   - from: build/app
     to: lightrunner
     filter: ["**/*"]
+  # electron-builder never copies a node_modules folder at the top of a "from", so the server's packages have an
+  # entry of their own (scripts/dist.mjs checks they arrived).
+  - from: build/app/node_modules
+    to: lightrunner/node_modules
+    filter: ["**/*"]
 asar: true
 # The window is in English: leave out Chromium's other languages (about 45 MB).
 electronLanguages: [en-US]
+# Electron's own switches, set in the built app: it can't be run as plain Node, take Node's debugging or NODE_OPTIONS,
+# or load its code from anywhere but its checked asar; the window's cookies are encrypted. (The server runs on the
+# bundled node, not on Electron, so none of this changes it.)
+electronFuses:
+  runAsNode: false
+  enableNodeCliInspectArguments: false
+  enableNodeOptionsEnvironmentVariable: false
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+  enableCookieEncryption: true
 # The server's own native add-ons (MIDI, serial) run on the bundled Node, not on Electron: nothing to rebuild.
 npmRebuild: false
 nodeGypRebuild: false

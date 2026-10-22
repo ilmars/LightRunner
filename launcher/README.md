@@ -8,6 +8,7 @@ The server is the same `server/src/main.ts` as `npm start`, run as a child proce
 | --- | --- | --- |
 | Data folder (the show, backups, `launcher.json`) | `~/Library/Application Support/Light Runner` | `%APPDATA%\Light Runner` |
 | Installer | `Light Runner <version> <arch>.dmg` (the build machine's processor) | `Light Runner Setup <version>.exe` (x64, for this user, no questions) |
+| Installed in | Applications (dragged there) | `%LOCALAPPDATA%\Programs\light-runner-launcher` (electron-builder names a one-click per-user install after the package) |
 
 ## Building
 
@@ -23,7 +24,7 @@ npm run dist -- --win --dir # Windows: only the unpacked app (launcher/dist/win-
 
 `npm run dist` first runs `scripts/stage-app.mjs`, which copies into `launcher/build/app` what the installed app runs: `server/`, `packages/`, `web/`, `shows/`, the Lightkey importer, the root `package.json`, the production `node_modules` and `node` (`node.exe`). electron-builder puts that folder in the app as `resources/lightrunner`, outside the asar, so the bundled Node can read it. The version is the root `package.json`'s. Nothing is signed yet: Windows' SmartScreen and the Mac's Gatekeeper ask once (the Mac build has an ad-hoc signature, so Apple Silicon runs it).
 
-electron-builder downloads its own tools the first time (Electron for the target, NSIS on Windows) into its cache.
+electron-builder downloads its own tools the first time (Electron for the target, NSIS on Windows) into its cache. The built app has Electron's fuses set (`electronFuses`): it can't be run as plain Node, takes no `--inspect` or `NODE_OPTIONS`, and loads its code only from its checked asar. electron-builder never copies a `node_modules` at the top of an extra resource, so the server's packages are an entry of their own, and `dist.mjs` fails the build if any are missing from a built app (an unpacked app inside the repository would otherwise find the repository's own and hide it).
 
 ## Trying it while developing
 
@@ -38,7 +39,7 @@ While developing the launcher runs the repository's server on the `node` on the 
 
 - One per computer: a second launch shows the first one's window. A Light Runner already running on the same data folder (started by hand, or left by a launcher that crashed) is shown as running, with **Stop it**; one that doesn't answer has to be ended by hand, and the window says how. Another program on the port: the window says so and offers another port.
 - Closing the window keeps it running in the tray / menu bar. **Quit** (in that menu, or Cmd+Q on the Mac) asks first, then saves the stage and stops the server.
-- **Start when the computer starts** (on after the first start) puts it in the login items; it then starts hidden, with the server running.
+- **Start when the computer starts** (on after the first start) puts it in the login items, checked again at every start; it then starts hidden, with the server running, and shows the window if the server can't start.
 - `Light Runner --quit` stops a running Light Runner on this computer (the launcher and its server, saving the stage) and returns when they have gone. The Windows installer and uninstaller run it before they replace or remove the files (`resources/installer.nsh`); the uninstaller also takes it out of the login items.
 - Once a day at most, it asks GitHub for the latest release and shows "Version X is available" when there is a newer one (nothing when offline).
 
