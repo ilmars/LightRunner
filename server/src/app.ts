@@ -250,7 +250,15 @@ export class App {
     // after two missed answers, so its Flash goes out like on a clean close.
     this.heartbeat = setInterval(() => this.checkTablets(), this.opts.heartbeatMs ?? 2000);
     this.heartbeat.unref();
-    await new Promise<void>((resolve) => this.server!.listen(this.opts.port, this.opts.host ?? '0.0.0.0', resolve));
+    // A port that is taken rejects, so the caller can say so (a launcher shows it in plain words).
+    const server = this.server;
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(this.opts.port, this.opts.host ?? '0.0.0.0', () => {
+        server.off('error', reject);
+        resolve();
+      });
+    });
     this.log(`Light Runner on http://localhost:${this.port}/`);
     await this.syncOsc();
     await this.startMidi();

@@ -45,4 +45,26 @@ async function shutdown(signal: string): Promise<void> {
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
-await app.start();
+// Started by a launcher (an IPC channel): it can ask for a clean stop, and hears when we are listening or can't start.
+// On Windows a child's kill() is forceful, so the message is how the stage gets saved.
+const send = process.send ? (message: object) => void process.send!(message) : undefined;
+if (send) process.on('message', (message) => {
+  if ((message as { type?: unknown } | null)?.type === 'shutdown') void shutdown('shutdown message');
+});
+
+try {
+  await app.start();
+  send?.({ type: 'ready', port: app.port });
+} catch (e) {
+  const err = e as NodeJS.ErrnoException;
+  const code = err.code === 'EADDRINUSE' ? 'port-in-use' : 'start-failed';
+  const message = code === 'port-in-use' ? `Port ${process.env.PORT ?? 8080} is already in use` : String(err.message ?? err);
+  console.error(`${new Date().toISOString()} could not start: ${message}`);
+  // Exit at once, without saving: a second copy that failed must not write over the one that is running.
+  if (send) {
+    process.send!({ type: 'error', code, message }, () => process.exit(2));
+    setTimeout(() => process.exit(2), 2000).unref();
+  } else {
+    process.exit(2);
+  }
+}
