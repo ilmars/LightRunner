@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig, saveConfig, DEFAULT_CONFIG } from '../src/config.js';
@@ -72,6 +72,49 @@ test('a setting that is wrong falls back to its default, the others are kept', (
     }
     writeFileSync(file, JSON.stringify({ port: 65535, address: '' }));
     assert.deepEqual(loadConfig(file), { ...DEFAULT_CONFIG, port: 65535 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a settings file saved with a byte order mark (Notepad) is read', () => {
+  const dir = tempDir();
+  try {
+    const file = join(dir, 'launcher.json');
+    writeFileSync(file, `\uFEFF${JSON.stringify({ port: 8095, startAtLogin: false, testMode: true, address: null })}`);
+    assert.deepEqual(loadConfig(file), { port: 8095, startAtLogin: false, testMode: true, address: null });
+    assert.deepEqual(readdirSync(dir), ['launcher.json']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a damaged settings file is kept as launcher.json.bad before the defaults replace it', () => {
+  const dir = tempDir();
+  try {
+    const file = join(dir, 'launcher.json');
+    writeFileSync(file, '{ "port": 80');
+    assert.deepEqual(loadConfig(file), DEFAULT_CONFIG);
+    assert.deepEqual(readdirSync(dir).sort(), ['launcher.json.bad']);
+    assert.equal(readFileSync(join(dir, 'launcher.json.bad'), 'utf8'), '{ "port": 80');
+    saveConfig(file, DEFAULT_CONFIG);
+    assert.deepEqual(readdirSync(dir).sort(), ['launcher.json', 'launcher.json.bad']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('settings that cannot be saved give a plain error and leave nothing behind', () => {
+  const dir = tempDir();
+  try {
+    // A folder where the file should be: the rename fails.
+    const file = join(dir, 'launcher.json');
+    mkdirSync(file);
+    assert.throws(() => saveConfig(file, { ...DEFAULT_CONFIG, port: 9001 }), (err) => {
+      assert.match(err.message, /^Couldn't save the Light Runner settings/);
+      return true;
+    });
+    assert.deepEqual(readdirSync(dir), ['launcher.json']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

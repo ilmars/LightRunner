@@ -1,7 +1,7 @@
 // The launcher's own settings (launcher.json in the data folder): the port, Start when the computer starts,
 // Test mode and the address chosen for the iPads. The show and its settings stay the server's.
 
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 /**
@@ -28,35 +28,71 @@ function normalise(value) {
 }
 
 /**
- * Read the settings; a missing or broken file gives the defaults.
+ * Read the settings; a missing or broken file gives the defaults. A damaged file (not a JSON object) is kept as
+ * `<file>.bad`, so the defaults saved later don't destroy what was in it.
  * @param {string} file
  * @returns {LauncherConfig}
  */
 export function loadConfig(file) {
-  let parsed;
+  let text;
   try {
-    parsed = JSON.parse(readFileSync(file, 'utf8'));
+    text = readFileSync(file, 'utf8');
   } catch {
-    parsed = null;
+    return normalise(null);
+  }
+  let parsed = null;
+  try {
+    // Notepad saves with a byte order mark.
+    parsed = JSON.parse(text.replace(/^﻿/, ''));
+  } catch {}
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    try {
+      renameSync(file, `${file}.bad`);
+    } catch {}
+    return normalise(null);
   }
   return normalise(parsed);
 }
 
+/** @param {number} ms */
+function pause(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /**
- * Save the settings: written next to the old file and renamed over it, so a crash never leaves half a file.
+ * Save the whole settings (one that doesn't make sense is saved as its default): written next to the old file and
+ * renamed over it, so a crash never leaves half a file. Throws an error in plain words when it can't.
  * @param {string} file
- * @param {Partial<LauncherConfig>} config
+ * @param {LauncherConfig} config
  */
 export function saveConfig(file, config) {
-  mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(normalise(config), null, 2)}\n`);
-  // 'r+', not 'r': Windows refuses to flush a file opened read-only (EPERM).
-  const fd = openSync(tmp, 'r+');
   try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(tmp, `${JSON.stringify(normalise(config), null, 2)}\n`);
+    // 'r+', not 'r': Windows refuses to flush a file opened read-only (EPERM).
+    const fd = openSync(tmp, 'r+');
+    try {
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    // Windows can refuse a rename for a moment while something (a virus scanner, a backup) has the file open.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        renameSync(tmp, file);
+        break;
+      } catch (e) {
+        const code = /** @type {NodeJS.ErrnoException} */ (e).code;
+        if (attempt >= 2 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw e;
+        pause(100);
+      }
+    }
+  } catch (e) {
+    try {
+      if (existsSync(tmp)) rmSync(tmp, { force: true });
+    } catch {}
+    const err = /** @type {NodeJS.ErrnoException} */ (e);
+    throw new Error(`Couldn't save the Light Runner settings in ${dirname(file)} (${err.code ?? err.message})`, { cause: e });
   }
-  renameSync(tmp, file);
 }

@@ -5,7 +5,7 @@ import { networkInterfaces } from 'node:os';
 /** @typedef {{ name: string, address: string }} LanAddress */
 
 // Ethernet and Wi-Fi by the names Mac (en0), Windows (Ethernet, Wi-Fi, WLAN) and Linux (eth0, wlan0, enp3s0, wlp2s0, end0) give them.
-const REAL = /^(en\d|eth|wlan|wl|enp|ens|eno|end\d|ethernet|wi-?fi|wlan|wireless)/i;
+const REAL = /^(eth|en\d|enp|ens|eno|end\d|wlan|wlp|wi-?fi|wireless)/i;
 // VPNs, virtual machines, containers and the Mac's own sharing: an iPad is rarely on these.
 const VIRTUAL = /(vethernet|virtual|vmware|vbox|hyper-v|docker|^br-|^bridge|^veth|utun|^tun|^tap|tap-|^ppp|^wg|wireguard|tailscale|zerotier|vpn|hamachi|^awdl|^llw|^anpi|loopback|npcap)/i;
 
