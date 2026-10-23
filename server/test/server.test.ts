@@ -90,6 +90,19 @@ test('the show is saved with backups, and a corrupt show falls back to the newes
   }
 });
 
+test('start() is done only when commands work: the layout and the first state are there', async () => {
+  const dir = tempDir();
+  const app = makeApp(dir);
+  try {
+    await app.start();
+    assert.ok(app.state, 'no state yet when start() was done');
+    assert.equal((await api(app, 'POST', '/api/look/worship')).status, 200);
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the API runs looks, reports state and refuses manual for operators by default', async () => {
   const dir = tempDir();
   const app = makeApp(dir);

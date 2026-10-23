@@ -546,7 +546,8 @@ export class App {
       case 'ready':
         this.refreshLayout(msg.fixtures);
         this.midi?.update(this.layout, this.latestState);
-        markReady();
+        // Ready once commands work: the layout and the engine's first state (it may come just before or after).
+        if (this.latestState) markReady();
         break;
       case 'result':
       case 'snapshot':
@@ -559,6 +560,7 @@ export class App {
       case 'state':
         this.engineState = msg.state;
         this.publishState();
+        if (this.layout) markReady();
         break;
       case 'runtime':
         this.latestRuntime = msg.runtime;

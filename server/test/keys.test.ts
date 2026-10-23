@@ -112,8 +112,6 @@ async function withKeys(fn: (rig: Rig) => Promise<void>, opts: { midi?: (log: (m
   });
   try {
     await app.start();
-    // start() is done once it listens; the engine's first state comes a moment later (slow on some machines).
-    await waitFor(() => app.state, 10000, 'the first state');
     const url = `http://127.0.0.1:${app.port}`;
     const layout = await (await fetch(`${url}/api/layout`)).json();
     await fn({ app, midi, lines, layout, url });
