@@ -100,7 +100,10 @@ const footprint = (f) => profileById.get(f.profile)?.channels ?? 1;
 /** Segments in a fixture type: the most times any colour repeats (a bar of 8 pixels has 8). Same rule as the engine. */
 function segmentsOf(f) {
   const channels = (show.profiles.find((p) => p.id === f.profile) ?? profileById.get(f.profile))?.channels;
-  if (!Array.isArray(channels)) return 1; // a built-in type: one segment
+  return Array.isArray(channels) ? segmentsOfChannels(channels) : 1; // a built-in summary has only a channel count: one segment
+}
+/** The same rule on a channel list. */
+function segmentsOfChannels(channels) {
   const seen = new Map();
   for (const c of channels) if (!c.fine && COLOUR_ROLES.includes(c.role)) seen.set(c.role, (seen.get(c.role) ?? 0) + 1);
   return Math.max(1, ...seen.values());
@@ -692,7 +695,7 @@ function addProfile(profile) {
   const k = show.profiles.findIndex((p) => p.id === profile.id);
   if (k >= 0) show.profiles[k] = profile;
   else show.profiles.push(profile);
-  const summary = { id: profile.id, name: profile.name, channels: profile.channels.length, roles: [...new Set(profile.channels.map((c) => c.role))] };
+  const summary = { id: profile.id, name: profile.name, channels: profile.channels.length, segments: segmentsOfChannels(profile.channels), roles: [...new Set(profile.channels.map((c) => c.role))] };
   const j = profiles.findIndex((p) => p.id === profile.id);
   if (j >= 0) profiles[j] = summary;
   else profiles.unshift(summary);

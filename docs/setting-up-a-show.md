@@ -59,7 +59,7 @@ Open **Patch**. Changes stay in the page until you press **Save patch** in the b
 At the bottom of Patch, **Stage plan** is a picture of the stage with the back at the top. The operator page's stage view is drawn from it, so it shows what the lights are doing.
 
 1. **Drag** a light to where it hangs. A new light starts in the middle of the plan (several new ones start in a row).
-2. **Click** a light to change it. Choose its shape: **Dot**, **Beam**, **Bar**, **Outline** or **Smoke**. A fixture with several segments should arrive as a bar; if one arrives as a dot, choose **Bar**.
+2. **Click** a light to change it. Choose its shape: **Dot**, **Beam**, **Bar**, **Outline** or **Smoke**. A fixture with several segments arrives as a bar; for any other, choose the shape you want.
 3. What each shape gives you to drag:
    - A **Bar** has a handle at each end (length), one on a long side (thickness) and one past the end to turn it. **Across** and **Upright** snap it flat or upright, and its angle shows beside them.
    - A **Beam** has a round handle at its tip: drag it to aim the beam and set how far it reaches.
