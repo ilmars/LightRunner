@@ -35,7 +35,7 @@
         <p class="steps-title">Let the iPads through, in Windows' settings</p>
         <ol>
           <li><b>Settings › Network &amp; internet › Wi-Fi</b> (or Ethernet) › this network › <b>Network profile type: Private</b>. Only on a network you trust, such as the church's.</li>
-          <li><b>Windows Security › Firewall &amp; network protection › Allow an app through firewall</b> › tick <b>Private</b> for Light Runner (it may be listed as Node.js JavaScript Runtime).</li>
+          <li><b>Windows Security › Firewall &amp; network protection › Allow an app through firewall</b> › tick <b>Private</b> for <b>Node.js JavaScript Runtime</b> (that is the name Windows gives Light Runner's server).</li>
         </ol>
         <p class="detail">This window notices when the network is Private.</p>
       </div>
@@ -57,7 +57,7 @@
             <select id="pick" class="ds-field"></select>
           </label>
           <p id="noNetwork" class="hint" hidden>This computer isn't on a network, so the iPads can't reach it yet.</p>
-          <p id="firewall" class="firewall" hidden>If Windows asks, allow Light Runner on private networks, so the iPads can reach it</p>
+          <p id="firewall" class="firewall" hidden>If Windows asks about Node.js JavaScript Runtime, tick Private networks and choose Allow, so the iPads can reach Light Runner.</p>
           <div id="blocked" class="firewall blocked" hidden>
             <span>Windows blocks the iPads on this network (it's set to Public).</span>
             <button id="howTo" class="ds-btn ds-btn--quiet">How to fix it</button>

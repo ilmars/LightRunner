@@ -18,7 +18,8 @@ import { categoryOf, readProfiles } from './src/netprofile.js';
 import { ServerProcess } from './src/server-process.js';
 import { fetchLatestTag, latestTag, newerVersion } from './src/version.js';
 import { isPage } from './src/page.js';
-import { checkPort, describe, firewallNote } from './src/view.js';
+import { chooseDataDir } from './src/datadir.js';
+import { checkPort, describe, firewallNote, pageUrl } from './src/view.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** The window's page. */
@@ -36,15 +37,15 @@ const appDir = app.isPackaged ? join(process.resourcesPath, 'lightrunner') : res
 const nodePath = app.isPackaged ? join(appDir, isWindows ? 'node.exe' : 'node') : (process.env.LIGHT_RUNNER_NODE || 'node');
 
 // The show, its backups and the launcher's settings (Mac ~/Library/Application Support/Light Runner, Windows
-// %APPDATA%\Light Runner). The window's own browser data goes in a folder of its own inside it. While developing,
-// LIGHT_RUNNER_DATA can point it at another folder, as it does for `npm start`; `--data-dir=<folder>` does it for
-// a copy being tried beside the one in use (it is then one per that folder, and never goes in the login items).
-const dataDirArg = process.argv.find((a) => a.startsWith('--data-dir='))?.slice('--data-dir='.length);
-if (dataDirArg) app.setPath('userData', resolve(dataDirArg));
-else if (!app.isPackaged && process.env.LIGHT_RUNNER_DATA) app.setPath('userData', resolve(process.env.LIGHT_RUNNER_DATA));
+// %APPDATA%\Light Runner). The window's own browser data goes in a folder of its own inside it. Run from the
+// repository (`electron .`) it uses the repository's `data/` folder, as `npm start` does, so developing never touches
+// the installed show; LIGHT_RUNNER_DATA points it at another folder. `--data-dir=<folder>` does it for a copy being
+// tried beside the one in use (it is then one per that folder, and never goes in the login items).
+const chosenData = chooseDataDir({ argv: process.argv, env: process.env, packaged: app.isPackaged, repoDir: resolve(here, '..') });
+if (chosenData.dir) app.setPath('userData', chosenData.dir);
 const dataDir = app.getPath('userData');
 /** Only the installed app, on its usual data folder, goes in the login items. */
-const ownsLoginItem = app.isPackaged && !dataDirArg;
+const ownsLoginItem = app.isPackaged && !chosenData.fromArg;
 app.setPath('sessionData', join(dataDir, 'Launcher window'));
 const configFile = join(dataDir, 'launcher.json');
 const pidFile = join(dataDir, 'launcher.pid');
@@ -553,7 +554,7 @@ async function readLive() {
 /** @param {'operator' | 'settings'} page @param {string} [at] a place on the page */
 async function open(page, at = '') {
   const port = shownPort();
-  await shell.openExternal(`http://localhost:${port}/${page}/${at ? `#${at}` : ''}`);
+  await shell.openExternal(pageUrl(port, page, at));
 }
 
 /** The Stop question while it is open: quitting closes it. @type {AbortController | null} */

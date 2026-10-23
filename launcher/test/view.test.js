@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkPort, describe, firewallNote } from '../src/view.js';
+import { checkPort, describe, firewallNote, pageUrl } from '../src/view.js';
 
 // The launcher window's status line, its one sentence and its Fix it, and the port check.
 
@@ -123,4 +123,9 @@ test('where an iPad is added: on Windows, the Public network warning, or the gen
   assert.equal(firewallNote({ platform: 'win32', publicNetwork: false, ipadSeen: false }), 'ask');
   assert.equal(firewallNote({ platform: 'win32', publicNetwork: false, ipadSeen: true }), null);
   assert.equal(firewallNote({ platform: 'darwin', publicNetwork: true, ipadSeen: false }), null);
+});
+
+test('the Open buttons use 127.0.0.1, never localhost, so a program on [::1] cannot answer', () => {
+  assert.equal(pageUrl(8080, 'operator'), 'http://127.0.0.1:8080/operator/');
+  assert.equal(pageUrl(8123, 'settings', 'dmx'), 'http://127.0.0.1:8123/settings/#dmx');
 });

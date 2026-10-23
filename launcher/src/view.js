@@ -145,3 +145,14 @@ export function firewallNote({ platform, publicNetwork, ipadSeen }) {
   if (publicNetwork) return 'public';
   return ipadSeen ? null : 'ask';
 }
+
+/**
+ * The address the Open buttons give the browser: 127.0.0.1, not "localhost", so that another program listening on
+ * the same port of the computer's IPv6 address ([::1]) can't be the one that answers.
+ * @param {number} port
+ * @param {'operator' | 'settings'} page
+ * @param {string} [at] a place on the page
+ */
+export function pageUrl(port, page, at = '') {
+  return `http://127.0.0.1:${port}/${page}/${at ? `#${at}` : ''}`;
+}
