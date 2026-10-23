@@ -808,7 +808,7 @@ function smokeWarnings(g) {
     if (!f || !type) continue;
     if (g.kind === 'smoke') {
       if (type.channels > 1 && !type.roles?.includes('dimmer')) {
-        out.push(`${f.name}: This fixture has no dimmer channel, so Light Runner can't drive it. Set its level channel to dimmer in the fixture type.`);
+        out.push(`${f.name}: This fixture type has no dimmer channel, so Light Runner can't run it as a smoke machine. Choose a fixture type for it that has a dimmer channel (for example Generic dimmer), or take it out of this group.`);
       }
     } else {
       const own = show.profiles.find((p) => p.id === f.profile);
