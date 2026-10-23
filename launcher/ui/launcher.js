@@ -42,6 +42,9 @@ function render(v) {
   fix.hidden = !v.fix;
   if (v.fix) setText(fix, v.fix.kind === 'network' && stepsOpen ? 'Hide the steps' : v.fix.label);
   fix.disabled = busy === 'fix';
+  const retry = $('retry');
+  retry.hidden = !v.retry;
+  retry.disabled = busy === 'fix';
   // The steps for a Public network go with whichever says so: the status line's Fix it, or the note in Add.
   const stepsBy = v.fix?.kind === 'network' ? 'status' : v.firewallNote === 'public' && addOpen ? 'add' : null;
   if (!stepsBy) stepsOpen = false;
@@ -95,7 +98,8 @@ function render(v) {
   const port = $('port');
   if (!portDirty && document.activeElement !== port) port.value = String(v.configPort);
   port.disabled = !v.canChange;
-  $('applyPort').disabled = !v.canChange || !portDirty;
+  // After the port was taken, Change starts it again on the same port too.
+  $('applyPort').disabled = !v.canChange || (!portDirty && v.status !== 'failed');
   const login = $('startAtLogin');
   login.checked = v.startAtLogin;
   login.disabled = !v.canSetLogin;
@@ -117,14 +121,14 @@ async function act(action, value) {
 
 /**
  * Run an action with its button waiting; afterwards the view as it is now decides what the buttons are.
- * @param {string} which @param {string} action
+ * @param {string} which @param {string} action @param {unknown} [value]
  */
-async function withButton(which, action) {
+async function withButton(which, action, value) {
   if (busy) return;
   busy = which;
   if (current) render(current);
   try {
-    await act(action);
+    await act(action, value);
   } finally {
     busy = '';
     render(await api.view());
@@ -173,11 +177,18 @@ $('optionsToggle').addEventListener('click', () => {
   render(current);
   if (optionsOpen) $('options').scrollIntoView({ block: 'nearest' });
 });
-$('stop').addEventListener('click', () => void withButton('stop', current?.bottom === 'stop-elsewhere' ? 'stop-elsewhere' : 'stop'));
+$('retry').addEventListener('click', () => void withButton('fix', 'start'));
+// Stop asks first; "Stopping…" only once the answer is Stop.
+$('stop').addEventListener('click', async () => {
+  if (busy) return;
+  const action = current?.bottom === 'stop-elsewhere' ? 'stop-elsewhere' : 'stop';
+  const { ok } = await act('confirm-stop', action);
+  if (ok) await withButton('stop', action, 'confirmed');
+});
 $('pick').addEventListener('change', (/** @type {Event} */ e) => void act('address', /** @type {HTMLSelectElement} */ (e.target).value));
 $('port').addEventListener('input', () => {
   portDirty = $('port').value.trim() !== String(current?.configPort ?? '');
-  $('applyPort').disabled = !portDirty;
+  $('applyPort').disabled = !portDirty && current?.status !== 'failed';
   portNote('');
 });
 $('port').addEventListener('keydown', (/** @type {KeyboardEvent} */ e) => {

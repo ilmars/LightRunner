@@ -17,11 +17,13 @@ import { lanAddresses, pickAddress } from './src/net.js';
 import { categoryOf, readProfiles } from './src/netprofile.js';
 import { ServerProcess } from './src/server-process.js';
 import { fetchLatestTag, latestTag, newerVersion } from './src/version.js';
+import { isPage } from './src/page.js';
 import { checkPort, describe, firewallNote } from './src/view.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** The window's page. */
-const pageUrl = pathToFileURL(join(here, 'ui', 'index.html')).href;
+const pagePath = join(here, 'ui', 'index.html');
+const pageUrl = pathToFileURL(pagePath).href;
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 const RELEASES_PAGE = 'https://github.com/ilmars/LightRunner/releases/latest';
@@ -158,6 +160,8 @@ async function main() {
   });
   app.on('before-quit', (event) => {
     quitting = true;
+    // A Stop question still open goes, as if Cancel: quitting stops the server anyway.
+    stopQuestion?.abort();
     if (serverDone) return;
     event.preventDefault();
     if (stoppingForQuit) return;
@@ -204,14 +208,7 @@ async function main() {
   const fromWindow = (/** @type {Electron.IpcMainInvokeEvent} */ event) => {
     const frame = event.senderFrame;
     if (!win || !frame || frame !== win.webContents.mainFrame) return false;
-    try {
-      const url = new URL(frame.url);
-      url.hash = '';
-      url.search = '';
-      return url.href === pageUrl;
-    } catch {
-      return false;
-    }
+    return isPage(frame.url, pagePath);
   };
   ipcMain.handle('launcher:view', (event) => {
     if (!fromWindow(event)) throw new Error('not the launcher window');
@@ -323,6 +320,7 @@ function createWindow(show) {
   // Windows is logging off or shutting down: there is no time to wait, so ask the server to save and stop now.
   win.on('session-end', () => {
     quitting = true;
+    stopQuestion?.abort();
     server.requestStop();
   });
   win.on('show', () => push());
@@ -395,6 +393,8 @@ function updateTray() {
     { type: 'separator' },
     { label: 'Open window', click: () => showWindow() },
     { label: 'Open operator page', click: () => void open('operator'), enabled: server.status === 'running' || server.status === 'running-elsewhere' },
+    // Stopped, or it couldn't start (the port was taken for a moment at login): start it from here too.
+    ...(server.status === 'stopped' || server.status === 'failed' ? [{ label: 'Start Light Runner', click: () => void act('start') }] : []),
     { type: 'separator' },
     { label: 'Quit Light Runner', click: () => void confirmQuit() },
   ]));
@@ -555,11 +555,19 @@ async function open(page, at = '') {
   await shell.openExternal(`http://localhost:${port}/${page}/${at ? `#${at}` : ''}`);
 }
 
+/** The Stop question while it is open: quitting closes it. @type {AbortController | null} */
+let stopQuestion = null;
+
 /**
- * Stop asks first while the lights follow the iPads (a Light Runner started elsewhere too).
+ * Stop asks first while the lights follow the iPads (a Light Runner started elsewhere too). Not one change at a
+ * time with the others (serial), so an open question never holds up quitting; quitting closes it as Cancel.
  * @param {string} what
  */
 async function confirmStop(what) {
+  if (quitting) return false;
+  stopQuestion?.abort();
+  const question = new AbortController();
+  stopQuestion = question;
   const options = {
     type: /** @type {const} */ ('question'),
     buttons: ['Stop', 'Cancel'],
@@ -569,9 +577,14 @@ async function confirmStop(what) {
     title: 'Light Runner',
     message: `The lights stop following the iPads. ${what}?`,
     detail: 'The stage is saved first. Start brings them back.',
+    signal: question.signal,
   };
-  const { response } = win && win.isVisible() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
-  return response === 0;
+  try {
+    const { response } = win && win.isVisible() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+    return response === 0 && !question.signal.aborted && !quitting;
+  } finally {
+    if (stopQuestion === question) stopQuestion = null;
+  }
 }
 
 /** Stop the server this launcher runs, and start it again with the settings as they are now. */
@@ -585,9 +598,17 @@ const changeable = () => server.status !== 'running-elsewhere' && server.code !=
 /**
  * @param {string} action
  * @param {unknown} value
- * @returns {Promise<{ error?: string }>}
+ * @returns {Promise<{ error?: string, ok?: boolean }>}
  */
-function act(action, value) {
+async function act(action, value) {
+  // Stop asks first, outside the one-at-a-time queue; the window asks with 'confirm-stop' before it shows "Stopping…"
+  // and then sends the stop with 'confirmed'.
+  if (action === 'confirm-stop' || ((action === 'stop' || action === 'stop-elsewhere') && value !== 'confirmed')) {
+    const elsewhere = action === 'stop-elsewhere' || value === 'stop-elsewhere';
+    const needed = elsewhere ? server.status === 'running-elsewhere' : server.status === 'running';
+    const ok = !needed || (await confirmStop(elsewhere ? 'Stop the Light Runner that is running' : 'Stop Light Runner'));
+    if (action === 'confirm-stop' || !ok) return { ok };
+  }
   return /** @type {Promise<{ error?: string }>} */ (serial(async () => {
     if (quitting) return {};
     switch (action) {
@@ -595,11 +616,10 @@ function act(action, value) {
         if (server.status === 'stopped' || server.status === 'failed') await server.start({ port: config.port, testMode: config.testMode });
         break;
       case 'stop':
-        if (server.status === 'running' && !(await confirmStop('Stop Light Runner'))) break;
         await server.stop();
         break;
       case 'stop-elsewhere':
-        if (server.status === 'running-elsewhere' && (await confirmStop('Stop the Light Runner that is running'))) await server.stopElsewhere();
+        if (server.status === 'running-elsewhere') await server.stopElsewhere();
         break;
       case 'port': {
         if (!changeable()) return { error: 'Stop the Light Runner that is running first' };
