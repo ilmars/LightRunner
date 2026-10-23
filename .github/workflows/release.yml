@@ -55,6 +55,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # A mistyped tag fails here, in seconds, and not after the builds.
       - name: Check the tag matches the version
@@ -87,7 +89,8 @@ jobs:
         run: npm ci --omit=dev
 
       # npm skips an optional package that fails to install without saying so, and the app would then have no MIDI
-      # controllers or no USB DMX box.
+      # controllers or no USB DMX box. The folder can also be there with no compiled add-on (a .node file) in it for
+      # this system: the prebuilt ones sit in prebuilds/<system>, one built here in build/Release.
       - name: Check the MIDI and serial packages are there
         run: |
           for package in @julusian/midi serialport; do
@@ -95,6 +98,15 @@ jobs:
               echo "node_modules/${package} is missing: npm dropped an optional package, so this build would have no MIDI or USB DMX."
               exit 1
             fi
+          done
+          system=$(node -p "process.platform")
+          for package in @julusian/midi @serialport/bindings-cpp; do
+            found=$(find "node_modules/${package}" -type f -name '*.node' \( -path "*/prebuilds/*${system}*" -o -path '*/build/Release/*' \) 2>/dev/null)
+            if [ -z "$found" ]; then
+              echo "node_modules/${package} has no compiled add-on for ${system}, so this build would have no MIDI or USB DMX."
+              exit 1
+            fi
+            echo "${package}: ${found%%$'\n'*}"
           done
 
       - name: Install the launcher's tools

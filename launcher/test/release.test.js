@@ -58,6 +58,26 @@ test('each build uses Node 24, runs the tests, then keeps only the production pa
   assert.ok(build.indexOf('npm run jump-check') < build.indexOf('npm ci --omit=dev'));
   // An optional package npm silently dropped would leave the app without MIDI or USB DMX.
   assert.ok(build.indexOf('@julusian/midi serialport') > build.indexOf('npm ci --omit=dev'));
+  // ...and so would a folder with no compiled add-on in it for this system.
+  assert.ok(build.indexOf('@serialport/bindings-cpp') > build.indexOf('npm ci --omit=dev'));
+  assert.match(build, /-name\s+'\*\.node'/);
+  assert.match(build, /prebuilds\//);
+  assert.match(build, /build\/Release/);
+});
+
+test('no checkout keeps the token in the build: every actions/checkout has persist-credentials: false', () => {
+  const lines = workflow.split('\n');
+  const checkouts = [];
+  lines.forEach((line, i) => {
+    if (!/^\s+- uses: actions\/checkout@v\d+\s*$/.test(line)) return;
+    const indent = line.length - line.trimStart().length;
+    let end = i + 1;
+    while (end < lines.length && (lines[end].trim() === '' || lines[end].length - lines[end].trimStart().length > indent)) end++;
+    checkouts.push(lines.slice(i, end).join('\n'));
+  });
+  assert.ok(checkouts.length >= 2, 'expected a checkout in the build and in the release job');
+  for (const step of checkouts) assert.match(step, /persist-credentials:\s*false/, `this checkout keeps the token:\n${step}`);
+  assert.match(job('build'), /persist-credentials:\s*false/);
 });
 
 test('a tag is checked against the version first in every build, and again in the release job', () => {
