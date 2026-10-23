@@ -245,11 +245,13 @@ test('a soft edge over a base blends smoothly: the base never switches off', () 
 });
 
 test('without a base every effect renders exactly as before (one-colour sparkle too)', () => {
-  // A checksum of many renders, taken from the engine before bases and sparks in every colour were added.
+  // A checksum of many renders, taken from the engine before bases and sparks in every colour were added (on x64,
+  // where the old engine's renders matched these exactly). Values are rounded to 9 decimals first: Math.cos and
+  // friends can differ in the last bit on ARM processors (Apple Silicon, the Pi), which is not a change in the engine.
   const WARM = { hex: '#ffb46b', white: 0.5 };
   let h = 0x811c9dc5;
   const eat = (v: number) => {
-    const s = v.toString();
+    const s = (Math.round(v * 1e9) / 1e9).toString();
     for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
   };
   for (const effect of EffectLayer.shape.effect.options) {
@@ -274,7 +276,7 @@ test('without a base every effect renders exactly as before (one-colour sparkle 
       }
     }
   }
-  assert.equal((h >>> 0).toString(16), '550a8a75');
+  assert.equal((h >>> 0).toString(16), '1387ff50');
 });
 
 test('a base never loosens light safety: the bound is the animation\'s', () => {

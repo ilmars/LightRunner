@@ -20,6 +20,8 @@ async function withApp(fn: (app: App) => Promise<void>, deviceFlashMs?: number) 
   const app = makeApp(dir, deviceFlashMs);
   try {
     await app.start();
+    // start() is done once it listens; the engine's first state comes a moment later (slow on some machines).
+    await waitFor(() => app.state, 10000, 'the first state');
     await fn(app);
   } finally {
     await app.stop();

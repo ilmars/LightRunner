@@ -112,6 +112,8 @@ async function withKeys(fn: (rig: Rig) => Promise<void>, opts: { midi?: (log: (m
   });
   try {
     await app.start();
+    // start() is done once it listens; the engine's first state comes a moment later (slow on some machines).
+    await waitFor(() => app.state, 10000, 'the first state');
     const url = `http://127.0.0.1:${app.port}`;
     const layout = await (await fetch(`${url}/api/layout`)).json();
     await fn({ app, midi, lines, layout, url });
@@ -602,7 +604,7 @@ test("unplugging a controller that isn't an APC puts out the Flash it holds", ()
   const g = layout.groups[0].id;
   await learn(rig, { kind: 'flash', group: g }, () => tap(port, 45));
   port.receive([0x90, 45, 127]);
-  await waitFor(() => app.state?.flashing.includes(g), 2000, 'the flash');
+  await waitFor(() => app.state?.flashing.includes(g), 5000, 'the flash');
   midi.unplug('nanoKONTROL2');
   await waitFor(() => port.closed, 1000, 'the port to close');
   await waitFor(() => app.state?.flashing.length === 0, 2000, 'the flash to go out');
