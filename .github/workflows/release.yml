@@ -1,0 +1,177 @@
+# Builds the Light Runner downloads: the Mac .dmg (Apple Silicon and Intel), the Windows Setup.exe and the Raspberry Pi
+# tarballs (arm64 and x64), each on a computer of its own kind.
+#
+#   push a tag v*        builds everything and makes a DRAFT release; the owner checks it and presses Publish
+#   run it by hand       builds everything and keeps the files as this run's downloads; no release
+#
+# See launcher/README.md ("Releases").
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Mac (Apple Silicon)
+            os: macos-15
+            kind: dist
+            files: launcher/dist/Light-Runner-*-arm64.dmg
+          - name: Mac (Intel)
+            os: macos-15-intel
+            kind: dist
+            files: launcher/dist/Light-Runner-*-x64.dmg
+          - name: Windows
+            os: windows-latest
+            kind: dist
+            files: launcher/dist/Light-Runner-Setup-*.exe
+          - name: Pi (arm64)
+            os: ubuntu-24.04-arm
+            kind: linux
+            files: launcher/dist/light-runner-linux-arm64.tar.gz
+          - name: Linux (x64)
+            os: ubuntu-latest
+            kind: linux
+            checks: true
+            files: launcher/dist/light-runner-linux-x64.tar.gz
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            launcher/package-lock.json
+
+      - name: Install the server's packages
+        run: npm ci
+
+      - name: Unit and server tests
+        run: npm test
+
+      # Once, on one computer: they don't depend on the system. typescript is a dev dependency, so before --omit=dev.
+      - name: Type check and fade jump check
+        if: matrix.checks
+        run: |
+          npm run typecheck
+          npm run jump-check
+
+      # What goes into the app: the production packages only, built for this computer.
+      - name: Keep the production packages only
+        run: npm ci --omit=dev
+
+      - name: Install the launcher's tools
+        if: matrix.kind == 'dist'
+        working-directory: launcher
+        run: npm ci
+
+      - name: Build the installer
+        if: matrix.kind == 'dist'
+        working-directory: launcher
+        run: npm run dist -- --publish never
+
+      # pack-linux needs nothing from the launcher's own packages. It bundles this computer's Node, so the arm64
+      # tarball is built on an arm64 computer.
+      - name: Build the Linux download
+        if: matrix.kind == 'linux'
+        working-directory: launcher
+        run: npm run pack-linux
+
+      - name: Keep the files
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Make the draft release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check the tag matches the version
+        run: |
+          version="$(jq -r .version package.json)"
+          if [ "$GITHUB_REF_NAME" != "v${version}" ]; then
+            echo "The tag is ${GITHUB_REF_NAME}, but the version in package.json is ${version}, so it should be v${version}."
+            echo "Change the version (or tag the right commit) and push the tag again. Nothing was published."
+            exit 1
+          fi
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: build-*
+          path: release
+          merge-multiple: true
+
+      - name: Gather the files
+        run: |
+          cd release
+          cp ../packaging/pi/install-pi.sh .
+          for file in "Light-Runner-${VERSION}-arm64.dmg" "Light-Runner-${VERSION}-x64.dmg" "Light-Runner-Setup-${VERSION}.exe" \
+                      light-runner-linux-arm64.tar.gz light-runner-linux-x64.tar.gz install-pi.sh; do
+            if [ ! -f "$file" ]; then
+              echo "The build made no file called ${file}. What it made:"
+              ls -l
+              exit 1
+            fi
+          done
+          sha256sum -- * > ../SHA256SUMS.txt
+          mv ../SHA256SUMS.txt .
+          ls -l
+
+      - name: Write the release notes
+        run: |
+          cat > notes.md <<NOTES
+          **Mac:** download the .dmg for your Mac (arm64 for Apple Silicon, x64 for an Intel Mac), drag Light Runner to Applications, then right-click it and choose Open the first time.
+
+          **Windows:** download Light-Runner-Setup-${VERSION}.exe and run it. If Windows says it protected your PC, choose More info, then Run anyway.
+
+          **Raspberry Pi:** run this on the Pi (64-bit Raspberry Pi OS). It works once this release is published, because it downloads the latest published release:
+
+              curl -fsSL https://github.com/${GH_REPO}/releases/latest/download/install-pi.sh | sudo bash
+
+          These downloads are not signed yet, which is why the Mac and Windows ask once. SHA256SUMS.txt lists a checksum for every file.
+          NOTES
+
+      - name: Make the draft release
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --draft --verify-tag \
+            --title "Light Runner ${VERSION}" \
+            --notes-file notes.md
+          echo "The draft release is ready: check it on GitHub under Releases, then press Publish." >> "$GITHUB_STEP_SUMMARY"

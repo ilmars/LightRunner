@@ -1,5 +1,6 @@
 # The Light Runner installers: a .dmg for the Mac (the build machine's own processor) and a per-user Setup.exe
-# for Windows (x64). Build with `npm run dist` (see README.md); the version comes from the root package.json.
+# for Windows (x64). File names have no spaces: GitHub turns spaces in a release's file names into dots.
+# Build with `npm run dist` (see README.md); the version comes from the root package.json.
 appId: com.github.ilmars.lightrunner
 productName: Light Runner
 copyright: Light Runner contributors
@@ -55,7 +56,7 @@ nsis:
   shortcutName: Light Runner
   runAfterFinish: true
   deleteAppDataOnUninstall: false
-  artifactName: Light Runner Setup ${version}.exe
+  artifactName: Light-Runner-Setup-${version}.exe
   # Stops a running Light Runner cleanly (the stage is saved) before the files are replaced; see installer.nsh.
   include: resources/installer.nsh
 
@@ -71,5 +72,5 @@ mac:
   extendInfo:
     NSLocalNetworkUsageDescription: Light Runner sends to the lights and talks to the iPads on this network.
 dmg:
-  artifactName: Light Runner ${version} ${arch}.dmg
+  artifactName: Light-Runner-${version}-${arch}.dmg
   title: Light Runner ${version}

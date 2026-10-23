@@ -7,7 +7,7 @@ The server is the same `server/src/main.ts` as `npm start`, run as a child proce
 | | Mac | Windows |
 | --- | --- | --- |
 | Data folder (the show, backups, `launcher.json`) | `~/Library/Application Support/Light Runner` | `%APPDATA%\Light Runner` |
-| Installer | `Light Runner <version> <arch>.dmg` (the build machine's processor) | `Light Runner Setup <version>.exe` (x64, for this user, no questions) |
+| Installer | `Light-Runner-<version>-<arch>.dmg` (the build machine's processor) | `Light-Runner-Setup-<version>.exe` (x64, for this user, no questions) |
 | Installed in | Applications (dragged there) | `%LOCALAPPDATA%\Programs\light-runner-launcher` (electron-builder names a one-click per-user install after the package) |
 
 ## Building
@@ -25,6 +25,17 @@ npm run dist -- --win --dir # Windows: only the unpacked app (launcher/dist/win-
 `npm run dist` first runs `scripts/stage-app.mjs`, which copies into `launcher/build/app` what the installed app runs: `server/`, `packages/`, `web/`, `shows/`, the Lightkey importer, the root `package.json`, the production `node_modules` and `node` (`node.exe`). electron-builder puts that folder in the app as `resources/lightrunner`, outside the asar, so the bundled Node can read it. The version is the root `package.json`'s. Nothing is signed yet: Windows' SmartScreen and the Mac's Gatekeeper ask once (the Mac build has an ad-hoc signature, so Apple Silicon runs it).
 
 electron-builder downloads its own tools the first time (Electron for the target, NSIS on Windows) into its cache. The built app has Electron's fuses set (`electronFuses`): it can't be run as plain Node, takes no `--inspect` or `NODE_OPTIONS`, and loads its code only from its checked asar. electron-builder never copies a `node_modules` at the top of an extra resource, so the server's packages are an entry of their own, and `dist.mjs` fails the build if any are missing from a built app (an unpacked app inside the repository would otherwise find the repository's own and hide it).
+
+## Releases
+
+GitHub builds every download (`.github/workflows/release.yml`): the Mac `.dmg` for Apple Silicon and for Intel, the Windows `Light-Runner-Setup-<version>.exe`, and the Raspberry Pi tarballs for arm64 and x64, each on a computer of its own kind. Nothing is signed (the owner's decision), so the Mac and Windows ask once, as above. To make a release:
+
+1. Change `version` in the root `package.json`, and commit it.
+2. Tag that commit `vX.Y.Z` (the same number) and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`. The workflow stops if the tag and the version differ.
+3. When the builds have finished, open the draft release under Releases on GitHub and check the files (three installers, two Pi tarballs, `install-pi.sh`, `SHA256SUMS.txt`).
+4. Press **Publish**. The Raspberry Pi install command only finds the files once the release is published.
+
+To try the builds without a release, run the workflow by hand (Actions > Release > Run workflow): it builds everything and keeps the files for a few days as that run's downloads, and makes no release.
 
 ## Trying it while developing
 
