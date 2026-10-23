@@ -206,6 +206,7 @@ test('two universes routed to two Art-Net nodes go to their own node', async () 
       const r = await call('PUT', '/api/settings', {
         output: { kind: 'artnet', host: '192.0.2.1' },
         routes: [{ universe: 2, output: { kind: 'artnet', host: '192.0.2.2' } }],
+        outputEnabled: true, // the demo show starts with Send DMX off
       });
       assert.equal(r.status, 200);
       assert.deepEqual(r.body.routes, [{ universe: 2, output: { kind: 'artnet', host: '192.0.2.2' } }]);

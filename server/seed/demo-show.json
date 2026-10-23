@@ -90,6 +90,6 @@
     "groups": ["front-wash", "back-wall", "audience", "pulpit"],
     "manualForOperators": false
   },
-  "settings": { "output": { "kind": "none" }, "frameRate": 40, "gamma": 2.2 },
+  "settings": { "output": { "kind": "none" }, "outputEnabled": false, "frameRate": 40, "gamma": 2.2 },
   "stage": { "grid": 10 }
 }
