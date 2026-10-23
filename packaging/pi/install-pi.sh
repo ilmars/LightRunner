@@ -4,7 +4,7 @@
 #   curl -fsSL https://github.com/ilmars/LightRunner/releases/latest/download/install-pi.sh | sudo bash
 #
 # Run it again to update: the show, backups and settings in /var/lib/light-runner stay as they are.
-# If an update goes wrong half way, the previous version is put back and started again.
+# If an update goes wrong half way, the previous version stays (or is put back) and is started again.
 #
 # For testing and offline installs:
 #   LR_TARBALL=/path/light-runner-linux-arm64.tar.gz   use this file instead of downloading
@@ -34,7 +34,7 @@ UNIT_FILE=""
 # What has happened so far, so that cleanup can undo a half-finished update.
 TMP=""
 WAS_ACTIVE=0   # the service was running before the update
-SWAPPING=0     # the old version may be moved aside
+MOVED_OLD=0    # the old version was moved aside to /opt/light-runner.old
 DONE=0         # the new version is in place and the service was started
 
 say() { printf '%s\n' "$*"; }
@@ -45,24 +45,35 @@ die() {
   exit 1
 }
 
-# Runs on every exit, including Ctrl-C and a failure. If the update stopped half way, the old version comes back.
+# True when the folder holds an install that can run.
+usable_install() {
+  [ -x "$1/node" ] && [ -f "$1/app/server/src/main.ts" ]
+}
+
+# Runs on every exit, including Ctrl-C and a failure. If the update stopped half way, the old version stays or comes
+# back, and if it was running it is started again.
 cleanup() {
   set +e
   trap - EXIT
   local restored=0
-  if [ "$SWAPPING" = 1 ] && [ "$DONE" = 0 ] && [ -d "$OLD_DIR" ]; then
+  if [ "$MOVED_OLD" = 1 ] && [ "$DONE" = 0 ] && [ -d "$OLD_DIR" ]; then
     rm -rf "$INSTALL_DIR"
     if mv "$OLD_DIR" "$INSTALL_DIR"; then restored=1; fi
   fi
   if [ -n "$TMP" ] && [ -d "$TMP" ]; then rm -rf "$TMP"; fi
   if [ "$DONE" = 0 ] && [ -n "$NEW_DIR" ] && [ -d "$NEW_DIR" ]; then rm -rf "$NEW_DIR"; fi
-  if [ "$restored" = 1 ]; then
-    printf '\nThe update stopped, so the previous version of Light Runner is back.\n' >&2
+  if [ "$DONE" = 0 ] && [ "$WAS_ACTIVE" = 1 ] && usable_install "$INSTALL_DIR"; then
+    if [ "$restored" = 1 ]; then
+      printf '\nThe update stopped, so the previous version of Light Runner is back.\n' >&2
+    else
+      printf '\nThe update stopped. The previous version of Light Runner is still installed.\n' >&2
+    fi
     if [ "$DRY" = 1 ]; then
-      say "  (dry run) would start ${SERVICE} again if it was running" >&2
-    elif [ "$WAS_ACTIVE" = 1 ]; then
+      say "  (dry run) would start ${SERVICE} again" >&2
+    else
+      systemctl reset-failed "$SERVICE" </dev/null 2>/dev/null
       if systemctl start "$SERVICE" </dev/null; then
-        printf 'The old version is still running, and the lights are as they were.\n' >&2
+        printf 'The old version is running again, and the lights are as they were.\n' >&2
       else
         printf 'It could not be started again. To see why, run: journalctl -u %s -n 50\n' "$SERVICE" >&2
       fi
@@ -260,11 +271,26 @@ stop_service() {
   systemctl stop "$SERVICE" </dev/null 2>/dev/null || true
 }
 
-swap_in() {
-  SWAPPING=1
-  if [ -d "$INSTALL_DIR" ]; then
+# A leftover /opt/light-runner.old (from an update that was killed) goes before the service is stopped, so
+# nothing deletes it while the swap is under way. If the install itself is gone, the leftover is put back.
+tidy_leftover() {
+  [ -e "$OLD_DIR" ] || return 0
+  if usable_install "$INSTALL_DIR"; then
     rm -rf "$OLD_DIR"
+  elif usable_install "$OLD_DIR"; then
+    say "An earlier update was cut short: putting the previous version back first"
+    rm -rf "$INSTALL_DIR"
+    mv "$OLD_DIR" "$INSTALL_DIR"
+  else
+    rm -rf "$OLD_DIR"
+  fi
+  [ ! -e "$OLD_DIR" ] || die "Could not remove ${OLD_DIR}. Remove it by hand: sudo rm -rf /opt/light-runner.old"
+}
+
+swap_in() {
+  if [ -d "$INSTALL_DIR" ]; then
     mv "$INSTALL_DIR" "$OLD_DIR"
+    MOVED_OLD=1
   fi
   mv "$NEW_DIR" "$INSTALL_DIR" || die "Could not put the new version in /opt/light-runner."
 }
@@ -274,6 +300,8 @@ install_service() {
   write_unit
   chmod 644 "$UNIT_FILE"
   run systemctl daemon-reload
+  # A start-limit failure from an earlier run must not keep the restart from happening.
+  run systemctl reset-failed "$SERVICE" || true
   run systemctl enable "$SERVICE"
   run systemctl restart "$SERVICE"
 }
@@ -282,6 +310,7 @@ install_service() {
 # (the server names its process in a header). READY is up, other (another program has the port) or none.
 wait_for_server() {
   READY=none
+  UNIT_STATE=active
   if [ "$DRY" = 1 ]; then
     say "  (dry run) would wait for http://127.0.0.1:${PORT}/ to answer"
     READY=up
@@ -306,6 +335,7 @@ wait_for_server() {
     fi
     sleep 1
   done
+  UNIT_STATE="$(systemctl is-active "$SERVICE" 2>/dev/null || true)"
 }
 
 print_summary() {
@@ -336,10 +366,19 @@ print_summary() {
       say "Stop that program (or move it to another port), then run: sudo systemctl restart ${SERVICE}"
       ;;
     *)
-      printf '\nLight Runner %s is installed, but it did not answer within 15 seconds.\n' "$VERSION"
-      say "It may still be starting. If it does not come up, the log says why."
+      case "$UNIT_STATE" in
+        failed | activating)
+          printf '\nLight Runner %s is installed, but it stopped with an error.\n' "$VERSION"
+          ;;
+        *)
+          printf '\nLight Runner %s is installed, but it did not answer within 15 seconds.\n' "$VERSION"
+          ;;
+      esac
       ;;
   esac
+  if [ "$READY" != up ] && [ "$READY" != unchecked ] && [ -d "$OLD_DIR" ]; then
+    say "The previous version is kept at /opt/light-runner.old."
+  fi
   say ""
   say "To read its log:        journalctl -u ${SERVICE} -f"
   say "To update Light Runner: run the same install command again. The show and backups stay."
@@ -371,15 +410,17 @@ main() {
   check_python
 
   step "Installing"
+  tidy_leftover
   stop_service
   swap_in
   install_service
   DONE=1
-  rm -rf "$OLD_DIR"
   say "Installed Light Runner ${VERSION} in /opt/light-runner"
 
   step "Starting"
   wait_for_server
+  # The previous version goes only once the new one answers.
+  if [ "$READY" = up ] || [ "$READY" = unchecked ]; then rm -rf "$OLD_DIR"; fi
   print_summary
 }
 
