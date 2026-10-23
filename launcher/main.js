@@ -24,7 +24,7 @@ import { checkPort, describe, firewallNote, pageUrl } from './src/view.js';
 const here = dirname(fileURLToPath(import.meta.url));
 /** The window's page. */
 const pagePath = join(here, 'ui', 'index.html');
-const pageUrl = pathToFileURL(pagePath).href;
+const windowUrl = pathToFileURL(pagePath).href;
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 const RELEASES_PAGE = 'https://github.com/ilmars/LightRunner/releases/latest';
@@ -326,7 +326,7 @@ function createWindow(show) {
   });
   win.on('show', () => push());
   if (show) win.once('ready-to-show', () => win?.show());
-  void win.loadURL(pageUrl);
+  void win.loadURL(windowUrl);
 }
 
 function showWindow() {
