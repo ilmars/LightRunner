@@ -10,12 +10,14 @@
  *   sentence: string | null,
  *   detail: string | null,
  *   fix: Fix | null,
+ *   retry: boolean,
  *   showLines: boolean,
  *   bottom: 'stop' | 'stop-elsewhere' | null,
  *   canChange: boolean,
  * }} Status
  *   `fix`: start the server, open Light Runner's Settings at Send DMX, open the Options at the port, or show how to
- *   let the iPads through Windows' firewall; `bottom`: the quiet Stop (or Stop it) at the foot of the window
+ *   let the iPads through Windows' firewall; `retry`: a Try again beside it (start again on the same port);
+ *   `bottom`: the quiet Stop (or Stop it) at the foot of the window
  */
 
 import { PORT_MAX, PORT_MIN } from './config.js';
@@ -63,7 +65,7 @@ function endByHand(platform, pid) {
 export function describe(s, { platform, answering = true, pid = null, testMode = false, output = null, outputWords = null, publicNetwork = false }) {
   const port = s.port ?? 0;
   /** @type {Status} */
-  const w = { tone: 'ok', line: '', sentence: null, detail: null, fix: null, showLines: false, bottom: null, canChange: true };
+  const w = { tone: 'ok', line: '', sentence: null, detail: null, fix: null, retry: false, showLines: false, bottom: null, canChange: true };
   /** @param {Partial<Status>} more */
   const set = (more) => Object.assign(w, more);
   const start = /** @type {Fix} */ ({ kind: 'start', label: 'Start' });
@@ -104,6 +106,8 @@ export function describe(s, { platform, answering = true, pid = null, testMode =
           sentence: `${s.message ?? `Port ${port} is already in use`}.`,
           detail: `Choose another port in the Options, for example ${port >= PORT_MAX ? 8081 : port + 1}.`,
           fix: { kind: 'port', label: 'Fix it' },
+          // What held the port may have let it go (it was only there for a moment, at login).
+          retry: true,
         });
       } else if (s.code === 'not-answering') {
         set({

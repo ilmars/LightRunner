@@ -18,7 +18,7 @@ test('a port is a whole number from 1024 to 65535', () => {
 
 test('running with nothing wrong: a green line and nothing else', () => {
   assert.deepEqual(describe(snap('running'), win), {
-    tone: 'ok', line: 'Running', sentence: null, detail: null, fix: null, showLines: false, bottom: 'stop', canChange: true,
+    tone: 'ok', line: 'Running', sentence: null, detail: null, fix: null, retry: false, showLines: false, bottom: 'stop', canChange: true,
   });
 });
 
@@ -84,6 +84,11 @@ test('the port taken: red, and Fix it opens the Options at the port', () => {
   assert.match(w.detail ?? '', /for example 8081/);
   assert.deepEqual(w.fix, { kind: 'port', label: 'Fix it' });
   assert.equal(w.canChange, true);
+  // The program holding the port may only have had it for a moment: Try again, on the same port.
+  assert.equal(w.retry, true);
+  for (const other of [snap('running'), snap('stopped'), snap('failed', { code: 'crashed' }), snap('failed', { code: 'not-answering' })]) {
+    assert.equal(describe(other, win).retry, false, `${other.status} ${other.code}`);
+  }
 });
 
 test('a Light Runner that is not answering must be ended by hand: no Fix it, no changes', () => {

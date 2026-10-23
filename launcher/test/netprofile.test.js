@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { categoryOf, parseProfiles } from '../src/netprofile.js';
+import { win32 } from 'node:path';
+import { categoryOf, parseProfiles, powershellPath, PROFILE_COMMAND } from '../src/netprofile.js';
 
 // Windows' network profiles (Get-NetConnectionProfile): is the iPads' network set to Public?
 
@@ -33,4 +34,20 @@ test('the category of the network an address is on, by its interface name', () =
   assert.equal(categoryOf(profiles, 'vEthernet (WSL)'), null);
   assert.equal(categoryOf(profiles, null), null);
   assert.equal(categoryOf([], 'Wi-Fi'), null);
+});
+
+test('an adapter name that is not plain ASCII (Latvian Windows) is read and matched', () => {
+  const profiles = parseProfiles('[{"InterfaceAlias":"Bezvadu tīkls","NetworkCategory":"Public"},{"InterfaceAlias":"Ethernet 2","NetworkCategory":"Private"}]');
+  assert.deepEqual(profiles, [{ name: 'Bezvadu tīkls', category: 'public' }, { name: 'Ethernet 2', category: 'private' }]);
+  assert.equal(categoryOf(profiles, 'Bezvadu tīkls'), 'public');
+  assert.equal(categoryOf(profiles, 'BEZVADU TĪKLS'), 'public');
+  // PowerShell is asked to answer in UTF-8, so such a name arrives whole.
+  assert.match(PROFILE_COMMAND, /^\[Console\]::OutputEncoding\s*=\s*\[Text\.Encoding\]::UTF8;/);
+});
+
+test('PowerShell is run by its full path in the Windows folder', () => {
+  const ps = (/** @type {string} */ root) => win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  assert.equal(powershellPath({ SystemRoot: win32.join('D:/', 'WINDOWS') }), ps(win32.join('D:/', 'WINDOWS')));
+  assert.equal(powershellPath({ windir: win32.join('C:/', 'Windows') }), ps(win32.join('C:/', 'Windows')));
+  assert.equal(powershellPath({}), ps(win32.join('C:/', 'Windows')));
 });
