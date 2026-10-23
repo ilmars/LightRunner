@@ -2,16 +2,20 @@
 // No Electron here, so it is tested on its own.
 
 /** @typedef {import('./server-process.js').Snapshot} Snapshot */
+/** @typedef {{ kind: 'start' | 'settings' | 'port' | 'network', label: string }} Fix */
 /**
  * @typedef {{
- *   headline: string,
- *   notice: { tone: 'quiet' | 'warn', text: string, detail: string | null } | null,
+ *   tone: 'ok' | 'warn' | 'bad' | 'quiet',
+ *   line: string,
+ *   sentence: string | null,
+ *   detail: string | null,
+ *   fix: Fix | null,
  *   showLines: boolean,
- *   button: 'start' | 'stop' | null,
- *   canStart: boolean,
- *   stopElsewhere: boolean,
+ *   bottom: 'stop' | 'stop-elsewhere' | null,
  *   canChange: boolean,
- * }} Words
+ * }} Status
+ *   `fix`: start the server, open Light Runner's Settings at Send DMX, open the Options at the port, or show how to
+ *   let the iPads through Windows' firewall; `bottom`: the quiet Stop (or Stop it) at the foot of the window
  */
 
 import { PORT_MAX, PORT_MIN } from './config.js';
@@ -44,68 +48,96 @@ function endByHand(platform, pid) {
 }
 
 /**
- * The window's words for the server's status.
+ * The window's status for the server: one line coloured by its tone, at most one plain sentence (and a detail)
+ * under it, and at most one button that fixes it.
  * @param {Snapshot} s
- * @param {{ platform: string, answering?: boolean, pid?: number | null }} context `answering`: the running server
- *   answers this window's reads; `pid`: the process of a server that isn't answering, when known
- * @returns {Words}
+ * @param {{
+ *   platform: string, answering?: boolean, pid?: number | null, testMode?: boolean,
+ *   output?: string | null, outputWords?: { long: string, title: string } | null, publicNetwork?: boolean,
+ * }} context
+ *   `answering`: the running server answers this window's reads; `pid`: the process of a server that isn't
+ *   answering, when known; `output` and `outputWords`: the live state's output and the operator page's words for a
+ *   problem with it (web/shared/appbar.js problemWords); `publicNetwork`: Windows has the iPads' network as Public
+ * @returns {Status}
  */
-export function describe(s, { platform, answering = true, pid = null }) {
+export function describe(s, { platform, answering = true, pid = null, testMode = false, output = null, outputWords = null, publicNetwork = false }) {
   const port = s.port ?? 0;
-  /** @type {Words} */
-  const w = { headline: '', notice: null, showLines: false, button: null, canStart: true, stopElsewhere: false, canChange: true };
+  /** @type {Status} */
+  const w = { tone: 'ok', line: '', sentence: null, detail: null, fix: null, showLines: false, bottom: null, canChange: true };
+  /** @param {Partial<Status>} more */
+  const set = (more) => Object.assign(w, more);
+  const start = /** @type {Fix} */ ({ kind: 'start', label: 'Start' });
   switch (s.status) {
     case 'running':
-      w.headline = 'Running';
-      w.button = 'stop';
-      if (!answering) w.notice = { tone: 'warn', text: "Light Runner isn't answering.", detail: 'If this goes on, stop it and start it again.' };
+    case 'running-elsewhere': {
+      set({ line: 'Running', bottom: s.status === 'running' ? 'stop' : 'stop-elsewhere' });
+      if (s.status === 'running-elsewhere') {
+        set({ canChange: false, sentence: `It was started outside this window (port ${port}).`, detail: s.message ?? 'To change the Options here, stop it first.' });
+      }
+      const notSending = outputWords && !(testMode && s.status === 'running' && output === 'off');
+      if (!answering) {
+        set({ tone: 'warn', line: 'Running · not answering', sentence: "Light Runner isn't answering this window.", detail: 'If this goes on, stop it and start it again.' });
+      } else if (notSending && outputWords) {
+        set({
+          tone: 'warn',
+          line: `Running · ${outputWords.long.charAt(0).toLowerCase()}${outputWords.long.slice(1)}`,
+          sentence: output === 'off' ? "Nothing goes to the lights: in Light Runner's Settings, Send DMX is off or no output is chosen." : outputWords.title,
+          fix: { kind: 'settings', label: 'Fix it' },
+        });
+      } else if (publicNetwork && platform === 'win32') {
+        set({ tone: 'warn', line: 'Running · the iPads are blocked', sentence: "Windows blocks the iPads on this network (it's set to Public).", fix: { kind: 'network', label: 'Fix it' } });
+      }
       break;
+    }
     case 'starting':
-      w.headline = 'Starting…';
-      w.button = 'stop';
+      set({ tone: 'quiet', line: 'Starting…', bottom: 'stop' });
       break;
     case 'stopped':
-      w.headline = 'Stopped';
-      w.button = 'start';
-      w.notice = { tone: 'quiet', text: "The iPads can't reach Light Runner until you start it.", detail: s.message };
-      break;
-    case 'running-elsewhere':
-      w.headline = 'Already running';
-      w.stopElsewhere = true;
-      w.canChange = false;
-      w.notice = {
-        tone: 'quiet',
-        text: `Light Runner is already running on this computer (port ${port}).`,
-        detail: s.message ?? 'To change its port or Test mode here, stop it first.',
-      };
+      set({ tone: 'bad', line: 'Stopped', sentence: "The iPads can't reach Light Runner until you start it.", detail: s.message, fix: start });
       break;
     case 'failed':
     default:
-      w.button = 'start';
+      w.tone = 'bad';
       if (s.code === 'port-in-use') {
-        w.headline = 'Not running';
-        w.notice = { tone: 'warn', text: `${s.message ?? `Port ${port} is already in use`}.`, detail: `Choose another port below, for example ${port >= PORT_MAX ? 8081 : port + 1}.` };
+        set({
+          line: `Stopped · port ${port} is taken`,
+          sentence: `${s.message ?? `Port ${port} is already in use`}.`,
+          detail: `Choose another port in the Options, for example ${port >= PORT_MAX ? 8081 : port + 1}.`,
+          fix: { kind: 'port', label: 'Fix it' },
+        });
       } else if (s.code === 'not-answering') {
-        w.headline = 'Not answering';
-        w.canStart = false;
-        w.canChange = false;
-        w.notice = {
-          tone: 'warn',
-          text: `Light Runner is already running on this computer (port ${port}) but isn't answering.`,
+        set({
+          line: 'Not answering',
+          sentence: `Light Runner is already running on this computer (port ${port}) but isn't answering.`,
           detail: `It has to be ended by hand: ${endByHand(platform, pid)} This window notices when it has gone.`,
-        };
+          canChange: false,
+        });
       } else if (s.code === 'stop-failed') {
-        w.headline = 'Not stopped';
-        w.notice = { tone: 'warn', text: `${s.message ?? 'Light Runner could not be stopped'}.`, detail: `End it by hand: ${endByHand(platform, pid)}` };
+        set({ line: 'Not stopped', sentence: `${s.message ?? 'Light Runner could not be stopped'}.`, detail: `End it by hand: ${endByHand(platform, pid)}`, fix: start });
       } else if (s.code === 'crashed') {
-        w.headline = 'Stopped';
-        w.showLines = true;
-        w.notice = { tone: 'warn', text: `${s.message ?? 'Light Runner stopped unexpectedly'}.`, detail: 'It was started again once by itself. Press Start to try again.' };
+        set({
+          line: 'Stopped · it stopped unexpectedly',
+          sentence: `${s.message ?? 'Light Runner stopped unexpectedly'}.`,
+          detail: 'It was started again once by itself.',
+          showLines: true,
+          fix: start,
+        });
       } else {
-        w.headline = 'Not running';
-        w.showLines = true;
-        w.notice = { tone: 'warn', text: `Light Runner couldn't start: ${s.message ?? 'no reason given'}.`, detail: null };
+        set({ line: "Stopped · it couldn't start", sentence: `Light Runner couldn't start: ${s.message ?? 'no reason given'}.`, showLines: true, fix: start });
       }
   }
   return w;
+}
+
+/**
+ * What to say about Windows' firewall where an iPad is added: on a Public network it blocks them ('public', also
+ * when the status line has a problem of its own to show); otherwise the gentle 'ask' note until the first iPad has
+ * come; nothing on other systems.
+ * @param {{ platform: string, publicNetwork: boolean, ipadSeen: boolean }} context
+ * @returns {'public' | 'ask' | null}
+ */
+export function firewallNote({ platform, publicNetwork, ipadSeen }) {
+  if (platform !== 'win32') return null;
+  if (publicNetwork) return 'public';
+  return ipadSeen ? null : 'ask';
 }
