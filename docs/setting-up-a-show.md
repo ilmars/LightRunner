@@ -27,7 +27,7 @@ Open **Patch**. Changes stay in the page until you press **Save patch** in the b
 1. The first time, open Settings › Fixture database and press **Download database (about 3 MB)**. Patch can then search the whole Open Fixture Library without internet.
 2. In Patch, under **Open Fixture Library**, type the model (for example `SonicPulse`) and press **Search**, or choose a maker under **Browse by manufacturer…**.
 3. Tap the fixture, then tap the **DMX mode** the fixture is really set to (for example "23-channel · 23 ch"). The channel count must match the mode set on the light itself. The type now appears in the **Fixture library** list and is picked in **Add fixtures**.
-4. A fixture type from a Lightkey project arrives with the project (step 1). **Import fixture file…** takes a fixture file in the Open Fixture Library's format, if someone gives you one.
+4. A fixture type from a Lightkey project arrives with the project (step 1). **Import fixture file…** takes a fixture file in the Open Fixture Library's format (see below for making one).
 
 **Add the lights:**
 
@@ -51,7 +51,7 @@ Open **Patch**. Changes stay in the page until you press **Save patch** in the b
 
 - Use one of the built-in **Generic** types if the light's channels are in the same order: Generic dimmer (1 ch), RGB (3), RGBW (4), RGBA (4), dimmer + RGB (4), dimmer + RGBW + strobe (6) and 16-bit dimmer + RGBW (6). It works only when the light's own channels really are those, in that order; otherwise colours will be wrong.
 - If the light is in a Lightkey project, use **Compare with a file…** (step 1); the type comes from Lightkey.
-- If someone has an Open Fixture Library file for it, use **Import fixture file…**.
+- Describe it yourself in the Open Fixture Library's online fixture editor (open-fixture-library.org, "Add fixture"): list each channel in order (dimmer, red, green, blue, white, amber, UV, colour temperature, strobe), download the file it makes, and bring it in with **Import fixture file…**. Someone may also simply give you such a file.
 - Otherwise ask whoever maintains Light Runner to add the type.
 
 ## 3. The stage plan
