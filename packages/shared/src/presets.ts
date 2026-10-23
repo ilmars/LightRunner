@@ -476,6 +476,33 @@ export function ensureEffects(show: Show): Show {
   return out;
 }
 
+/** The warm white a new group starts with (the same warm light the importer gives a white-only group). */
+const STARTER_WARM = '#ffb46b';
+
+/**
+ * Gives every light group that has no colours a starter set, so its colour list is never empty: Warm
+ * white, and Off (a way to turn the group off that needs no colour made first). A group made in Patch
+ * starts with none; so does an old show's. Hidden colours (Basic light, Any colour) are not the group's
+ * own colours. Smoke machines have no colours. A group that has any colour, effect or Off is left alone,
+ * and nothing is added to it again. The input is not changed.
+ */
+export function ensureGroupColours(show: Show): Show {
+  const bare = show.groups.filter((g) => g.kind !== 'smoke' && !show.presets.some((p) => p.group === g.id && !p.custom));
+  if (!bare.length) return show;
+  const out = structuredClone(show);
+  const starters: { name: string; hex: string; intensity: number }[] = [
+    { name: 'Warm white', hex: STARTER_WARM, intensity: 1 },
+    { name: 'Off', hex: '#000000', intensity: 0 },
+  ];
+  for (const group of bare) {
+    for (const { name, hex, intensity } of starters) {
+      const id = uniqueId(`${group.id} ${name}`, out.presets.map((p) => p.id));
+      out.presets.push({ id, name, group: group.id, fade: 3, swatch: hex, layers: [{ kind: 'static', colour: { hex }, intensity }] });
+    }
+  }
+  return out;
+}
+
 // ---- Edits in Prepare keep the stage as it is ----
 
 /** A preset's layers with palette colours looked up, so two layers compare by the light they make. */

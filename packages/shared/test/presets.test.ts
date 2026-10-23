@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  addColour, addEffect, canRecolour, checkReferences, deleteColour, displayColour, editColour, editEffect, EffectLayer, ensureEffects, ensureRunningOrder, groupIsWhiteOnly,
-  effectKey, groupSegments, isEffectPreset, isOff, keepLitPresets, listNames, parseShow, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, resolvedLayers,
+  addColour, addEffect, canRecolour, checkReferences, deleteColour, displayColour, editColour, editEffect, EffectLayer, ensureEffects, ensureGroupColours, ensureRunningOrder, groupIsWhiteOnly,
+  effectKey, groupSegments, isEffectPreset, isOff, keepLitPresets, listNames, parseShow, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, resolvedLayers, swatchOf,
   type Show, type StaticLayer,
 } from '../src/index.ts';
 
@@ -681,6 +681,39 @@ test('ready-made effects are added once to every coloured group with more than o
   const cleared = structuredClone(out);
   cleared.presets = cleared.presets.filter((p) => !isEffectPreset(p));
   assert.deepEqual(ensureEffects(cleared), cleared);
+});
+
+test('a light group with no colours gets Warm white and Off, and nothing else is touched', () => {
+  const before = rig();
+  before.groups.push({ id: 'balcony', name: 'Balcony', kind: 'light', fixtures: [] });
+  before.groups.push({ id: 'haze', name: 'Haze', kind: 'smoke', fixtures: [] });
+  // A hidden colour (Basic light) is not one of the group's colours.
+  before.presets.push({ id: 'balcony-hidden', name: 'Basic light', group: 'balcony', custom: true, fade: 3, layers: [{ kind: 'static', colour: { hex: '#ffd2a0' }, intensity: 0.8 }] });
+  const out = ensureGroupColours(before);
+  assert.deepEqual(names(out, 'balcony'), ['Warm white', 'Off']);
+  const [warm, off] = out.presets.filter((p) => p.group === 'balcony' && !p.custom);
+  assert.equal(isOff(warm!), false);
+  assert.equal(canRecolour(warm!), true);
+  assert.equal(isOff(off!), true);
+  assert.equal(off!.swatch, '#000000');
+  assert.equal(warm!.swatch, swatchOf(out, warm!));
+  assert.deepEqual(names(out, 'haze'), [], 'a smoke machine has no colours');
+  for (const g of before.groups) assert.deepEqual(names(out, g.id).slice(g.id === 'balcony' ? 2 : 0), names(before, g.id), g.id); // the others as they were
+  assert.equal(out.presets.length, before.presets.length + 2);
+  assert.deepEqual(checkReferences(out), []);
+  parseShow(JSON.parse(JSON.stringify(out)));
+  assert.equal(before.presets.some((p) => p.group === 'balcony' && p.name === 'Off'), false, 'the input is not changed');
+  // Done once: a second run changes nothing, and ids are never reused.
+  assert.deepEqual(ensureGroupColours(out), out);
+  const clash = rig();
+  clash.groups.push({ id: 'balcony', name: 'Balcony', kind: 'light', fixtures: [] });
+  clash.presets.push({ id: 'balcony-off', name: 'Off', group: 'front-lights', fade: 3, layers: [{ kind: 'static', colour: { hex: '#000000' }, intensity: 0 }] });
+  assert.deepEqual(checkReferences(ensureGroupColours(clash)), []);
+});
+
+test('a show whose groups all have colours is left exactly as it is', () => {
+  const s = rig();
+  assert.deepEqual(ensureGroupColours(s), s);
 });
 
 test('an edit in Prepare keeps the lit colours as they were: a hidden copy and a pin for each group whose light changes', () => {

@@ -85,7 +85,7 @@ In Settings › **DMX output**:
 On the operator page each group has its own colour list, used on the **Groups** panel.
 
 1. Tap a group's colour button to open the picker. It has **Colours** and **Effects** tabs, **‹ Groups** and **Done**.
-2. A group made in Patch starts with no colours. Tap **＋ New colour**. The stage doesn't change while you try colours here.
+2. A group made in Patch starts with two colours, **Warm white** and **Off**. Tap **＋ New colour** to add more. The stage doesn't change while you try colours here.
    - Give it a **Name**, then pick the **Colour** on the strip (a white-only group has a warm-to-cool strip instead).
    - **Saturation** makes it paler or stronger. **Exact values ›** takes a hex code or R, G and B. A group with White, Amber or UV also has a slider for each.
    - **Brightness** sets how bright it is (5 to 100 %), and **Fade into it** how long it takes to fade in.
