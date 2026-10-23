@@ -166,7 +166,7 @@ jobs:
       - name: Write the release notes
         run: |
           cat > notes.md <<NOTES
-          **Mac:** download the .dmg for your Mac (arm64 for Apple Silicon, x64 for an Intel Mac), drag Light Runner to Applications, then right-click it and choose Open the first time.
+          **Mac:** download the .dmg for your Mac (arm64 for Apple Silicon, x64 for an Intel Mac), drag Light Runner to Applications, then open it once. When the Mac says it can't be checked, go to System Settings > Privacy & Security, scroll down, press Open Anyway next to Light Runner, and confirm.
 
           **Windows:** download Light-Runner-Setup-${VERSION}.exe and run it. If Windows says it protected your PC, choose More info, then Run anyway.
 

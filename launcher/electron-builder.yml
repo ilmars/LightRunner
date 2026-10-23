@@ -65,7 +65,7 @@ mac:
     - target: dmg
   category: public.app-category.utilities
   icon: resources/icon-mac.png
-  # Unsigned for now (owner's decision): an ad-hoc signature, so Apple Silicon runs it; right-click > Open once.
+  # Unsigned for now (owner's decision): an ad-hoc signature, so Apple Silicon runs it; Open Anyway in System Settings > Privacy & Security once.
   identity: "-"
   hardenedRuntime: false
   gatekeeperAssess: false

@@ -8,13 +8,13 @@ A plain guide for the lighting lead and volunteers at stage L1. Part 1 is settin
 
 ### The Light Runner computer
 
-1. **Install Light Runner.** Download it and install it as the [README's Install section](../README.md#install) says (the first time you open it, the Mac asks once: right-click it, then Open). No Terminal and no Node are needed.
+1. **Install Light Runner.** Download it and install it as the [README's Install section](../README.md#install) says (the first time you open it, the Mac asks once: open it, then in **System Settings › Privacy & Security** press **Open Anyway** next to Light Runner and confirm). No Terminal and no Node are needed.
 
-2. **It starts with the computer.** Light Runner starts by itself when the computer starts and sits in the menu bar (the Mac) or the system tray (Windows). Open it to see the window: it says **Running**, and **Add an iPad or phone** shows the address for the iPads. Closing the window doesn't stop it. If the window says something is wrong, its **Fix it** button takes you to the fix.
+2. **It starts with the computer.** Light Runner starts by itself when the computer starts and sits in the menu bar (the Mac) or the system tray (Windows). Open it to see the window: it says **Running**, and **Add an iPad or phone** shows the address for the iPads. A new install says **Running · not sending to the lights** with a **Fix it** button until **Send DMX** is switched on in Settings; that is expected. Closing the window doesn't stop it. If the window says something is wrong, its **Fix it** button takes you to the fix.
 
    Away from the church (testing at home), turn on **Options › Test mode: don't send to the lights**, so it never sends to any lights. Turn it off again at the church.
 
-   *From source:* if Light Runner is run from the `LightRunner` folder instead of installed, start it in Terminal there with `/opt/homebrew/opt/node@24/bin/node server/src/main.ts` (after `/opt/homebrew/opt/node@24/bin/npm install` the first time and after an update), and leave that Terminal window open: closing it stops the lights. Use `LIGHT_RUNNER_OUTPUT=none` in front instead of Test mode. It doesn't start by itself.
+   *From source:* if Light Runner is run from the `LightRunner` folder instead of installed, start it in Terminal there with `/opt/homebrew/opt/node@24/bin/node server/src/main.ts` (after `/opt/homebrew/opt/node@24/bin/npm install` the first time and after an update), and leave that Terminal window open: closing it stops the lights. Use `LIGHT_RUNNER_OUTPUT=none` in front instead of Test mode. It doesn't start by itself. On the church Mac today, until the installed Mac app has been tried there, this is the way.
 
 3. **Keep the computer awake**: in System Settings, set the display and computer not to sleep while it is plugged in.
 
@@ -59,7 +59,7 @@ Songs, colours, quick looks and effects are made on the operator page; the fixtu
 
 ### Before people arrive (15 minutes)
 
-1. Open Light Runner on the Mac if it isn't running (its icon is in the menu bar; if not, open Light Runner from Applications). Its window should say **Running**. Lightkey off, **Send DMX on**.
+1. Open Light Runner on the Mac if it isn't running (its icon is in the menu bar; if not, open Light Runner from Applications). Its window should say **Running** (with Send DMX off it says **Running · not sending to the lights**, and **Fix it** takes you to the switch). Lightkey off, **Send DMX on**.
 2. Open the operator page on the iPad. The top bar should show **On stage** and a name, and **no amber pill**. If there is one, see "When something is wrong" below.
 3. Tap **Basic lights**: the stage should come up warm. Then tap through the songs once with the stage in view. Every change fades; nothing should jump.
 4. If you use the APC mini: plug it in, check its pads light up, and press Next once.

@@ -29,11 +29,11 @@ curl -fsSL https://github.com/ilmars/LightRunner/releases/latest/download/instal
 
 The Pi starts Light Runner when it starts, and the command prints the address to open on the iPad. To read its log: `journalctl -u light-runner -f`.
 
-**The first time you open it,** the Mac and Windows ask, because the downloads aren't signed yet. On a Mac, right-click (or Control-click) Light Runner, choose **Open**, then **Open** again. On Windows, when SmartScreen says it protected your PC, choose **More info**, then **Run anyway**. You only do this once.
+**The first time you open it,** the Mac and Windows ask, because the downloads aren't signed yet. On a Mac, open Light Runner once; when the Mac says it can't be checked, go to **System Settings › Privacy & Security**, scroll down, press **Open Anyway** next to Light Runner, and confirm. On Windows, when SmartScreen says it protected your PC, choose **More info**, then **Run anyway**. You only do this once.
 
 **What you see.** On a Mac or Windows computer a small window shows whether Light Runner is running, with buttons to open the operator page and Settings. **Add an iPad or phone** shows the address in big letters with a code to point the camera at. Closing the window leaves Light Runner running in the menu bar (Mac) or the system tray (Windows); Quit is there, and asks first. Under **Options** you can change the port, choose whether Light Runner starts when the computer starts (it does, to begin with), and switch on **Test mode: don't send to the lights**, which is the way to try it away from the church. On Windows the window also says if the network is set to Public, which stops the iPads from reaching Light Runner, and shows how to make it Private.
 
-A fresh install starts with a small demo rig that isn't connected to any lights, so nothing reaches your lights until you open your own show or choose an output in Settings. When a newer version is out, the window says "Version X is available" with a link. Updating is installing the new version over the old one (on the Pi, running the command again); the show stays.
+A fresh install starts with a demo rig that isn't connected to any lights, with **Send DMX** off; nothing is sent until someone switches Send DMX on in Settings. In the window it shows as "Running · not sending to the lights", with a **Fix it** button, until then. When a newer version is out, the window says "Version X is available" with a link. Updating is installing the new version over the old one (on the Pi, running the command again); the show stays.
 
 **Where the show lives.**
 
@@ -43,7 +43,7 @@ A fresh install starts with a small demo rig that isn't connected to any lights,
 | Windows | `%APPDATA%\Light Runner` |
 | Raspberry Pi | `/var/lib/light-runner` |
 
-**Moving a show in** (for example the church's, from a computer that runs Light Runner from source): on the old one, Settings > **Export show file**. On the new one, first make sure Lightkey isn't sending to the node (or switch **Send DMX** off in Settings), then Settings > **Open a show file…**, choose that file and confirm. The whole show is replaced, and the old one is kept as a backup in Settings > Backups. The file's node address comes with it; **Send DMX** and the programmer PIN stay as they are on this computer. When Lightkey isn't sending, switch Send DMX on. To take only some parts of a show (a few songs, or the fixtures from a Lightkey project) use **Compare with a file…** instead. The installed app doesn't read the old computer's `data/` folder by itself.
+**Moving a show in** (for example the church's, from a computer that runs Light Runner from source): on the old one, Settings > **Export show file**. On the new one, Settings > **Open a show file…**, choose that file and confirm. The whole show is replaced, and the old one is kept as a backup in Settings > Backups. The file's node address comes with it; **Send DMX** and the programmer PIN stay as they are on this computer (a fresh install has Send DMX off, so nothing is sent yet). Make sure Lightkey isn't sending to the node when you switch Send DMX on, and, on an install that already has it on, before you open the file. The exported file leaves out the PIN. To take only some parts of a show (a few songs, or the fixtures from a Lightkey project) use **Compare with a file…** instead. The installed app doesn't read the old computer's `data/` folder by itself.
 
 ## A short tour
 

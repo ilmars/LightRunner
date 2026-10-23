@@ -5,7 +5,7 @@ description: Walk someone through preparing Light Runner for a church service an
 
 # Light Runner: setting up and running a service
 
-You are helping a lighting lead or a volunteer at a church get the lights ready and run them. On the church Mac Light Runner is normally the installed app (it starts with the computer and sits in the menu bar); the Terminal is only for someone running it from source. They are usually not technical, may be in a dark room, and may be in a hurry before a service. Talk in plain words, one step at a time, and wait for them to confirm a step before giving the next when they are doing it live.
+You are helping a lighting lead or a volunteer at a church get the lights ready and run them. Light Runner is either the installed app (it starts with the computer and sits in the menu bar) or, on the church Mac today (the Mac build hasn't been tried yet), the source install started in Terminal. They are usually not technical, may be in a dark room, and may be in a hurry before a service. Talk in plain words, one step at a time, and wait for them to confirm a step before giving the next when they are doing it live.
 
 The full people guide is `docs/running-a-service.md` — read it first; it is what you walk them through. Controllers are detailed in `docs/companion.md`. Facts about the rig are in `CLAUDE.md` ("The rig (stage L1)").
 
@@ -29,7 +29,7 @@ node .claude/skills/light-runner-service/scripts/check.ts http://localhost:8080
 
 Use the address they use (on the church Mac `http://localhost:8080`; from elsewhere `http://192.168.0.195:8080`). On the church Mac, `node` may need to be `/opt/homebrew/opt/node@24/bin/node`. The script only reads; it reports whether Light Runner answers, whether it is sending to the lights (and the problem in plain words if not), what is on stage, Master below full, held individual lights, the groups, Who to call, and the APC mini. Tell them the result in your own short words and what to do about each ✗ — don't paste the raw output at them.
 
-If it doesn't answer: Light Runner isn't running, or the address is wrong. For the installed app, tell them to open Light Runner (its menu-bar icon, or from Applications) and look at the status line in its window: **Running** is good, and a problem comes with a sentence and a **Fix it** button (or **Try again** when the port was taken). The window's **Add an iPad or phone** shows the address for the iPads. For a source install (started in Terminal), the Terminal window was closed or never started: guide Part 1 step 2, "From source".
+If it doesn't answer: Light Runner isn't running, or the address is wrong. For the installed app, tell them to open Light Runner (its menu-bar icon, or from Applications) and look at the status line in its window: **Running** is good (a new install says **Running · not sending to the lights** until Send DMX is switched on: expected), and a problem comes with a sentence and a **Fix it** button (or **Try again** when the port was taken). The window's **Add an iPad or phone** shows the address for the iPads. For a source install (started in Terminal), the Terminal window was closed or never started: guide Part 1 step 2, "From source".
 
 ## What you may do, and what you ask first
 
