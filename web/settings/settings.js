@@ -762,6 +762,7 @@ function routeFields(u, out) {
 // ---- Open a whole show file ----
 
 const NOT_A_SHOW = "This file isn't a Light Runner show";
+const TOO_BIG = 'This file is too big to be a show';
 
 $('openShowFile').addEventListener('change', async (e) => {
   const file = e.target.files[0];
@@ -778,10 +779,12 @@ $('openShowFile').addEventListener('change', async (e) => {
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || typeof parsed.schemaVersion !== 'number') throw new Error(NOT_A_SHOW);
     const name = typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim() : file.name;
-    if (!confirm(`Replace the whole show with "${name}"? The current show is kept as a backup. Send DMX stays as it is now.`)) return;
+    const unsaved = saved && Object.keys(changedFields()).length ? ' Unsaved changes on this page are dropped.' : '';
+    if (!confirm(`Replace the whole show with "${name}"? The current show is kept as a backup. Send DMX stays as it is now.${unsaved}`)) return;
     const res = await request('/api/show', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: text });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) showLogin();
+    if (res.status === 413 || /too (large|big)/i.test(data.error || '')) throw new Error(TOO_BIG);
     if (res.status === 400) throw new Error(NOT_A_SHOW);
     if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
     toast('Show opened');

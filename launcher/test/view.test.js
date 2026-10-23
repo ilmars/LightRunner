@@ -6,7 +6,7 @@ import { checkPort, describe, firewallNote } from '../src/view.js';
 
 const snap = (status, extra = {}) => ({ status, code: null, message: null, port: 8080, ...extra });
 const win = { platform: 'win32' };
-const NOT_SENDING = { long: 'Not sending to the lights', title: 'DMX output is off: Send DMX is off, or this server was started with output forced off.' };
+const NOT_SENDING = { long: 'Not sending to the lights', title: 'Nothing is sent to the lights: Send DMX is off in Settings, or Test mode is on.' };
 const NOT_ANSWERING = { long: 'Lights not answering', title: 'The lighting network box at 192.168.0.114 is not answering.' };
 
 test('a port is a whole number from 1024 to 65535', () => {

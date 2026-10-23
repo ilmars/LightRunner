@@ -1422,7 +1422,10 @@ export class App {
           'content-type': 'application/json; charset=utf-8',
           'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file)}`,
         });
-        res.end(JSON.stringify(this.show, null, 2));
+        // A show file is shared and kept: it never carries this installation's PIN hash (a 4 to 6 digit PIN is easy
+        // to work out from its hash). Opening a file keeps the PIN here, so a file without one loses nothing.
+        const { pinHash: _pin, ...settings } = this.show.settings;
+        res.end(JSON.stringify({ ...this.show, settings }, null, 2));
         return true;
       }
       case 'PUT /api/show': {
@@ -1430,6 +1433,8 @@ export class App {
         try {
           show = parseShow(await readJson(req, 10 * 1024 * 1024));
         } catch (err) {
+          // Too large (413) and not JSON keep their own words; anything else is not a show.
+          if (err instanceof HttpError) throw err;
           throw new HttpError(400, `not a valid show: ${(err as Error).message}`);
         }
         const fromPatch = url.searchParams.get('source') === 'patch';
