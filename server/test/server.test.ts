@@ -1475,3 +1475,21 @@ test('Update from the stage stores the stage, refuses during Blackout, and a ren
   assert.equal(await t.send({ type: 'editQuickLook', look: quick.id, fromStage: true }), 'Blackout is on. Bring the lights back, then save.');
   assert.equal(await t.send({ type: 'editQuickLook', look: quick.id, name: 'Quiet' }), null);
 }));
+
+test('Compare with a file on a fresh export of the same show finds no differences, even with songs made on the stage', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const basic = t.order()[0]!;
+  // Basic lights on stage (its hidden "Basic light" colour), then a song made from it, and one from a song.
+  assert.equal(await t.send({ type: 'look', id: basic, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'addSong', after: basic }), null);
+  const welcome = t.order()[1]!;
+  assert.equal(await t.send({ type: 'renameItem', id: welcome, name: 'Welcome' }), null);
+  assert.equal(await t.send({ type: 'look', id: t.order()[2]!, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 }), null);
+  assert.equal(await t.send({ type: 'addSong', after: welcome }), null);
+  const exported = (await api(app, 'GET', '/api/show')).body;
+  const preview = await api(app, 'POST', '/api/import/preview', exported);
+  assert.equal(preview.status, 200);
+  assert.deepEqual(preview.body.items, []);
+}));

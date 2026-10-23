@@ -35,7 +35,18 @@ const LISTS: Record<ItemKind, 'profiles' | 'fixtures' | 'groups' | 'palettes' | 
 const ORDER: ItemKind[] = ['profile', 'fixture', 'group', 'palette', 'preset', 'look'];
 const kindsFor = (scope: Scope): ItemKind[] => (scope === 'patch' ? ['profile', 'fixture'] : ORDER);
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+/**
+ * Two values are the same when they hold the same things: the order of an object's fields is not part of it
+ * (a song made on the stage has its tempo after its colours; the same song read from a file has the schema's
+ * order), and a field that is missing is the same as one that is undefined. The order of a list is.
+ */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) => {
+    if (v === null || typeof v !== 'object' || Array.isArray(v)) return v;
+    return Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  });
+}
+const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
 const list = (show: Show, kind: ItemKind) => show[LISTS[kind]] as Item[];
 
 /** True when a preset's swatch is just what its colour (shared colours looked up in its own show) shows. */

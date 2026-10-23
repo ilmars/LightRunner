@@ -9,6 +9,19 @@ test('an identical show has no differences', () => {
   assert.deepEqual(diffShows(rig(), rig()), []);
 });
 
+test('the order of the fields in an item makes no difference: a song with a tempo, saved in the order it was made, is the same song', () => {
+  const current = rig();
+  const song = current.looks.find((l) => l.id === 'worship')!;
+  // As addSong builds a look: tempo added after groups. A parsed show has the schema's order (tempo before groups).
+  const made = { id: song.id, name: song.name, groups: song.groups, tempo: 96 } as typeof song;
+  current.looks = current.looks.map((l) => (l.id === song.id ? made : l));
+  const incoming = parseShow(JSON.parse(JSON.stringify(current)));
+  assert.notEqual(JSON.stringify(incoming.looks.find((l) => l.id === song.id)), JSON.stringify(made), 'the two differ only in key order');
+  assert.deepEqual(diffShows(current, incoming), []);
+  incoming.looks.find((l) => l.id === song.id)!.tempo = 100;
+  assert.equal(diffShows(current, incoming).find((i) => i.id === song.id)?.change, 'changed');
+});
+
 test('new, changed and removed items are found and described', () => {
   const current = rig();
   const incoming = rig();
