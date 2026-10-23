@@ -677,7 +677,7 @@ async function showOflModes(loadInfo, makeProfile) {
       b.append(el('span', null, `${m.name} · ${m.channels} ch`), el('br'), el('small', null, m.roles.length ? m.roles.join(', ') : 'no colour or dimmer channels'));
       b.addEventListener('click', async () => {
         try {
-          addProfile(await makeProfile(m.index));
+          addProfile(await makeProfile(m.index), info.manufacturer);
         } catch (err) {
           toast(err.message, true);
         }
@@ -690,8 +690,9 @@ async function showOflModes(loadInfo, makeProfile) {
   }
 }
 
-/** Add (or update) a fixture type in this show; it is stored when the patch is saved. */
-function addProfile(profile) {
+/** Add (or update) a fixture type in this show; it is stored when the patch is saved. The fixture's suggested name
+ * is the type's without its maker. */
+function addProfile(profile, manufacturer = '') {
   const k = show.profiles.findIndex((p) => p.id === profile.id);
   if (k >= 0) show.profiles[k] = profile;
   else show.profiles.push(profile);
@@ -702,7 +703,8 @@ function addProfile(profile) {
   profileById.set(profile.id, summary);
   fillAddForm(false);
   $('addProfile').value = profile.id;
-  $('addName').value = typeLabel(summary).replace(/^\S+\s+/, '');
+  const label = typeLabel(summary);
+  $('addName').value = manufacturer && label.startsWith(`${manufacturer} `) ? label.slice(manufacturer.length + 1) : label;
   suggestAddress();
   changed();
   toast(`${profile.name} is in the library. Drag it onto the map, then save.`);

@@ -176,7 +176,7 @@ export function oflToProfile(fixture: OflFixture, modeIndex: number, manufacture
   const channels = expandModeChannels(fixture, mode).map((name) => toChannel(name, fixture));
   return {
     id: oflProfileId(manufacturerKey, fixtureKey, mode),
-    name: `${manufacturerName} ${fixture.name} (${mode.name})`,
+    name: `${[manufacturerName, fixture.name].filter(Boolean).join(' ')} (${mode.name})`,
     channels,
     source: { ofl: `${manufacturerKey}/${fixtureKey}`, mode: mode.name },
   };
