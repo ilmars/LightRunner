@@ -13,50 +13,66 @@
 <body>
   <main class="lr">
     <header class="top">
-      <img class="icon" src="shared/icon.svg" alt="" width="36" height="36">
-      <div class="title">
-        <div class="ds-caps">Light Runner</div>
-        <h1 id="headline" role="status">Starting…</h1>
-      </div>
+      <img class="icon" src="shared/icon.svg" alt="" width="32" height="32">
+      <h1>Light Runner</h1>
+      <span class="grow"></span>
       <span id="testPill" class="ds-pill" hidden>Test mode</span>
-      <span id="problem" class="ds-pill ds-pill--warn" hidden></span>
     </header>
 
-    <section class="ds-panel card" id="reach" aria-labelledby="reachLabel">
-      <div class="ds-caps" id="reachLabel">For the iPads</div>
-      <div id="url" class="url"></div>
-      <div class="reach">
-        <div class="reach-text">
-          <p class="hint">Open it in Safari on the iPad, or point the iPad's camera at the code.</p>
+    <!-- How it is, in one line coloured by its state; a problem gets one sentence and one button. -->
+    <section id="status" class="status" aria-live="polite">
+      <div class="status-line"><span class="dot" aria-hidden="true"></span><span id="line">Starting…</span></div>
+      <div id="problem" class="problem" hidden>
+        <p id="sentence" class="sentence"></p>
+        <p id="detail" class="detail"></p>
+        <pre id="lines" class="lines" hidden></pre>
+        <button id="fix" class="ds-btn ds-btn--primary fix" hidden>Fix it</button>
+      </div>
+      <div id="steps" class="steps" hidden>
+        <p class="steps-title">Let the iPads through, in Windows' settings</p>
+        <ol>
+          <li><b>Settings › Network &amp; internet › Wi-Fi</b> (or Ethernet) › this network › <b>Network profile type: Private</b>. Only on a network you trust, such as the church's.</li>
+          <li><b>Windows Security › Firewall &amp; network protection › Allow an app through firewall</b> › tick <b>Private</b> for Light Runner (it may be listed as Node.js JavaScript Runtime).</li>
+        </ol>
+        <p class="detail">This window notices when the network is Private.</p>
+      </div>
+    </section>
+
+    <div class="buttons">
+      <button id="openOperator" class="ds-btn ds-btn--primary big">Open the operator page</button>
+      <button id="openSettings" class="ds-btn big">Open Settings</button>
+      <button id="addDevice" class="ds-btn big" aria-expanded="false" aria-controls="add">＋ Add an iPad or phone</button>
+    </div>
+
+    <section id="add" class="ds-panel card add" aria-label="Add an iPad or phone" hidden>
+      <div class="add-row">
+        <div class="add-text">
+          <p class="hint">On the iPad or phone, point the camera at the code, or type the address into Safari.</p>
+          <div id="url" class="url"></div>
           <label id="pickRow" class="pick" hidden>
             <span class="ds-label">Network</span>
             <select id="pick" class="ds-field"></select>
           </label>
           <p id="noNetwork" class="hint" hidden>This computer isn't on a network, so the iPads can't reach it yet.</p>
           <p id="firewall" class="firewall" hidden>If Windows asks, allow Light Runner on private networks, so the iPads can reach it</p>
+          <div id="blocked" class="firewall blocked" hidden>
+            <span>Windows blocks the iPads on this network (it's set to Public).</span>
+            <button id="howTo" class="ds-btn ds-btn--quiet">How to fix it</button>
+          </div>
         </div>
-        <img id="qr" class="qr" alt="Code for the iPad's camera: the address above" width="152" height="152" hidden>
+        <img id="qr" class="qr" alt="Code for the camera: the address beside it" width="152" height="152" hidden>
       </div>
     </section>
 
-    <section id="notice" class="notice" hidden>
-      <p id="noticeText" class="notice-text"></p>
-      <p id="noticeDetail" class="notice-detail"></p>
-      <pre id="lines" class="lines" hidden></pre>
-      <div class="notice-actions" id="elsewhereActions" hidden>
-        <button id="stopElsewhere" class="ds-btn">Stop it</button>
-      </div>
-    </section>
-
-    <div class="actions">
-      <button id="openOperator" class="ds-btn">Open the operator page</button>
-      <button id="openSettings" class="ds-btn">Open Settings</button>
+    <footer class="foot">
+      <button id="optionsToggle" class="ds-btn ds-btn--text" aria-expanded="false" aria-controls="options">Options <span class="chev">›</span></button>
+      <button id="stop" class="ds-btn ds-btn--quiet" hidden>Stop</button>
       <span class="grow"></span>
-      <button id="startStop" class="ds-btn ds-btn--quiet">Stop</button>
-    </div>
+      <span id="version" class="version"></span>
+      <a id="newer" href="#" hidden></a>
+    </footer>
 
-    <section class="ds-panel card settings" aria-labelledby="settingsLabel">
-      <div class="ds-caps" id="settingsLabel">Settings</div>
+    <section id="options" class="ds-panel card options" aria-label="Options" hidden>
       <form id="portForm" class="port-row">
         <label for="port">Port</label>
         <input id="port" class="ds-field" inputmode="numeric" autocomplete="off" maxlength="5" aria-describedby="portNote">
@@ -75,11 +91,6 @@
       </label>
       <p id="saveError" class="field-note bad" hidden></p>
     </section>
-
-    <footer class="foot">
-      <span id="version"></span>
-      <a id="newer" href="#" hidden></a>
-    </footer>
   </main>
 </body>
 </html>

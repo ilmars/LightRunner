@@ -9,8 +9,12 @@ const $ = (/** @type {string} */ id) => /** @type {any} */ (document.getElementB
 let current = null;
 /** The port typed but not yet changed: a new view doesn't overwrite it. */
 let portDirty = false;
-/** The action under way ('start-stop', 'stop-elsewhere'): its button waits, whatever a new view says. */
+/** The action under way ('fix', 'stop'): its button waits, whatever a new view says. */
 let busy = '';
+/** The parts folded open or shut by hand. Add is open by itself only on the very first start. */
+let addOpen = null;
+let optionsOpen = false;
+let stepsOpen = false;
 
 /** @param {HTMLElement} el @param {string} text */
 function setText(el, text) {
@@ -20,19 +24,44 @@ function setText(el, text) {
 /** @param {any} v */
 function render(v) {
   current = v;
-  setText($('headline'), v.headline);
+  if (addOpen === null) addOpen = !!v.firstStart;
   $('testPill').hidden = !v.testPill;
-  $('problem').hidden = !v.problem;
-  if (v.problem) {
-    setText($('problem'), v.problem.text);
-    $('problem').title = v.problem.title ?? '';
-  }
 
-  // The address and the code (only while the iPads could reach it there).
+  // How it is.
+  const status = $('status');
+  status.className = `status ${v.tone}`;
+  setText($('line'), v.line);
+  const problem = !!(v.sentence || v.fix || (v.lines && v.lines.length));
+  $('problem').hidden = !problem;
+  setText($('sentence'), v.sentence ?? '');
+  $('sentence').hidden = !v.sentence;
+  setText($('detail'), v.detail ?? '');
+  $('lines').hidden = !(v.lines && v.lines.length);
+  setText($('lines'), (v.lines ?? []).join('\n'));
+  const fix = $('fix');
+  fix.hidden = !v.fix;
+  if (v.fix) setText(fix, v.fix.kind === 'network' && stepsOpen ? 'Hide the steps' : v.fix.label);
+  fix.disabled = busy === 'fix';
+  // The steps for a Public network go with whichever says so: the status line's Fix it, or the note in Add.
+  const stepsBy = v.fix?.kind === 'network' ? 'status' : v.firewallNote === 'public' && addOpen ? 'add' : null;
+  if (!stepsBy) stepsOpen = false;
+  const steps = $('steps');
+  const home = stepsBy === 'add' ? $('blocked') : $('problem');
+  if (steps.previousElementSibling !== home) home.after(steps);
+  steps.hidden = !stepsOpen;
+
+  // The three things people come for.
   const reachable = v.status === 'running' || v.status === 'running-elsewhere';
+  $('openOperator').disabled = !reachable;
+  $('openSettings').disabled = !reachable;
+  $('addDevice').setAttribute('aria-expanded', String(addOpen));
+
+  // Adding an iPad.
+  $('add').hidden = !addOpen;
   setText($('url'), v.url);
   $('url').classList.toggle('dim', !reachable);
-  $('qr').hidden = !(v.qr && reachable && v.address);
+  // The code only while it leads somewhere.
+  $('qr').hidden = !(v.qr && v.address && reachable);
   if (v.qr) {
     const src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(v.qr)}`;
     if ($('qr').getAttribute('src') !== src) $('qr').setAttribute('src', src);
@@ -46,34 +75,23 @@ function render(v) {
   }
   if (v.address && pick.value !== v.address) pick.value = v.address;
   $('noNetwork').hidden = v.addresses.length > 0;
-  $('firewall').hidden = !v.firewallNote;
+  $('firewall').hidden = v.firewallNote !== 'ask';
+  // Said once: not here when the status line already says it.
+  $('blocked').hidden = v.firewallNote !== 'public' || v.fix?.kind === 'network';
+  setText($('howTo'), stepsOpen ? 'Hide the steps' : 'How to fix it');
 
-  // What to know.
-  const notice = $('notice');
-  notice.hidden = !v.notice;
-  if (v.notice) {
-    notice.classList.toggle('warn', v.notice.tone === 'warn');
-    setText($('noticeText'), v.notice.text);
-    setText($('noticeDetail'), v.notice.detail ?? '');
-  }
-  $('lines').hidden = !(v.lines && v.lines.length);
-  setText($('lines'), (v.lines ?? []).join('\n'));
-  $('elsewhereActions').hidden = !v.stopElsewhere;
+  // The foot.
+  const stop = $('stop');
+  stop.hidden = !v.bottom;
+  setText(stop, busy === 'stop' ? 'Stopping…' : v.bottom === 'stop-elsewhere' ? 'Stop it' : 'Stop');
+  stop.disabled = busy === 'stop';
+  $('optionsToggle').setAttribute('aria-expanded', String(optionsOpen));
+  $('options').hidden = !optionsOpen;
+  setText($('version'), `Version ${v.version}`);
+  $('newer').hidden = !v.newer;
+  if (v.newer) setText($('newer'), `Version ${v.newer} is available`);
 
-  // Buttons.
-  $('openOperator').disabled = !reachable;
-  $('openSettings').disabled = !reachable;
-  const startStop = $('startStop');
-  startStop.hidden = !v.button;
-  setText(startStop, v.button === 'stop' ? 'Stop' : 'Start');
-  startStop.classList.toggle('ds-btn--primary', v.button === 'start');
-  startStop.classList.toggle('ds-btn--quiet', v.button !== 'start');
-  startStop.disabled = busy === 'start-stop' || (v.button === 'start' && !v.canStart);
-  const stopIt = $('stopElsewhere');
-  stopIt.disabled = busy === 'stop-elsewhere';
-  setText(stopIt, busy === 'stop-elsewhere' ? 'Stopping…' : 'Stop it');
-
-  // Settings.
+  // Options.
   const port = $('port');
   if (!portDirty && document.activeElement !== port) port.value = String(v.configPort);
   port.disabled = !v.canChange;
@@ -89,10 +107,6 @@ function render(v) {
   test.closest('label').classList.toggle('off', !v.canChange);
   $('saveError').hidden = !v.saveError;
   setText($('saveError'), v.saveError ?? '');
-
-  setText($('version'), `Version ${v.version}`);
-  $('newer').hidden = !v.newer;
-  if (v.newer) setText($('newer'), `Version ${v.newer} is available`);
 }
 
 /** @param {string} action @param {unknown} [value] */
@@ -101,14 +115,6 @@ async function act(action, value) {
   return result ?? {};
 }
 
-/** @param {string} text */
-function portNote(text) {
-  $('portNote').hidden = !text;
-  setText($('portNote'), text);
-}
-
-$('openOperator').addEventListener('click', () => void act('open-operator'));
-$('openSettings').addEventListener('click', () => void act('open-settings'));
 /**
  * Run an action with its button waiting; afterwards the view as it is now decides what the buttons are.
  * @param {string} which @param {string} action
@@ -124,8 +130,50 @@ async function withButton(which, action) {
     render(await api.view());
   }
 }
-$('startStop').addEventListener('click', () => void withButton('start-stop', current?.button === 'stop' ? 'stop' : 'start'));
-$('stopElsewhere').addEventListener('click', () => void withButton('stop-elsewhere', 'stop-elsewhere'));
+
+/** @param {string} text */
+function portNote(text) {
+  $('portNote').hidden = !text;
+  setText($('portNote'), text);
+}
+
+function openOptionsAtPort() {
+  optionsOpen = true;
+  if (current) render(current);
+  const port = $('port');
+  $('options').scrollIntoView({ block: 'end' });
+  port.focus({ preventScroll: true });
+  port.select();
+}
+
+$('fix').addEventListener('click', () => {
+  const kind = current?.fix?.kind;
+  if (kind === 'start') void withButton('fix', 'start');
+  else if (kind === 'settings') void act('open-send-dmx');
+  else if (kind === 'port') openOptionsAtPort();
+  else if (kind === 'network') {
+    stepsOpen = !stepsOpen;
+    render(current);
+  }
+});
+$('howTo').addEventListener('click', () => {
+  stepsOpen = !stepsOpen;
+  render(current);
+  if (stepsOpen) $('steps').scrollIntoView({ block: 'nearest' });
+});
+$('openOperator').addEventListener('click', () => void act('open-operator'));
+$('openSettings').addEventListener('click', () => void act('open-settings'));
+$('addDevice').addEventListener('click', () => {
+  addOpen = !addOpen;
+  render(current);
+  if (addOpen) $('add').scrollIntoView({ block: 'nearest' });
+});
+$('optionsToggle').addEventListener('click', () => {
+  optionsOpen = !optionsOpen;
+  render(current);
+  if (optionsOpen) $('options').scrollIntoView({ block: 'nearest' });
+});
+$('stop').addEventListener('click', () => void withButton('stop', current?.bottom === 'stop-elsewhere' ? 'stop-elsewhere' : 'stop'));
 $('pick').addEventListener('change', (/** @type {Event} */ e) => void act('address', /** @type {HTMLSelectElement} */ (e.target).value));
 $('port').addEventListener('input', () => {
   portDirty = $('port').value.trim() !== String(current?.configPort ?? '');
@@ -161,3 +209,6 @@ $('newer').addEventListener('click', (/** @type {Event} */ e) => {
 
 api.onChange(render);
 render(await api.view());
+// The window takes the height of what it shows.
+const page = /** @type {HTMLElement} */ (document.querySelector('.lr'));
+new ResizeObserver(() => api.fit(Math.ceil(page.getBoundingClientRect().height))).observe(page);

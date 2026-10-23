@@ -5,7 +5,7 @@
 // Light Runner on this computer (the launcher and its server, saving the stage) and exits: the Windows installer
 // runs it before it replaces the files.
 
-import { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, powerMonitor, shell } from 'electron';
+import { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, powerMonitor, screen, shell } from 'electron';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { uptime } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -14,9 +14,10 @@ import QRCode from 'qrcode';
 import { loadConfig, saveConfig } from './src/config.js';
 import { processAlive, readMarker } from './src/marker.js';
 import { lanAddresses, pickAddress } from './src/net.js';
+import { categoryOf, readProfiles } from './src/netprofile.js';
 import { ServerProcess } from './src/server-process.js';
 import { fetchLatestTag, latestTag, newerVersion } from './src/version.js';
-import { checkPort, describe } from './src/view.js';
+import { checkPort, describe, firewallNote } from './src/view.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** The window's page. */
@@ -34,9 +35,14 @@ const nodePath = app.isPackaged ? join(appDir, isWindows ? 'node.exe' : 'node') 
 
 // The show, its backups and the launcher's settings (Mac ~/Library/Application Support/Light Runner, Windows
 // %APPDATA%\Light Runner). The window's own browser data goes in a folder of its own inside it. While developing,
-// LIGHT_RUNNER_DATA can point it at another folder, as it does for `npm start`.
-if (!app.isPackaged && process.env.LIGHT_RUNNER_DATA) app.setPath('userData', resolve(process.env.LIGHT_RUNNER_DATA));
+// LIGHT_RUNNER_DATA can point it at another folder, as it does for `npm start`; `--data-dir=<folder>` does it for
+// a copy being tried beside the one in use (it is then one per that folder, and never goes in the login items).
+const dataDirArg = process.argv.find((a) => a.startsWith('--data-dir='))?.slice('--data-dir='.length);
+if (dataDirArg) app.setPath('userData', resolve(dataDirArg));
+else if (!app.isPackaged && process.env.LIGHT_RUNNER_DATA) app.setPath('userData', resolve(process.env.LIGHT_RUNNER_DATA));
 const dataDir = app.getPath('userData');
+/** Only the installed app, on its usual data folder, goes in the login items. */
+const ownsLoginItem = app.isPackaged && !dataDirArg;
 app.setPath('sessionData', join(dataDir, 'Launcher window'));
 const configFile = join(dataDir, 'launcher.json');
 const pidFile = join(dataDir, 'launcher.pid');
@@ -99,6 +105,10 @@ let win = null;
 /** @type {Tray | null} */
 let tray = null;
 let quitting = false;
+/** This is the very first start (no settings yet): the window opens with the way to add an iPad. */
+let firstStart = false;
+/** Windows' network profiles (netprofile.js), read every half minute: is the iPads' network set to Public? */
+let profiles = /** @type {import('./src/netprofile.js').Profile[]} */ ([]);
 let stoppingForQuit = false;
 let serverDone = false;
 let config = loadConfig(configFile);
@@ -137,7 +147,7 @@ function save(change) {
 }
 
 async function main() {
-  const firstStart = !existsQuietly(configFile);
+  firstStart = !existsQuietly(configFile);
   app.on('second-instance', (_event, argv, data) => {
     if ((data && /** @type {any} */ (data).quit) || argv.includes('--quit')) {
       quitting = true;
@@ -211,6 +221,14 @@ async function main() {
     if (!fromWindow(event)) throw new Error('not the launcher window');
     return act(String(action), value);
   });
+  // The window is as tall as what it shows (folded parts make it shorter), within the screen.
+  ipcMain.on('launcher:fit', (event, height) => {
+    if (!fromWindow(/** @type {any} */ (event)) || !win || win.isMaximized() || win.isFullScreen() || typeof height !== 'number') return;
+    const [width, now] = win.getContentSize();
+    const room = screen.getDisplayMatching(win.getBounds()).workArea.height - 40;
+    const target = Math.round(Math.max(360, Math.min(height, room)));
+    if (Math.abs(target - now) > 2) win.setContentSize(width, target);
+  });
   server.onChange(() => push());
 
   setMenus();
@@ -235,6 +253,8 @@ async function main() {
   setInterval(() => void server.recheck().catch(() => {}), 5000);
   // Networks come and go (Wi-Fi, a cable, a VPN).
   setInterval(() => push(), 10_000);
+  void readNetworkProfiles();
+  setInterval(() => void readNetworkProfiles(), 30_000);
   setTimeout(checkForUpdate, 10_000);
   setInterval(checkForUpdate, 6 * 60 * 60 * 1000);
 }
@@ -253,8 +273,8 @@ function existsQuietly(file) {
 
 /** @param {boolean} on */
 function setLoginItem(on) {
-  // Only the installed app goes in the login items, never Electron itself while developing.
-  if (!app.isPackaged) return;
+  // Only the installed app goes in the login items, never Electron itself while developing or a copy being tried.
+  if (!ownsLoginItem) return;
   if (isWindows) app.setLoginItemSettings({ openAtLogin: on, path: process.execPath, args: ['--hidden'], name: 'Light Runner' });
   // The Mac's login items take no arguments; openAsHidden still works before macOS 13.
   else app.setLoginItemSettings({ openAtLogin: on, openAsHidden: true });
@@ -268,7 +288,7 @@ function setLoginItem(on) {
  */
 function startedAtLogin() {
   if (process.argv.includes('--hidden')) return true;
-  if (!isMac || !app.isPackaged) return false;
+  if (!isMac || !ownsLoginItem) return false;
   const login = app.getLoginItemSettings();
   if (login.wasOpenedAtLogin || login.wasOpenedAsHidden) return true;
   return config.startAtLogin && uptime() < 180;
@@ -280,9 +300,9 @@ function startedAtLogin() {
 function createWindow(show) {
   win = new BrowserWindow({
     width: 600,
-    height: 760,
+    height: 680,
     minWidth: 480,
-    minHeight: 560,
+    minHeight: 400,
     show: false,
     title: 'Light Runner',
     backgroundColor: '#090F1C',
@@ -416,7 +436,16 @@ function address() {
   const chosen = pickAddress(list, config.address);
   const port = shownPort();
   const host = chosen?.address ?? 'localhost';
-  return { list, chosen: chosen?.address ?? null, url: `http://${host}:${port}`, port };
+  return { list, chosen: chosen?.address ?? null, network: chosen?.name ?? null, url: `http://${host}:${port}`, port };
+}
+
+async function readNetworkProfiles() {
+  if (!isWindows) return;
+  const next = await readProfiles();
+  if (JSON.stringify(next) !== JSON.stringify(profiles)) {
+    profiles = next;
+    void push();
+  }
 }
 
 async function qrFor(/** @type {string} */ url) {
@@ -432,9 +461,19 @@ async function view() {
   const snapshot = { status: server.status, code: server.code, message: server.message, port: server.code === 'port-in-use' ? server.port : shownPort() };
   // The process to end by hand, for a Light Runner on this data folder that isn't answering.
   const stuck = server.code === 'not-answering' ? readMarker(dataDir)?.pid ?? null : null;
-  const words = describe(snapshot, { platform: process.platform, answering: live.answering, pid: stuck });
   const running = server.status === 'running' || server.status === 'running-elsewhere';
-  const problem = running && live.state ? problemWords(live.state) : null;
+  // The iPads' network is set to Public: Windows' firewall keeps them out.
+  const publicNetwork = isWindows && categoryOf(profiles, a.network) === 'public';
+  const words = describe(snapshot, {
+    platform: process.platform,
+    answering: live.answering,
+    pid: stuck,
+    testMode: config.testMode,
+    output: live.state?.output ?? null,
+    // A problem with the lights in the operator page's words.
+    outputWords: running && live.state ? problemWords(live.state) : null,
+    publicNetwork,
+  });
   // Test mode is this launcher's: a Light Runner running elsewhere sends (or doesn't) as it was started.
   const ownTest = config.testMode && (server.status === 'running' || server.status === 'starting');
   return {
@@ -444,17 +483,16 @@ async function view() {
     port: snapshot.port,
     configPort: config.port,
     lines: words.showLines ? server.lastLines.slice(-12) : [],
-    // A problem with the lights in the operator page's words; Test mode's "not sending" is what was asked for.
-    problem: problem && !(ownTest && live.state?.output === 'off') ? { text: problem.long, title: problem.title } : null,
     testMode: config.testMode,
     testPill: ownTest,
+    firstStart,
     startAtLogin: config.startAtLogin,
-    canSetLogin: app.isPackaged,
+    canSetLogin: ownsLoginItem,
     addresses: a.list,
     address: a.chosen,
     url: a.url,
     qr: await qrFor(a.url).catch(() => null),
-    firewallNote: isWindows && !config.ipadSeen,
+    firewallNote: firewallNote({ platform: process.platform, publicNetwork, ipadSeen: config.ipadSeen }),
     saveError,
     version,
     newer: newer?.version ?? null,
@@ -511,10 +549,29 @@ async function readLive() {
 
 // ---- What the window can do ----
 
-/** @param {'operator' | 'settings'} page */
-async function open(page) {
+/** @param {'operator' | 'settings'} page @param {string} [at] a place on the page */
+async function open(page, at = '') {
   const port = shownPort();
-  await shell.openExternal(`http://localhost:${port}/${page}/`);
+  await shell.openExternal(`http://localhost:${port}/${page}/${at ? `#${at}` : ''}`);
+}
+
+/**
+ * Stop asks first while the lights follow the iPads (a Light Runner started elsewhere too).
+ * @param {string} what
+ */
+async function confirmStop(what) {
+  const options = {
+    type: /** @type {const} */ ('question'),
+    buttons: ['Stop', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+    title: 'Light Runner',
+    message: `The lights stop following the iPads. ${what}?`,
+    detail: 'The stage is saved first. Start brings them back.',
+  };
+  const { response } = win && win.isVisible() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+  return response === 0;
 }
 
 /** Stop the server this launcher runs, and start it again with the settings as they are now. */
@@ -538,10 +595,11 @@ function act(action, value) {
         if (server.status === 'stopped' || server.status === 'failed') await server.start({ port: config.port, testMode: config.testMode });
         break;
       case 'stop':
+        if (server.status === 'running' && !(await confirmStop('Stop Light Runner'))) break;
         await server.stop();
         break;
       case 'stop-elsewhere':
-        if (server.status === 'running-elsewhere') await server.stopElsewhere();
+        if (server.status === 'running-elsewhere' && (await confirmStop('Stop the Light Runner that is running'))) await server.stopElsewhere();
         break;
       case 'port': {
         if (!changeable()) return { error: 'Stop the Light Runner that is running first' };
@@ -568,6 +626,10 @@ function act(action, value) {
         break;
       case 'open-settings':
         await open('settings');
+        break;
+      case 'open-send-dmx':
+        // Settings' DMX output card, where Send DMX is.
+        await open('settings', 'outputCard');
         break;
       case 'open-release':
         await shell.openExternal(RELEASES_PAGE);

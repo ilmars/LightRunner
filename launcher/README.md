@@ -33,10 +33,12 @@ cd launcher
 npm start   # copies the design system files for the window, then opens it on the repository's own server
 ```
 
-While developing the launcher runs the repository's server on the `node` on the PATH (or `LIGHT_RUNNER_NODE`), with the data folder above, or `LIGHT_RUNNER_DATA` if it is set. It never adds itself to the login items then; only the installed app does.
+While developing the launcher runs the repository's server on the `node` on the PATH (or `LIGHT_RUNNER_NODE`), with the data folder above, or `LIGHT_RUNNER_DATA` if it is set. It never adds itself to the login items then; only the installed app does. To try a built app beside the one in use, start it with `--data-dir=<folder>`: it is then one per that folder, and it leaves the login items alone.
 
 ## How it behaves
 
+- The window, top to bottom (the owner's order: most people come to open the operator page or Settings): the name and a Test mode pill while it is on; one status line coloured by its state (green running, amber running with a problem, red stopped), with one plain sentence and one **Fix it** for a problem (Send DMX off: Settings at Send DMX; the port taken: the Options at the port; Windows on a Public network: the steps; stopped: **Start**); **Open the operator page**, **Open Settings**, **＋ Add an iPad or phone** (the code, the address and the network; open by itself only on the very first start); and quietly at the foot **Options ›** (port, Start when the computer starts, Test mode), **Stop** (asks first) and the version. The window takes the height of what it shows.
+- Windows: the launcher reads (never changes) the network's profile (`Get-NetConnectionProfile`, every half minute). On a Public network Windows' firewall keeps the iPads out, so the window says so, with the steps to make the network Private and allow Light Runner on private networks.
 - One per computer: a second launch shows the first one's window. A Light Runner already running on the same data folder (started by hand, or left by a launcher that crashed) is shown as running, with **Stop it**; one that doesn't answer has to be ended by hand, and the window says how. Another program on the port: the window says so and offers another port.
 - Closing the window keeps it running in the tray / menu bar. **Quit** (in that menu, or Cmd+Q on the Mac) asks first, then saves the stage and stops the server.
 - **Start when the computer starts** (on after the first start) puts it in the login items, checked again at every start; it then starts hidden, with the server running, and shows the window if the server can't start.

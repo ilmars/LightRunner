@@ -1,4 +1,7 @@
-/* The Light Runner launcher window: the design system's tokens and components (shared/theme.css), dark and quiet. */
+/* The Light Runner launcher window: the design system's tokens and components (shared/theme.css), dark and quiet.
+   Top to bottom: the name, how it is (one coloured line, and a problem's sentence and Fix it), the three things
+   people come for, the way to add an iPad (folded away after the first start), and the quiet foot: Options, Stop,
+   the version. */
 
 html, body { margin: 0; }
 body {
@@ -10,58 +13,77 @@ body {
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
-.lr { display: flex; flex-direction: column; gap: var(--ds-gap); padding: 16px 16px 12px; max-width: 760px; margin: 0 auto; }
+.lr { display: flex; flex-direction: column; gap: var(--ds-gap); padding: 14px 16px 14px; max-width: 640px; margin: 0 auto; }
 [hidden] { display: none !important; }
+.grow { flex: 1; }
 
-/* Top: the icon, the name and the status. */
-.top { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 4px; }
-.top .icon { flex: none; border-radius: 9px; }
-.top .title { flex: 1; min-width: 0; }
-.top h1 { margin: 2px 0 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
-.top .ds-pill--warn { min-height: 36px; cursor: default; }
+.top { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 2px; }
+.top .icon { flex: none; border-radius: 8px; }
+.top h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
 
-.card { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
-
-/* The address for the iPads, big, with the code for the camera. */
-.reach { display: flex; gap: 18px; align-items: flex-start; }
-.reach-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.url {
-  font-size: 28px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere; user-select: text; margin: 2px 0 2px;
-}
-.hint { margin: 0; color: var(--ds-muted); font-size: 13px; line-height: 1.45; }
-.pick { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
-.pick select { flex: 1; min-width: 0; font-size: 14px; }
-.firewall {
-  margin: 2px 0 0; padding: 9px 12px; border-radius: var(--ds-r-small); font-size: 13px; line-height: 1.4;
-  color: var(--ds-warn-text); background: var(--ds-warn-tint); box-shadow: inset 0 0 0 1px var(--ds-warn-edge);
-}
-.qr { flex: none; width: 152px; height: 152px; border-radius: var(--ds-r-small); opacity: 0.92; }
-
-/* What is wrong, or what to know, in plain words. */
-.notice {
-  display: flex; flex-direction: column; gap: 6px; padding: 14px 18px; border-radius: var(--ds-r-panel);
+/* The status: green running, amber running with a problem, red stopped or a problem that stops it. */
+.status {
+  --tone: var(--ds-muted);
+  display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border-radius: var(--ds-r-panel);
   background: var(--ds-panel-fill); box-shadow: var(--ds-shadow-raise);
 }
-.notice.warn { background: var(--ds-warn-tint); box-shadow: inset 0 0 0 1px var(--ds-warn-edge); }
-.notice-text { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4; }
-.notice.warn .notice-text { color: var(--ds-warn-text); }
-.notice-detail { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ds-muted-on); user-select: text; }
-.notice-detail:empty { display: none; }
-.notice-actions { display: flex; gap: 8px; margin-top: 4px; }
+.status.ok { --tone: #7fcf9e; }
+.status.warn { --tone: var(--ds-warn-text); background: var(--ds-warn-tint); box-shadow: inset 0 0 0 1px var(--ds-warn-edge); }
+.status.bad { --tone: var(--ds-danger-text); background: var(--ds-danger-fill); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
+.status-line { display: flex; align-items: center; gap: 10px; min-height: 28px; font-size: 17px; font-weight: 600; color: var(--tone); }
+.status-line .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--tone); opacity: 0.85; }
+.problem { display: flex; flex-direction: column; gap: 6px; }
+.sentence { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ds-text); user-select: text; }
+.detail { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ds-muted-on); user-select: text; }
+.detail:empty { display: none; }
+.fix { align-self: flex-start; margin-top: 4px; min-width: 120px; }
 .lines {
-  margin: 4px 0 0; max-height: 180px; overflow: auto; padding: 10px 12px; border-radius: var(--ds-r-small);
+  margin: 2px 0 0; max-height: 160px; overflow: auto; padding: 10px 12px; border-radius: var(--ds-r-small);
   background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge);
   font: 12px/1.45 ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; color: var(--ds-muted-on);
   white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
 }
+.steps { padding: 10px 14px; border-radius: var(--ds-r-tile); background: rgba(0, 0, 0, 0.16); box-shadow: inset 0 0 0 1px var(--ds-edge); }
+.steps-title { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.steps ol { margin: 0 0 8px; padding-left: 20px; font-size: 13px; line-height: 1.5; color: var(--ds-muted-on); user-select: text; }
+.steps li + li { margin-top: 4px; }
+.steps b { color: var(--ds-text); font-weight: 600; }
 
-.actions { display: flex; flex-wrap: wrap; gap: var(--ds-gap-tight); align-items: center; }
-.actions .grow { flex: 1; }
+/* The three things people come for, full width, in this order. */
+.buttons { display: flex; flex-direction: column; gap: var(--ds-gap-tight); }
+.buttons .big { width: 100%; min-height: 52px; font-size: 15px; }
+#addDevice[aria-expanded="true"] { background: var(--ds-elevated); }
 
-/* Settings. */
-.settings { gap: 4px; }
-.settings .ds-caps { margin-bottom: 6px; }
+/* Adding an iPad: the code, the address in big text, the network. */
+.card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
+.add-row { display: flex; gap: 16px; align-items: flex-start; }
+.add-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.url {
+  font-size: 26px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere; user-select: text;
+}
+.url.dim { color: var(--ds-muted); }
+.hint { margin: 0; color: var(--ds-muted); font-size: 13px; line-height: 1.45; }
+.pick { display: flex; align-items: center; gap: 10px; }
+.pick select { flex: 1; min-width: 0; font-size: 14px; }
+.firewall {
+  margin: 0; padding: 9px 12px; border-radius: var(--ds-r-small); font-size: 13px; line-height: 1.4;
+  color: var(--ds-warn-text); background: var(--ds-warn-tint); box-shadow: inset 0 0 0 1px var(--ds-warn-edge);
+}
+.blocked { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.blocked .ds-btn { color: var(--ds-warn-text); box-shadow: inset 0 0 0 1px var(--ds-warn-edge); }
+.qr { flex: none; width: 152px; height: 152px; border-radius: var(--ds-r-small); opacity: 0.92; }
+
+/* The quiet foot. */
+.foot { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.foot .ds-btn--text { padding: 0 10px; }
+.foot .chev { display: inline-block; transition: transform 0.15s; }
+#optionsToggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.version { color: var(--ds-muted); font-size: 12px; }
+.foot a { color: var(--ds-muted-on); font-size: 12px; text-underline-offset: 3px; }
+.foot a:hover { color: var(--ds-text); }
+
+.options { gap: 4px; }
 .port-row { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; }
 .port-row label { min-width: 48px; color: var(--ds-text); }
 .port-row input { width: 96px; font-variant-numeric: tabular-nums; user-select: text; }
@@ -70,16 +92,10 @@ body {
 .ds-switch { font-size: 15px; }
 .ds-switch.off { opacity: 0.4; cursor: default; }
 
-.foot { display: flex; gap: 14px; align-items: center; min-height: 32px; padding: 0 4px; color: var(--ds-muted); font-size: 12px; }
-.foot a { color: var(--ds-muted-on); text-underline-offset: 3px; }
-.foot a:hover { color: var(--ds-text); }
-
 button:focus-visible, select:focus-visible, a:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--ds-accent); }
 
-/* A narrow window: the code goes under the address. */
-@media (max-width: 540px) {
-  .reach { flex-direction: column; }
-  .url { font-size: 24px; }
+@media (max-width: 520px) {
+  .add-row { flex-direction: column; }
   .qr { align-self: center; }
+  .url { font-size: 22px; }
 }
-.url.dim { color: var(--ds-muted); }
