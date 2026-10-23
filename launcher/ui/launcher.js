@@ -104,7 +104,7 @@ function render(v) {
   login.checked = v.startAtLogin;
   login.disabled = !v.canSetLogin;
   login.closest('label').classList.toggle('off', !v.canSetLogin);
-  login.closest('label').title = v.canSetLogin ? '' : 'Only the installed Light Runner can start with the computer';
+  $('loginNote').hidden = v.canSetLogin;
   const test = $('testMode');
   test.checked = v.testMode;
   test.disabled = !v.canChange;
