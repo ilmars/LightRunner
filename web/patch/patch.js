@@ -1179,6 +1179,8 @@ $('save').addEventListener('click', async () => {
   if (problems.size && !confirm(`${problems.size} fixtures have address problems. Save anyway?`)) return;
   try {
     await call('PUT', '/api/show?source=patch', show);
+    // The server adds a few things on the way in (a new group's starter colours): carry on from what it stored.
+    show = await call('GET', '/api/show');
     savedJson = JSON.stringify(show);
     renderAll();
     toast('Patch saved');
