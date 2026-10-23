@@ -100,7 +100,10 @@ const footprint = (f) => profileById.get(f.profile)?.channels ?? 1;
 /** Segments in a fixture type: the most times any colour repeats (a bar of 8 pixels has 8). Same rule as the engine. */
 function segmentsOf(f) {
   const channels = (show.profiles.find((p) => p.id === f.profile) ?? profileById.get(f.profile))?.channels;
-  if (!Array.isArray(channels)) return 1; // a built-in type: one segment
+  return Array.isArray(channels) ? segmentsOfChannels(channels) : 1; // a built-in summary has only a channel count: one segment
+}
+/** The same rule on a channel list. */
+function segmentsOfChannels(channels) {
   const seen = new Map();
   for (const c of channels) if (!c.fine && COLOUR_ROLES.includes(c.role)) seen.set(c.role, (seen.get(c.role) ?? 0) + 1);
   return Math.max(1, ...seen.values());
@@ -674,7 +677,7 @@ async function showOflModes(loadInfo, makeProfile) {
       b.append(el('span', null, `${m.name} · ${m.channels} ch`), el('br'), el('small', null, m.roles.length ? m.roles.join(', ') : 'no colour or dimmer channels'));
       b.addEventListener('click', async () => {
         try {
-          addProfile(await makeProfile(m.index));
+          addProfile(await makeProfile(m.index), info.manufacturer);
         } catch (err) {
           toast(err.message, true);
         }
@@ -687,19 +690,21 @@ async function showOflModes(loadInfo, makeProfile) {
   }
 }
 
-/** Add (or update) a fixture type in this show; it is stored when the patch is saved. */
-function addProfile(profile) {
+/** Add (or update) a fixture type in this show; it is stored when the patch is saved. The fixture's suggested name
+ * is the type's without its maker. */
+function addProfile(profile, manufacturer = '') {
   const k = show.profiles.findIndex((p) => p.id === profile.id);
   if (k >= 0) show.profiles[k] = profile;
   else show.profiles.push(profile);
-  const summary = { id: profile.id, name: profile.name, channels: profile.channels.length, roles: [...new Set(profile.channels.map((c) => c.role))] };
+  const summary = { id: profile.id, name: profile.name, channels: profile.channels.length, segments: segmentsOfChannels(profile.channels), roles: [...new Set(profile.channels.map((c) => c.role))] };
   const j = profiles.findIndex((p) => p.id === profile.id);
   if (j >= 0) profiles[j] = summary;
   else profiles.unshift(summary);
   profileById.set(profile.id, summary);
   fillAddForm(false);
   $('addProfile').value = profile.id;
-  $('addName').value = typeLabel(summary).replace(/^\S+\s+/, '');
+  const label = typeLabel(summary);
+  $('addName').value = manufacturer && label.startsWith(`${manufacturer} `) ? label.slice(manufacturer.length + 1) : label;
   suggestAddress();
   changed();
   toast(`${profile.name} is in the library. Drag it onto the map, then save.`);
@@ -808,7 +813,7 @@ function smokeWarnings(g) {
     if (!f || !type) continue;
     if (g.kind === 'smoke') {
       if (type.channels > 1 && !type.roles?.includes('dimmer')) {
-        out.push(`${f.name}: This fixture has no dimmer channel, so Light Runner can't drive it. Set its level channel to dimmer in the fixture type.`);
+        out.push(`${f.name}: This fixture type has no dimmer channel, so Light Runner can't run it as a smoke machine. Choose a fixture type for it that has a dimmer channel (for example Generic dimmer), or take it out of this group.`);
       }
     } else {
       const own = show.profiles.find((p) => p.id === f.profile);
@@ -1176,6 +1181,8 @@ $('save').addEventListener('click', async () => {
   if (problems.size && !confirm(`${problems.size} fixtures have address problems. Save anyway?`)) return;
   try {
     await call('PUT', '/api/show?source=patch', show);
+    // The server adds a few things on the way in (a new group's starter colours): carry on from what it stored.
+    show = await call('GET', '/api/show');
     savedJson = JSON.stringify(show);
     renderAll();
     toast('Patch saved');

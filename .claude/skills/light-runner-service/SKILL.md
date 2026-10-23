@@ -53,7 +53,7 @@ The lights are real and people may be in the room, so:
 - Blackout needs a 1 second hold and doesn't toggle: a song, Basic lights or Next brings the lights back.
 - Prepare (violet) changes nothing on stage until Go; Live throws the draft away.
 - The APC mini needs no setup (its standard layout); its faders "pick up" — they do nothing until moved to the current level.
-- A group made in Patch has no colours yet: on the operator page tap its colour button, then ＋ New colour. A song is made with ＋ Add song (it holds the stage as it is); the Key chip in Edit list only shows while a controller is plugged in.
+- A group made in Patch starts with two colours, Warm white and Off: on the operator page tap its colour button, then ＋ New colour for more. A song is made with ＋ Add song (it holds the stage as it is); the Key chip in Edit list only shows while a controller is plugged in.
 - A key for a song is set in running-order Edit list; the fixed actions (Blackout, Next, Master…) in Settings with the PIN.
 
 ## Not built yet (say so, don't improvise)

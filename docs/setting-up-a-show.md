@@ -59,7 +59,7 @@ Open **Patch**. Changes stay in the page until you press **Save patch** in the b
 At the bottom of Patch, **Stage plan** is a picture of the stage with the back at the top. The operator page's stage view is drawn from it, so it shows what the lights are doing.
 
 1. **Drag** a light to where it hangs. A new light starts in the middle of the plan (several new ones start in a row).
-2. **Click** a light to change it. Choose its shape: **Dot**, **Beam**, **Bar**, **Outline** or **Smoke**. A fixture with several segments should arrive as a bar; if one arrives as a dot, choose **Bar**.
+2. **Click** a light to change it. Choose its shape: **Dot**, **Beam**, **Bar**, **Outline** or **Smoke**. A fixture with several segments arrives as a bar; for any other, choose the shape you want.
 3. What each shape gives you to drag:
    - A **Bar** has a handle at each end (length), one on a long side (thickness) and one past the end to turn it. **Across** and **Upright** snap it flat or upright, and its angle shows beside them.
    - A **Beam** has a round handle at its tip: drag it to aim the beam and set how far it reaches.
@@ -85,7 +85,7 @@ In Settings › **DMX output**:
 On the operator page each group has its own colour list, used on the **Groups** panel.
 
 1. Tap a group's colour button to open the picker. It has **Colours** and **Effects** tabs, **‹ Groups** and **Done**.
-2. A group made in Patch starts with no colours. Tap **＋ New colour**. The stage doesn't change while you try colours here.
+2. A group made in Patch starts with two colours, **Warm white** and **Off**. Tap **＋ New colour** to add more. The stage doesn't change while you try colours here.
    - Give it a **Name**, then pick the **Colour** on the strip (a white-only group has a warm-to-cool strip instead).
    - **Saturation** makes it paler or stronger. **Exact values ›** takes a hex code or R, G and B. A group with White, Amber or UV also has a slider for each.
    - **Brightness** sets how bright it is (5 to 100 %), and **Fade into it** how long it takes to fade in.

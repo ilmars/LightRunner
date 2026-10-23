@@ -1475,3 +1475,56 @@ test('Update from the stage stores the stage, refuses during Blackout, and a ren
   assert.equal(await t.send({ type: 'editQuickLook', look: quick.id, fromStage: true }), 'Blackout is on. Bring the lights back, then save.');
   assert.equal(await t.send({ type: 'editQuickLook', look: quick.id, name: 'Quiet' }), null);
 }));
+
+test('Compare with a file on a fresh export of the same show finds no differences, even with songs made on the stage', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const basic = t.order()[0]!;
+  // Basic lights on stage (its hidden "Basic light" colour), then a song made from it, and one from a song.
+  assert.equal(await t.send({ type: 'look', id: basic, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'addSong', after: basic }), null);
+  const welcome = t.order()[1]!;
+  assert.equal(await t.send({ type: 'renameItem', id: welcome, name: 'Welcome' }), null);
+  assert.equal(await t.send({ type: 'look', id: t.order()[2]!, fade: 0 }), null);
+  assert.equal(await t.send({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 }), null);
+  assert.equal(await t.send({ type: 'addSong', after: welcome }), null);
+  const exported = (await api(app, 'GET', '/api/show')).body;
+  const preview = await api(app, 'POST', '/api/import/preview', exported);
+  assert.equal(preview.status, 200);
+  assert.deepEqual(preview.body.items, []);
+}));
+
+test('a group made in Patch starts with Warm white and Off, and an old show with a colourless group gets them on load', async () => {
+  const dir = tempDir();
+  try {
+    // A show from before: a group with no colours at all.
+    const old = JSON.parse(readFileSync(seedPath, 'utf8'));
+    old.groups.push({ id: 'balcony', name: 'Balcony', kind: 'light', fixtures: [] });
+    writeFileSync(join(dir, 'show.json'), JSON.stringify(old));
+    const app = makeApp(dir);
+    try {
+      await app.start();
+      const coloursOf = (show: any, group: string) => show.presets.filter((p: any) => p.group === group && !p.custom).map((p: any) => p.name);
+      let show = (await api(app, 'GET', '/api/show')).body;
+      assert.deepEqual(coloursOf(show, 'balcony'), ['Warm white', 'Off']);
+      assert.deepEqual(coloursOf(show, 'back-wall').slice(0, 4), ['Deep blue', 'Purple', 'Amber', 'Dim blue'], 'other groups are left alone');
+      assert.deepEqual(coloursOf(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8')), 'balcony'), ['Warm white', 'Off'], 'and it is saved');
+
+      // Save patch with a new group (and a smoke group, which has no colours).
+      show.operator.groups.push('choir');
+      show.groups.push({ id: 'choir', name: 'Choir', kind: 'light', fixtures: [] }, { id: 'haze', name: 'Haze', kind: 'smoke', fixtures: [] });
+      assert.equal((await api(app, 'PUT', '/api/show?source=patch', show)).status, 200);
+      show = (await api(app, 'GET', '/api/show')).body;
+      assert.deepEqual(coloursOf(show, 'choir'), ['Warm white', 'Off']);
+      assert.deepEqual(coloursOf(show, 'haze'), []);
+      assert.equal(show.presets.filter((p: any) => p.group === 'balcony').length, 2, 'not added a second time');
+      // The operator page can use them.
+      const layout = (await api(app, 'GET', '/api/layout')).body;
+      assert.ok(layout.groups.find((g: any) => g.id === 'choir')?.presets.some((p: any) => p.name === 'Off'));
+    } finally {
+      await app.stop();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

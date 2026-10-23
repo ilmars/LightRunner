@@ -103,3 +103,10 @@ test('a channel that mixes fog output with other functions is parked at 0, whate
   };
   assert.deepEqual(roles(oflToProfile(mixed, 0, 'x', 'fog-light', 'X')), ['other']);
 });
+
+test("a fixture file with no maker gives a type name without a leading space", () => {
+  const fixture = load('stairville-sonicpulse-led-bar-10');
+  const k = fixture.modes.findIndex((m) => m.shortName === '39ch');
+  assert.equal(oflToProfile(fixture, k, 'file', 'my-bar', '').name, `${fixture.name} (${fixture.modes[k]!.name})`);
+  assert.equal(oflToProfile(fixture, k, 'stairville', 'my-bar', 'Stairville').name, `Stairville ${fixture.name} (${fixture.modes[k]!.name})`);
+});

@@ -13,7 +13,7 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OscSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureRunningOrder, isManualCommand,
+  BUILT_IN_PROFILES, Command, OscSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureRunningOrder, isManualCommand,
   applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,  type OflFixture, type Pick, type Scope,
   BLACKOUT, LiveEffectLayer, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
@@ -246,7 +246,7 @@ export class App {
     const migrated = ensureShow(loaded.show);
     if (JSON.stringify(migrated) !== JSON.stringify(loaded.show)) {
       this.store.saveShow(migrated);
-      this.log('Gave the show a running order and ready-made effects');
+      this.log('Gave the show a running order, ready-made effects and starter colours where they were missing');
     }
     this.show = migrated;
     this.latestRuntime = this.store.loadRuntime();
@@ -1857,12 +1857,12 @@ function withIgnored(show: Show, ignored: string[] | undefined): Show {
 }
 
 /**
- * What every show gets on its way in (at start, import, restore, merge): a running order with
- * Basic lights first, and the ready-made effects the first time.
+ * What every show gets on its way in (at start, import, restore, merge, a Patch save): a running order with
+ * Basic lights first, the ready-made effects the first time, and Warm white and Off for a group with no colours.
  */
 function ensureShow(show: Show): Show {
   // A key for a song, quick look or group that is gone is freed.
-  return pruneKeys(ensureEffects(ensureBasicLights(ensureRunningOrder(show))));
+  return pruneKeys(ensureGroupColours(ensureEffects(ensureBasicLights(ensureRunningOrder(show)))));
 }
 
 /**
