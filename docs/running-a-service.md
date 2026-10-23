@@ -8,7 +8,7 @@ A plain guide for the lighting lead and volunteers at stage L1. Part 1 is settin
 
 ### The Light Runner computer
 
-1. **Install Light Runner.** Download it and install it as the [README's Install section](../README.md#install) says (the first time you open it, the Mac asks once: open it, then in **System Settings › Privacy & Security** press **Open Anyway** next to Light Runner and confirm). No Terminal and no Node are needed.
+1. **Install Light Runner.** Download it and install it as the [README's Install section](../README.md#install) says (the first time you open it, the Mac asks once: open it, then in **System Settings › Privacy & Security** press **Open Anyway** next to Light Runner and confirm). No Terminal and no Node are needed. When the Mac asks whether Light Runner may find devices on your local network, choose **Allow**. If it was refused: **System Settings › Privacy & Security › Local Network**, and switch Light Runner on.
 
 2. **It starts with the computer.** Light Runner starts by itself when the computer starts and sits in the menu bar (the Mac) or the system tray (Windows). Open it to see the window: it says **Running**, and **Add an iPad or phone** shows the address for the iPads. A new install says **Running · not sending to the lights** with a **Fix it** button until **Send DMX** is switched on in Settings; that is expected. Closing the window doesn't stop it. If the window says something is wrong, its **Fix it** button takes you to the fix.
 
@@ -80,7 +80,7 @@ Songs, colours, quick looks and effects are made on the operator page; the fixtu
 | You see | What it means | What to do |
 | --- | --- | --- |
 | Amber **Not sending to the lights** | Send DMX is off | Settings › Send DMX on (make sure Lightkey isn't sending) |
-| Amber **Lights not answering** | The node doesn't answer | Check the node's power and network cable. Tap the pill for details and Who to call |
+| Amber **Lights not answering** | The node doesn't answer | Check the node's power and network cable. On a Mac, also check System Settings › Privacy & Security › Local Network: Light Runner must be switched on. Tap the pill for details and Who to call |
 | Amber **Another desk is sending** | Lightkey or another desk is sending too | Stop the other desk's output |
 | A red banner **Connection lost. Lights keep running. Reconnecting…** | The iPad can't reach the Mac (the lights keep their last look) | Check the iPad's Wi-Fi, and that Light Runner is running on the Mac (its icon is in the menu bar; open it and look for **Running**). It reconnects by itself |
 | A light flickers or jumps | Not normal | Tap Basic lights, then tell the lighting lead what you did just before |
