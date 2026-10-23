@@ -206,6 +206,7 @@ test('two universes routed to two Art-Net nodes go to their own node', async () 
       const r = await call('PUT', '/api/settings', {
         output: { kind: 'artnet', host: '192.0.2.1' },
         routes: [{ universe: 2, output: { kind: 'artnet', host: '192.0.2.2' } }],
+        outputEnabled: true, // the demo show starts with Send DMX off
       });
       assert.equal(r.status, 200);
       assert.deepEqual(r.body.routes, [{ universe: 2, output: { kind: 'artnet', host: '192.0.2.2' } }]);
@@ -351,5 +352,69 @@ test('import with comparison: a Lightkey project compares the patch only', { ski
     assert.ok(body.items.every((i: any) => i.kind === 'profile' || i.kind === 'fixture'));
     // Against the demo show, every Lightkey fixture is new.
     assert.ok(body.items.filter((i: any) => i.kind === 'fixture' && i.change === 'added').length >= 12);
+  });
+});
+
+test('opening a whole show file keeps Send DMX, the PIN and a backup of the old show; a bad file changes nothing', async () => {
+  await withApp(async (call, app) => {
+    // This installation: Send DMX off, with a PIN.
+    assert.equal((await call('PUT', '/api/settings', { outputEnabled: false })).status, 200);
+    assert.equal((await call('POST', '/api/pin', { next: '2468' })).status, 200);
+    const old = (await call('GET', '/api/show')).body;
+    const oldName = old.name;
+
+    // A file from another computer: Send DMX on, its own node address, its own PIN, another name.
+    const file = structuredClone(old);
+    file.name = 'Church show';
+    file.settings.outputEnabled = true;
+    file.settings.output = { kind: 'artnet', host: '192.168.0.114' };
+    file.settings.pinHash = hashPin('1111');
+    const backups = app.store.backups().length;
+    assert.equal((await call('PUT', '/api/show', file)).status, 200);
+
+    const now = (await call('GET', '/api/show')).body;
+    const pinNow: string = JSON.parse(readFileSync(join(app.store.dir, 'show.json'), 'utf8')).settings.pinHash;
+    assert.equal(now.name, 'Church show');
+    assert.equal(now.settings.outputEnabled, false, 'opening a file never starts sending to the lights');
+    assert.equal(now.settings.output.host, '192.168.0.114', "the file's node address is taken");
+    assert.ok(verifyPin('2468', pinNow), "this installation's PIN stays");
+    assert.ok(!verifyPin('1111', pinNow));
+    assert.equal(app.store.backups().length, backups + 1, 'the old show is kept as a backup');
+    const kept = JSON.parse(readFileSync(join(app.store.dir, 'backups', app.store.backups()[0]), 'utf8'));
+    assert.equal(kept.name, oldName);
+    await sleep(150);
+    assert.equal(app.state?.output, 'off', 'the live output stays off too');
+
+    // Send DMX on in the installation stays on when the file says off.
+    assert.equal((await call('PUT', '/api/settings', { outputEnabled: true })).status, 200);
+    file.settings.outputEnabled = false;
+    assert.equal((await call('PUT', '/api/show', file)).status, 200);
+    assert.equal((await call('GET', '/api/show')).body.settings.outputEnabled, true);
+
+    // Not a show: refused, nothing changes.
+    const before = JSON.stringify((await call('GET', '/api/show')).body);
+    const count = app.store.backups().length;
+    assert.equal((await call('PUT', '/api/show', { hello: 'world' })).status, 400);
+    assert.equal(JSON.stringify((await call('GET', '/api/show')).body), before);
+    assert.equal(app.store.backups().length, count);
+  });
+});
+
+test('the exported show file has no PIN hash, and a file put back keeps the PIN here; a too big file says so', async () => {
+  await withApp(async (call, app) => {
+    assert.equal((await call('POST', '/api/pin', { next: '2468' })).status, 200);
+    const saved = () => JSON.parse(readFileSync(join(app.store.dir, 'show.json'), 'utf8'));
+    const hash: string = saved().settings.pinHash;
+    assert.ok(hash, 'the live show has the hash');
+    const exported = (await call('GET', '/api/show')).body;
+    assert.equal(exported.settings.pinHash, undefined, 'a shared file never carries the PIN hash');
+    assert.ok(!JSON.stringify(exported).includes(hash));
+    // Putting that file back (Patch does, and so does Open a show file) leaves the PIN as it was.
+    assert.equal((await call('PUT', '/api/show', exported)).status, 200);
+    assert.ok(verifyPin('2468', saved().settings.pinHash));
+    // A file over the limit is refused as too large, not as an invalid show.
+    const big = await call('PUT', '/api/show', { padding: 'x'.repeat(11 * 1024 * 1024) });
+    assert.equal(big.status, 413);
+    assert.match(big.body.error, /too large/);
   });
 });

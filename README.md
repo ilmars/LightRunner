@@ -12,6 +12,39 @@ It was built for one church's stage and is shared under the MIT license so other
 
 ![The operator page on an iPad: the stage view, the running order with Song 2 on stage, quick looks, and a row per group with its colour and dimmer](docs/screenshots/operator-live.png)
 
+## Install
+
+Download from the [latest release](https://github.com/ilmars/LightRunner/releases/latest). Nothing else needs installing first.
+
+| System | Download | Notes |
+| --- | --- | --- |
+| Mac, Apple Silicon (M1 and newer) | `Light-Runner-<version>-arm64.dmg` | Open it and drag Light Runner into Applications. |
+| Mac, Intel | `Light-Runner-<version>-x64.dmg` | The same. |
+| Windows | `Light-Runner-Setup-<version>.exe` | Run it. It installs straight away, for you only, and asks nothing. |
+| Raspberry Pi (64-bit Raspberry Pi OS) | the command below | No screen needed. Run the command again to update. |
+
+```bash
+curl -fsSL https://github.com/ilmars/LightRunner/releases/latest/download/install-pi.sh | sudo bash
+```
+
+The Pi starts Light Runner when it starts, and the command prints the address to open on the iPad. To read its log: `journalctl -u light-runner -f`.
+
+**The first time you open it,** the Mac and Windows ask, because the downloads aren't signed yet. On a Mac, open Light Runner once; when the Mac says it can't be checked, go to **System Settings › Privacy & Security**, scroll down, press **Open Anyway** next to Light Runner, and confirm. On Windows, when SmartScreen says it protected your PC, choose **More info**, then **Run anyway**. You only do this once. When the Mac asks whether Light Runner may find devices on your local network, choose **Allow**. If it was refused: **System Settings › Privacy & Security › Local Network**, and switch Light Runner on.
+
+**What you see.** On a Mac or Windows computer a small window shows whether Light Runner is running, with buttons to open the operator page and Settings. **Add an iPad or phone** shows the address in big letters with a code to point the camera at. Closing the window leaves Light Runner running in the menu bar (Mac) or the system tray (Windows); Quit is there, and asks first. Under **Options** you can change the port, choose whether Light Runner starts when the computer starts (it does, to begin with), and switch on **Test mode: don't send to the lights**, which is the way to try it away from the church. On Windows the window also says if the network is set to Public, which stops the iPads from reaching Light Runner, and shows how to make it Private.
+
+A fresh install starts with a demo rig that isn't connected to any lights, with **Send DMX** off; nothing is sent until someone switches Send DMX on in Settings. In the window it shows as "Running · not sending to the lights", with a **Fix it** button, until then. When a newer version is out, the window says "Version X is available" with a link. Updating is installing the new version over the old one (on the Pi, running the command again); the show stays.
+
+**Where the show lives.**
+
+| System | Folder |
+| --- | --- |
+| Mac | `~/Library/Application Support/Light Runner` |
+| Windows | `%APPDATA%\Light Runner` |
+| Raspberry Pi | `/var/lib/light-runner` |
+
+**Moving a show in** (for example the church's, from a computer that runs Light Runner from source): on the old one, Settings > **Export show file**. On the new one, Settings > **Open a show file…**, choose that file and confirm. The whole show is replaced, and the old one is kept as a backup in Settings > Backups. The file's node address comes with it; **Send DMX** and the programmer PIN stay as they are on this computer (a fresh install has Send DMX off, so nothing is sent yet). Make sure Lightkey isn't sending to the node when you switch Send DMX on, and, on an install that already has it on, before you open the file. The exported file leaves out the PIN. To take only some parts of a show (a few songs, or the fixtures from a Lightkey project) use **Compare with a file…** instead. The installed app doesn't read the old computer's `data/` folder by itself.
+
 ## A short tour
 
 ### Live, Prepare and Go
@@ -114,7 +147,9 @@ Devices and controller keys always act on the real stage, never on an iPad's Pre
 - **Saves are safe.** A save never leaves a half-written show behind, and the last 20 are kept as backups (Settings > Backups).
 - **It keeps going.** DMX runs on its own thread with a steady 40 frames a second and is restarted if it ever crashes. After a restart the stage comes back exactly as it was, and tablets reconnect by themselves.
 
-## Running it
+## Running from source
+
+This is for developers and for testing changes. To just use Light Runner, see Install above.
 
 You need [Node.js](https://nodejs.org) 24 or newer. On the church Mac, Node 24 is Homebrew's `node@24`: use `/opt/homebrew/opt/node@24/bin/node` (or put `/opt/homebrew/opt/node@24/bin` on the PATH).
 
@@ -142,7 +177,7 @@ Patch and Settings ask for the programmer PIN once one is set (Settings > Progra
 | `LIGHT_RUNNER_OUTPUT` | — | `none` never sends DMX, whatever the show says |
 | `LIGHT_RUNNER_FAKE_MIDI` | — | **For testing only:** `1` runs with a simulated APC mini mk2 and nanoKONTROL2 |
 
-`data/` is not in git. To keep a show in the repository, export it (Settings > Export show file) into `shows/`. Light Runner doesn't start itself when the computer starts yet; see [docs/STATUS.md](docs/STATUS.md).
+`data/` is not in git. To keep a show in the repository, export it (Settings > Export show file) into `shows/`. Run from source, Light Runner doesn't start itself when the computer starts; the installed app does.
 
 ### Bringing in a Lightkey project
 

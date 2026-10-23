@@ -38,7 +38,7 @@ try {
   say(true, `Light Runner answers at ${base}`);
 
   if (state.output === 'ok') say(true, 'Sending to the lights, and the lights answer');
-  else if (state.output === 'off') say(false, 'Not sending to the lights: Send DMX is off (Settings), or it was started with LIGHT_RUNNER_OUTPUT=none');
+  else if (state.output === 'off') say(false, 'Not sending to the lights: Send DMX is off (Settings), or Test mode is on');
   else say(false, `Problem with the lights${state.outputProblemKind === 'other-desk' ? ' (another desk is sending)' : ''}: ${state.outputProblem ?? 'no details'}`);
 
   const items = layout.runningOrder ?? [];

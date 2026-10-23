@@ -4,7 +4,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
@@ -31,7 +31,8 @@ import { keyLabel, keyPlace } from './keynames.ts';
 import type { FakeMidi, MidiPorts } from './midi.ts';
 import { operatorLayout, type OperatorLayout } from './layout.ts';
 import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from './messages.ts';
-import { isLocalAddress } from './net.ts';
+import { isLocalAddress, isThisComputer } from './net.ts';
+import { AlreadyRunning, liveMarker, removeMarker, writeMarker } from './marker.ts';
 import { RuntimeSaver, Store } from './store.ts';
 
 export interface AppOptions {
@@ -70,6 +71,15 @@ export interface AppOptions {
    * gives, and `POST /api/test/midi` to press their keys. Never set otherwise.
    */
   fakeMidi?: FakeMidi;
+  /**
+   * One server per data folder (main.ts): refuse to start while another server answers for this folder, and keep
+   * `server.json` (pid, port, token) there while running. Tests and tools leave it off.
+   */
+  claimData?: boolean;
+  /** The launcher's stop (`POST /api/launcher/stop` with the marker's token): main.ts runs its clean shutdown. */
+  onStopRequest?: () => void;
+  /** This Light Runner's version, sent as the `x-light-runner` header of `GET /api/state`. */
+  version?: string;
 }
 
 export type Role = 'operator' | 'programmer';
@@ -126,6 +136,10 @@ export class App {
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
   private stopping = false;
+  /** The token in this server's server.json (claimData), the key to the launcher's stop. */
+  private markerToken: string | null = null;
+  /** Pages open on other computers (iPads, phones): the launcher's note about the firewall goes once one has come. */
+  private remotePages = new Set<WebSocket>();
   private nextId = 1;
   private pending = new Map<number, (value: unknown) => void>();
   private layout: OperatorLayout | null = null;
@@ -221,6 +235,11 @@ export class App {
   }
 
   async start(): Promise<void> {
+    // Before anything is loaded or the engine starts: a second engine on the same show must never send.
+    if (this.opts.claimData) {
+      const other = await liveMarker(this.opts.dataDir);
+      if (other) throw new AlreadyRunning(other.port);
+    }
     const loaded = this.store.loadShow();
     if (loaded.problem) this.log(`WARNING: ${loaded.problem}`);
     this.log(`Loaded show "${loaded.show.name}" from ${loaded.source}`);
@@ -244,14 +263,33 @@ export class App {
         return;
       }
       const role: Role = this.isProgrammer(req) ? 'programmer' : 'operator';
-      this.wss!.handleUpgrade(req, socket, head, (ws) => this.onSocket(ws, role));
+      const remote = !isThisComputer(req.socket.remoteAddress);
+      this.wss!.handleUpgrade(req, socket, head, (ws) => {
+        if (remote) {
+          this.remotePages.add(ws);
+          ws.on('close', () => this.remotePages.delete(ws));
+        }
+        this.onSocket(ws, role);
+      });
     });
     // A tablet that drops off the network never closes its socket; ping each one and drop it
     // after two missed answers, so its Flash goes out like on a clean close.
     this.heartbeat = setInterval(() => this.checkTablets(), this.opts.heartbeatMs ?? 2000);
     this.heartbeat.unref();
-    await new Promise<void>((resolve) => this.server!.listen(this.opts.port, this.opts.host ?? '0.0.0.0', resolve));
+    // A port that is taken rejects, so the caller can say so (a launcher shows it in plain words).
+    const server = this.server;
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(this.opts.port, this.opts.host ?? '0.0.0.0', () => {
+        server.off('error', reject);
+        resolve();
+      });
+    });
     this.log(`Light Runner on http://localhost:${this.port}/`);
+    if (this.opts.claimData) {
+      this.markerToken = randomBytes(32).toString('hex');
+      writeMarker(this.opts.dataDir, { pid: process.pid, port: this.port, token: this.markerToken, startedAt: new Date().toISOString() });
+    }
     await this.syncOsc();
     await this.startMidi();
   }
@@ -285,6 +323,10 @@ export class App {
     }
     // Last, so a state the worker sent while stopping is saved now rather than after the app is gone.
     this.saver.flush();
+    if (this.markerToken) {
+      removeMarker(this.opts.dataDir, this.markerToken);
+      this.markerToken = null;
+    }
   }
 
   /** The show as the engine runs it: tests (and LIGHT_RUNNER_OUTPUT=none) can force the output, routes included. */
@@ -1187,6 +1229,7 @@ export class App {
     try {
       if (!isLocalAddress(req.socket.remoteAddress)) throw new HttpError(403, 'local network only');
       const url = new URL(req.url ?? '/', 'http://local');
+      if (url.pathname === '/api/launcher/stop') return this.launcherStop(req, res);
       if (url.pathname.startsWith('/api/')) {
         if (await this.programmerApi(req, res, url)) return;
         return await this.api(req, res, url);
@@ -1202,6 +1245,30 @@ export class App {
       if (status === 500) this.log(`HTTP error: ${(err as Error).stack}`);
       json(res, status, { error: (err as Error).message });
     }
+  }
+
+  /**
+   * The launcher stops a server it didn't start (one left running, or started before it): only from this computer
+   * (a loopback connection, addressed to localhost: no page in a browser can make it) and only with the token from
+   * server.json, which only this computer's user can read.
+   */
+  private launcherStop(req: IncomingMessage, res: ServerResponse): void {
+    const token = this.markerToken;
+    if (!token || !this.opts.onStopRequest) throw new HttpError(404, 'no such endpoint');
+    if (req.method !== 'POST') throw new HttpError(405, 'method not allowed');
+    const from = req.socket.remoteAddress;
+    if (from !== '127.0.0.1' && from !== '::1' && from !== '::ffff:127.0.0.1') throw new HttpError(403, 'only from this computer');
+    const host = (req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '[::1]') throw new HttpError(403, 'only from this computer');
+    if (req.headers.origin !== undefined) throw new HttpError(403, 'not from a web page');
+    const given = /^Bearer ([0-9a-f]{64})$/.exec(req.headers.authorization ?? '')?.[1] ?? '';
+    if (given.length !== token.length || !timingSafeEqual(Buffer.from(given), Buffer.from(token))) throw new HttpError(401, 'wrong token');
+    const stop = this.opts.onStopRequest;
+    res.once('finish', () => {
+      this.log('Stopping: asked by the Light Runner launcher');
+      stop();
+    });
+    json(res, 202, { stopping: true });
   }
 
   private async serveStatic(pathname: string, res: ServerResponse): Promise<void> {
@@ -1355,7 +1422,10 @@ export class App {
           'content-type': 'application/json; charset=utf-8',
           'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file)}`,
         });
-        res.end(JSON.stringify(this.show, null, 2));
+        // A show file is shared and kept: it never carries this installation's PIN hash (a 4 to 6 digit PIN is easy
+        // to work out from its hash). Opening a file keeps the PIN here, so a file without one loses nothing.
+        const { pinHash: _pin, ...settings } = this.show.settings;
+        res.end(JSON.stringify({ ...this.show, settings }, null, 2));
         return true;
       }
       case 'PUT /api/show': {
@@ -1363,6 +1433,8 @@ export class App {
         try {
           show = parseShow(await readJson(req, 10 * 1024 * 1024));
         } catch (err) {
+          // Too large (413) and not JSON keep their own words; anything else is not a show.
+          if (err instanceof HttpError) throw err;
           throw new HttpError(400, `not a valid show: ${(err as Error).message}`);
         }
         const fromPatch = url.searchParams.get('source') === 'patch';
@@ -1370,10 +1442,12 @@ export class App {
         // (Send DMX, output, routes), or saving the patch could start sending DMX again.
         // An imported file keeps this installation's PIN: it must not change who can log in. It keeps this computer's
         // Listen switches too (they name the controllers plugged in here); its keys and APC mini layout switch are taken.
+        // It keeps this installation's Send DMX switch as well, so opening a file never starts sending to the lights by
+        // itself; the file's output settings (the node's address and so on) are taken.
         // Controller keys are assigned while Patch may be open, so its copy keeps the live ones too.
         show = fromPatch
           ? { ...show, operator: { ...show.operator, controller: this.show.operator.controller }, settings: this.show.settings }
-          : withIgnored({ ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash } }, this.show.operator.controller?.ignored);
+          : withIgnored({ ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash, outputEnabled: this.show.settings.outputEnabled } }, this.show.operator.controller?.ignored);
         await this.setShow(show);
         this.log(fromPatch ? 'Patch saved' : `Imported show "${show.name}"`);
         json(res, 200, this.settingsView());
@@ -1693,6 +1767,11 @@ export class App {
       case 'GET /companion':
         return json(res, 200, this.companion());
       case 'GET /state':
+        res.setHeader('x-light-runner', this.opts.version ?? 'dev');
+        // Its pid, so a launcher (and a second server) knows it is the one in server.json.
+        res.setHeader('x-light-runner-pid', String(process.pid));
+        // How many pages are open on other computers, so the launcher knows an iPad has reached it.
+        res.setHeader('x-light-runner-remote-pages', String(this.remotePages.size));
         return json(res, 200, this.latestState);
       case 'GET /apc':
         return json(res, 200, this.apcStatus());

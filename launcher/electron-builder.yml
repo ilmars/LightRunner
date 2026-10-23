@@ -1,0 +1,76 @@
+# The Light Runner installers: a .dmg for the Mac (the build machine's own processor) and a per-user Setup.exe
+# for Windows (x64). File names have no spaces: GitHub turns spaces in a release's file names into dots.
+# Build with `npm run dist` (see README.md); the version comes from the root package.json.
+appId: com.github.ilmars.lightrunner
+productName: Light Runner
+copyright: Light Runner contributors
+directories:
+  output: dist
+  buildResources: resources
+# The window's code in the asar; the server and its Node beside it (scripts/stage-app.mjs made build/app).
+files:
+  - main.js
+  - preload.js
+  - package.json
+  - src/**
+  - ui/**
+  - assets/**
+extraResources:
+  - from: build/app
+    to: lightrunner
+    filter: ["**/*"]
+  # electron-builder never copies a node_modules folder at the top of a "from", so the server's packages have an
+  # entry of their own (scripts/dist.mjs checks they arrived).
+  - from: build/app/node_modules
+    to: lightrunner/node_modules
+    filter: ["**/*"]
+asar: true
+# The window is in English: leave out Chromium's other languages (about 45 MB).
+electronLanguages: [en-US]
+# Electron's own switches, set in the built app: it can't be run as plain Node, take Node's debugging or NODE_OPTIONS,
+# or load its code from anywhere but its checked asar; the window's cookies are encrypted. (The server runs on the
+# bundled node, not on Electron, so none of this changes it.)
+electronFuses:
+  runAsNode: false
+  enableNodeCliInspectArguments: false
+  enableNodeOptionsEnvironmentVariable: false
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+  enableCookieEncryption: true
+# The server's own native add-ons (MIDI, serial) run on the bundled Node, not on Electron: nothing to rebuild.
+npmRebuild: false
+nodeGypRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icon.png
+  # Unsigned for now (owner's decision): Windows' SmartScreen asks once, "More info > Run anyway".
+nsis:
+  # Per-user, no questions: it installs, puts Light Runner on the desktop and in the Start menu, and opens it.
+  oneClick: true
+  perMachine: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Light Runner
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  artifactName: Light-Runner-Setup-${version}.exe
+  # Stops a running Light Runner cleanly (the stage is saved) before the files are replaced; see installer.nsh.
+  include: resources/installer.nsh
+
+mac:
+  target:
+    - target: dmg
+  category: public.app-category.utilities
+  icon: resources/icon-mac.png
+  # Unsigned for now (owner's decision): an ad-hoc signature, so Apple Silicon runs it; Open Anyway in System Settings > Privacy & Security once.
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extendInfo:
+    NSLocalNetworkUsageDescription: Light Runner sends to the lights and talks to the iPads on this network.
+dmg:
+  artifactName: Light-Runner-${version}-${arch}.dmg
+  title: Light Runner ${version}

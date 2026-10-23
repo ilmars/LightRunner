@@ -8,21 +8,13 @@ A plain guide for the lighting lead and volunteers at stage L1. Part 1 is settin
 
 ### The Light Runner computer
 
-1. **Node 24 and Light Runner.** Light Runner is in a folder called `LightRunner`. On the church Mac, Node is Homebrew's `node@24`. The first time, and after an update, run in Terminal in that folder:
+1. **Install Light Runner.** Download it and install it as the [README's Install section](../README.md#install) says (the first time you open it, the Mac asks once: open it, then in **System Settings › Privacy & Security** press **Open Anyway** next to Light Runner and confirm). No Terminal and no Node are needed. When the Mac asks whether Light Runner may find devices on your local network, choose **Allow**. If it was refused: **System Settings › Privacy & Security › Local Network**, and switch Light Runner on.
 
-   ```bash
-   /opt/homebrew/opt/node@24/bin/npm install
-   ```
+2. **It starts with the computer.** Light Runner starts by itself when the computer starts and sits in the menu bar (the Mac) or the system tray (Windows). Open it to see the window: it says **Running**, and **Add an iPad or phone** shows the address for the iPads. A new install says **Running · not sending to the lights** with a **Fix it** button until **Send DMX** is switched on in Settings; that is expected. Closing the window doesn't stop it. If the window says something is wrong, its **Fix it** button takes you to the fix.
 
-2. **Start it** (Terminal, in the `LightRunner` folder):
+   Away from the church (testing at home), turn on **Options › Test mode: don't send to the lights**, so it never sends to any lights. Turn it off again at the church.
 
-   ```bash
-   /opt/homebrew/opt/node@24/bin/node server/src/main.ts
-   ```
-
-   It prints `Light Runner on http://localhost:8080/`. **Leave that Terminal window open** for the whole service: closing it stops the lights. Light Runner doesn't start by itself when the computer starts yet.
-
-   Away from the church (testing at home), start it with `LIGHT_RUNNER_OUTPUT=none` in front, so it never sends to any lights.
+   *From source:* if Light Runner is run from the `LightRunner` folder instead of installed, start it in Terminal there with `/opt/homebrew/opt/node@24/bin/node server/src/main.ts` (after `/opt/homebrew/opt/node@24/bin/npm install` the first time and after an update), and leave that Terminal window open: closing it stops the lights. Use `LIGHT_RUNNER_OUTPUT=none` in front instead of Test mode. It doesn't start by itself. On the church Mac today, until the installed Mac app has been tried there, this is the way.
 
 3. **Keep the computer awake**: in System Settings, set the display and computer not to sleep while it is plugged in.
 
@@ -42,7 +34,7 @@ Open `http://192.168.0.195:8080/settings/` (or `http://localhost:8080/settings/`
 - **Programmer PIN**: set one (4 to 6 digits) so volunteers can't change the patch or settings by accident. Keep it written down somewhere safe, not on the iPad.
 - **Who to call**: a name and a phone number. Volunteers see them when the lights have a problem.
 - **Operators may use manual control**: on if volunteers should be able to set single lights (Individual lights on the operator page).
-- **Backups**: Light Runner keeps the last 20 saves by itself. Before big changes, also use **Export show file** and keep the file.
+- **Backups**: Light Runner keeps the last 20 saves by itself. Before big changes, also use **Export show file** and keep the file. A kept file comes back with **Open a show file…**, which replaces the whole show (the current one is kept as a backup; Send DMX and the PIN stay as they are). **Compare with a file…** takes only the parts you tick.
 - **Controller keys**: see below.
 
 ### The iPads
@@ -67,7 +59,7 @@ Songs, colours, quick looks and effects are made on the operator page; the fixtu
 
 ### Before people arrive (15 minutes)
 
-1. Start Light Runner on the Mac if it isn't running (Part 1, step 2). Lightkey off, **Send DMX on**.
+1. Open Light Runner on the Mac if it isn't running (its icon is in the menu bar; if not, open Light Runner from Applications). Its window should say **Running** (with Send DMX off it says **Running · not sending to the lights**, and **Fix it** takes you to the switch). Lightkey off, **Send DMX on**.
 2. Open the operator page on the iPad. The top bar should show **On stage** and a name, and **no amber pill**. If there is one, see "When something is wrong" below.
 3. Tap **Basic lights**: the stage should come up warm. Then tap through the songs once with the stage in view. Every change fades; nothing should jump.
 4. If you use the APC mini: plug it in, check its pads light up, and press Next once.
@@ -88,9 +80,9 @@ Songs, colours, quick looks and effects are made on the operator page; the fixtu
 | You see | What it means | What to do |
 | --- | --- | --- |
 | Amber **Not sending to the lights** | Send DMX is off | Settings › Send DMX on (make sure Lightkey isn't sending) |
-| Amber **Lights not answering** | The node doesn't answer | Check the node's power and network cable. Tap the pill for details and Who to call |
+| Amber **Lights not answering** | The node doesn't answer | Check the node's power and network cable. On a Mac, also check System Settings › Privacy & Security › Local Network: Light Runner must be switched on. Tap the pill for details and Who to call |
 | Amber **Another desk is sending** | Lightkey or another desk is sending too | Stop the other desk's output |
-| A red banner **Connection lost. Lights keep running. Reconnecting…** | The iPad can't reach the Mac (the lights keep their last look) | Check the iPad's Wi-Fi, and that the Terminal window on the Mac is still open. It reconnects by itself |
+| A red banner **Connection lost. Lights keep running. Reconnecting…** | The iPad can't reach the Mac (the lights keep their last look) | Check the iPad's Wi-Fi, and that Light Runner is running on the Mac (its icon is in the menu bar; open it and look for **Running**). It reconnects by itself |
 | A light flickers or jumps | Not normal | Tap Basic lights, then tell the lighting lead what you did just before |
 
 If nothing helps, call the person in **Who to call** (the problem pill shows them).
@@ -100,4 +92,4 @@ If nothing helps, call the person in **Who to call** (the problem pill shows the
 1. Tap **Basic lights** or **Blackout** as the room needs.
 2. If Lightkey is used next: Settings › **Send DMX off** before starting Lightkey.
 3. Changes made during the service are saved by themselves. If you made many, the lighting lead can **Export show file** in Settings as an extra copy.
-4. You can leave Light Runner running, or stop it with Ctrl+C in its Terminal window.
+4. Leave Light Runner running; it is meant to. To stop it, choose **Quit Light Runner** from its menu-bar icon (it asks first: the lights stop following the iPads). If it is run from source, stop it with Ctrl+C in its Terminal window.

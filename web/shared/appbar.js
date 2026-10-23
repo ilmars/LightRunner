@@ -53,7 +53,7 @@ export async function getJson(path, timeoutMs) {
 export function problemWords(state) {
   if (!state) return null;
   if (state.output === 'off') {
-    return { long: 'Not sending to the lights', short: 'Not sending', title: 'DMX output is off: Send DMX is off, or this server was started with output forced off.' };
+    return { long: 'Not sending to the lights', short: 'Not sending', title: 'Nothing is sent to the lights: Send DMX is off in Settings, or Test mode is on.' };
   }
   if (state.output !== 'lost') return null;
   if (state.outputProblemKind === 'other-desk') {

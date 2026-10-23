@@ -93,9 +93,22 @@ export class Store {
   }
 }
 
-export function writeAtomic(path: string, text: string): void {
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Write a file atomically (a temporary file, flushed, then renamed over the old one). `mode` is for files only this
+ * user may read; `rename` is for tests.
+ */
+export function writeAtomic(
+  path: string,
+  text: string,
+  { mode, rename = renameSync }: { mode?: number; rename?: (from: string, to: string) => void } = {},
+): void {
   const tmp = `${path}.tmp`;
-  writeFileSync(tmp, text);
+  rmSync(tmp, { force: true });
+  writeFileSync(tmp, text, mode === undefined ? undefined : { mode });
   // 'r+', not 'r': Windows refuses to flush a file opened read-only (EPERM).
   const fd = openSync(tmp, 'r+');
   try {
@@ -103,7 +116,20 @@ export function writeAtomic(path: string, text: string): void {
   } finally {
     closeSync(fd);
   }
-  renameSync(tmp, path);
+  // Windows can refuse a rename for a moment while something (a virus scanner, a backup) has the file open.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rename(tmp, path);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (attempt >= 2 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) {
+        rmSync(tmp, { force: true });
+        throw e;
+      }
+      pause(100);
+    }
+  }
 }
 
 /** Writes live state at most once per second, always ending with the latest. */
