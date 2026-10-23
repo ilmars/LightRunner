@@ -56,6 +56,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A mistyped tag fails here, in seconds, and not after the builds.
+      - name: Check the tag matches the version
+        if: github.ref_type == 'tag'
+        run: node .github/scripts/check-tag.mjs
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -80,6 +85,17 @@ jobs:
       # What goes into the app: the production packages only, built for this computer.
       - name: Keep the production packages only
         run: npm ci --omit=dev
+
+      # npm skips an optional package that fails to install without saying so, and the app would then have no MIDI
+      # controllers or no USB DMX box.
+      - name: Check the MIDI and serial packages are there
+        run: |
+          for package in @julusian/midi serialport; do
+            if [ ! -d "node_modules/${package}" ]; then
+              echo "node_modules/${package} is missing: npm dropped an optional package, so this build would have no MIDI or USB DMX."
+              exit 1
+            fi
+          done
 
       - name: Install the launcher's tools
         if: matrix.kind == 'dist'
@@ -109,7 +125,7 @@ jobs:
   release:
     name: Make the draft release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -123,14 +139,7 @@ jobs:
           persist-credentials: false
 
       - name: Check the tag matches the version
-        run: |
-          version="$(jq -r .version package.json)"
-          if [ "$GITHUB_REF_NAME" != "v${version}" ]; then
-            echo "The tag is ${GITHUB_REF_NAME}, but the version in package.json is ${version}, so it should be v${version}."
-            echo "Change the version (or tag the right commit) and push the tag again. Nothing was published."
-            exit 1
-          fi
-          echo "VERSION=${version}" >> "$GITHUB_ENV"
+        run: node .github/scripts/check-tag.mjs
 
       - uses: actions/download-artifact@v4
         with:
@@ -170,6 +179,10 @@ jobs:
 
       - name: Make the draft release
         run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "A release for ${GITHUB_REF_NAME} already exists: delete the draft on GitHub, then re-run."
+            exit 1
+          fi
           gh release create "$GITHUB_REF_NAME" release/* \
             --draft --verify-tag \
             --title "Light Runner ${VERSION}" \

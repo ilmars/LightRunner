@@ -35,7 +35,7 @@ GitHub builds every download (`.github/workflows/release.yml`): the Mac `.dmg` f
 3. When the builds have finished, open the draft release under Releases on GitHub and check the files (three installers, two Pi tarballs, `install-pi.sh`, `SHA256SUMS.txt`).
 4. Press **Publish**. The Raspberry Pi install command only finds the files once the release is published.
 
-To try the builds without a release, run the workflow by hand (Actions > Release > Run workflow): it builds everything and keeps the files for a few days as that run's downloads, and makes no release.
+Before the first tag, run the workflow by hand (Actions › Release › Run workflow) to check the Mac builds; a dmg step that fails with "Resource busy" just needs Re-run. A run by hand builds everything, keeps the files for a few days as that run's downloads, and makes no release (also when run on a tag).
 
 ## Trying it while developing
 
