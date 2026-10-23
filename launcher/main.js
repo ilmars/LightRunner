@@ -337,6 +337,7 @@ function showWindow() {
 }
 
 async function confirmQuit() {
+  stopQuestion?.abort(); // the Quit question replaces an open Stop question
   if (server.status === 'running' || server.status === 'starting') {
     const options = {
       type: /** @type {const} */ ('question'),
