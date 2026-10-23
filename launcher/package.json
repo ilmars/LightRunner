@@ -13,6 +13,7 @@
     "start": "node scripts/stage-app.mjs --ui && electron .",
     "stage": "node scripts/stage-app.mjs",
     "dist": "node scripts/dist.mjs",
+    "pack-linux": "node scripts/pack-linux.mjs",
     "icons": "electron scripts/make-icons.mjs"
   },
   "dependencies": {

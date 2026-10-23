@@ -1,0 +1,24 @@
+[Unit]
+Description=Light Runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lightrunner
+Group=lightrunner
+WorkingDirectory=/var/lib/light-runner
+Environment=LIGHT_RUNNER_DATA=/var/lib/light-runner
+Environment=PORT=8080
+ExecStart=/opt/light-runner/node /opt/light-runner/app/server/src/main.ts
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=15
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
