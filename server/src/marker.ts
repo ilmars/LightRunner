@@ -2,9 +2,10 @@
 // token (the launcher's key to stop it) and when it started. A second server on the same folder finds the first
 // answering there and refuses, before it starts an engine that would also send to the lights.
 
-import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, renameSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
 import { join } from 'node:path';
+import { writeAtomic } from './store.ts';
 
 export interface Marker {
   pid: number;
@@ -34,39 +35,12 @@ export function readMarker(dataDir: string): Marker | null {
   }
 }
 
-function pause(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
 /**
  * Write the marker atomically, readable only by this user where the system allows it (the token is a key).
  * `rename` is for tests.
  */
 export function writeMarker(dataDir: string, marker: Marker, rename: (from: string, to: string) => void = renameSync): void {
-  const path = markerPath(dataDir);
-  const tmp = `${path}.tmp`;
-  rmSync(tmp, { force: true });
-  writeFileSync(tmp, JSON.stringify(marker), { mode: 0o600 });
-  const fd = openSync(tmp, 'r+');
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  // Windows can refuse a rename for a moment while something (a virus scanner, a backup) has the file open.
-  for (let attempt = 0; ; attempt++) {
-    try {
-      rename(tmp, path);
-      return;
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code;
-      if (attempt >= 2 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) {
-        rmSync(tmp, { force: true });
-        throw e;
-      }
-      pause(100);
-    }
-  }
+  writeAtomic(markerPath(dataDir), JSON.stringify(marker), { mode: 0o600, rename });
 }
 
 /** Remove the marker, if it is still this server's. */
