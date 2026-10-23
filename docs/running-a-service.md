@@ -34,7 +34,7 @@ Open `http://192.168.0.195:8080/settings/` (or `http://localhost:8080/settings/`
 - **Programmer PIN**: set one (4 to 6 digits) so volunteers can't change the patch or settings by accident. Keep it written down somewhere safe, not on the iPad.
 - **Who to call**: a name and a phone number. Volunteers see them when the lights have a problem.
 - **Operators may use manual control**: on if volunteers should be able to set single lights (Individual lights on the operator page).
-- **Backups**: Light Runner keeps the last 20 saves by itself. Before big changes, also use **Export show file** and keep the file.
+- **Backups**: Light Runner keeps the last 20 saves by itself. Before big changes, also use **Export show file** and keep the file. A kept file comes back with **Open a show file…**, which replaces the whole show (the current one is kept as a backup; Send DMX and the PIN stay as they are). **Compare with a file…** takes only the parts you tick.
 - **Controller keys**: see below.
 
 ### The iPads
