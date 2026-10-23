@@ -1437,10 +1437,12 @@ export class App {
         // (Send DMX, output, routes), or saving the patch could start sending DMX again.
         // An imported file keeps this installation's PIN: it must not change who can log in. It keeps this computer's
         // Listen switches too (they name the controllers plugged in here); its keys and APC mini layout switch are taken.
+        // It keeps this installation's Send DMX switch as well, so opening a file never starts sending to the lights by
+        // itself; the file's output settings (the node's address and so on) are taken.
         // Controller keys are assigned while Patch may be open, so its copy keeps the live ones too.
         show = fromPatch
           ? { ...show, operator: { ...show.operator, controller: this.show.operator.controller }, settings: this.show.settings }
-          : withIgnored({ ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash } }, this.show.operator.controller?.ignored);
+          : withIgnored({ ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash, outputEnabled: this.show.settings.outputEnabled } }, this.show.operator.controller?.ignored);
         await this.setShow(show);
         this.log(fromPatch ? 'Patch saved' : `Imported show "${show.name}"`);
         json(res, 200, this.settingsView());
