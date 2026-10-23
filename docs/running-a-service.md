@@ -53,7 +53,7 @@ Open `http://192.168.0.195:8080/settings/` (or `http://localhost:8080/settings/`
 
 ### The show
 
-Songs, colours, quick looks and effects are made on the operator page; the fixtures and groups on the Patch page. Before a service, check that every song in the running order looks right (Prepare is good for this, see below).
+Songs, colours, quick looks and effects are made on the operator page; the fixtures and groups on the Patch page. [setting-up-a-show.md](setting-up-a-show.md) walks through building a show from the pages, step by step. Before a service, check that every song in the running order looks right (Prepare is good for this, see below).
 
 ## Part 2. A service
 

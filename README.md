@@ -222,6 +222,7 @@ More detail:
 - [docs/STATUS.md](docs/STATUS.md): what's built, what's next, known issues
 - [docs/DECISIONS.md](docs/DECISIONS.md): choices made and why
 - [docs/running-a-service.md](docs/running-a-service.md): setting up and running the lights for a service
+- [docs/setting-up-a-show.md](docs/setting-up-a-show.md): building a show from the pages: patch, groups, stage plan, colours, songs, quick looks, effects and keys
 - [docs/companion.md](docs/companion.md): Stream Deck, APC mini, controller keys and OSC
 - [docs/design-system.md](docs/design-system.md): the pages' colours, type and brightness rules
 - [CLAUDE.md](CLAUDE.md): project briefing (also read by Claude Code)
