@@ -289,8 +289,8 @@ tidy_leftover() {
 
 swap_in() {
   if [ -d "$INSTALL_DIR" ]; then
+    MOVED_OLD=1 # set first, so a signal right after the move still restores it (cleanup checks .old exists)
     mv "$INSTALL_DIR" "$OLD_DIR"
-    MOVED_OLD=1
   fi
   mv "$NEW_DIR" "$INSTALL_DIR" || die "Could not put the new version in /opt/light-runner."
 }
@@ -377,7 +377,9 @@ print_summary() {
       ;;
   esac
   if [ "$READY" != up ] && [ "$READY" != unchecked ] && [ -d "$OLD_DIR" ]; then
-    say "The previous version is kept at /opt/light-runner.old."
+    say "The previous version is kept at /opt/light-runner.old. To go back to it:"
+    say "  sudo systemctl stop ${SERVICE} && sudo rm -rf /opt/light-runner && sudo mv /opt/light-runner.old /opt/light-runner && sudo systemctl start ${SERVICE}"
+    say "Running the install command again replaces it."
   fi
   say ""
   say "To read its log:        journalctl -u ${SERVICE} -f"
