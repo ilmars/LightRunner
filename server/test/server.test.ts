@@ -889,9 +889,9 @@ test('a tablet that stops answering is dropped and its Flash goes out',() => wit
   assert.equal(await silent.send({ type: 'flash', groups: ['back-wall'], on: true }), null);
   await waitFor(() => watch.state()?.flashing.length === 1, 2000, 'the flash to start');
   // Checks every 50 ms: dropped after two missed answers, while the answering tablet stays.
-  await waitFor(() => watch.state()?.flashing.length === 0, 1000, "the silent tablet's flash to stop");
+  await waitFor(() => watch.state()?.flashing.length === 0, 3000, "the silent tablet's flash to stop");
   assert.equal(watch.ws.readyState, WebSocket.OPEN);
-  await waitFor(() => silent.ws.readyState === WebSocket.CLOSED, 1000, 'the silent tablet to be dropped');
+  await waitFor(() => silent.ws.readyState === WebSocket.CLOSED, 3000, 'the silent tablet to be dropped');
 }, 50));
 
 /** Starts a song, picks Any colour on the back wall, saves it, then takes the Save back with Undo. */

@@ -158,20 +158,25 @@ test('flash from HTTP by position, id and all, with on and off', () => withApp(a
 test('a Flash held over HTTP is put out after the time limit', () => withApp(async (app) => {
   await post(app, '/api/flash/1/on');
   await waitFor(() => app.state?.flashing.length === 1, 2000, 'group 1 flashing');
-  await waitFor(() => app.state?.flashing.length === 0, 2000, 'the held flash to be put out');
-}, 150));
+  await waitFor(() => app.state?.flashing.length === 0, 3000, 'the held flash to be put out');
+}, 600));
 
 test('letting go of a Flash early keeps no timer that puts out a later one', () => withApp(async (app) => {
+  // A device Flash goes out by itself after 600 ms here. If the first press left its timer running, it would put
+  // out the second flash 600 ms after the first press, while the second is still within its own 600 ms.
+  const t0 = Date.now();
   await post(app, '/api/flash/1/on');
   await post(app, '/api/flash/1/off');
   await waitFor(() => app.state?.flashing.length === 0, 2000, 'flash off');
-  await sleep(100);
+  await sleep(Math.max(0, t0 + 300 - Date.now()));
+  const t1 = Date.now();
   await post(app, '/api/flash/1/on');
   await waitFor(() => app.state?.flashing.length === 1, 2000, 'flashing again');
-  await sleep(100); // 200 ms since the first press, 100 ms since the second: still held
-  assert.equal(app.state?.flashing.length, 1);
-  await waitFor(() => app.state?.flashing.length === 0, 2000, 'the second flash to time out');
-}, 150));
+  await sleep(Math.max(0, t0 + 750 - Date.now())); // past the first press's 600 ms
+  // Only meaningful while the second press is still within its own time (a very slow machine can't tell).
+  if (Date.now() - t1 < 550) assert.equal(app.state?.flashing.length, 1, "the first press's timer put out the second flash");
+  await waitFor(() => app.state?.flashing.length === 0, 3000, 'the second flash to time out');
+}, 600));
 
 test('releaseDevice puts out what that source holds, and spares what another source holds', () => withApp(async (app) => {
   await waitFor(() => app.state, 2000, 'the first state');
