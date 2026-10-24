@@ -41,9 +41,9 @@ Open `http://192.168.0.195:8080/settings/` (or `http://localhost:8080/settings/`
 
 1. Join the church Wi-Fi (the same network as the Mac).
 2. In Safari open `http://192.168.0.195:8080/operator/`.
-3. Share › **Add to Home Screen**. It gets the Light Runner icon; open it from there from now on.
+3. Share › **Add to Home Screen**. It gets the Light Runner icon; open it from there from now on, and it opens full screen, without Safari's bars.
 4. Settings › Display & Brightness › **Auto-Lock: Never**, and turn the brightness down for the dark room.
-5. A phone works too: the same address gives the phone remote (Order, Groups, Looks).
+5. A phone works too: the same address gives the phone remote (Order, Groups, Looks). On an iPhone use Add to Home Screen as above. On Android, Chrome's menu › **Add to home screen** gives it the icon; over the church's plain http Chrome can only make a shortcut that opens in a browser tab, so tap **Full screen** (the corner-brackets button in the top bar) to hide the address bar, and the same button leaves full screen again. It only shows where the browser can do it, and not when the page was opened from the home screen as an app.
 
 ### Controllers (optional)
 

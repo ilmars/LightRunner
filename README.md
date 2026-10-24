@@ -168,7 +168,7 @@ Open http://localhost:8080/. The first start loads a small demo rig. At the venu
 | `/patch/` | Programmer (PIN) | DMX map, fixture library and types, groups, stage plan |
 | `/settings/` | Programmer (PIN) | Outputs, Send DMX, Who to call, controller keys, backups and more |
 
-Patch and Settings ask for the programmer PIN once one is set (Settings > Programmer PIN). On the iPad, open `/operator/`, add it to the home screen (it has its own icon), and set Auto-Lock to Never so the screen stays on during the service. The Inter font and the icon are served by Light Runner itself, so the pages work with no internet.
+Patch and Settings ask for the programmer PIN once one is set (Settings > Programmer PIN). On the iPad, open `/operator/`, add it to the home screen (it has its own icon and opens full screen; on Android use the top bar's **Full screen** button), and set Auto-Lock to Never so the screen stays on during the service. The Inter font and the icon are served by Light Runner itself, so the pages work with no internet.
 
 | Setting | Default | What |
 | --- | --- | --- |
