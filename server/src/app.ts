@@ -1459,7 +1459,13 @@ export class App {
         // The show's own profiles win over built-ins with the same id.
         const own = new Set(this.show.profiles.map((p) => p.id));
         const all = [...this.show.profiles, ...BUILT_IN_PROFILES.filter((p) => !own.has(p.id))];
-        json(res, 200, all.map((p) => ({ id: p.id, name: p.name, channels: p.channels.length, segments: profileSegments(p), roles: [...new Set(p.channels.map((c) => c.role))] })));
+        // `defs` is the full channel list (Patch shows it and compares two types). Types that came from the Open Fixture
+        // Library or a fixture file, and the built-in ones, can't be changed: `readOnly`.
+        const builtIn = new Set(BUILT_IN_PROFILES.map((p) => p.id));
+        json(res, 200, all.map((p) => ({
+          id: p.id, name: p.name, channels: p.channels.length, segments: profileSegments(p), roles: [...new Set(p.channels.map((c) => c.role))],
+          defs: p.channels, readOnly: Boolean(p.source?.ofl) || builtIn.has(p.id),
+        })));
         return true;
       }
       case 'POST /api/import/preview': {

@@ -4,6 +4,7 @@
 import {
   aimBeam, alignFixtures, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setShape, shapeOf, spaceEvenly, touches, turnBar,
 } from './plan.js';
+import { channelRows, compareRows, isReadOnly, segmentCount, summary } from './types.js';
 import { PLAN_ASPECT, barAxis, beamCone } from '../shared/stage.js';
 import { request, startClock, watchState } from '../shared/appbar.js';
 
@@ -17,8 +18,9 @@ const el = (tag, cls, text) => {
 
 let show = null; // working copy
 let savedJson = ''; // the show as last saved
-let profiles = []; // [{ id, name, channels }]
+let profiles = []; // [{ id, name, channels (a count), segments, roles, defs (the channels), readOnly }]
 const profileById = new Map();
+let builtInIds = new Set(); // the built-in types' ids: read-only, like the Open Fixture Library's
 
 async function call(method, path, body) {
   const res = await request(path, {
@@ -66,6 +68,9 @@ async function load() {
   profiles = profs;
   profileById.clear();
   for (const p of profiles) profileById.set(p.id, p);
+  // A type of the show's with a built-in's id replaces it; it is read-only only when it came from the library.
+  builtInIds = new Set(profs.filter((p) => p.readOnly && !show.profiles.some((x) => x.id === p.id && x.source?.ofl)).map((p) => p.id));
+  closeTypeSheet();
   $('main').hidden = false;
   fillAddForm(true);
   renderAll();
@@ -199,6 +204,13 @@ function renderFixtures() {
     for (const p of profiles) type.append(new Option(`${p.name}`, p.id));
     type.value = f.profile;
     type.addEventListener('change', () => { f.profile = type.value; changed(); });
+    const typeCell = el('div', 'type-cell');
+    const seeChannels = el('button', 'ds-btn ds-btn--quiet type-open', '›');
+    seeChannels.type = 'button';
+    seeChannels.title = "See this type's channels";
+    seeChannels.setAttribute('aria-label', `Channels of ${f.name}'s type`);
+    seeChannels.addEventListener('click', () => openTypeSheet(f.profile));
+    typeCell.append(type, seeChannels);
 
     const uni = el('input', 'ds-field');
     uni.type = 'number'; uni.min = '0'; uni.max = '32767'; uni.value = String(f.universe);
@@ -254,7 +266,7 @@ function renderFixtures() {
     });
     actions.append(identify, del);
 
-    for (const c of [name, type, uni, addr, range, rev, chips, actions]) {
+    for (const c of [name, typeCell, uni, addr, range, rev, chips, actions]) {
       const td = el('td');
       if (c === uni || c === addr) td.className = 'num';
       td.append(c);
@@ -556,8 +568,13 @@ function renderLibrary() {
     item.addEventListener('pointerdown', (ev) => startLibraryDrag(ev, p, item));
     list.append(item);
   }
+  // The picked type (the one "Add fixtures" has) can show its channels.
+  const picked = profileById.get($('addProfile').value);
+  $('libPickedName').textContent = picked ? typeLabel(picked) : '';
+  $('libChannels').disabled = !picked;
 }
 $('libSearch').addEventListener('input', renderLibrary);
+$('libChannels').addEventListener('click', () => openTypeSheet($('addProfile').value));
 
 /** Drag a fixture type from the library onto the map to patch one there. */
 function startLibraryDrag(ev, p, item) {
@@ -611,6 +628,138 @@ function startLibraryDrag(ev, p, item) {
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', up);
 }
+
+// ---- A fixture type's channels, and two types side by side ----
+
+/** What the sheet shows: the type, and whether it is being compared with `withId`. Null while the sheet is closed. */
+let typeView = null; // { id, comparing, withId }
+
+function openTypeSheet(id) {
+  if (!profileById.has(id)) return;
+  typeView = { id, comparing: false, withId: null };
+  renderTypeSheet();
+  const sheet = $('typeSheet');
+  sheet.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  sheet.focus({ preventScroll: true });
+}
+
+function closeTypeSheet() {
+  typeView = null;
+  $('typeSheet').hidden = true;
+}
+
+/** One channel row in words: "Colour temperature 3200–5600 K, 16-bit", "Fixed value 255". */
+function rowText(row) {
+  let text = row.label;
+  if (row.kelvin) text += ` ${row.kelvin.min}–${row.kelvin.max} K`;
+  if (row.value !== undefined) text += ` ${row.value}`;
+  if (row.sixteenBit) text += ', 16-bit';
+  return text;
+}
+
+/** A channel's own name from the light's manual, unless it only says the job again ("Red" on a red channel). */
+const ownName = (row) => (row.name && row.name.toLowerCase() !== row.label.toLowerCase() ? row.name : '');
+
+function renderTypeSheet() {
+  const p = typeView && profileById.get(typeView.id);
+  if (!p) return closeTypeSheet();
+  $('typeSheet').hidden = false;
+  $('typeName').textContent = p.name;
+  $('typeSummary').textContent = summary(p.defs);
+  const users = show.fixtures.filter((f) => f.profile === p.id).length;
+  const note = [users ? `Used by ${users} ${users === 1 ? 'fixture' : 'fixtures'}.` : 'No fixture uses this type.'];
+  if (p.readOnly) note.push(builtInIds.has(p.id) ? "A built-in type, so it can't be changed." : "From the Open Fixture Library or a fixture file, so it can't be changed.");
+  $('typeNote').textContent = note.join(' ');
+
+  // Compare with…: pick the second type, then the two lists run side by side.
+  const other = typeView.comparing && typeView.withId ? profileById.get(typeView.withId) : null;
+  $('typeCompare').textContent = typeView.comparing ? 'Stop comparing' : 'Compare with…';
+  $('typeCompareBar').hidden = !typeView.comparing;
+  if (typeView.comparing) {
+    const pick = $('typeCompareWith');
+    pick.replaceChildren(new Option('Choose a type…', ''));
+    for (const q of profiles) if (q.id !== p.id) pick.append(new Option(q.name, q.id));
+    pick.value = other ? other.id : '';
+  }
+  const body = $('typeBody');
+  if (other) {
+    const rows = compareRows(p.defs, other.defs);
+    const differing = rows.filter((r) => !r.same).length;
+    $('typeCompareNote').textContent = differing
+      ? `${differing} of ${rows.length} channels differ. They are tinted.`
+      : 'These two types have the same channels.';
+    body.replaceChildren(compareTable(p, other, rows));
+  } else {
+    $('typeCompareNote').textContent = typeView.comparing ? 'Pick the type to put beside this one.' : '';
+    body.replaceChildren(channelTable(p));
+  }
+}
+
+/** A table with a header row of these titles. */
+function tableWith(cls, titles) {
+  const table = el('table', cls);
+  const head = el('tr');
+  for (const text of titles) head.append(el('th', null, text));
+  table.append(el('thead'));
+  table.firstChild.append(head);
+  return table;
+}
+
+/** The channels in order: number, what each does, and its own name when it has one. Several segments get headings. */
+function channelTable(p) {
+  const rows = channelRows(p.defs);
+  const withNames = rows.some((r) => ownName(r));
+  const table = tableWith('type-table', withNames ? ['Channel', 'Does', 'Name'] : ['Channel', 'Does']);
+  const bodyEl = el('tbody');
+  const several = segmentCount(p.defs) > 1;
+  let run; // the segment of the rows being listed; a heading starts each run
+  rows.forEach((row, k) => {
+    if (several && (k === 0 || row.segment !== run)) {
+      const th = el('th', 'seg-head', row.segment === null ? 'Whole light' : `Segment ${row.segment}`);
+      th.colSpan = withNames ? 3 : 2;
+      th.scope = 'colgroup';
+      const headRow = el('tr', 'seg-row');
+      headRow.append(th);
+      bodyEl.append(headRow);
+    }
+    run = row.segment;
+    const tr = el('tr');
+    tr.append(el('td', 'num', row.last > row.first ? `${row.first}–${row.last}` : String(row.first)), el('td', null, rowText(row)));
+    if (withNames) tr.append(el('td', 'muted', ownName(row)));
+    bodyEl.append(tr);
+  });
+  table.append(bodyEl);
+  return table;
+}
+
+/** Two types channel by channel; a row where they differ (or only one has the channel) is tinted. */
+function compareTable(a, b, rows) {
+  const table = tableWith('type-table type-compare', ['Channel', a.name, b.name]);
+  const bodyEl = el('tbody');
+  for (const r of rows) {
+    const tr = el('tr', r.same ? null : 'differs');
+    const n = el('td', 'num', String(r.n));
+    if (!r.same) n.append(el('span', 'sr-only', ' (differs)'));
+    tr.append(n, el('td', r.left === null ? 'muted' : null, r.left ?? '—'), el('td', r.right === null ? 'muted' : null, r.right ?? '—'));
+    bodyEl.append(tr);
+  }
+  table.append(bodyEl);
+  return table;
+}
+
+$('typeClose').addEventListener('click', closeTypeSheet);
+$('typeCompare').addEventListener('click', () => {
+  if (!typeView) return;
+  typeView.comparing = !typeView.comparing;
+  if (!typeView.comparing) typeView.withId = null;
+  renderTypeSheet();
+  if (typeView.comparing) $('typeCompareWith').focus({ preventScroll: true });
+});
+$('typeCompareWith').addEventListener('change', (ev) => {
+  if (!typeView) return;
+  typeView.withId = ev.target.value || null;
+  renderTypeSheet();
+});
 
 // ---- Open Fixture Library ----
 
@@ -690,20 +839,29 @@ async function showOflModes(loadInfo, makeProfile) {
   }
 }
 
+/** What `profiles` keeps of a type in the show: the server's summary of it (GET /api/profiles). */
+function profileSummary(profile) {
+  return {
+    id: profile.id, name: profile.name, channels: profile.channels.length, segments: segmentsOfChannels(profile.channels),
+    roles: [...new Set(profile.channels.map((c) => c.role))], defs: profile.channels, readOnly: isReadOnly(profile, builtInIds),
+  };
+}
+
 /** Add (or update) a fixture type in this show; it is stored when the patch is saved. The fixture's suggested name
  * is the type's without its maker. */
 function addProfile(profile, manufacturer = '') {
   const k = show.profiles.findIndex((p) => p.id === profile.id);
   if (k >= 0) show.profiles[k] = profile;
   else show.profiles.push(profile);
-  const summary = { id: profile.id, name: profile.name, channels: profile.channels.length, segments: segmentsOfChannels(profile.channels), roles: [...new Set(profile.channels.map((c) => c.role))] };
+  const entry = profileSummary(profile);
   const j = profiles.findIndex((p) => p.id === profile.id);
-  if (j >= 0) profiles[j] = summary;
-  else profiles.unshift(summary);
-  profileById.set(profile.id, summary);
+  if (j >= 0) profiles[j] = entry;
+  else profiles.unshift(entry);
+  profileById.set(profile.id, entry);
   fillAddForm(false);
   $('addProfile').value = profile.id;
-  const label = typeLabel(summary);
+  renderTypeSheet();
+  const label = typeLabel(entry);
   $('addName').value = manufacturer && label.startsWith(`${manufacturer} `) ? label.slice(manufacturer.length + 1) : label;
   suggestAddress();
   changed();

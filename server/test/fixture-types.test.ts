@@ -2,7 +2,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { App } from '../src/app.ts';
 import {
   JOBS, addChannel, channelRows, channelText, compareRows, copyOf, isReadOnly, moveRow, newTypeId, removeRow, repeatLastSegment,
   segmentCount, setJob, setKelvin, setSixteenBit, setValue, summary, validateType,
@@ -377,4 +381,50 @@ test("library and built-in types are read-only; the show's own are not", () => {
   assert.equal(isReadOnly(as600b, builtIn), false);
   assert.equal(isReadOnly(sixbar, builtIn), false);
   assert.equal(isReadOnly(pulse23, builtIn), false);
+});
+
+// ---- GET /api/profiles: the channels and whether a type can be changed ----
+
+test('GET /api/profiles gives each type its channels, and says which are read-only', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'light-runner-types-'));
+  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'server/seed/demo-show.json'), webDir: join(root, 'web'), log: () => {} });
+  const call = async (method: string, path: string, body?: unknown) => {
+    const res = await fetch(`http://127.0.0.1:${app.port}${path}`, {
+      method,
+      headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    return { status: res.status, body: (await res.json()) as any };
+  };
+  try {
+    await app.start();
+    await call('PUT', '/api/settings', { output: { kind: 'none' } });
+    const current = (await call('GET', '/api/show')).body;
+    const fromLibrary = { id: 'ofl-bar', name: 'Library bar', channels: [{ role: 'dimmer' }, { role: 'red' }], source: { ofl: 'maker/bar', mode: '2ch' } };
+    const withTypes = { ...current, profiles: [...current.profiles, as600b, pulse39, fromLibrary] };
+    assert.equal((await call('PUT', '/api/show?source=patch', withTypes)).status, 200);
+
+    const list = (await call('GET', '/api/profiles')).body as { id: string; channels: number; segments: number; defs: Channel[]; readOnly: boolean }[];
+    const typeOf = (id: string) => {
+      const found = list.find((p) => p.id === id);
+      assert.ok(found, `${id} is listed`);
+      return found;
+    };
+    // The show's own types: the channels as stored, and editable unless they came from the library.
+    assert.deepEqual(typeOf(as600b.id).defs, as600b.channels);
+    assert.equal(typeOf(as600b.id).readOnly, false);
+    assert.deepEqual(typeOf(pulse39.id).defs, pulse39.channels);
+    assert.equal(typeOf(pulse39.id).defs.length, typeOf(pulse39.id).channels);
+    assert.equal(typeOf('ofl-bar').readOnly, true);
+    // Built-in types: their channels too, never editable.
+    const builtIn = BUILT_IN_PROFILES.find((p) => p.id === 'generic-rgbw');
+    assert.ok(builtIn);
+    assert.deepEqual(typeOf('generic-rgbw').defs, builtIn.channels);
+    assert.equal(typeOf('generic-rgbw').readOnly, true);
+    for (const p of BUILT_IN_PROFILES) assert.equal(typeOf(p.id).readOnly, true, p.id);
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
