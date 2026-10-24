@@ -3,10 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="theme-color" content="#090F1C">
   <title>Light Runner Patch</title>
   <link rel="icon" href="/shared/icon-16.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/shared/icon-180.png">
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/shared/theme.css">
   <link rel="stylesheet" href="/shared/programmer.css">
   <link rel="stylesheet" href="style.css">
@@ -249,6 +253,7 @@
   </footer>
 
   <div id="toast" class="ds-toast" role="status" hidden></div>
+  <script type="module" src="/shared/pwa.js"></script>
   <script type="module" src="patch.js"></script>
 </body>
 </html>

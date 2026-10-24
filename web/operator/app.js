@@ -3,6 +3,7 @@
 
 import { barAxis, barEnds, beamCone, outlineCells } from '/shared/stage.js';
 import { FlashPresses, isSideways } from '/shared/press.js';
+import { setupFullscreen } from '/shared/fullscreen.js';
 import { HUE_STOPS, WHITE_STOPS, hexRgb, parseChannel, parseHex, rgbHex, stripColour, stripMix, stripPick } from '/shared/colour.js';
 
 const $ = (id) => document.getElementById(id);
@@ -5658,6 +5659,11 @@ const stopHold = () => {
 blackout.addEventListener('pointerdown', startHold);
 for (const e of ['pointerup', 'pointerleave', 'pointercancel']) blackout.addEventListener(e, stopHold);
 blackout.addEventListener('click', (ev) => ev.preventDefault());
+
+// ---- Full screen ----
+
+// The top bar's button, shown only where the browser can do it and the page is not already an app.
+setupFullscreen($('fsBtn'));
 
 // ---- Clock, toast, wake lock ----
 

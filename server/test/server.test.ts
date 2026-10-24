@@ -1109,6 +1109,45 @@ test('the pages, the font and the icon are served with their types', () => withA
   for (const m of css.matchAll(/url\(([^)]+\.woff2)\)/g)) assert.equal((await get(`/shared/${m[1]}`)).status, 200, m[1]);
 }));
 
+test('the app manifest and the service worker are served, and every page links them', () => withApp(async (app) => {
+  const get = (path: string) => fetch(`http://127.0.0.1:${app.port}${path}`);
+  const res = await get('/manifest.webmanifest');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'application/manifest+json');
+  const manifest = await res.json();
+  assert.equal(manifest.name, 'Light Runner');
+  assert.equal(manifest.start_url, '/operator/');
+  assert.equal(manifest.scope, '/');
+  assert.equal(manifest.display, 'standalone');
+  const sizes = manifest.icons.map((i: any) => `${i.sizes}${i.purpose ? ' ' + i.purpose : ''}`);
+  assert.deepEqual(sizes, ['192x192', '512x512', '512x512 maskable']);
+  for (const icon of manifest.icons) {
+    const png = await get(icon.src);
+    assert.equal(png.status, 200, icon.src);
+    assert.equal(png.headers.get('content-type'), 'image/png', icon.src);
+    assert.equal(Buffer.from(await png.arrayBuffer()).subarray(1, 4).toString('latin1'), 'PNG', icon.src);
+  }
+
+  // At the root, so its scope can be the whole site; a JavaScript type (the browser refuses a worker served as anything else).
+  const sw = await get('/sw.js');
+  assert.equal(sw.status, 200);
+  assert.ok((sw.headers.get('content-type') ?? '').startsWith('text/javascript'), 'a JavaScript type');
+  assert.equal(sw.headers.get('cache-control'), 'no-cache');
+  const source = await sw.text();
+  assert.ok(source.includes('caches.open(CACHE)'));
+  assert.ok(source.includes("startsWith('/api/')"), 'the worker leaves the API alone');
+  assert.equal((await get('/shared/pwa.js')).status, 200);
+
+  for (const page of ['/operator/', '/patch/', '/settings/']) {
+    const html = await (await get(page)).text();
+    assert.ok(html.includes('<link rel="manifest" href="/manifest.webmanifest">'), page);
+    assert.ok(html.includes('<script type="module" src="/shared/pwa.js"></script>'), page);
+    assert.ok(html.includes('<meta name="apple-mobile-web-app-capable" content="yes">'), page);
+    assert.ok(html.includes('<meta name="apple-mobile-web-app-status-bar-style" content="black">'), page);
+    assert.ok(html.includes('<meta name="theme-color" content="#090F1C">'), page);
+  }
+}));
+
 // ---- Live effects, the song's tempo and the effects list ----
 
 /** A wave as the Effects tab sends it: every setting, colours as plain hex. */
