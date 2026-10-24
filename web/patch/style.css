@@ -279,8 +279,8 @@ table.patch { width: 100%; min-width: 900px; border-collapse: collapse; font-siz
 .type-compare tr.differs td { background: var(--ds-warn-tint); }
 .type-compare tr.differs td:not(.num):not(.muted) { color: var(--ds-text); }
 .type-compare tr.differs td.muted { color: var(--ds-warn-text); }
-.type-compare tr.differs td:first-child { box-shadow: inset 2px 0 0 var(--ds-warn-edge); border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
-.type-compare tr.differs td:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+.type-compare tr.differs td:first-child { box-shadow: inset 2px 0 0 var(--ds-warn-edge); border-top-left-radius: var(--ds-r-small); border-bottom-left-radius: var(--ds-r-small); }
+.type-compare tr.differs td:last-child { border-top-right-radius: var(--ds-r-small); border-bottom-right-radius: var(--ds-r-small); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* A fixture's type in the table: the menu, and a quiet › that opens its channels. */

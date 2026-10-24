@@ -68,8 +68,7 @@ async function load() {
   profiles = profs;
   profileById.clear();
   for (const p of profiles) profileById.set(p.id, p);
-  // A type of the show's with a built-in's id replaces it; it is read-only only when it came from the library.
-  builtInIds = new Set(profs.filter((p) => p.readOnly && !show.profiles.some((x) => x.id === p.id && x.source?.ofl)).map((p) => p.id));
+  builtInIds = new Set(profs.filter((p) => p.builtIn).map((p) => p.id));
   closeTypeSheet();
   $('main').hidden = false;
   fillAddForm(true);
@@ -179,6 +178,7 @@ function renderAll() {
   renderGroups();
   renderStage();
   updateAddHint();
+  refreshTypeSheet();
   const dirty = JSON.stringify(show) !== savedJson;
   $('saveBar').hidden = !dirty;
 }
@@ -665,11 +665,7 @@ function renderTypeSheet() {
   if (!p) return closeTypeSheet();
   $('typeSheet').hidden = false;
   $('typeName').textContent = p.name;
-  $('typeSummary').textContent = summary(p.defs);
-  const users = show.fixtures.filter((f) => f.profile === p.id).length;
-  const note = [users ? `Used by ${users} ${users === 1 ? 'fixture' : 'fixtures'}.` : 'No fixture uses this type.'];
-  if (p.readOnly) note.push(builtInIds.has(p.id) ? "A built-in type, so it can't be changed." : "From the Open Fixture Library or a fixture file, so it can't be changed.");
-  $('typeNote').textContent = note.join(' ');
+  refreshTypeSheet();
 
   // Compare with…: pick the second type, then the two lists run side by side.
   const other = typeView.comparing && typeView.withId ? profileById.get(typeView.withId) : null;
@@ -693,6 +689,25 @@ function renderTypeSheet() {
     $('typeCompareNote').textContent = typeView.comparing ? 'Pick the type to put beside this one.' : '';
     body.replaceChildren(channelTable(p));
   }
+}
+
+/**
+ * The parts of the open view that follow the rest of the page: the summary and the "Used by" note. renderAll() calls
+ * this on every change. It never touches the rows or the compare menu, so what is being typed there keeps its focus.
+ */
+function refreshTypeSheet() {
+  const p = typeView && profileById.get(typeView.id);
+  if (!p) return;
+  $('typeSummary').textContent = summary(p.defs);
+  const users = show.fixtures.filter((f) => f.profile === p.id).length;
+  const note = [users ? `Used by ${users} ${users === 1 ? 'fixture' : 'fixtures'}.` : 'No fixture uses this type.'];
+  if (p.readOnly) {
+    const own = show.profiles.find((x) => x.id === p.id);
+    if (own?.source?.ofl || !builtInIds.has(p.id)) note.push("From the Open Fixture Library or a fixture file, so it can't be changed.");
+    else if (own) note.push("Shares its name with a built-in type, so it can't be changed here. Copy and edit makes your own.");
+    else note.push("A built-in type, so it can't be changed.");
+  }
+  $('typeNote').textContent = note.join(' ');
 }
 
 /** A table with a header row of these titles. */

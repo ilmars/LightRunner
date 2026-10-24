@@ -1464,7 +1464,7 @@ export class App {
         const builtIn = new Set(BUILT_IN_PROFILES.map((p) => p.id));
         json(res, 200, all.map((p) => ({
           id: p.id, name: p.name, channels: p.channels.length, segments: profileSegments(p), roles: [...new Set(p.channels.map((c) => c.role))],
-          defs: p.channels, readOnly: Boolean(p.source?.ofl) || builtIn.has(p.id),
+          defs: p.channels, readOnly: Boolean(p.source?.ofl) || builtIn.has(p.id), builtIn: builtIn.has(p.id),
         })));
         return true;
       }

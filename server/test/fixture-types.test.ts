@@ -405,7 +405,7 @@ test('GET /api/profiles gives each type its channels, and says which are read-on
     const withTypes = { ...current, profiles: [...current.profiles, as600b, pulse39, fromLibrary] };
     assert.equal((await call('PUT', '/api/show?source=patch', withTypes)).status, 200);
 
-    const list = (await call('GET', '/api/profiles')).body as { id: string; channels: number; segments: number; defs: Channel[]; readOnly: boolean }[];
+    const list = (await call('GET', '/api/profiles')).body as { id: string; channels: number; segments: number; defs: Channel[]; readOnly: boolean; builtIn: boolean }[];
     const typeOf = (id: string) => {
       const found = list.find((p) => p.id === id);
       assert.ok(found, `${id} is listed`);
@@ -423,6 +423,22 @@ test('GET /api/profiles gives each type its channels, and says which are read-on
     assert.deepEqual(typeOf('generic-rgbw').defs, builtIn.channels);
     assert.equal(typeOf('generic-rgbw').readOnly, true);
     for (const p of BUILT_IN_PROFILES) assert.equal(typeOf(p.id).readOnly, true, p.id);
+    // `builtIn` marks the real built-in ids only.
+    for (const p of BUILT_IN_PROFILES) assert.equal(list.find((x) => x.id === p.id)?.builtIn, true, p.id);
+    assert.equal(typeOf(as600b.id).builtIn, false);
+    assert.equal(typeOf('ofl-bar').builtIn, false);
+
+    // A type of the show's that reuses a built-in's id wins in the list (its own channels), and stays read-only.
+    const sameId = { id: 'generic-rgbw', name: 'My RGBW', channels: [{ role: 'dimmer' }, { role: 'red' }] };
+    const current2 = (await call('GET', '/api/show')).body;
+    assert.equal((await call('PUT', '/api/show?source=patch', { ...current2, profiles: [...current2.profiles, sameId] })).status, 200);
+    const again = (await call('GET', '/api/profiles')).body as { id: string; name: string; defs: Channel[]; readOnly: boolean; builtIn: boolean }[];
+    const mine = again.filter((p) => p.id === 'generic-rgbw');
+    assert.equal(mine.length, 1);
+    assert.equal(mine[0].name, 'My RGBW');
+    assert.deepEqual(mine[0].defs, sameId.channels);
+    assert.equal(mine[0].readOnly, true);
+    assert.equal(mine[0].builtIn, true);
   } finally {
     await app.stop();
     rmSync(dir, { recursive: true, force: true });
