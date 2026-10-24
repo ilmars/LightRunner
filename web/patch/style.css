@@ -326,7 +326,10 @@ table.patch { width: 100%; min-width: 900px; border-collapse: collapse; font-siz
 .te-tick.on { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-text); }
 .te-tick.on:focus-within { box-shadow: inset 0 0 0 1px var(--ds-accent); }
 .te-tick.on .te-tick-mark { visibility: visible; }
-.te-tick.locked { cursor: default; }
+/* The fixtures that already use the type being edited: quieter, and nothing to tap. */
+.te-tick.on.locked { cursor: default; background: var(--ds-tile-fill); box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-muted-on); }
 .te-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .te-foot-gap { flex: 1; }
 .te-foot .ds-btn { min-width: 96px; }
+/* Delete type, once tapped: the second tap deletes (tinted like the operator page's delete). */
+.te-foot .del.armed { color: var(--ds-danger-text); background: var(--ds-danger-fill); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }

@@ -640,7 +640,8 @@ function startLibraryDrag(ev, p, item) {
 let typeView = null; // { id, comparing, withId }
 
 function openTypeSheet(id) {
-  if (!profileById.has(id)) return;
+  if (!profileById.has(id) || !letGoOfEditor()) return;
+  closeEditor();
   typeView = { id, comparing: false, withId: null };
   renderTypeSheet();
   const sheet = $('typeSheet');
@@ -800,9 +801,11 @@ const takenTypeIds = () => new Set([...show.profiles.map((p) => p.id), ...builtI
 
 /** The editor, opened on a draft; the type's own view (if open) gives way to it. */
 function openEditor(draft) {
+  if (!letGoOfEditor()) return;
+  const returnTo = typeView ? typeView.id : null; // Cancel goes back to the view the editor came from
   closeTypeSheet();
-  disarmDelete();
-  editor = { extra: {}, from: null, ticks: [], armed: 0, ...draft };
+  closeEditor();
+  editor = { extra: {}, base: null, from: null, ticks: [], armed: 0, returnTo, ...draft };
   editor.ticks = new Set(editor.ticks);
   const own = editor.id !== null;
   $('teTitle').textContent = own ? 'Fixture type' : 'New fixture type';
@@ -814,6 +817,7 @@ function openEditor(draft) {
   renderEditorRows();
   renderTicks();
   refreshEditor();
+  editor.start = editorKey();
   const panel = $('typeEditor');
   panel.hidden = false;
   panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -824,15 +828,29 @@ function openEditor(draft) {
   }
 }
 
+/** What the editor holds, to tell whether anything was changed since it opened. */
+const editorKey = () => JSON.stringify([editor.name, editor.channels, [...editor.ticks].sort()]);
+/** An open editor with changes in it. */
+const editorChanged = () => Boolean(editor) && editorKey() !== editor.start;
+/** Before something takes the editor's place: false when the person wants to keep working in it. */
+function letGoOfEditor() {
+  return !editorChanged() || confirm(`Throw away the changes to ${editor.name.trim() || 'the new type'}?`);
+}
+
 function closeEditor() {
   disarmDelete();
   editor = null;
   $('typeEditor').hidden = true;
 }
 
-/** A number typed in a field: nothing, or whatever was typed read as a number (NaN when it isn't one; the check says so). */
-const typedNumber = (text) => (text.trim() === '' ? undefined : Number(text));
-const shownNumber = (n) => (Number.isFinite(n) ? String(n) : '');
+/** What was typed in a number field: nothing, whole digits as a number, anything else as the text itself (the check
+ * says what is wrong, and the field keeps what was typed). */
+function typedNumber(text) {
+  const t = text.trim();
+  if (t === '') return undefined;
+  return /^\d{1,9}$/.test(t) ? Number(t) : t;
+}
+const shownNumber = (n) => (typeof n === 'string' ? n : Number.isFinite(n) ? String(n) : '');
 
 /** Replace the channels, and draw the rows again. `focus`: selectors to try for what should keep the focus. */
 function editChannels(next, focus = []) {
@@ -973,6 +991,7 @@ function renderTicks() {
   const ordered = firstId
     ? [...show.fixtures.filter((f) => f.profile === firstId), ...show.fixtures.filter((f) => f.profile !== firstId)]
     : show.fixtures;
+  $('teLockedHint').hidden = !follows.size;
   box.replaceChildren();
   if (!ordered.length) box.append(el('p', 'hint', 'There are no fixtures in the show yet.'));
   for (const f of ordered) {
@@ -992,7 +1011,6 @@ function renderTicks() {
     chip.append(input, el('span', 'te-tick-mark', '✓'), el('span', null, f.name));
     const type = profileById.get(f.profile);
     if (type && !locked) chip.append(el('small', null, typeLabel(type)));
-    if (locked) chip.title = 'Uses this type already';
     box.append(chip);
   }
 }
@@ -1003,7 +1021,8 @@ function saveEditorType() {
   const name = editor.name.trim();
   const id = editor.id ?? newTypeId(name, takenTypeIds()); // fixed from here on; a rename changes only the name
   const wasNew = editor.id === null;
-  putProfile({ ...editor.extra, id, name, channels: structuredClone(editor.channels) });
+  // An edit keeps the type as stored (its key order too), so saving with no change leaves the patch as it was.
+  putProfile(editor.base ? { ...editor.base, name, channels: structuredClone(editor.channels) } : { id, name, channels: structuredClone(editor.channels), ...editor.extra });
   for (const f of show.fixtures) if (editor.ticks.has(f.id)) f.profile = id;
   fillAddForm(false);
   if (wasNew) $('addProfile').value = id;
@@ -1020,6 +1039,7 @@ function disarmDelete() {
   clearTimeout(editor.armed);
   editor.armed = 0;
   $('teDelete').textContent = 'Delete type';
+  $('teDelete').classList.remove('armed');
 }
 
 function deleteEditorType() {
@@ -1027,6 +1047,7 @@ function deleteEditorType() {
   if (!editor.armed) {
     editor.armed = setTimeout(disarmDelete, 4000);
     $('teDelete').textContent = 'Tap again to delete';
+    $('teDelete').classList.add('armed');
     return;
   }
   const { id } = editor;
@@ -1062,8 +1083,8 @@ $('typeEdit').addEventListener('click', () => {
   const p = typeView && profileById.get(typeView.id);
   const own = p && !p.readOnly && show.profiles.find((x) => x.id === p.id);
   if (!own) return;
-  const { id, name, channels, ...extra } = structuredClone(own);
-  openEditor({ id, name, channels, extra });
+  const base = structuredClone(own);
+  openEditor({ id: base.id, name: base.name, channels: structuredClone(base.channels), base });
 });
 
 $('teName').addEventListener('input', () => {
@@ -1080,7 +1101,11 @@ $('teAdd').addEventListener('change', () => {
 $('teRepeat').addEventListener('click', () => { if (editor) editChannels(repeatLastSegment(editor.channels)); });
 $('teSave').addEventListener('click', saveEditorType);
 $('teDelete').addEventListener('click', deleteEditorType);
-$('teCancel').addEventListener('click', closeEditor);
+$('teCancel').addEventListener('click', () => {
+  const back = editor?.returnTo;
+  closeEditor();
+  if (back) openTypeSheet(back);
+});
 
 // ---- Open Fixture Library ----
 
@@ -1165,6 +1190,7 @@ function profileSummary(profile) {
   return {
     id: profile.id, name: profile.name, channels: profile.channels.length, segments: segmentsOfChannels(profile.channels),
     roles: [...new Set(profile.channels.map((c) => c.role))], defs: profile.channels, readOnly: isReadOnly(profile, builtInIds),
+    builtIn: builtInIds.has(profile.id),
   };
 }
 
@@ -1662,6 +1688,7 @@ $('planAdd').addEventListener('submit', (ev) => {
 $('discard').addEventListener('click', () => load().catch((err) => toast(err.message, true)));
 
 $('save').addEventListener('click', async () => {
+  if (editorChanged()) return toast('Save type or Cancel first, then Save patch.', true);
   const problems = addressProblems();
   if (problems.size && !confirm(`${problems.size} fixtures have address problems. Save anyway?`)) return;
   try {
@@ -1677,7 +1704,7 @@ $('save').addEventListener('click', async () => {
 });
 
 window.addEventListener('beforeunload', (e) => {
-  if (show && JSON.stringify(show) !== savedJson) e.preventDefault();
+  if (show && (JSON.stringify(show) !== savedJson || editorChanged())) e.preventDefault();
 });
 
 let toastTimer = 0;
