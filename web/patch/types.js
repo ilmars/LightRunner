@@ -120,6 +120,12 @@ function listed(items) {
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
+/** A colour temperature range that can be saved: whole numbers from 1000 to 20000 K, warm below cool. */
+const inKelvinRange = (n) => isWhole(n) && n >= 1000 && n <= 20000;
+function rangeIsValid(k) {
+  return Boolean(k) && inKelvinRange(k.min) && inKelvinRange(k.max) && k.min < k.max;
+}
+
 /** The jobs of some rows in words: "dimmer, strobe and 5 fixed values". */
 function jobsInWords(rows) {
   const fixed = rows.filter((r) => r.job === 'other').length;
@@ -131,7 +137,8 @@ function jobsInWords(rows) {
       fixedDone = true;
       items.push(fixed === 1 ? 'fixed value' : `${fixed} fixed values`);
     } else if (row.job === 'cct') {
-      items.push(row.kelvin ? `colour temperature ${row.kelvin.min}–${row.kelvin.max} K` : 'colour temperature');
+      // While the range is being typed and is not right yet, the summary leaves it out.
+      items.push(rangeIsValid(row.kelvin) ? `colour temperature ${row.kelvin.min}–${row.kelvin.max} K` : 'colour temperature');
     } else if (row.job === 'uv') {
       items.push('UV');
     } else {
@@ -175,9 +182,9 @@ export function validateType(name, channels) {
     const ch = channels[row.index];
     if (row.job === 'cct') {
       const k = ch.kelvin;
-      const inRange = (n) => isWhole(n) && n >= 1000 && n <= 20000;
-      if (!k || k.min == null || k.max == null) return `Channel ${row.first}: type the warm end and the cool end in K.`;
-      if (!inRange(k.min) || !inRange(k.max)) return `Channel ${row.first}: colour temperatures are whole numbers from 1000 to 20000 K.`;
+      // Text that is not a whole number (the editor keeps what was typed) counts as not typed yet.
+      if (!k || k.min == null || k.max == null || typeof k.min === 'string' || typeof k.max === 'string') return `Channel ${row.first}: type the warm end and the cool end in K.`;
+      if (!inKelvinRange(k.min) || !inKelvinRange(k.max)) return `Channel ${row.first}: colour temperatures are whole numbers from 1000 to 20000 K.`;
       if (k.min >= k.max) return `Channel ${row.first}: the warm end must be below the cool end.`;
     } else if (FIXED.has(row.job)) {
       // No value is 0, as the engine has it; a value that is there must be right.

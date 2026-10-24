@@ -186,6 +186,14 @@ test('validation says the first problem in plain words, and never lets a number 
   assert.equal(validateType('X', [{ role: 'strobe', default: 1.5 }]), value);
   assert.equal(validateType('X', [{ role: 'strobe', default: Number.NaN }]), value);
   assert.equal(validateType('X', [{ role: 'strobe', default: 255 }, { role: 'other', default: 0 }]), null);
+  // The editor keeps text that is not a whole number as typed; it counts as not typed yet.
+  assert.equal(validateType('X', cct({ min: 'abc', max: 5600 })), typed);
+  assert.equal(validateType('X', cct({ min: 3200, max: '1e3' })), typed);
+  assert.equal(validateType('X', [{ role: 'other', default: 'abc' as unknown as number }]), value);
+  // The summary leaves a range out while it is not a good one.
+  assert.equal(summary(cct({ min: 6000, max: 5600 })), '2 channels · one light · dimmer and colour temperature');
+  assert.equal(summary(cct({ min: 'abc', max: 5600 })), '2 channels · one light · dimmer and colour temperature');
+  assert.equal(summary(cct({ min: 3200, max: 5600 })), '2 channels · one light · dimmer and colour temperature 3200–5600 K');
   // The message names the channel number, which counts fine bytes.
   assert.equal(
     validateType('X', [{ role: 'dimmer' }, { role: 'dimmer', fine: true }, { role: 'other', default: 300 }]),
@@ -449,9 +457,10 @@ test('GET /api/profiles gives each type its channels, and says which are read-on
 // ---- Cutting a type down while its fixtures are running (Review focus 3) ----
 
 test('a type with fewer segments saves, and the engine carries on with its fixtures in a running group', async () => {
+  const logged: string[] = [];
   const dir = mkdtempSync(join(tmpdir(), 'light-runner-types-'));
   const root = fileURLToPath(new URL('../../', import.meta.url));
-  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'server/seed/demo-show.json'), webDir: join(root, 'web'), output: { kind: 'none' }, log: () => {} });
+  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'server/seed/demo-show.json'), webDir: join(root, 'web'), output: { kind: 'none' }, log: (line: string) => logged.push(line) });
   const base = () => `http://127.0.0.1:${app.port}`;
   const put = async (body: unknown) => {
     const res = await fetch(`${base()}/api/show?source=patch`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -492,7 +501,10 @@ test('a type with fewer segments saves, and the engine carries on with its fixtu
     };
     assert.equal(await send({ type: 'groupEffect', group: 'key-lights', effect: wave, fade: 0 }), null);
     assert.equal(await send({ type: 'manual', target: { fixture: 'b1', segment: 2 }, colour: '#ff0000', intensity: 1 }), null);
-    await wait(() => latest('state').held?.some((h: any) => h.fixture === 'b1' && h.segment === 2), 'the held segment');
+    assert.equal(await send({ type: 'manual', target: { fixture: 'b2', segment: 0 }, colour: '#00ff00', intensity: 1 }), null);
+    await wait(() => latest('state').held?.length === 2, 'both held segments');
+    // The effect is running on the key lights, so the cut hits a group that is playing something.
+    await wait(() => latest('state').groups['key-lights'].effect, 'the effect running on the key lights');
 
     // Cut the SixBar 500 to two segments (12 channels): the show is accepted.
     const current = (await (await fetch(`${base()}/api/show`)).json()) as any;
@@ -500,6 +512,10 @@ test('a type with fewer segments saves, and the engine carries on with its fixtu
     assert.equal(cut.profiles.find((p: any) => p.id === sixbar.id).channels.length, 12);
     assert.equal(segmentCount(cut.profiles.find((p: any) => p.id === sixbar.id).channels), 2);
     assert.equal((await put(cut)).status, 200);
+    // The hold on a segment the type no longer has is let go; the one that still exists stays, and the effect carries on.
+    await wait(() => latest('state').held?.length === 1, 'a segment that is gone to be let go');
+    assert.deepEqual(latest('state').held.map((h: any) => [h.fixture, h.segment]), [['b2', 0]]);
+    assert.equal(latest('state').groups['key-lights'].effect?.effect, 'wave');
 
     // The state is still published, and the engine still answers: a look, then Blackout.
     const framesBefore = seen.filter((m) => m.type === 'state').length;
@@ -508,6 +524,9 @@ test('a type with fewer segments saves, and the engine carries on with its fixtu
     assert.ok(seen.filter((m) => m.type === 'state').length > framesBefore, 'state keeps coming');
     assert.equal(await send({ type: 'blackout' }), null);
     await wait(() => latest('state').look === 'blackout', 'blackout');
+    // A crashed worker is only restarted after 200 ms, so look at the log as well: nothing may have gone wrong.
+    await new Promise((r) => setTimeout(r, 400));
+    assert.deepEqual(logged.filter((line) => /Engine worker (error|stopped)/.test(line)), []);
     const profiles = (await (await fetch(`${base()}/api/profiles`)).json()) as any[];
     assert.equal(profiles.find((p) => p.id === sixbar.id).channels, 12);
     assert.equal(profiles.find((p) => p.id === sixbar.id).segments, 2);
