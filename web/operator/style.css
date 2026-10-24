@@ -279,8 +279,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: var(--ds-surface-hi); color: var(--ds-muted-on); font: inherit; font-size: 13px; white-space: nowrap;
 }
 .more-pill:active { background: var(--ds-elevated); }
-/* A little more room to hit, under and beside the pill. */
-.more-pill::after { content: ""; position: absolute; inset: -6px -8px -4px; }
+/* A 44 px tap area: the pill and 14 px above it (over the fade), and wider than the pill. */
+.more-pill::after { content: ""; position: absolute; inset: -16px -10px -1px; }
 .qgrid {
   min-height: 0; max-height: 120px; overflow-y: auto; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
   grid-auto-rows: 56px; gap: 8px; align-content: start; overscroll-behavior: contain;
@@ -402,8 +402,8 @@ body:not(.phone) .rows.two-col .row .chip {
 }
 body:not(.phone) .rows.two-col .row .chip i { width: 10px; height: 10px; }
 body:not(.phone) .rows.two-col .row .chip svg { width: 10px; height: 10px; }
-/* The tap area is bigger than the button, within the cell. */
-body:not(.phone) .rows.two-col .row .chip::after, body:not(.phone) .rows.two-col .row .puff::after { content: ""; position: absolute; inset: -1px -6px -1px; }
+/* The tap area is 44 px high (the cell's top 44 of 56), wider than the button, and sits over the top of the thin slider. */
+body:not(.phone) .rows.two-col .row .chip::after, body:not(.phone) .rows.two-col .row .puff::after { content: ""; position: absolute; inset: -2px -8px -16px; }
 body:not(.phone) .rows.two-col .row .smoke-cell { flex: 0 1 auto; justify-content: flex-start; gap: 8px; }
 body:not(.phone) .rows.two-col .row .smoke-tag { font-size: 12px; }
 body:not(.phone) .rows.two-col .row .puff { position: relative; min-height: 28px; min-width: 56px; padding: 0 12px; border-radius: 8px; font-size: 12px; }
@@ -876,7 +876,7 @@ body:not(.phone) .rows.two-col .row .pct { grid-column: 2; grid-row: 1 / 3; alig
 .flash-area .flash-label { flex: none; margin-right: 5px; }
 .flash-scroll {
   flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; overflow-x: auto; overscroll-behavior-x: contain;
-  scrollbar-width: none; touch-action: pan-x pan-y;
+  scrollbar-width: none; touch-action: pan-x;
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 var(--fl, 0px), #000 calc(100% - var(--fr, 0px)), transparent);
   mask-image: linear-gradient(90deg, transparent, #000 var(--fl, 0px), #000 calc(100% - var(--fr, 0px)), transparent);
 }
@@ -884,8 +884,10 @@ body:not(.phone) .rows.two-col .row .pct { grid-column: 2; grid-row: 1 / 3; alig
 .flash-area button {
   flex: none; min-width: 50px; min-height: 52px; padding: 0 14px; font-size: 13px; font-weight: 600; white-space: nowrap;
   background: var(--ds-tile-fill); border: 1px solid var(--ds-edge); border-radius: 10px;
-  touch-action: pan-x pan-y; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
+  touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
 }
+/* A row that really scrolls lets the finger pan it from a button (sideways only); a row that fits keeps every touch for the button. */
+.flash-scroll.scrolls button { touch-action: pan-x; }
 /* Held: a blue tint and edge, so the volunteer sees it is on (never the bright accent as an area). */
 /* Short names on the iPad's one line: the narrower padding they had before. */
 .flash-short .flash-area button { padding: 0 6px; }

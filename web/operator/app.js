@@ -2,6 +2,7 @@
 // sends commands and shows the live state it is given.
 
 import { barAxis, barEnds, beamCone, outlineCells } from '/shared/stage.js';
+import { FlashPresses, isSideways } from '/shared/press.js';
 import { HUE_STOPS, WHITE_STOPS, hexRgb, parseChannel, parseHex, rgbHex, stripColour, stripMix, stripPick } from '/shared/colour.js';
 
 const $ = (id) => document.getElementById(id);
@@ -148,8 +149,7 @@ function setConnected(on) {
   $('banner').hidden = on;
   if (!on) {
     // The server puts a flash out when it loses us; show the same here.
-    for (const h of flashHeld.values()) h.button.classList.remove('down');
-    flashHeld.clear();
+    presses.reset();
     // Answers that can no longer come: let a tap on ＋ Add song go through again.
     pendingAdd = null;
     addWanted = false;
@@ -1490,15 +1490,16 @@ function wireDimmer(row) {
     const cmd = { type: 'groupLevel', group: row.group.id, value: v };
     if (row.smoke) send(cmd); else sendStage(cmd, target);
   });
-  let startX = 0, startV = 0;
+  let startX = 0, startV = 0, pushed = false;
   const down = (ev) => {
-    ev.preventDefault();
+    if (ev.type === 'pointerdown') ev.preventDefault();
     // The server refuses smoke during Blackout; say so once and leave the slider where it is.
     if (row.smoke && state?.look === 'blackout') {
       toast('Blackout is on.');
       return;
     }
     row.dragging = true;
+    pushed = false;
     target = stageTarget();
     try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     row.dim.classList.add('ds-dragging');
@@ -1506,23 +1507,41 @@ function wireDimmer(row) {
     startV = row.value;
   };
   row.dim.addEventListener('pointerdown', down);
-  // In two columns the whole cell drags the slider (the slider is thin there); the colour button and Puff keep their taps.
+  // In two columns the whole cell drags the slider (the slider is thin there); the colour button and Puff keep their
+  // taps. A press on the cell only becomes a drag once it moves clearly sideways: a vertical swipe scrolls the panel
+  // (the browser takes the finger and sends pointercancel) and sends nothing.
+  let cellPress = null;
   row.box.addEventListener('pointerdown', (ev) => {
+    cellPress = null;
     if (!row.box.parentElement.classList.contains('two-col') || document.body.classList.contains('phone')) return;
     if (row.dim.contains(ev.target) || ev.target.closest('.chip, .puff')) return;
+    cellPress = { id: ev.pointerId, x: ev.clientX, y: ev.clientY };
+  });
+  row.box.addEventListener('pointermove', (ev) => {
+    if (!cellPress || cellPress.id !== ev.pointerId || row.dragging) return;
+    if (!isSideways(ev.clientX - cellPress.x, ev.clientY - cellPress.y)) return;
+    cellPress = null;
     down(ev);
   });
+  for (const name of ['pointerup', 'pointercancel']) row.box.addEventListener(name, (ev) => { if (cellPress?.id === ev.pointerId) cellPress = null; });
   row.dim.addEventListener('pointermove', (ev) => {
     if (!row.dragging) return;
     showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
+    pushed = true;
     out.push(row.value);
   });
-  const end = () => {
+  const end = (ev) => {
     if (!row.dragging) return;
     row.dragging = false;
     row.dim.classList.remove('ds-dragging');
     // Keep what the finger set until the server has caught up with it.
     row.holdUntil = performance.now() + 600;
+    // The drag was cancelled (a palm, a system gesture): back to where it started, not wherever it got to.
+    if (ev.type === 'pointercancel') {
+      showLevel(row, startV);
+      if (pushed) out.end(startV);
+      return;
+    }
     if (row.value === startV) return;
     out.end(row.value);
   };
@@ -5324,73 +5343,45 @@ scrollCue($('runningOrder'), { items: '.item', step: () => Math.max(96, $('runni
 
 // ---- Flash: hold a button and the group goes to full white ----
 
-// Buttons now held: pointer id -> { button, groups }.
-const flashHeld = new Map();
-
-/** Puts out one flash. Groups another held button still covers stay on. */
-function flashOff(pointerId) {
-  const h = flashHeld.get(pointerId);
-  if (!h) return;
-  flashHeld.delete(pointerId);
-  h.button.classList.remove('down');
-  const still = new Set([...flashHeld.values()].flatMap((o) => o.groups));
-  const groups = h.groups.filter((id) => !still.has(id));
-  if (groups.length) send({ type: 'flash', groups, on: false });
-}
-
-const flashAllOff = () => { for (const id of [...flashHeld.keys()]) flashOff(id); };
+// Every press on a Flash or Puff button: web/shared/press.js (tested in server/test/press.test.ts).
+const presses = new FlashPresses({
+  send: (cmd) => send(cmd),
+  setDown: (b, down) => b.classList.toggle('down', down),
+  // A press that waited out its 70 ms only counts if its button is still on the page and the page is in view.
+  canFlash: (b) => b.isConnected && document.visibilityState === 'visible',
+});
+const flashAllOff = () => presses.allOff();
 
 /**
- * Holding the button flashes the groups; letting go (or losing the finger) puts
- * them out. Flash buttons and a smoke group's Puff both work this way.
+ * Holding the button flashes the groups; letting go (or losing the finger) puts them out, never sooner than 100 ms
+ * after it went on. Flash buttons and a smoke group's Puff both work this way.
  *
- * `swipe`: the button sits in a row that scrolls sideways (Flash). A finger or pen waits a moment (SWIPE_WAIT)
- * before the flash goes on, and a finger that moves more than SWIPE_SLOP in that time is a swipe: no flash.
- * Once the flash is on, a swipe still ends it (the browser sends pointercancel when it starts scrolling).
- * A tap shorter than the wait flashes as it lets go. The mouse presses at once.
+ * `swipe`: the button sits in the Flash row. Only while that row really scrolls (its buttons don't all fit) does a
+ * finger or pen wait 70 ms before the flash goes on, and a move over 8 px in that time is a swipe: no flash (the row
+ * also then lets the browser pan it, see .flash-scroll.scrolls). A row that fits presses at once, as it always did,
+ * and a finger drifting a little on a held button keeps it held. The mouse always presses at once.
  */
-const SWIPE_WAIT = 70;
-const SWIPE_SLOP = 8;
-
 function wireHold(b, groups, { swipe = false } = {}) {
-  // The press that has not gone on yet: { id, x, y, timer }.
-  let pending = null;
-  const dropPending = () => {
-    if (pending) clearTimeout(pending.timer);
-    pending = null;
-  };
-  const on = (id) => {
-    if (flashHeld.has(id)) return;
-    if (send({ type: 'flash', groups, on: true }) === null) return;
-    flashHeld.set(id, { button: b, groups });
-    b.classList.add('down');
-  };
+  // Pointers that lifted: the leave and lost-capture events that follow must not cut the minimum hold short.
+  const lifted = new Set();
   b.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
-    if (flashHeld.has(ev.pointerId)) return;
+    lifted.delete(ev.pointerId);
     // Keep getting the release when the finger slides off the button.
     try { b.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
-    if (swipe && ev.pointerType !== 'mouse') {
-      dropPending();
-      const id = ev.pointerId;
-      pending = { id, x: ev.clientX, y: ev.clientY, timer: setTimeout(() => { pending = null; on(id); }, SWIPE_WAIT) };
-      return;
-    }
-    on(ev.pointerId);
+    const sc = b.parentElement;
+    const wait = swipe && ev.pointerType !== 'mouse' && sc.scrollWidth > sc.clientWidth + 1;
+    presses.press(ev.pointerId, b, groups, { wait, x: ev.clientX, y: ev.clientY });
   });
-  b.addEventListener('pointermove', (ev) => {
-    if (pending && pending.id === ev.pointerId && Math.hypot(ev.clientX - pending.x, ev.clientY - pending.y) > SWIPE_SLOP) dropPending();
+  b.addEventListener('pointermove', (ev) => presses.move(ev.pointerId, ev.clientX, ev.clientY));
+  b.addEventListener('pointerup', (ev) => {
+    lifted.add(ev.pointerId);
+    setTimeout(() => lifted.delete(ev.pointerId), 500);
+    presses.release(ev.pointerId);
   });
-  const end = (ev) => {
-    if (pending && pending.id === ev.pointerId) {
-      const tap = ev.type === 'pointerup';
-      dropPending();
-      // A quick tap: on as it lets go, then off below.
-      if (tap) on(ev.pointerId);
-    }
-    flashOff(ev.pointerId);
-  };
-  for (const name of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) b.addEventListener(name, end);
+  for (const name of ['pointercancel', 'pointerleave', 'lostpointercapture']) {
+    b.addEventListener(name, (ev) => { if (!lifted.has(ev.pointerId)) presses.cancel(ev.pointerId); });
+  }
   b.addEventListener('contextmenu', (ev) => ev.preventDefault());
 }
 
@@ -5401,6 +5392,8 @@ let flashShortsDiffer = false;
 function updateFlashFades() {
   const sc = $('flashArea').querySelector('.flash-scroll');
   if (!sc) return;
+  // Only a row that really scrolls lets the browser pan it from a finger on a button (see .flash-scroll.scrolls).
+  sc.classList.toggle('scrolls', sc.scrollWidth > sc.clientWidth + 1);
   sc.style.setProperty('--fl', sc.scrollLeft > 1 ? '28px' : '0px');
   sc.style.setProperty('--fr', sc.scrollLeft + sc.clientWidth < sc.scrollWidth - 1 ? '28px' : '0px');
 }
@@ -5419,6 +5412,7 @@ function shortFlashName(name) {
 function setFlashLabels(short) {
   for (const b of $('flashArea').querySelectorAll('button')) b.textContent = short ? b.dataset.short : b.dataset.full;
   document.body.classList.toggle('flash-short', short);
+  updateFlashFades();
 }
 
 function buildFlash() {
