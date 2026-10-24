@@ -27,7 +27,7 @@ Open **Patch**. Changes stay in the page until you press **Save patch** in the b
 1. The first time, open Settings › Fixture database and press **Download database (about 3 MB)**. Patch can then search the whole Open Fixture Library without internet.
 2. In Patch, under **Open Fixture Library**, type the model (for example `SonicPulse`) and press **Search**, or choose a maker under **Browse by manufacturer…**.
 3. Tap the fixture, then tap the **DMX mode** the fixture is really set to (for example "23-channel · 23 ch"). The channel count must match the mode set on the light itself. The type now appears in the **Fixture library** list and is picked in **Add fixtures**.
-4. A fixture type from a Lightkey project arrives with the project (step 1). **Import fixture file…** takes a fixture file in the Open Fixture Library's format (see below for making one).
+4. A fixture type from a Lightkey project arrives with the project (step 1). **Import fixture file…** takes a fixture file in the Open Fixture Library's format. A light that is in none of these gets a type you make yourself (below).
 
 **Add the lights:**
 
@@ -47,12 +47,25 @@ Open **Patch**. Changes stay in the page until you press **Save patch** in the b
 4. A smoke or haze machine gets its own group with **Smoke or haze machine** switched on. Songs, quick looks, Basic lights and Flash leave it alone; the operator page gives it its own slider and **Puff**.
 5. Press **Save patch**. **Delete group** also deletes the group's colours and takes the group out of songs and quick looks, so use it carefully.
 
-**A fixture that is in neither the Open Fixture Library nor a Lightkey project.** Patch cannot make a new fixture type, and there is no channel editor. The options are:
+**A fixture that is in neither the Open Fixture Library nor a Lightkey project.** Make its type yourself in Patch:
+
+1. Press **＋ New fixture type** above the **Fixture library** list. Type a **Name**.
+2. Choose **＋ Add channel…** once for each of the light's channels, in the order the light uses them. Give each a job: **Dimmer**, **Red**, **Green**, **Blue**, **White**, **Amber**, **UV**, **Colour temperature**, **Strobe** or **Fixed value**. Use the light's manual for the order. **↑** and **↓** move a channel and **×** takes it out.
+3. Switch **16-bit** on for a channel that takes two DMX channels (it uses the next one as well). For **Colour temperature**, type the light's **Warm end** and **Cool end** in K. For **Strobe** and **Fixed value**, type the **Value** (0 to 255) that holds the channel where you want it. A light made of several identical segments: add the first segment, then tap **Repeat the last segment** for each more.
+4. The line under the channels sums it up: how many channels, whether it is one light or several segments, and what they do. Under **Use it for**, tick the fixtures that should switch to this type. They keep their names, addresses, groups and places on the plan.
+5. Press **Save type**, then **Save patch**. Nothing reaches the show before that; **Discard** throws it away.
+
+**Look at a type, or find a substitute.** **Channels ›** under the Fixture library list (for the type you picked), and the **›** beside a fixture's **Type** in the Fixtures table, open that type's channels: a summary, "Used by N fixtures", and the numbered channels. **Compare with…** shows two types side by side, with the channels that differ tinted and "—" where one type has no such channel. Use it to check that a type you have is close enough to a light you don't have a type for.
+
+**Change a type.** **Copy and edit** makes your own copy of any type and opens it in the editor; **Edit** changes one of your own. Types from the Open Fixture Library or a fixture file, and the built-in Generic types, can't be changed, so copy them. A type that came from a Lightkey project can be edited. In the editor the fixtures already using the type are shown and locked; they follow every change. To move one to another type, change its **Type** in the Fixtures table. **Delete type** (tap it twice) is there only when no fixture uses the type. Press **Save type** or **Cancel** before **Save patch**.
+
+*Example.* The church's front panels P1–P4 are walimex pro LED Niova 600 Plus Bi Color lights patched with the Neewer AS600B (2 channels: dimmer and colour temperature, 2500 to 10000 K) as a substitute. The walimex only goes from 3200 to 5600 K. To say so: pick the AS600B in the Fixture library, press **Channels ›**, then **Copy and edit**. Rename it, set **Warm end** to 3200 and **Cool end** to 5600, tick P1–P4 under **Use it for**, press **Save type**, then **Save patch**.
+
+Other routes:
 
 - Use one of the built-in **Generic** types if the light's channels are in the same order: Generic dimmer (1 ch), RGB (3), RGBW (4), RGBA (4), dimmer + RGB (4), dimmer + RGBW + strobe (6) and 16-bit dimmer + RGBW (6). It works only when the light's own channels really are those, in that order; otherwise colours will be wrong.
 - If the light is in a Lightkey project, use **Compare with a file…** (step 1); the type comes from Lightkey.
-- Describe it yourself in the Open Fixture Library's online fixture editor (open-fixture-library.org, "Add fixture"): list each channel in order (dimmer, red, green, blue, white, amber, UV, colour temperature, strobe), download the file it makes, and bring it in with **Import fixture file…**. Someone may also simply give you such a file.
-- Otherwise ask whoever maintains Light Runner to add the type.
+- Describe it in the Open Fixture Library's online fixture editor (open-fixture-library.org, "Add fixture"), download the file it makes, and bring it in with **Import fixture file…**. Someone may also simply give you such a file.
 
 ## 3. The stage plan
 
