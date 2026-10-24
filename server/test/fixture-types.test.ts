@@ -83,14 +83,28 @@ test('a type with one segment is all the whole light', () => {
   for (const r of channelRows(walimex)) assert.equal(r.segment, null);
 });
 
-test("channels between a segment's colours belong to it, those after the last segment do not", () => {
+test('only colour channels are in a segment, as the engine drives them', () => {
   const list: Channel[] = [
     { role: 'dimmer' },
     { role: 'red' }, { role: 'green' }, { role: 'other', default: 3 }, { role: 'blue' },
-    { role: 'red' }, { role: 'green' }, { role: 'blue' },
+    { role: 'red' }, { role: 'dimmer' }, { role: 'green' }, { role: 'blue' },
     { role: 'strobe', default: 0 },
   ];
-  assert.deepEqual(channelRows(list).map((r) => r.segment), [null, 1, 1, 1, 1, 2, 2, 2, null]);
+  assert.deepEqual(channelRows(list).map((r) => r.segment), [null, 1, 1, null, 1, 2, null, 2, 2, null]);
+});
+
+test('a colour that appears once in a type with several segments is the whole light', () => {
+  const list: Channel[] = [
+    { role: 'red' }, { role: 'green' }, { role: 'blue' }, { role: 'red' }, { role: 'green' }, { role: 'blue' }, { role: 'white' },
+  ];
+  assert.equal(segmentCount(list), 2);
+  assert.deepEqual(channelRows(list).map((r) => r.segment), [1, 1, 1, 2, 2, 2, null]);
+  assert.equal(summary(list), '7 channels · 2 segments · each red, green and blue · also white');
+  // With one segment everything is the whole light.
+  assert.deepEqual(channelRows([{ role: 'red' }, { role: 'white' }]).map((r) => r.segment), [null, null]);
+  // A 16-bit colour keeps its segment.
+  const fine: Channel[] = [{ role: 'red' }, { role: 'red', fine: true }, { role: 'red' }, { role: 'red', fine: true }];
+  assert.deepEqual(channelRows(fine).map((r) => r.segment), [1, 2]);
 });
 
 test('a 16-bit channel is one row that spans two channel numbers', () => {
@@ -145,9 +159,11 @@ test('validation says the first problem in plain words, and never lets a number 
   const range = 'Channel 2: colour temperatures are whole numbers from 1000 to 20000 K.';
   assert.equal(validateType('X', cct({ min: NaN, max: 5600 })), range);
   assert.equal(validateType('X', cct({ min: 3200.5, max: 5600 })), range);
-  assert.equal(validateType('X', cct({ min: 3200 })), range);
-  assert.equal(validateType('X', cct({ min: 3200, max: null })), range);
-  assert.equal(validateType('X', cct(undefined)), range);
+  const typed = 'Channel 2: type the warm end and the cool end in K.';
+  assert.equal(validateType('X', cct({ min: 3200 })), typed);
+  assert.equal(validateType('X', cct({ min: 3200, max: null })), typed);
+  assert.equal(validateType('X', cct({ min: undefined, max: 5600 })), typed);
+  assert.equal(validateType('X', cct(undefined)), typed);
   assert.equal(validateType('X', cct({ min: 999, max: 5600 })), range);
   assert.equal(validateType('X', cct({ min: 3200, max: 20001 })), range);
   assert.equal(validateType('X', cct({ min: 3200, max: Infinity })), range);
@@ -157,13 +173,17 @@ test('validation says the first problem in plain words, and never lets a number 
   const value = 'Channel 1: a value is a whole number from 0 to 255.';
   assert.equal(validateType('X', [{ role: 'other', default: 256 }]), value);
   assert.equal(validateType('X', [{ role: 'other', default: -1 }]), value);
-  assert.equal(validateType('X', [{ role: 'other', default: undefined }]), value);
+  // No value counts as 0, as the engine has it; a value that is there must be right.
+  assert.equal(validateType('X', [{ role: 'other', default: undefined }]), null);
+  assert.equal(validateType('X', [{ role: 'strobe' }]), null);
+  assert.equal(validateType('X', [{ role: 'other', default: null as unknown as number }]), value);
+  assert.equal(validateType('X', [{ role: 'other', default: '5' as unknown as number }]), value);
   assert.equal(validateType('X', [{ role: 'strobe', default: 1.5 }]), value);
   assert.equal(validateType('X', [{ role: 'strobe', default: Number.NaN }]), value);
   assert.equal(validateType('X', [{ role: 'strobe', default: 255 }, { role: 'other', default: 0 }]), null);
   // The message names the channel number, which counts fine bytes.
   assert.equal(
-    validateType('X', [{ role: 'dimmer' }, { role: 'dimmer', fine: true }, { role: 'other' }]),
+    validateType('X', [{ role: 'dimmer' }, { role: 'dimmer', fine: true }, { role: 'other', default: 300 }]),
     'Channel 3: a value is a whole number from 0 to 255.',
   );
 });
@@ -199,6 +219,13 @@ test('changing a job keeps what still fits and drops what does not', () => {
   // From a strobe to a dimmer: the value goes. From a dimmer to a colour temperature: the range arrives.
   assert.deepEqual(setJob(list, 2, 'dimmer')[3], { role: 'dimmer' });
   assert.deepEqual(setJob(list, 0, 'cct')[0], { role: 'cct', name: 'Master', kelvin: { min: 2700, max: 6500 } });
+  // A name that only repeated the old job goes; one that says more stays.
+  assert.deepEqual(
+    setJob([{ role: 'red', name: 'Red' }, { role: 'green', name: 'Left eye' }], 0, 'blue'),
+    [{ role: 'blue' }, { role: 'green', name: 'Left eye' }],
+  );
+  assert.deepEqual(setJob([{ role: 'red', name: 'red' }], 0, 'blue'), [{ role: 'blue' }]);
+  assert.deepEqual(setJob([{ role: 'green', name: 'Left eye' }], 0, 'blue'), [{ role: 'blue', name: 'Left eye' }]);
   // From a fixed value to a strobe keeps the value.
   assert.deepEqual(setJob([{ role: 'other', default: 9 }], 0, 'strobe'), [{ role: 'strobe', default: 9 }]);
 });
@@ -273,6 +300,16 @@ test('repeating the last segment', () => {
   assert.deepEqual(p.slice(0, 7), pulse39.channels.slice(0, 7), 'the whole-light channels stay first');
   assert.deepEqual(p.slice(39), pulse39.channels.slice(35));
 
+  // A lone colour is the whole light, not part of segment 1, and stays after the copy.
+  const lone = repeatLastSegment([
+    { role: 'red' }, { role: 'green' }, { role: 'blue' }, { role: 'red' }, { role: 'green' }, { role: 'blue' }, { role: 'white' },
+  ]);
+  assert.deepEqual(roles(lone), ['red', 'green', 'blue', 'red', 'green', 'blue', 'red', 'green', 'blue', 'white']);
+  // Whatever is between the segment's first and last colour comes with it.
+  const between = repeatLastSegment([
+    { role: 'red' }, { role: 'other', default: 5 }, { role: 'green' }, { role: 'red' }, { role: 'dimmer' }, { role: 'green' }, { role: 'strobe' },
+  ]);
+  assert.deepEqual(roles(between), ['red', 'other', 'green', 'red', 'dimmer', 'green', 'red', 'dimmer', 'green', 'strobe']);
   // A type with one segment copies its colour channels as segment 2, before any trailing whole-light channels.
   const one = repeatLastSegment([{ role: 'dimmer' }, { role: 'red', name: 'R' }, { role: 'green' }, { role: 'blue' }, { role: 'strobe', default: 4 }]);
   assert.deepEqual(roles(one), ['dimmer', 'red', 'green', 'blue', 'red', 'green', 'blue', 'strobe']);
@@ -314,6 +351,10 @@ test('a copy keeps every channel and is a separate type', () => {
   assert.deepEqual(fineCopy.channels[2].kelvin, { min: 1000, max: 2000 });
   assert.equal('source' in fineCopy, false);
   assert.equal(copyOf(as600b, new Set()).channels[1].kelvin?.max, 10000);
+  // Everything else the type has comes along, except where it came from.
+  const gamma = copyOf({ ...withFine, gamma: 2.2 }, new Set());
+  assert.equal(gamma.gamma, 2.2);
+  assert.equal('gamma' in copyOf(withFine, new Set()), false);
 });
 
 test('ids are slugs, made unique', () => {

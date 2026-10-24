@@ -61,23 +61,29 @@ function groupRows(channels) {
 }
 
 /**
- * Where the segments are: a colour channel is in segment n when it is its colour's n-th (fine bytes don't count);
- * a segment runs from its first colour channel to its last (fine byte included).
+ * Where the segments are, as the engine drives them (planChannels in packages/engine/src/output.ts): a colour channel
+ * is in segment n when it is its colour's n-th (a fine byte goes with its coarse channel). In a type with several
+ * segments a colour that appears only once is the whole light, and so is every channel that is not a colour.
+ * `ranges[n]` is the span of channel positions from segment n's first colour channel to its last (fine byte included).
  */
 function segmentsOf(channels, rows) {
-  const seen = new Map();
+  const totals = new Map();
+  const colourRows = rows.filter((row) => COLOURS.includes(row.job) && !channels[row.index].fine);
+  for (const row of colourRows) totals.set(row.job, (totals.get(row.job) ?? 0) + 1);
+  const count = Math.max(1, ...totals.values());
   const own = new Map();
   const ranges = [];
-  for (const row of rows) {
-    if (!COLOURS.includes(row.job) || channels[row.index].fine) continue;
+  const seen = new Map();
+  for (const row of colourRows) {
     const n = (seen.get(row.job) ?? 0) + 1;
     seen.set(row.job, n);
-    own.set(row, n);
+    if (count > 1 && totals.get(row.job) === 1) continue;
+    if (count > 1) own.set(row, n);
     const range = ranges[n] ?? (ranges[n] = { lo: row.index, hi: row.index });
     range.lo = Math.min(range.lo, row.index);
     range.hi = Math.max(range.hi, row.last - 1);
   }
-  return { count: Math.max(1, ...seen.values()), own, ranges };
+  return { count, own, ranges };
 }
 
 /** How many segments a type has: the most times any colour repeats, at least 1. The engine counts the same way. */
@@ -87,26 +93,13 @@ export function segmentCount(channels) {
 
 /**
  * One row per channel, with its 1-based channel numbers, its job, and the segment it is in (null: the whole light,
- * which is everything in a type with one segment and the channels outside the segments in one with several).
+ * which is everything in a type with one segment, and in one with several every channel that is not a colour
+ * that repeats).
  */
 export function channelRows(channels) {
   const rows = groupRows(channels);
-  const { count, own, ranges } = segmentsOf(channels, rows);
-  if (count < 2) return rows;
-  for (const row of rows) {
-    const mine = own.get(row);
-    if (mine !== undefined) {
-      row.segment = mine;
-      continue;
-    }
-    for (let s = 1; s <= count; s++) {
-      const range = ranges[s];
-      if (range && row.index >= range.lo && row.index <= range.hi) {
-        row.segment = s;
-        break;
-      }
-    }
-  }
+  const { own } = segmentsOf(channels, rows);
+  for (const row of rows) row.segment = own.get(row) ?? null;
   return rows;
 }
 
@@ -183,10 +176,12 @@ export function validateType(name, channels) {
     if (row.job === 'cct') {
       const k = ch.kelvin;
       const inRange = (n) => isWhole(n) && n >= 1000 && n <= 20000;
-      if (!k || !inRange(k.min) || !inRange(k.max)) return `Channel ${row.first}: colour temperatures are whole numbers from 1000 to 20000 K.`;
+      if (!k || k.min == null || k.max == null) return `Channel ${row.first}: type the warm end and the cool end in K.`;
+      if (!inRange(k.min) || !inRange(k.max)) return `Channel ${row.first}: colour temperatures are whole numbers from 1000 to 20000 K.`;
       if (k.min >= k.max) return `Channel ${row.first}: the warm end must be below the cool end.`;
     } else if (FIXED.has(row.job)) {
-      if (!isWhole(ch.default) || ch.default < 0 || ch.default > 255) return `Channel ${row.first}: a value is a whole number from 0 to 255.`;
+      // No value is 0, as the engine has it; a value that is there must be right.
+      if (ch.default !== undefined && (!isWhole(ch.default) || ch.default < 0 || ch.default > 255)) return `Channel ${row.first}: a value is a whole number from 0 to 255.`;
     }
   }
   return null;
@@ -206,12 +201,15 @@ export function setJob(channels, rowIndex, job) {
   if (!row || row.job === job) return clone(channels);
   const old = channels[row.index];
   const next = starting(job);
-  if (old.name !== undefined) next.name = old.name;
+  // A name that only repeated the old job ("Red" on a red channel) is not worth keeping on another job.
+  const echoes = (name) => name.toLowerCase() === labelOf(old.role).toLowerCase();
+  if (old.name !== undefined && !echoes(old.name)) next.name = old.name;
   if (job === 'cct' && old.kelvin) next.kelvin = clone(old.kelvin);
   if (FIXED.has(job) && FIXED.has(old.role) && old.default !== undefined) next.default = old.default;
   const replacement = [next];
   if (row.sixteenBit && TAKES_LEVEL.has(job)) {
     const fine = { ...clone(channels[row.index + 1]), role: job };
+    if (fine.name !== undefined && echoes(fine.name)) delete fine.name;
     replacement.push(fine);
   }
   return [...clone(channels.slice(0, row.index)), ...replacement, ...clone(channels.slice(row.last))];
@@ -289,10 +287,11 @@ export function newTypeId(name, takenIds) {
   return id;
 }
 
-/** A copy to edit: every channel kept as it is, a new id and name, and no library source. */
+/** A copy to edit: everything the type has (channels as they are, gamma ...), a new id and name, and no library source. */
 export function copyOf(profile, takenIds) {
+  const { id: _id, name: _name, source: _source, ...rest } = clone(profile);
   const name = `Copy of ${profile.name}`;
-  return { id: newTypeId(name, takenIds), name, channels: clone(profile.channels) };
+  return { ...rest, id: newTypeId(name, takenIds), name };
 }
 
 /** Library types (from the fixture library or a fixture file) and the built-in ones can't be changed; copy them. */
