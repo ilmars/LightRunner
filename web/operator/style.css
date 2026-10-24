@@ -266,6 +266,21 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .qtabs .tab { min-height: 44px; padding: 0 12px; border-radius: 9px; font-size: 13px; white-space: nowrap; }
 .qtabs .tab.on { box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+/* A list that scrolls says so: "N more ↓" over a soft fade at its bottom edge while there is more below (app.js scrollCue).
+   The pill is the only part that takes a tap; the fade lets taps through to what is under it. */
+.cue-host { position: relative; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.cue-host.grow-host { flex: 1; }
+.more-cue {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 42px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 3px;
+  background: linear-gradient(transparent, var(--ds-surface) 85%); border-radius: 0 0 var(--ds-r-tile) var(--ds-r-tile); pointer-events: none;
+}
+.more-pill {
+  position: relative; pointer-events: auto; min-height: 30px; padding: 0 14px; border: 1px solid var(--ds-edge); border-radius: var(--ds-r-pill);
+  background: var(--ds-surface-hi); color: var(--ds-muted-on); font: inherit; font-size: 13px; white-space: nowrap;
+}
+.more-pill:active { background: var(--ds-elevated); }
+/* A little more room to hit, under and beside the pill. */
+.more-pill::after { content: ""; position: absolute; inset: -6px -8px -4px; }
 .qgrid {
   min-height: 0; max-height: 120px; overflow-y: auto; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
   grid-auto-rows: 56px; gap: 8px; align-content: start; overscroll-behavior: contain;
@@ -1043,6 +1058,7 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   .qhead .sec-title, .sec-sub, .qhead .grow { display: none; }
   .qhead .qtabs { flex: 1; }
   .qhead .qtabs .tab { flex: 1; font-size: 14px; }
+  .quick-looks .cue-host { flex: 1; }
   .qgrid { max-height: none; flex: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(64px, auto); }
   .ql { padding: 10px; font-size: 14px; }
 

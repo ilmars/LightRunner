@@ -5277,6 +5277,44 @@ function finishSaveQuick() {
   }
 }
 
+// ---- "N more ↓": a list that scrolls says so ----
+
+/**
+ * Adds a quiet cue to the bottom edge of a scrolling list: a soft fade and a pill, "N more ↓", while there is more
+ * below. A tap scrolls down `step()` pixels; it goes away at the end. `items` says what counts as an entry and
+ * `partial` (the quick-look grid) still shows "More ↓" when only something that isn't an entry is out of view.
+ */
+function scrollCue(scroller, { items, step, partial = false }) {
+  const pill = el('button', 'more-pill');
+  pill.type = 'button';
+  const cue = el('div', 'more-cue');
+  cue.hidden = true;
+  cue.append(pill);
+  scroller.parentElement.append(cue);
+  const update = () => {
+    const room = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+    if (room <= 2 || scroller.clientHeight === 0) {
+      cue.hidden = true;
+      return;
+    }
+    const bottom = scroller.scrollTop + scroller.clientHeight;
+    const hidden = [...scroller.querySelectorAll(items)].filter((n) => n.offsetTop + n.offsetHeight > bottom + 2).length;
+    cue.hidden = !hidden && !partial;
+    const text = hidden ? `${hidden} more ↓` : 'More ↓';
+    if (pill.textContent !== text) pill.textContent = text;
+    pill.setAttribute('aria-label', `${text.replace(' ↓', '')}, scroll down`);
+  };
+  pill.addEventListener('click', () => scroller.scrollBy({ top: step(), behavior: 'smooth' }));
+  scroller.addEventListener('scroll', update, { passive: true });
+  new ResizeObserver(update).observe(scroller);
+  new MutationObserver(update).observe(scroller, { childList: true });
+  update();
+}
+
+// The quick-look grid: one row (a tile and a gap) at a time. The running order: nearly a page.
+scrollCue($('qGrid'), { items: '.ql:not(.newq)', step: () => ($('qGrid').querySelector('.ql')?.offsetHeight ?? 56) + 8, partial: true });
+scrollCue($('runningOrder'), { items: '.item', step: () => Math.max(96, $('runningOrder').clientHeight - 56) });
+
 // ---- Flash: hold a button and the group goes to full white ----
 
 // Buttons now held: pointer id -> { button, groups }.
