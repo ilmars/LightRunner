@@ -5281,10 +5281,12 @@ function finishSaveQuick() {
 
 /**
  * Adds a quiet cue to the bottom edge of a scrolling list: a soft fade and a pill, "N more ↓", while there is more
- * below. A tap scrolls down `step()` pixels; it goes away at the end. `items` says what counts as an entry and
- * `partial` (the quick-look grid) still shows "More ↓" when only something that isn't an entry is out of view.
+ * below. A tap scrolls down `step()` pixels; it goes away at the end. Only when at least 2 entries are not fully in
+ * view (one cut-off row isn't worth covering it with a pill): `all` says what counts as an entry (the quick-look
+ * grid's "Save stage" tile counts), `items` which of them the number counts (the grid's looks only; "More ↓" when
+ * that is none).
  */
-function scrollCue(scroller, { items, step, partial = false }) {
+function scrollCue(scroller, { items, all = items, step }) {
   const pill = el('button', 'more-pill');
   pill.type = 'button';
   const cue = el('div', 'more-cue');
@@ -5298,8 +5300,13 @@ function scrollCue(scroller, { items, step, partial = false }) {
       return;
     }
     const bottom = scroller.scrollTop + scroller.clientHeight;
-    const hidden = [...scroller.querySelectorAll(items)].filter((n) => n.offsetTop + n.offsetHeight > bottom + 2).length;
-    cue.hidden = !hidden && !partial;
+    const out = (n) => n.offsetTop + n.offsetHeight > bottom + 2;
+    const hidden = [...scroller.querySelectorAll(items)].filter(out).length;
+    if ([...scroller.querySelectorAll(all)].filter(out).length < 2) {
+      cue.hidden = true;
+      return;
+    }
+    cue.hidden = false;
     const text = hidden ? `${hidden} more ↓` : 'More ↓';
     if (pill.textContent !== text) pill.textContent = text;
     pill.setAttribute('aria-label', `${text.replace(' ↓', '')}, scroll down`);
@@ -5312,7 +5319,7 @@ function scrollCue(scroller, { items, step, partial = false }) {
 }
 
 // The quick-look grid: one row (a tile and a gap) at a time. The running order: nearly a page.
-scrollCue($('qGrid'), { items: '.ql:not(.newq)', step: () => ($('qGrid').querySelector('.ql')?.offsetHeight ?? 56) + 8, partial: true });
+scrollCue($('qGrid'), { items: '.ql:not(.newq)', all: '.ql', step: () => ($('qGrid').querySelector('.ql')?.offsetHeight ?? 56) + 8 });
 scrollCue($('runningOrder'), { items: '.item', step: () => Math.max(96, $('runningOrder').clientHeight - 56) });
 
 // ---- Flash: hold a button and the group goes to full white ----
