@@ -5387,12 +5387,31 @@ function wireHold(b, groups, { swipe = false } = {}) {
   b.addEventListener('contextmenu', (ev) => ev.preventDefault());
 }
 
+// True when every Flash button's short name differs from the others (and from "All").
+let flashShortsDiffer = false;
+
 /** The Flash row scrolls sideways: a soft fade at an edge only while there is more to scroll that way. */
 function updateFlashFades() {
   const sc = $('flashArea').querySelector('.flash-scroll');
   if (!sc) return;
   sc.style.setProperty('--fl', sc.scrollLeft > 1 ? '28px' : '0px');
   sc.style.setProperty('--fr', sc.scrollLeft + sc.clientWidth < sc.scrollWidth - 1 ? '28px' : '0px');
+}
+
+/**
+ * A short name for a Flash button: the first word of the group's name, cut to 4 letters when it is longer than 6
+ * ("Front", "Key", "Back", "Drum", "B8"). Used only on the iPad's one-line bar, and only when no two short names
+ * (or "All") are the same and they all fit; otherwise the buttons carry the full names.
+ */
+function shortFlashName(name) {
+  const w = name.trim().split(/\s+/)[0] ?? '';
+  return w.length > 6 ? w.slice(0, 4) : w;
+}
+
+/** Writes the short (or the full) name on every Flash button. The label for assistive tech is always the full name. */
+function setFlashLabels(short) {
+  for (const b of $('flashArea').querySelectorAll('button')) b.textContent = short ? b.dataset.short : b.dataset.full;
+  document.body.classList.toggle('flash-short', short);
 }
 
 function buildFlash() {
@@ -5404,10 +5423,15 @@ function buildFlash() {
   root.replaceChildren(el('span', 'flash-label ds-caps', 'Flash'), scroll);
   // Smoke machines have Puff in the details instead, and "All" never includes them.
   const lights = lightGroups();
-  const buttons = [['All', lights.map((g) => g.id), 'All lights']];
-  for (const g of lights) buttons.push([g.name, [g.id], g.name]);
-  for (const [text, groups, full] of buttons) {
+  const buttons = [['All', lights.map((g) => g.id), 'All lights', 'All']];
+  for (const g of lights) buttons.push([g.name, [g.id], g.name, shortFlashName(g.name)]);
+  const shorts = buttons.map((x) => x[3].toLowerCase());
+  flashShortsDiffer = new Set(shorts).size === shorts.length;
+  for (const [text, groups, full, short] of buttons) {
     const b = el('button', null, text);
+    b.dataset.full = text;
+    b.dataset.short = short;
+    b.title = full;
     b.setAttribute('aria-label', `Flash ${full} (hold)`);
     scroll.append(b);
     wireHold(b, groups, { swipe: true });
@@ -5688,14 +5712,23 @@ const midQuery = window.matchMedia('(min-width: 701px) and (max-width: 1079px) a
  */
 function fitBottomBar() {
   const body = document.body;
+  const area = $('flashArea').querySelector('.flash-scroll');
   if (phoneQuery.matches || midQuery.matches) {
     body.classList.toggle('bar-two-rows', !phoneQuery.matches);
+    if (area) setFlashLabels(false);
     return;
   }
-  // Measure on one line (no paint happens in between).
+  if (!area) return;
+  // The iPad's one line, measured with no paint in between: short names when they all differ and fit; else the full
+  // names on that line when they fit, else the full names in a row of their own (two lines).
   body.classList.remove('bar-two-rows');
-  const area = $('flashArea').querySelector('.flash-scroll');
-  if (area && area.scrollWidth > area.clientWidth + 1) body.classList.add('bar-two-rows');
+  const overflows = () => area.scrollWidth > area.clientWidth + 1;
+  if (flashShortsDiffer) {
+    setFlashLabels(true);
+    if (!overflows()) return;
+  }
+  setFlashLabels(false);
+  if (overflows()) body.classList.add('bar-two-rows');
 }
 window.addEventListener('resize', fitBottomBar);
 midQuery.addEventListener('change', fitBottomBar);

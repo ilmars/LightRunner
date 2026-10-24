@@ -887,6 +887,8 @@ body:not(.phone) .rows.two-col .row .pct { grid-column: 2; grid-row: 1 / 3; alig
   touch-action: pan-x pan-y; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
 }
 /* Held: a blue tint and edge, so the volunteer sees it is on (never the bright accent as an area). */
+/* Short names on the iPad's one line: the narrower padding they had before. */
+.flash-short .flash-area button { padding: 0 6px; }
 .flash-area button.down { background: var(--ds-selected); border-color: var(--ds-edge-held); }
 
 .action {
