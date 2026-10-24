@@ -4,6 +4,10 @@
 import {
   aimBeam, alignFixtures, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setShape, shapeOf, spaceEvenly, touches, turnBar,
 } from './plan.js';
+import {
+  JOBS, addChannel, channelRows, compareRows, copyOf, isReadOnly, moveRow, newTypeId, removeRow, repeatLastSegment, segmentCount,
+  setJob, setKelvin, setSixteenBit, setValue, summary, validateType,
+} from './types.js';
 import { PLAN_ASPECT, barAxis, beamCone } from '../shared/stage.js';
 import { request, startClock, watchState } from '../shared/appbar.js';
 
@@ -17,8 +21,9 @@ const el = (tag, cls, text) => {
 
 let show = null; // working copy
 let savedJson = ''; // the show as last saved
-let profiles = []; // [{ id, name, channels }]
+let profiles = []; // [{ id, name, channels (a count), segments, roles, defs (the channels), readOnly }]
 const profileById = new Map();
+let builtInIds = new Set(); // the built-in types' ids: read-only, like the Open Fixture Library's
 
 async function call(method, path, body) {
   const res = await request(path, {
@@ -66,6 +71,9 @@ async function load() {
   profiles = profs;
   profileById.clear();
   for (const p of profiles) profileById.set(p.id, p);
+  builtInIds = new Set(profs.filter((p) => p.builtIn).map((p) => p.id));
+  closeTypeSheet();
+  closeEditor();
   $('main').hidden = false;
   fillAddForm(true);
   renderAll();
@@ -174,6 +182,8 @@ function renderAll() {
   renderGroups();
   renderStage();
   updateAddHint();
+  refreshTypeSheet();
+  if (editor) { renderTicks(); refreshEditor(); }
   const dirty = JSON.stringify(show) !== savedJson;
   $('saveBar').hidden = !dirty;
 }
@@ -199,6 +209,13 @@ function renderFixtures() {
     for (const p of profiles) type.append(new Option(`${p.name}`, p.id));
     type.value = f.profile;
     type.addEventListener('change', () => { f.profile = type.value; changed(); });
+    const typeCell = el('div', 'type-cell');
+    const seeChannels = el('button', 'ds-btn ds-btn--quiet type-open', '›');
+    seeChannels.type = 'button';
+    seeChannels.title = "See this type's channels";
+    seeChannels.setAttribute('aria-label', `Channels of ${f.name}'s type`);
+    seeChannels.addEventListener('click', () => openTypeSheet(f.profile, seeChannels));
+    typeCell.append(type, seeChannels);
 
     const uni = el('input', 'ds-field');
     uni.type = 'number'; uni.min = '0'; uni.max = '32767'; uni.value = String(f.universe);
@@ -254,7 +271,7 @@ function renderFixtures() {
     });
     actions.append(identify, del);
 
-    for (const c of [name, type, uni, addr, range, rev, chips, actions]) {
+    for (const c of [name, typeCell, uni, addr, range, rev, chips, actions]) {
       const td = el('td');
       if (c === uni || c === addr) td.className = 'num';
       td.append(c);
@@ -556,8 +573,13 @@ function renderLibrary() {
     item.addEventListener('pointerdown', (ev) => startLibraryDrag(ev, p, item));
     list.append(item);
   }
+  // The picked type (the one "Add fixtures" has) can show its channels.
+  const picked = profileById.get($('addProfile').value);
+  $('libPickedName').textContent = picked ? typeLabel(picked) : '';
+  $('libChannels').disabled = !picked;
 }
 $('libSearch').addEventListener('input', renderLibrary);
+$('libChannels').addEventListener('click', () => openTypeSheet($('addProfile').value, $('libChannels')));
 
 /** Drag a fixture type from the library onto the map to patch one there. */
 function startLibraryDrag(ev, p, item) {
@@ -611,6 +633,487 @@ function startLibraryDrag(ev, p, item) {
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', up);
 }
+
+// ---- A fixture type's channels, and two types side by side ----
+
+/** What the sheet shows: the type, and whether it is being compared with `withId`. Null while the sheet is closed. */
+let typeView = null; // { id, comparing, withId }
+let typeOpener = null; // the button that opened the view; Close scrolls back to it
+
+function openTypeSheet(id, opener = null) {
+  if (!profileById.has(id) || !letGoOfEditor()) return;
+  if (opener) typeOpener = opener; // opened again from the editor: keep the one before
+  closeEditor();
+  typeView = { id, comparing: false, withId: null };
+  renderTypeSheet();
+  const sheet = $('typeSheet');
+  sheet.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  sheet.focus({ preventScroll: true });
+}
+
+function closeTypeSheet() {
+  typeView = null;
+  $('typeSheet').hidden = true;
+}
+
+/** One channel row in words: "Colour temperature 3200–5600 K, 16-bit", "Fixed value 255". */
+function rowText(row) {
+  let text = row.label;
+  if (row.kelvin) text += ` ${row.kelvin.min}–${row.kelvin.max} K`;
+  if (row.value !== undefined) text += ` ${row.value}`;
+  if (row.sixteenBit) text += ', 16-bit';
+  return text;
+}
+
+/** A channel's own name from the light's manual, unless it only says the job again ("Red" on a red channel). */
+const ownName = (row) => (row.name && row.name.toLowerCase() !== row.label.toLowerCase() ? row.name : '');
+
+function renderTypeSheet() {
+  const p = typeView && profileById.get(typeView.id);
+  if (!p) return closeTypeSheet();
+  $('typeSheet').hidden = false;
+  $('typeName').textContent = p.name;
+  refreshTypeSheet();
+
+  // Compare with…: pick the second type, then the two lists run side by side.
+  const other = typeView.comparing && typeView.withId ? profileById.get(typeView.withId) : null;
+  $('typeCompare').textContent = typeView.comparing ? 'Stop comparing' : 'Compare with…';
+  $('typeCompareBar').hidden = !typeView.comparing;
+  if (typeView.comparing) {
+    const pick = $('typeCompareWith');
+    pick.replaceChildren(new Option('Choose a type…', ''));
+    for (const q of profiles) if (q.id !== p.id) pick.append(new Option(q.name, q.id));
+    pick.value = other ? other.id : '';
+  }
+  const body = $('typeBody');
+  if (other) {
+    const rows = compareRows(p.defs, other.defs);
+    const differing = rows.filter((r) => !r.same).length;
+    $('typeCompareNote').textContent = differing
+      ? `${differing} of ${rows.length} channels differ. They are tinted.`
+      : 'These two types have the same channels.';
+    body.replaceChildren(compareTable(p, other, rows));
+  } else {
+    $('typeCompareNote').textContent = typeView.comparing ? 'Pick the type to put beside this one.' : '';
+    body.replaceChildren(channelTable(p));
+  }
+}
+
+/**
+ * The parts of the open view that follow the rest of the page: the summary and the "Used by" note. renderAll() calls
+ * this on every change. It never touches the rows or the compare menu, so what is being typed there keeps its focus.
+ */
+function refreshTypeSheet() {
+  const p = typeView && profileById.get(typeView.id);
+  if (!p) return;
+  $('typeSummary').textContent = summary(p.defs);
+  $('typeEdit').hidden = p.readOnly; // library and built-in types: Copy and edit only
+  const users = show.fixtures.filter((f) => f.profile === p.id).length;
+  const note = [users ? `Used by ${users} ${users === 1 ? 'fixture' : 'fixtures'}.` : 'No fixture uses this type.'];
+  if (p.readOnly) {
+    const own = show.profiles.find((x) => x.id === p.id);
+    if (own?.source?.ofl || !builtInIds.has(p.id)) note.push("From the Open Fixture Library or a fixture file, so it can't be changed.");
+    else if (own) note.push("Shares its name with a built-in type, so it can't be changed here. Copy and edit makes your own.");
+    else note.push("A built-in type, so it can't be changed.");
+  }
+  $('typeNote').textContent = note.join(' ');
+}
+
+/** A table with a header row of these titles. */
+function tableWith(cls, titles) {
+  const table = el('table', cls);
+  const head = el('tr');
+  for (const text of titles) head.append(el('th', null, text));
+  table.append(el('thead'));
+  table.firstChild.append(head);
+  return table;
+}
+
+/** The channels in order: number, what each does, and its own name when it has one. Several segments get headings. */
+function channelTable(p) {
+  const rows = channelRows(p.defs);
+  const withNames = rows.some((r) => ownName(r));
+  const table = tableWith('type-table', withNames ? ['Channel', 'Does', 'Name'] : ['Channel', 'Does']);
+  const bodyEl = el('tbody');
+  const several = segmentCount(p.defs) > 1;
+  let run; // the segment of the rows being listed; a heading starts each run
+  rows.forEach((row, k) => {
+    if (several && (k === 0 || row.segment !== run)) {
+      const th = el('th', 'seg-head', row.segment === null ? 'Whole light' : `Segment ${row.segment}`);
+      th.colSpan = withNames ? 3 : 2;
+      th.scope = 'colgroup';
+      const headRow = el('tr', 'seg-row');
+      headRow.append(th);
+      bodyEl.append(headRow);
+    }
+    run = row.segment;
+    const tr = el('tr');
+    tr.append(el('td', 'num', row.last > row.first ? `${row.first}–${row.last}` : String(row.first)), el('td', null, rowText(row)));
+    if (withNames) tr.append(el('td', 'muted', ownName(row)));
+    bodyEl.append(tr);
+  });
+  table.append(bodyEl);
+  return table;
+}
+
+/** Two types channel by channel; a row where they differ (or only one has the channel) is tinted. */
+function compareTable(a, b, rows) {
+  const table = tableWith('type-table type-compare', ['Channel', a.name, b.name]);
+  const bodyEl = el('tbody');
+  for (const r of rows) {
+    const tr = el('tr', r.same ? null : 'differs');
+    const n = el('td', 'num', String(r.n));
+    if (!r.same) n.append(el('span', 'sr-only', ' (differs)'));
+    tr.append(n, el('td', r.left === null ? 'muted' : null, r.left ?? '—'), el('td', r.right === null ? 'muted' : null, r.right ?? '—'));
+    bodyEl.append(tr);
+  }
+  table.append(bodyEl);
+  return table;
+}
+
+$('typeClose').addEventListener('click', () => {
+  closeTypeSheet();
+  if (typeOpener?.isConnected) {
+    typeOpener.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    typeOpener.focus({ preventScroll: true });
+  }
+});
+$('typeCompare').addEventListener('click', () => {
+  if (!typeView) return;
+  typeView.comparing = !typeView.comparing;
+  if (!typeView.comparing) typeView.withId = null;
+  renderTypeSheet();
+  if (typeView.comparing) $('typeCompareWith').focus({ preventScroll: true });
+});
+$('typeCompareWith').addEventListener('change', (ev) => {
+  if (!typeView) return;
+  typeView.withId = ev.target.value || null;
+  renderTypeSheet();
+});
+
+// ---- Making, copying and changing your own fixture types ----
+
+/** The jobs that take a level, so can be 16-bit. */
+const TAKES_LEVEL = new Set(['dimmer', ...COLOUR_ROLES, 'cct']);
+
+/**
+ * The type being made or changed, as a working copy; nothing reaches the show before Save type, and the lights
+ * before Save patch. Null while the editor is closed.
+ * { id: null for a new type, else the type's id (fixed), name, channels, extra: what else the type has (gamma...),
+ *   from: the type a copy came from, ticks: ids of the fixtures ticked to use it, armed: Delete type's timer }
+ */
+let editor = null;
+
+/** The ids a new type's id must not take: the show's types and the built-in ones. */
+const takenTypeIds = () => new Set([...show.profiles.map((p) => p.id), ...builtInIds]);
+
+/** The editor, opened on a draft; the type's own view (if open) gives way to it. */
+function openEditor(draft) {
+  if (!letGoOfEditor()) return;
+  const returnTo = typeView ? typeView.id : null; // Cancel goes back to the view the editor came from
+  closeTypeSheet();
+  closeEditor();
+  editor = { extra: {}, base: null, from: null, ticks: [], armed: 0, returnTo, ...draft };
+  editor.ticks = new Set(editor.ticks);
+  const own = editor.id !== null;
+  $('teTitle').textContent = own ? 'Fixture type' : 'New fixture type';
+  const source = editor.from && profileById.get(editor.from);
+  $('teNote').textContent = own
+    ? 'A change here changes every fixture that uses this type.'
+    : source ? `Starts as a copy of ${source.name}. The original stays as it is.` : "Name it, then add its channels in the order the light's manual lists them.";
+  $('teName').value = editor.name;
+  renderEditorRows();
+  renderTicks();
+  refreshEditor();
+  editor.start = editorKey();
+  const panel = $('typeEditor');
+  panel.hidden = false;
+  panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  if (own) panel.focus({ preventScroll: true });
+  else {
+    $('teName').focus({ preventScroll: true });
+    $('teName').select();
+  }
+}
+
+/** What the editor holds, to tell whether anything was changed since it opened. */
+const editorKey = () => JSON.stringify([editor.name, editor.channels, [...editor.ticks].sort()]);
+/** An open editor with changes in it. */
+const editorChanged = () => Boolean(editor) && editorKey() !== editor.start;
+/** Before something takes the editor's place: false when the person wants to keep working in it. */
+function letGoOfEditor() {
+  return !editorChanged() || confirm(`Throw away the changes to ${editor.name.trim() || 'the new type'}?`);
+}
+
+function closeEditor() {
+  disarmDelete();
+  editor = null;
+  $('typeEditor').hidden = true;
+}
+
+/** What was typed in a number field: nothing, whole digits as a number, anything else as the text itself (the check
+ * says what is wrong, and the field keeps what was typed). */
+function typedNumber(text) {
+  const t = text.trim();
+  if (t === '') return undefined;
+  return /^\d{1,9}$/.test(t) ? Number(t) : t;
+}
+const shownNumber = (n) => (typeof n === 'string' ? n : Number.isFinite(n) ? String(n) : '');
+
+/** Replace the channels, and draw the rows again. `focus`: selectors to try for what should keep the focus. */
+function editChannels(next, focus = []) {
+  editor.channels = next;
+  renderEditorRows(focus);
+  refreshEditor();
+}
+
+/** One input of a row: edits the working copy as it is typed, and leaves the rows alone so it keeps its focus. */
+function numberField(label, value, onType, ariaLabel) {
+  const wrap = el('label', 'te-num');
+  const input = el('input', 'ds-field');
+  input.type = 'text';
+  input.inputMode = 'numeric';
+  input.autocomplete = 'off';
+  input.value = shownNumber(value);
+  input.setAttribute('aria-label', ariaLabel);
+  input.addEventListener('input', () => { onType(typedNumber(input.value)); refreshEditor(); });
+  wrap.append(el('span', null, label), input);
+  return wrap;
+}
+
+function editorRow(row, k, count) {
+  const div = el('div', 'te-row');
+  div.dataset.row = String(k);
+  const at = (part) => `[data-row="${k}"] ${part}`;
+  const channel = row.last > row.first ? `${row.first}–${row.last}` : String(row.first);
+
+  const job = el('select', 'ds-field te-job');
+  job.setAttribute('aria-label', `Channel ${channel}: what it does`);
+  for (const j of JOBS) job.append(new Option(j.label, j.job));
+  job.value = row.job;
+  job.addEventListener('change', () => editChannels(setJob(editor.channels, k, job.value), [at('.te-job')]));
+
+  div.append(el('span', 'te-n', channel), job);
+
+  // 16-bit: the channel takes the next one as its fine byte.
+  if (TAKES_LEVEL.has(row.job)) {
+    const sw = el('label', 'ds-switch te-16');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = row.sixteenBit;
+    box.setAttribute('aria-label', `Channel ${channel}: 16-bit`);
+    box.addEventListener('change', () => editChannels(setSixteenBit(editor.channels, k, box.checked), [at('.te-16 input')]));
+    sw.append(box, el('span', 'ds-switch-track'), el('span', null, '16-bit'));
+    div.append(sw);
+  } else {
+    div.append(el('span', 'te-16'));
+  }
+
+  const extra = el('div', 'te-extra');
+  if (row.job === 'cct') {
+    // `row` is the row as drawn: read the other end from the working copy, which keeps changing as it is typed.
+    const current = () => channelRows(editor.channels)[k].kelvin ?? {};
+    extra.append(
+      numberField('Warm end', row.kelvin?.min, (min) => { editor.channels = setKelvin(editor.channels, k, { min, max: current().max }); }, `Channel ${channel}: warm end in K`),
+      numberField('Cool end', row.kelvin?.max, (max) => { editor.channels = setKelvin(editor.channels, k, { min: current().min, max }); }, `Channel ${channel}: cool end in K`),
+      el('span', 'te-unit', 'K'),
+    );
+  } else if (row.job === 'strobe' || row.job === 'other') {
+    extra.append(numberField('Value', row.value, (value) => { editor.channels = setValue(editor.channels, k, value); }, `Channel ${channel}: value from 0 to 255`));
+  }
+  // The channel's own name from the light's manual (Lightkey, a fixture file): shown, not edited.
+  const own = ownName(row);
+  if (own) {
+    const name = el('span', 'te-own', own);
+    name.title = "This channel's own name, kept as it is";
+    extra.append(name);
+  }
+  div.append(extra);
+
+  const buttons = el('div', 'te-btns');
+  const button = (cls, text, label, onClick, disabled = false) => {
+    const b = el('button', `ds-btn ds-btn--quiet ${cls}`, text);
+    b.type = 'button';
+    b.setAttribute('aria-label', label);
+    b.disabled = disabled;
+    b.addEventListener('click', onClick);
+    return b;
+  };
+  buttons.append(
+    button('te-up', '↑', `Move channel ${channel} up`, () => editChannels(moveRow(editor.channels, k, -1), [`[data-row="${k - 1}"] .te-up`, `[data-row="${k - 1}"] .te-down`]), k === 0),
+    button('te-down', '↓', `Move channel ${channel} down`, () => editChannels(moveRow(editor.channels, k, 1), [`[data-row="${k + 1}"] .te-down`, `[data-row="${k + 1}"] .te-up`]), k === count - 1),
+    button('te-remove', '×', `Remove channel ${channel}`, () => editChannels(removeRow(editor.channels, k))),
+  );
+  div.append(buttons);
+  return div;
+}
+
+/** The channel rows, grouped by segment as in the type's view. Only structure changes come here; typing does not. */
+function renderEditorRows(focus = []) {
+  const rows = channelRows(editor.channels);
+  const several = segmentCount(editor.channels) > 1;
+  const box = $('teRows');
+  box.replaceChildren();
+  let run; // the segment of the rows being listed; a heading starts each run
+  rows.forEach((row, k) => {
+    if (several && (k === 0 || row.segment !== run)) box.append(el('div', 'te-seg', row.segment === null ? 'Whole light' : `Segment ${row.segment}`));
+    run = row.segment;
+    box.append(editorRow(row, k, rows.length));
+  });
+  if (!rows.length) box.append(el('p', 'hint', 'No channels yet. Add the first one below.'));
+  for (const sel of focus) {
+    const target = box.querySelector(sel);
+    if (target && !target.disabled) { target.focus({ preventScroll: true }); break; }
+  }
+}
+
+/** Everything in the editor that follows the working copy, except the rows and the ticks (so typing keeps its focus). */
+function refreshEditor() {
+  if (!editor) return;
+  const { channels } = editor;
+  $('teSummary').textContent = summary(channels);
+  const colours = channels.some((c) => !c.fine && COLOUR_ROLES.includes(c.role));
+  $('teRepeat').hidden = !colours;
+  const segments = segmentCount(channels);
+  $('teRepeatHint').textContent = colours ? `${segments} ${segments === 1 ? 'segment' : 'segments'} now. Each tap adds one.` : '';
+  const users = editor.id ? show.fixtures.filter((f) => f.profile === editor.id).length : 0;
+  $('teUsedBy').textContent = editor.id
+    ? (users ? `Used by ${users} ${users === 1 ? 'fixture' : 'fixtures'}. They follow every change.` : 'No fixture uses this type yet.')
+    : '';
+  // Delete only an own type that no fixture uses.
+  const canDelete = editor.id !== null && users === 0;
+  $('teDelete').hidden = !canDelete;
+  if (!canDelete) disarmDelete();
+  const problem = validateType(editor.name, channels);
+  $('teMessage').textContent = problem ?? '';
+  $('teSave').disabled = problem !== null;
+}
+
+/** "Use it for": a tick for every fixture in the show. The ones using the type being changed come first, and stay ticked. */
+function renderTicks() {
+  if (!editor) return;
+  const box = $('teTicks');
+  const firstId = editor.id ?? editor.from;
+  const follows = new Set(editor.id ? show.fixtures.filter((f) => f.profile === editor.id).map((f) => f.id) : []);
+  editor.ticks = new Set([...editor.ticks].filter((id) => show.fixtures.some((f) => f.id === id)));
+  const ordered = firstId
+    ? [...show.fixtures.filter((f) => f.profile === firstId), ...show.fixtures.filter((f) => f.profile !== firstId)]
+    : show.fixtures;
+  $('teLockedHint').hidden = !follows.size;
+  box.replaceChildren();
+  if (!ordered.length) box.append(el('p', 'hint', 'There are no fixtures in the show yet.'));
+  for (const f of ordered) {
+    const locked = follows.has(f.id);
+    const input = el('input');
+    input.type = 'checkbox';
+    input.checked = locked || editor.ticks.has(f.id);
+    input.disabled = locked;
+    const chip = el('label', 'te-tick');
+    chip.classList.toggle('on', input.checked);
+    chip.classList.toggle('locked', locked);
+    input.addEventListener('change', () => {
+      if (input.checked) editor.ticks.add(f.id);
+      else editor.ticks.delete(f.id);
+      chip.classList.toggle('on', input.checked);
+    });
+    chip.append(input, el('span', 'te-tick-mark', '✓'), el('span', null, f.name));
+    const type = profileById.get(f.profile);
+    if (type && !locked) chip.append(el('small', null, typeLabel(type)));
+    box.append(chip);
+  }
+}
+
+/** Save type: the type goes in the working show, the ticked fixtures switch to it, and the page follows. */
+function saveEditorType() {
+  if (!editor || validateType(editor.name, editor.channels) !== null) return;
+  const name = editor.name.trim();
+  const id = editor.id ?? newTypeId(name, takenTypeIds()); // fixed from here on; a rename changes only the name
+  const wasNew = editor.id === null;
+  // An edit keeps the type as stored (its key order too), so saving with no change leaves the patch as it was.
+  putProfile(editor.base ? { ...editor.base, name, channels: structuredClone(editor.channels) } : { id, name, channels: structuredClone(editor.channels), ...editor.extra });
+  for (const f of show.fixtures) if (editor.ticks.has(f.id)) f.profile = id;
+  fillAddForm(false);
+  if (wasNew) $('addProfile').value = id;
+  suggestAddress();
+  closeEditor();
+  changed();
+  toast(`${name} is saved in the patch. Save patch to keep it.`);
+  openTypeSheet(id);
+}
+
+/** Delete type: first tap asks again, the second removes it. It asks again after a few seconds. */
+function disarmDelete() {
+  if (!editor?.armed) return;
+  clearTimeout(editor.armed);
+  editor.armed = 0;
+  $('teDelete').textContent = 'Delete type';
+  $('teDelete').classList.remove('armed');
+}
+
+function deleteEditorType() {
+  if (!editor || editor.id === null || show.fixtures.some((f) => f.profile === editor.id)) return;
+  if (!editor.armed) {
+    editor.armed = setTimeout(disarmDelete, 4000);
+    $('teDelete').textContent = 'Tap again to delete';
+    $('teDelete').classList.add('armed');
+    return;
+  }
+  const { id } = editor;
+  const name = profileById.get(id)?.name ?? id;
+  show.profiles = show.profiles.filter((p) => p.id !== id);
+  profiles = profiles.filter((p) => p.id !== id);
+  profileById.delete(id);
+  fillAddForm(false);
+  for (const form of ADD_FORMS) {
+    const sel = $(`${form}Profile`);
+    if (!sel.value && sel.options.length) sel.selectedIndex = 0;
+  }
+  suggestAddress();
+  closeEditor();
+  changed();
+  toast(`${name} is deleted from the patch.`);
+}
+
+/** A draft that starts as a copy of a type, for Copy and edit. */
+function copyDraft(p) {
+  const own = show.profiles.find((x) => x.id === p.id); // the whole type (gamma...) when the show has it
+  const copy = copyOf(own ?? { id: p.id, name: p.name, channels: p.defs }, takenTypeIds());
+  const { id: _id, name, channels, ...extra } = copy;
+  return { id: null, name, channels, extra, from: p.id };
+}
+
+$('libNew').addEventListener('click', () => openEditor({ id: null, name: '', channels: [] }));
+$('typeCopy').addEventListener('click', () => {
+  const p = typeView && profileById.get(typeView.id);
+  if (p) openEditor(copyDraft(p));
+});
+$('typeEdit').addEventListener('click', () => {
+  const p = typeView && profileById.get(typeView.id);
+  const own = p && !p.readOnly && show.profiles.find((x) => x.id === p.id);
+  if (!own) return;
+  const base = structuredClone(own);
+  openEditor({ id: base.id, name: base.name, channels: structuredClone(base.channels), base });
+});
+
+$('teName').addEventListener('input', () => {
+  if (!editor) return;
+  editor.name = $('teName').value;
+  refreshEditor();
+});
+$('teAdd').replaceChildren(new Option('＋ Add channel…', ''), ...JOBS.map((j) => new Option(j.label, j.job)));
+$('teAdd').addEventListener('change', () => {
+  const job = $('teAdd').value;
+  $('teAdd').value = '';
+  if (editor && job) editChannels(addChannel(editor.channels, job));
+});
+$('teRepeat').addEventListener('click', () => { if (editor) editChannels(repeatLastSegment(editor.channels)); });
+$('teSave').addEventListener('click', saveEditorType);
+$('teDelete').addEventListener('click', deleteEditorType);
+$('teCancel').addEventListener('click', () => {
+  const back = editor?.returnTo;
+  closeEditor();
+  if (back) openTypeSheet(back);
+});
 
 // ---- Open Fixture Library ----
 
@@ -690,20 +1193,45 @@ async function showOflModes(loadInfo, makeProfile) {
   }
 }
 
-/** Add (or update) a fixture type in this show; it is stored when the patch is saved. The fixture's suggested name
- * is the type's without its maker. */
-function addProfile(profile, manufacturer = '') {
+/** What `profiles` keeps of a type in the show: the server's summary of it (GET /api/profiles). */
+function profileSummary(profile) {
+  return {
+    id: profile.id, name: profile.name, channels: profile.channels.length, segments: segmentsOfChannels(profile.channels),
+    roles: [...new Set(profile.channels.map((c) => c.role))], defs: profile.channels, readOnly: isReadOnly(profile, builtInIds),
+    builtIn: builtInIds.has(profile.id),
+  };
+}
+
+/** Put a fixture type in the working show and in the lists (a new one first); returns its summary. */
+function putProfile(profile) {
   const k = show.profiles.findIndex((p) => p.id === profile.id);
   if (k >= 0) show.profiles[k] = profile;
   else show.profiles.push(profile);
-  const summary = { id: profile.id, name: profile.name, channels: profile.channels.length, segments: segmentsOfChannels(profile.channels), roles: [...new Set(profile.channels.map((c) => c.role))] };
+  const entry = profileSummary(profile);
   const j = profiles.findIndex((p) => p.id === profile.id);
-  if (j >= 0) profiles[j] = summary;
-  else profiles.unshift(summary);
-  profileById.set(profile.id, summary);
+  if (j >= 0) profiles[j] = entry;
+  else profiles.unshift(entry);
+  profileById.set(profile.id, entry);
+  return entry;
+}
+
+/** Add (or update) a fixture type in this show; it is stored when the patch is saved. The fixture's suggested name
+ * is the type's without its maker. */
+function addProfile(incoming, manufacturer = '') {
+  // A type of your own that has this id stays as it is; the library's goes in beside it under a new id
+  // (or over the one it got the last time it came in).
+  let profile = incoming;
+  const mine = show.profiles.find((p) => p.id === incoming.id);
+  if (mine && !mine.source?.ofl) {
+    const src = incoming.source?.ofl;
+    const before = src && show.profiles.find((p) => p.source?.ofl === src && p.source.mode === incoming.source.mode);
+    profile = { ...incoming, id: before ? before.id : newTypeId(incoming.name, takenTypeIds()) };
+  }
+  const entry = putProfile(profile);
   fillAddForm(false);
   $('addProfile').value = profile.id;
-  const label = typeLabel(summary);
+  renderTypeSheet();
+  const label = typeLabel(entry);
   $('addName').value = manufacturer && label.startsWith(`${manufacturer} `) ? label.slice(manufacturer.length + 1) : label;
   suggestAddress();
   changed();
@@ -1177,6 +1705,7 @@ $('planAdd').addEventListener('submit', (ev) => {
 $('discard').addEventListener('click', () => load().catch((err) => toast(err.message, true)));
 
 $('save').addEventListener('click', async () => {
+  if (editorChanged()) return toast('Save type or Cancel first, then Save patch.', true);
   const problems = addressProblems();
   if (problems.size && !confirm(`${problems.size} fixtures have address problems. Save anyway?`)) return;
   try {
@@ -1192,7 +1721,7 @@ $('save').addEventListener('click', async () => {
 });
 
 window.addEventListener('beforeunload', (e) => {
-  if (show && JSON.stringify(show) !== savedJson) e.preventDefault();
+  if (show && (JSON.stringify(show) !== savedJson || editorChanged())) e.preventDefault();
 });
 
 let toastTimer = 0;

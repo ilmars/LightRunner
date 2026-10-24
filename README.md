@@ -118,7 +118,7 @@ Settings (`/settings/`) is for whoever sets the system up. It has:
 
 ### Patch
 
-Patch (`/patch/`) is where the rig is set up, much like in Lightkey. The **DMX map** shows each universe's channels: drag a fixture to re-address it, drag a fixture type from the library onto free channels, and overlaps show at once in red. There is also a fixture table, groups, and Identify to flash a fixture so you can find it. Fixture types come from the [Open Fixture Library](https://open-fixture-library.org) (about 650 fixtures; download it once to use it without internet) or from a Lightkey project.
+Patch (`/patch/`) is where the rig is set up, much like in Lightkey. The **DMX map** shows each universe's channels: drag a fixture to re-address it, drag a fixture type from the library onto free channels, and overlaps show at once in red. There is also a fixture table, groups, and Identify to flash a fixture so you can find it. Fixture types come from the [Open Fixture Library](https://open-fixture-library.org) (about 650 fixtures; download it once to use it without internet), from a Lightkey project, or you make your own: see a type's channels, compare two types side by side, and copy one and change it (a light whose real colour-temperature range differs from its substitute's, say).
 
 The **stage plan** says where each light hangs, and the operator page draws the stage from it. Each light gets a shape: a dot, a beam (a cone you aim), a bar (any length, thickness and angle), an outline (a strip round something) or a smoke cloud. Select several to align them or space them evenly.
 
@@ -165,7 +165,7 @@ Open http://localhost:8080/. The first start loads a small demo rig. At the venu
 | Page | Who | What |
 | --- | --- | --- |
 | `/operator/` | Volunteers (no login) | The iPad page, and the phone remote on a phone |
-| `/patch/` | Programmer (PIN) | DMX map, fixture library, groups, stage plan |
+| `/patch/` | Programmer (PIN) | DMX map, fixture library and types, groups, stage plan |
 | `/settings/` | Programmer (PIN) | Outputs, Send DMX, Who to call, controller keys, backups and more |
 
 Patch and Settings ask for the programmer PIN once one is set (Settings > Programmer PIN). On the iPad, open `/operator/`, add it to the home screen (it has its own icon), and set Auto-Lock to Never so the screen stays on during the service. The Inter font and the icon are served by Light Runner itself, so the pages work with no internet.

@@ -50,9 +50,16 @@
           <p class="hint" id="mapInfo"></p>
         </div>
         <aside class="library sub" aria-label="Fixture library">
-          <h3 class="ds-caps">Fixture library</h3>
+          <div class="lib-head">
+            <h3 class="ds-caps">Fixture library</h3>
+            <button id="libNew" type="button" class="ds-btn ds-btn--quiet">＋ New fixture type</button>
+          </div>
           <input id="libSearch" class="ds-field" type="text" placeholder="Search types">
           <div id="libList" class="lib-list"></div>
+          <div class="lib-picked">
+            <span id="libPickedName" class="lib-picked-name"></span>
+            <button id="libChannels" type="button" class="ds-btn ds-btn--quiet">Channels ›</button>
+          </div>
           <p class="hint">Drag a type onto a free channel, or tap it to use it in "Add fixtures".</p>
           <div class="ofl">
             <h3 class="ds-caps">Open Fixture Library</h3>
@@ -67,6 +74,65 @@
           </div>
         </aside>
       </div>
+    </section>
+
+    <!-- A fixture type's channels, or two types side by side. Opens from the library and the Fixtures table. -->
+    <section id="typeSheet" class="card ds-panel type-sheet" aria-label="Fixture type" tabindex="-1" hidden>
+      <div class="card-head">
+        <div class="card-title">
+          <h2 class="ds-caps">Fixture type</h2>
+          <p id="typeName" class="type-name"></p>
+          <p id="typeSummary" class="card-desc"></p>
+        </div>
+        <div id="typeActions" class="type-actions">
+          <button id="typeCompare" type="button" class="ds-btn">Compare with…</button>
+          <button id="typeCopy" type="button" class="ds-btn">Copy and edit</button>
+          <button id="typeEdit" type="button" class="ds-btn">Edit</button>
+          <button id="typeClose" type="button" class="ds-btn ds-btn--quiet">Close</button>
+        </div>
+      </div>
+      <p id="typeNote" class="hint"></p>
+      <div id="typeCompareBar" class="sub type-compare-bar" hidden>
+        <div class="field"><label for="typeCompareWith">Compare with</label><select id="typeCompareWith" class="ds-field"></select></div>
+        <p id="typeCompareNote" class="hint"></p>
+      </div>
+      <div id="typeBody" class="table-wrap"></div>
+    </section>
+
+    <!-- Make, copy or change one of your own fixture types, and say which fixtures use it. -->
+    <section id="typeEditor" class="card ds-panel type-editor" aria-label="Fixture type editor" tabindex="-1" hidden>
+      <div class="card-head">
+        <div class="card-title">
+          <h2 id="teTitle" class="ds-caps">New fixture type</h2>
+          <p id="teNote" class="card-desc"></p>
+        </div>
+      </div>
+      <div class="field te-name"><label for="teName">Name</label><input id="teName" class="ds-field" type="text" autocomplete="off" spellcheck="false"></div>
+      <div class="sub">
+        <h3 class="ds-caps">Channels, in the order the light uses them</h3>
+        <div id="teRows" class="te-rows"></div>
+        <div class="te-add">
+          <select id="teAdd" class="ds-field member-add" aria-label="Add a channel"></select>
+          <button id="teRepeat" type="button" class="ds-btn">Repeat the last segment</button>
+          <span id="teRepeatHint" class="hint"></span>
+        </div>
+        <p id="teSummary" class="te-summary"></p>
+      </div>
+      <div class="sub">
+        <h3 class="ds-caps">Use it for</h3>
+        <p id="teUsedBy" class="hint"></p>
+        <div id="teTicks" class="te-ticks"></div>
+        <p id="teLockedHint" class="hint" hidden>These already use this type. To move one to another type, change its Type in the Fixtures table.</p>
+        <p class="hint">They keep their names, addresses, groups and places on the plan; only the type changes. If the channel count changes, the DMX patch shows any overlap in red.</p>
+      </div>
+      <div class="te-foot">
+        <button id="teDelete" type="button" class="ds-btn ds-btn--quiet del" hidden>Delete type</button>
+        <span class="te-foot-gap"></span>
+        <button id="teCancel" type="button" class="ds-btn ds-btn--quiet">Cancel</button>
+        <button id="teSave" type="button" class="ds-btn ds-btn--primary">Save type</button>
+      </div>
+      <p id="teMessage" class="warn" role="status"></p>
+      <p class="hint">The type is kept in the show when you Save patch, so Export show file carries it to another computer.</p>
     </section>
 
     <section class="card ds-panel">
