@@ -2,6 +2,7 @@
 // sends commands and shows the live state it is given.
 
 import { barAxis, barEnds, beamCone, outlineCells } from '/shared/stage.js';
+import { FlashPresses, isSideways } from '/shared/press.js';
 import { HUE_STOPS, WHITE_STOPS, hexRgb, parseChannel, parseHex, rgbHex, stripColour, stripMix, stripPick } from '/shared/colour.js';
 
 const $ = (id) => document.getElementById(id);
@@ -148,8 +149,7 @@ function setConnected(on) {
   $('banner').hidden = on;
   if (!on) {
     // The server puts a flash out when it loses us; show the same here.
-    for (const h of flashHeld.values()) h.button.classList.remove('down');
-    flashHeld.clear();
+    presses.reset();
     // Answers that can no longer come: let a tap on ＋ Add song go through again.
     pendingAdd = null;
     addWanted = false;
@@ -1443,7 +1443,9 @@ function buildDetails() {
       wireHold(puff, [group.id]);
       const cell = el('span', 'smoke-cell');
       cell.append(el('span', 'smoke-tag', 'Smoke'), puff);
-      box.append(el('span', 'g', group.name), cell, dim, pct);
+      const top = el('div', 'top');
+      top.append(el('span', 'g', group.name), cell);
+      box.append(top, dim, pct);
     } else {
       const sw = el('i');
       const chipName = el('span');
@@ -1457,13 +1459,21 @@ function buildDetails() {
       chip.append(sw, chipName, chevron);
       chip.addEventListener('click', () => openPicker(group.id));
       Object.assign(row, { chip, sw, chipName });
-      box.append(el('span', 'g', group.name), chip, dim, pct);
+      const top = el('div', 'top');
+      top.append(el('span', 'g', group.name), chip);
+      box.append(top, dim, pct);
     }
+    row.box = box;
     root.append(box);
     detailRows.push(row);
     showLevel(row, 0);
     wireDimmer(row);
   }
+  // More than 6 groups: two columns, filled down the left one first (the left gets the extra when it is odd).
+  // The row count goes to the stylesheet; the phone keeps its one column (the stylesheet only applies it off the phone).
+  const many = layout.groups.length > 6;
+  root.classList.toggle('two-col', many);
+  root.style.setProperty('--col-rows', String(Math.ceil(layout.groups.length / 2)));
   // A new layout can drop the group the picker was showing.
   if (picker.group && !layout.groups.some((g) => g.id === picker.group)) closePicker();
   else if (picker.group) buildPickerGrid();
@@ -1480,32 +1490,58 @@ function wireDimmer(row) {
     const cmd = { type: 'groupLevel', group: row.group.id, value: v };
     if (row.smoke) send(cmd); else sendStage(cmd, target);
   });
-  let startX = 0, startV = 0;
-  row.dim.addEventListener('pointerdown', (ev) => {
-    ev.preventDefault();
+  let startX = 0, startV = 0, pushed = false;
+  const down = (ev) => {
+    if (ev.type === 'pointerdown') ev.preventDefault();
     // The server refuses smoke during Blackout; say so once and leave the slider where it is.
     if (row.smoke && state?.look === 'blackout') {
       toast('Blackout is on.');
       return;
     }
     row.dragging = true;
+    pushed = false;
     target = stageTarget();
     try { row.dim.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
     row.dim.classList.add('ds-dragging');
     startX = ev.clientX;
     startV = row.value;
+  };
+  row.dim.addEventListener('pointerdown', down);
+  // In two columns the whole cell drags the slider (the slider is thin there); the colour button and Puff keep their
+  // taps. A press on the cell only becomes a drag once it moves clearly sideways: a vertical swipe scrolls the panel
+  // (the browser takes the finger and sends pointercancel) and sends nothing.
+  let cellPress = null;
+  row.box.addEventListener('pointerdown', (ev) => {
+    cellPress = null;
+    if (!row.box.parentElement.classList.contains('two-col') || document.body.classList.contains('phone')) return;
+    if (row.dim.contains(ev.target) || ev.target.closest('.chip, .puff')) return;
+    cellPress = { id: ev.pointerId, x: ev.clientX, y: ev.clientY };
   });
+  row.box.addEventListener('pointermove', (ev) => {
+    if (!cellPress || cellPress.id !== ev.pointerId || row.dragging) return;
+    if (!isSideways(ev.clientX - cellPress.x, ev.clientY - cellPress.y)) return;
+    cellPress = null;
+    down(ev);
+  });
+  for (const name of ['pointerup', 'pointercancel']) row.box.addEventListener(name, (ev) => { if (cellPress?.id === ev.pointerId) cellPress = null; });
   row.dim.addEventListener('pointermove', (ev) => {
     if (!row.dragging) return;
     showLevel(row, startV + (ev.clientX - startX) / row.dim.clientWidth);
+    pushed = true;
     out.push(row.value);
   });
-  const end = () => {
+  const end = (ev) => {
     if (!row.dragging) return;
     row.dragging = false;
     row.dim.classList.remove('ds-dragging');
     // Keep what the finger set until the server has caught up with it.
     row.holdUntil = performance.now() + 600;
+    // The drag was cancelled (a palm, a system gesture): back to where it started, not wherever it got to.
+    if (ev.type === 'pointercancel') {
+      showLevel(row, startV);
+      if (pushed) out.end(startV);
+      return;
+    }
     if (row.value === startV) return;
     out.end(row.value);
   };
@@ -5260,65 +5296,123 @@ function finishSaveQuick() {
   }
 }
 
+// ---- "N more ↓": a list that scrolls says so ----
+
+/**
+ * Adds a quiet cue to the bottom edge of a scrolling list: a soft fade and a pill, "N more ↓", while there is more
+ * below. A tap scrolls down `step()` pixels; it goes away at the end. Only when at least 2 entries are not fully in
+ * view (one cut-off row isn't worth covering it with a pill): `all` says what counts as an entry (the quick-look
+ * grid's "Save stage" tile counts), `items` which of them the number counts (the grid's looks only; "More ↓" when
+ * that is none).
+ */
+function scrollCue(scroller, { items, all = items, step }) {
+  const pill = el('button', 'more-pill');
+  pill.type = 'button';
+  const cue = el('div', 'more-cue');
+  cue.hidden = true;
+  cue.append(pill);
+  scroller.parentElement.append(cue);
+  const update = () => {
+    const room = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+    if (room <= 2 || scroller.clientHeight === 0) {
+      cue.hidden = true;
+      return;
+    }
+    const bottom = scroller.scrollTop + scroller.clientHeight;
+    const out = (n) => n.offsetTop + n.offsetHeight > bottom + 2;
+    const hidden = [...scroller.querySelectorAll(items)].filter(out).length;
+    if ([...scroller.querySelectorAll(all)].filter(out).length < 2) {
+      cue.hidden = true;
+      return;
+    }
+    cue.hidden = false;
+    const text = hidden ? `${hidden} more ↓` : 'More ↓';
+    if (pill.textContent !== text) pill.textContent = text;
+    pill.setAttribute('aria-label', `${text.replace(' ↓', '')}, scroll down`);
+  };
+  pill.addEventListener('click', () => scroller.scrollBy({ top: step(), behavior: 'smooth' }));
+  scroller.addEventListener('scroll', update, { passive: true });
+  new ResizeObserver(update).observe(scroller);
+  new MutationObserver(update).observe(scroller, { childList: true });
+  update();
+}
+
+// The quick-look grid: one row (a tile and a gap) at a time. The running order: nearly a page.
+scrollCue($('qGrid'), { items: '.ql:not(.newq)', all: '.ql', step: () => ($('qGrid').querySelector('.ql')?.offsetHeight ?? 56) + 8 });
+scrollCue($('runningOrder'), { items: '.item', step: () => Math.max(96, $('runningOrder').clientHeight - 56) });
+
 // ---- Flash: hold a button and the group goes to full white ----
 
-/**
- * Short label for each group, as the spec's "Front, Key, Back, Drum, B8": the first
- * word of its name, cut to 4 letters when it is longer than 6. Groups that would share
- * a label (or take "All") get their name cut to 8 instead, then 2, 3, … if still the same.
- */
-function flashLabels(groups) {
-  const names = groups.map((g) => g.name.trim());
-  const firstWord = (name) => {
-    const w = name.split(/\s+/)[0] ?? '';
-    return w.length > 6 ? w.slice(0, 4) : w;
-  };
-  // "All" is the first button, so it counts as taken.
-  const clashes = (list, i) => list.filter((w) => w.toLowerCase() === list[i].toLowerCase()).length > 1;
-  const short = ['All', ...names.map(firstWord)];
-  const longer = short.map((w, i) => (i > 0 && clashes(short, i) ? names[i - 1].slice(0, 8) : w));
-  const seen = new Map();
-  return longer.map((w) => {
-    const key = w.toLowerCase();
-    const n = (seen.get(key) ?? 0) + 1;
-    seen.set(key, n);
-    return n === 1 ? w : `${w} ${n}`;
-  }).slice(1);
-}
-
-// Buttons now held: pointer id -> { button, groups }.
-const flashHeld = new Map();
-
-/** Puts out one flash. Groups another held button still covers stay on. */
-function flashOff(pointerId) {
-  const h = flashHeld.get(pointerId);
-  if (!h) return;
-  flashHeld.delete(pointerId);
-  h.button.classList.remove('down');
-  const still = new Set([...flashHeld.values()].flatMap((o) => o.groups));
-  const groups = h.groups.filter((id) => !still.has(id));
-  if (groups.length) send({ type: 'flash', groups, on: false });
-}
-
-const flashAllOff = () => { for (const id of [...flashHeld.keys()]) flashOff(id); };
+// Every press on a Flash or Puff button: web/shared/press.js (tested in server/test/press.test.ts).
+const presses = new FlashPresses({
+  send: (cmd) => send(cmd),
+  setDown: (b, down) => b.classList.toggle('down', down),
+  // A press that waited out its 70 ms only counts if its button is still on the page and the page is in view.
+  canFlash: (b) => b.isConnected && document.visibilityState === 'visible',
+});
+const flashAllOff = () => presses.allOff();
 
 /**
- * Holding the button flashes the groups; letting go (or losing the finger) puts
- * them out. Flash buttons and a smoke group's Puff both work this way.
+ * Holding the button flashes the groups; letting go (or losing the finger) puts them out, never sooner than 100 ms
+ * after it went on. Flash buttons and a smoke group's Puff both work this way.
+ *
+ * `swipe`: the button sits in the Flash row. Only while that row really scrolls (its buttons don't all fit) does a
+ * finger or pen wait 70 ms before the flash goes on, and a move over 8 px in that time is a swipe: no flash (the row
+ * also then lets the browser pan it, see .flash-scroll.scrolls). A row that fits presses at once, as it always did,
+ * and a finger drifting a little on a held button keeps it held. The mouse always presses at once.
  */
-function wireHold(b, groups) {
+function wireHold(b, groups, { swipe = false } = {}) {
+  // Pointers that lifted: the leave and lost-capture events that follow must not cut the minimum hold short.
+  const lifted = new Set();
   b.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
-    if (flashHeld.has(ev.pointerId)) return;
+    lifted.delete(ev.pointerId);
     // Keep getting the release when the finger slides off the button.
     try { b.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
-    if (send({ type: 'flash', groups, on: true }) === null) return;
-    flashHeld.set(ev.pointerId, { button: b, groups });
-    b.classList.add('down');
+    const sc = b.parentElement;
+    const wait = swipe && ev.pointerType !== 'mouse' && sc.scrollWidth > sc.clientWidth + 1;
+    presses.press(ev.pointerId, b, groups, { wait, x: ev.clientX, y: ev.clientY });
   });
-  const end = (ev) => flashOff(ev.pointerId);
-  for (const name of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) b.addEventListener(name, end);
+  b.addEventListener('pointermove', (ev) => presses.move(ev.pointerId, ev.clientX, ev.clientY));
+  b.addEventListener('pointerup', (ev) => {
+    lifted.add(ev.pointerId);
+    setTimeout(() => lifted.delete(ev.pointerId), 500);
+    presses.release(ev.pointerId);
+  });
+  for (const name of ['pointercancel', 'pointerleave', 'lostpointercapture']) {
+    b.addEventListener(name, (ev) => { if (!lifted.has(ev.pointerId)) presses.cancel(ev.pointerId); });
+  }
   b.addEventListener('contextmenu', (ev) => ev.preventDefault());
+}
+
+// True when every Flash button's short name differs from the others (and from "All").
+let flashShortsDiffer = false;
+
+/** The Flash row scrolls sideways: a soft fade at an edge only while there is more to scroll that way. */
+function updateFlashFades() {
+  const sc = $('flashArea').querySelector('.flash-scroll');
+  if (!sc) return;
+  // Only a row that really scrolls lets the browser pan it from a finger on a button (see .flash-scroll.scrolls).
+  sc.classList.toggle('scrolls', sc.scrollWidth > sc.clientWidth + 1);
+  sc.style.setProperty('--fl', sc.scrollLeft > 1 ? '28px' : '0px');
+  sc.style.setProperty('--fr', sc.scrollLeft + sc.clientWidth < sc.scrollWidth - 1 ? '28px' : '0px');
+}
+
+/**
+ * A short name for a Flash button: the first word of the group's name, cut to 4 letters when it is longer than 6
+ * ("Front", "Key", "Back", "Drum", "B8"). Used only on the iPad's one-line bar, and only when no two short names
+ * (or "All") are the same and they all fit; otherwise the buttons carry the full names.
+ */
+function shortFlashName(name) {
+  const w = name.trim().split(/\s+/)[0] ?? '';
+  return w.length > 6 ? w.slice(0, 4) : w;
+}
+
+/** Writes the short (or the full) name on every Flash button. The label for assistive tech is always the full name. */
+function setFlashLabels(short) {
+  for (const b of $('flashArea').querySelectorAll('button')) b.textContent = short ? b.dataset.short : b.dataset.full;
+  document.body.classList.toggle('flash-short', short);
+  updateFlashFades();
 }
 
 function buildFlash() {
@@ -5326,18 +5420,32 @@ function buildFlash() {
   // A rebuild can change how many buttons there are: fit the bar again once they are in.
   queueMicrotask(fitBottomBar);
   const root = $('flashArea');
-  root.replaceChildren(el('span', 'flash-label ds-caps', 'Flash'));
+  const scroll = el('div', 'flash-scroll');
+  root.replaceChildren(el('span', 'flash-label ds-caps', 'Flash'), scroll);
   // Smoke machines have Puff in the details instead, and "All" never includes them.
   const lights = lightGroups();
-  const labels = flashLabels(lights);
-  const buttons = [['All', lights.map((g) => g.id), 'All lights']];
-  lights.forEach((g, i) => buttons.push([labels[i], [g.id], g.name]));
-  for (const [text, groups, full] of buttons) {
+  const buttons = [['All', lights.map((g) => g.id), 'All lights', 'All']];
+  for (const g of lights) buttons.push([g.name, [g.id], g.name, shortFlashName(g.name)]);
+  const shorts = buttons.map((x) => x[3].toLowerCase());
+  flashShortsDiffer = new Set(shorts).size === shorts.length;
+  for (const [text, groups, full, short] of buttons) {
     const b = el('button', null, text);
+    b.dataset.full = text;
+    b.dataset.short = short;
+    b.title = full;
     b.setAttribute('aria-label', `Flash ${full} (hold)`);
-    root.append(b);
-    wireHold(b, groups);
+    scroll.append(b);
+    wireHold(b, groups, { swipe: true });
   }
+  scroll.addEventListener('scroll', updateFlashFades, { passive: true });
+  // A mouse wheel turns the row too (a trackpad swipe or shift + wheel already does).
+  scroll.addEventListener('wheel', (ev) => {
+    if (ev.deltaX || !ev.deltaY || scroll.scrollWidth <= scroll.clientWidth) return;
+    scroll.scrollLeft += ev.deltaY;
+    ev.preventDefault();
+  }, { passive: false });
+  new ResizeObserver(updateFlashFades).observe(scroll);
+  updateFlashFades();
 }
 
 // A page that goes to the background or loses its connection can't send the release; end every flash here.
@@ -5605,14 +5713,23 @@ const midQuery = window.matchMedia('(min-width: 701px) and (max-width: 1079px) a
  */
 function fitBottomBar() {
   const body = document.body;
+  const area = $('flashArea').querySelector('.flash-scroll');
   if (phoneQuery.matches || midQuery.matches) {
     body.classList.toggle('bar-two-rows', !phoneQuery.matches);
+    if (area) setFlashLabels(false);
     return;
   }
-  // Measure on one line (no paint happens in between).
+  if (!area) return;
+  // The iPad's one line, measured with no paint in between: short names when they all differ and fit; else the full
+  // names on that line when they fit, else the full names in a row of their own (two lines).
   body.classList.remove('bar-two-rows');
-  const area = $('flashArea');
-  if (area.scrollWidth > area.clientWidth + 1) body.classList.add('bar-two-rows');
+  const overflows = () => area.scrollWidth > area.clientWidth + 1;
+  if (flashShortsDiffer) {
+    setFlashLabels(true);
+    if (!overflows()) return;
+  }
+  setFlashLabels(false);
+  if (overflows()) body.classList.add('bar-two-rows');
 }
 window.addEventListener('resize', fitBottomBar);
 midQuery.addEventListener('change', fitBottomBar);

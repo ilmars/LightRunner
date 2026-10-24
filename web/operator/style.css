@@ -266,6 +266,21 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .qtabs .tab { min-height: 44px; padding: 0 12px; border-radius: 9px; font-size: 13px; white-space: nowrap; }
 .qtabs .tab.on { box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+/* A list that scrolls says so: "N more ↓" over a soft fade at its bottom edge while there is more below (app.js scrollCue).
+   The pill is the only part that takes a tap; the fade lets taps through to what is under it. */
+.cue-host { position: relative; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.cue-host.grow-host { flex: 1; }
+.more-cue {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 42px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 3px;
+  background: linear-gradient(transparent, var(--ds-surface) 85%); border-radius: 0 0 var(--ds-r-tile) var(--ds-r-tile); pointer-events: none;
+}
+.more-pill {
+  position: relative; pointer-events: auto; min-height: 30px; padding: 0 14px; border: 1px solid var(--ds-edge); border-radius: var(--ds-r-pill);
+  background: var(--ds-surface-hi); color: var(--ds-muted-on); font: inherit; font-size: 13px; white-space: nowrap;
+}
+.more-pill:active { background: var(--ds-elevated); }
+/* A 44 px tap area: the pill and 14 px above it (over the fade), and wider than the pill. */
+.more-pill::after { content: ""; position: absolute; inset: -16px -10px -1px; }
 .qgrid {
   min-height: 0; max-height: 120px; overflow-y: auto; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
   grid-auto-rows: 56px; gap: 8px; align-content: start; overscroll-behavior: contain;
@@ -365,6 +380,36 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 }
 /* Held: tinted, like a held Flash button. */
 .puff.down { background: var(--ds-selected); border-color: var(--ds-edge-held); }
+
+/* The name and the colour button (or "Smoke" and Puff) share a line; one row has them as its own grid items. */
+.row .top { display: contents; }
+
+/* More than 6 groups (app.js sets .two-col and --col-rows): two columns, filled down the left one first. Each cell is
+   56 px: the name and the colour button on top, a thin dimmer under them, the level on the right. The whole cell drags
+   the dimmer (app.js); a vertical swipe still scrolls the panel when there are more groups than fit. Not on the phone. */
+body:not(.phone) .rows.two-col {
+  display: grid; grid-auto-flow: column; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(var(--col-rows), 56px);
+  column-gap: 18px; align-content: start;
+}
+body:not(.phone) .rows.two-col .row {
+  grid-template-columns: minmax(0, 1fr) 52px; grid-template-rows: 28px 22px; align-content: center; gap: 4px 8px;
+  min-height: 0; height: 56px; border-top: 0; touch-action: pan-y;
+}
+body:not(.phone) .rows.two-col .row .top { display: flex; align-items: center; gap: 8px; min-width: 0; grid-column: 1; grid-row: 1; }
+body:not(.phone) .rows.two-col .row .g { flex: 0 1 auto; min-width: 2ch; font-size: 13px; }
+body:not(.phone) .rows.two-col .row .chip {
+  flex: 0 1 auto; min-height: 28px; gap: 6px; padding: 0 8px; border-radius: 8px; font-size: 12px; position: relative;
+}
+body:not(.phone) .rows.two-col .row .chip i { width: 10px; height: 10px; }
+body:not(.phone) .rows.two-col .row .chip svg { width: 10px; height: 10px; }
+/* The tap area is 44 px high (the cell's top 44 of 56), wider than the button, and sits over the top of the thin slider. */
+body:not(.phone) .rows.two-col .row .chip::after, body:not(.phone) .rows.two-col .row .puff::after { content: ""; position: absolute; inset: -2px -8px -16px; }
+body:not(.phone) .rows.two-col .row .smoke-cell { flex: 0 1 auto; justify-content: flex-start; gap: 8px; }
+body:not(.phone) .rows.two-col .row .smoke-tag { font-size: 12px; }
+body:not(.phone) .rows.two-col .row .puff { position: relative; min-height: 28px; min-width: 56px; padding: 0 12px; border-radius: 8px; font-size: 12px; }
+body:not(.phone) .rows.two-col .row .ds-fill { grid-column: 1; grid-row: 2; height: 22px; border-radius: 8px; }
+body:not(.phone) .rows.two-col .row .ds-fill::after { height: 10px; left: 8px; }
+body:not(.phone) .rows.two-col .row .pct { grid-column: 2; grid-row: 1 / 3; align-self: center; font-size: 16px; }
 
 
 /* ---- Sheets over the Groups panel (the quick-look sheet; the colour picker below) ---- */
@@ -824,16 +869,28 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .master-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: rgba(148, 163, 184, 0.18); }
 .master-handle { display: none; }
 .master.dragging .master-track { box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-/* Flash: when its buttons don't fit on the bar's line, the bar takes two lines (see .bar-two-rows); scrolling is the last resort. */
-.flash-area { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; overflow-x: auto; scrollbar-width: none; }
-.flash-area::-webkit-scrollbar { display: none; }
+/* Flash: every button shows its group's full name, sized to it, in one row you swipe sideways (All first). When the
+   buttons don't fit on the bar's line, the bar takes two lines (see .bar-two-rows). A soft fade (--fl, --fr, set by
+   app.js) shows at an edge only while there is more to scroll that way. */
+.flash-area { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; }
 .flash-area .flash-label { flex: none; margin-right: 5px; }
-.flash-area button {
-  flex: none; min-width: 50px; min-height: 52px; padding: 0 6px; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden;
-  background: var(--ds-tile-fill); border: 1px solid var(--ds-edge); border-radius: 10px;
-  touch-action: none; -webkit-touch-callout: none;
+.flash-scroll {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; overflow-x: auto; overscroll-behavior-x: contain;
+  scrollbar-width: none; touch-action: pan-x;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 var(--fl, 0px), #000 calc(100% - var(--fr, 0px)), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 var(--fl, 0px), #000 calc(100% - var(--fr, 0px)), transparent);
 }
+.flash-scroll::-webkit-scrollbar { display: none; }
+.flash-area button {
+  flex: none; min-width: 50px; min-height: 52px; padding: 0 14px; font-size: 13px; font-weight: 600; white-space: nowrap;
+  background: var(--ds-tile-fill); border: 1px solid var(--ds-edge); border-radius: 10px;
+  touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
+}
+/* A row that really scrolls lets the finger pan it from a button (sideways only); a row that fits keeps every touch for the button. */
+.flash-scroll.scrolls button { touch-action: pan-x; }
 /* Held: a blue tint and edge, so the volunteer sees it is on (never the bright accent as an area). */
+/* Short names on the iPad's one line: the narrower padding they had before. */
+.flash-short .flash-area button { padding: 0 6px; }
 .flash-area button.down { background: var(--ds-selected); border-color: var(--ds-edge-held); }
 
 .action {
@@ -986,10 +1043,11 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   #details .tempo .tap-btn { flex: 1 1 0; font-size: 14px; }
   #details .tempo-menu { left: 0; right: auto; }
   #details .tempo-menu button { flex: 1 1 0; min-width: 64px; }
-  /* The Flash buttons share the width, so All and every group fit without scrolling; never under 44 px, they take a second line first. */
-  #details .flash-area { flex: none; flex-wrap: wrap; justify-content: stretch; gap: 6px; padding: 0 2px 4px; }
+  /* Flash: the same single row you swipe sideways, full names, 44 px buttons. */
+  #details .flash-area { flex: none; padding: 0 2px 4px; }
   #details .flash-area .flash-label { display: none; }
-  #details .flash-area button { flex: 1 1 44px; width: auto; min-width: 44px; min-height: 44px; }
+  #details .flash-scroll { gap: 6px; }
+  #details .flash-area button { flex: none; width: auto; min-width: 44px; min-height: 44px; }
   .pgrid, .pgrid.fxgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .pextras { grid-auto-flow: row; }
   /* The picker's header on two lines: ‹ Groups, the group and Done, then what it runs and the tabs. */
@@ -1004,6 +1062,7 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   .qhead .sec-title, .sec-sub, .qhead .grow { display: none; }
   .qhead .qtabs { flex: 1; }
   .qhead .qtabs .tab { flex: 1; font-size: 14px; }
+  .quick-looks .cue-host { flex: 1; }
   .qgrid { max-height: none; flex: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(64px, auto); }
   .ql { padding: 10px; font-size: 14px; }
 
@@ -1041,10 +1100,7 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   #details > .dhead { grid-column: 1 / -1; }
   #details > .tempo { grid-column: 1; grid-row: 2; }
   #details > .flash-area { grid-column: 2; grid-row: 2; }
-  /* Too short for a second line: Flash stays on one, and scrolls sideways when 44 px buttons don't fit. */
-  #details .flash-area { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  #details .flash-area::-webkit-scrollbar { display: none; }
-  #details .flash-area button { flex: 1 0 44px; }
+  /* Flash stays on one line and scrolls sideways (the same row as on a taller phone). */
   #details .tempo .fadepick { flex: none; }
   #details > .rows { grid-column: 1 / -1; grid-row: 3; }
   /* On a small phone the name and the colour give way first; the slider keeps at least 80 px. */
