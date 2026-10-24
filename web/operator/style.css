@@ -824,14 +824,22 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 .master-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: rgba(148, 163, 184, 0.18); }
 .master-handle { display: none; }
 .master.dragging .master-track { box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
-/* Flash: when its buttons don't fit on the bar's line, the bar takes two lines (see .bar-two-rows); scrolling is the last resort. */
-.flash-area { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; overflow-x: auto; scrollbar-width: none; }
-.flash-area::-webkit-scrollbar { display: none; }
+/* Flash: every button shows its group's full name, sized to it, in one row you swipe sideways (All first). When the
+   buttons don't fit on the bar's line, the bar takes two lines (see .bar-two-rows). A soft fade (--fl, --fr, set by
+   app.js) shows at an edge only while there is more to scroll that way. */
+.flash-area { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; }
 .flash-area .flash-label { flex: none; margin-right: 5px; }
+.flash-scroll {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; overflow-x: auto; overscroll-behavior-x: contain;
+  scrollbar-width: none; touch-action: pan-x pan-y;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 var(--fl, 0px), #000 calc(100% - var(--fr, 0px)), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 var(--fl, 0px), #000 calc(100% - var(--fr, 0px)), transparent);
+}
+.flash-scroll::-webkit-scrollbar { display: none; }
 .flash-area button {
-  flex: none; min-width: 50px; min-height: 52px; padding: 0 6px; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden;
+  flex: none; min-width: 50px; min-height: 52px; padding: 0 14px; font-size: 13px; font-weight: 600; white-space: nowrap;
   background: var(--ds-tile-fill); border: 1px solid var(--ds-edge); border-radius: 10px;
-  touch-action: none; -webkit-touch-callout: none;
+  touch-action: pan-x pan-y; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
 }
 /* Held: a blue tint and edge, so the volunteer sees it is on (never the bright accent as an area). */
 .flash-area button.down { background: var(--ds-selected); border-color: var(--ds-edge-held); }
@@ -986,10 +994,11 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   #details .tempo .tap-btn { flex: 1 1 0; font-size: 14px; }
   #details .tempo-menu { left: 0; right: auto; }
   #details .tempo-menu button { flex: 1 1 0; min-width: 64px; }
-  /* The Flash buttons share the width, so All and every group fit without scrolling; never under 44 px, they take a second line first. */
-  #details .flash-area { flex: none; flex-wrap: wrap; justify-content: stretch; gap: 6px; padding: 0 2px 4px; }
+  /* Flash: the same single row you swipe sideways, full names, 44 px buttons. */
+  #details .flash-area { flex: none; padding: 0 2px 4px; }
   #details .flash-area .flash-label { display: none; }
-  #details .flash-area button { flex: 1 1 44px; width: auto; min-width: 44px; min-height: 44px; }
+  #details .flash-scroll { gap: 6px; }
+  #details .flash-area button { flex: none; width: auto; min-width: 44px; min-height: 44px; }
   .pgrid, .pgrid.fxgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .pextras { grid-auto-flow: row; }
   /* The picker's header on two lines: ‹ Groups, the group and Done, then what it runs and the tabs. */
@@ -1041,10 +1050,7 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   #details > .dhead { grid-column: 1 / -1; }
   #details > .tempo { grid-column: 1; grid-row: 2; }
   #details > .flash-area { grid-column: 2; grid-row: 2; }
-  /* Too short for a second line: Flash stays on one, and scrolls sideways when 44 px buttons don't fit. */
-  #details .flash-area { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  #details .flash-area::-webkit-scrollbar { display: none; }
-  #details .flash-area button { flex: 1 0 44px; }
+  /* Flash stays on one line and scrolls sideways (the same row as on a taller phone). */
   #details .tempo .fadepick { flex: none; }
   #details > .rows { grid-column: 1 / -1; grid-row: 3; }
   /* On a small phone the name and the colour give way first; the slider keeps at least 80 px. */
