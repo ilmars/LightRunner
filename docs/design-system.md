@@ -62,6 +62,7 @@ The designer's icon (`Icon.dc.html`, kept with the restyle plan): a run of six s
 | `web/shared/icon.svg` | The 1024 px master; beside the Patch and Settings titles (26 px) |
 | `web/shared/icon-16.svg` | The browser tab (every page's `rel="icon"`): three thicker segments, so it reads at 16 px |
 | `web/shared/icon-180.png` | The iPad home screen (`apple-touch-icon`): the master drawn square and without the edge, as iOS rounds the corners itself. Made from `icon.svg` with the browser (no tool in the repo); make it again the same way if the master changes |
+| `web/shared/icon-192.png`, `icon-512.png`, `icon-maskable-512.png` | The web app manifest (`web/manifest.webmanifest`: Android home screen, Chrome's install). The maskable one has square corners and no edge (the system crops it; the drawing sits inside the 80 % safe zone). Made from `icon.svg` by `launcher/scripts/make-icons.mjs` (`cd launcher && npx electron scripts/make-icons.mjs`) |
 
 ## Components
 
