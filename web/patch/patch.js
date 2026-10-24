@@ -214,7 +214,7 @@ function renderFixtures() {
     seeChannels.type = 'button';
     seeChannels.title = "See this type's channels";
     seeChannels.setAttribute('aria-label', `Channels of ${f.name}'s type`);
-    seeChannels.addEventListener('click', () => openTypeSheet(f.profile));
+    seeChannels.addEventListener('click', () => openTypeSheet(f.profile, seeChannels));
     typeCell.append(type, seeChannels);
 
     const uni = el('input', 'ds-field');
@@ -579,7 +579,7 @@ function renderLibrary() {
   $('libChannels').disabled = !picked;
 }
 $('libSearch').addEventListener('input', renderLibrary);
-$('libChannels').addEventListener('click', () => openTypeSheet($('addProfile').value));
+$('libChannels').addEventListener('click', () => openTypeSheet($('addProfile').value, $('libChannels')));
 
 /** Drag a fixture type from the library onto the map to patch one there. */
 function startLibraryDrag(ev, p, item) {
@@ -638,9 +638,11 @@ function startLibraryDrag(ev, p, item) {
 
 /** What the sheet shows: the type, and whether it is being compared with `withId`. Null while the sheet is closed. */
 let typeView = null; // { id, comparing, withId }
+let typeOpener = null; // the button that opened the view; Close scrolls back to it
 
-function openTypeSheet(id) {
+function openTypeSheet(id, opener = null) {
   if (!profileById.has(id) || !letGoOfEditor()) return;
+  if (opener) typeOpener = opener; // opened again from the editor: keep the one before
   closeEditor();
   typeView = { id, comparing: false, withId: null };
   renderTypeSheet();
@@ -769,7 +771,13 @@ function compareTable(a, b, rows) {
   return table;
 }
 
-$('typeClose').addEventListener('click', closeTypeSheet);
+$('typeClose').addEventListener('click', () => {
+  closeTypeSheet();
+  if (typeOpener?.isConnected) {
+    typeOpener.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    typeOpener.focus({ preventScroll: true });
+  }
+});
 $('typeCompare').addEventListener('click', () => {
   if (!typeView) return;
   typeView.comparing = !typeView.comparing;
@@ -1209,7 +1217,16 @@ function putProfile(profile) {
 
 /** Add (or update) a fixture type in this show; it is stored when the patch is saved. The fixture's suggested name
  * is the type's without its maker. */
-function addProfile(profile, manufacturer = '') {
+function addProfile(incoming, manufacturer = '') {
+  // A type of your own that has this id stays as it is; the library's goes in beside it under a new id
+  // (or over the one it got the last time it came in).
+  let profile = incoming;
+  const mine = show.profiles.find((p) => p.id === incoming.id);
+  if (mine && !mine.source?.ofl) {
+    const src = incoming.source?.ofl;
+    const before = src && show.profiles.find((p) => p.source?.ofl === src && p.source.mode === incoming.source.mode);
+    profile = { ...incoming, id: before ? before.id : newTypeId(incoming.name, takenTypeIds()) };
+  }
   const entry = putProfile(profile);
   fillAddForm(false);
   $('addProfile').value = profile.id;

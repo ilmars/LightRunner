@@ -106,7 +106,7 @@ export function channelRows(channels) {
 /** One channel in a word or two, for the side-by-side comparison. */
 export function channelText(ch) {
   let text = labelOf(ch.role);
-  if (ch.fine) text += ', fine';
+  if (ch.fine) text += ' (16-bit, 2nd channel)';
   if (ch.kelvin) text += ` ${ch.kelvin.min}–${ch.kelvin.max} K`;
   if (FIXED.has(ch.role)) text += ` ${ch.default ?? 0}`;
   // A name that only repeats the job ("Red" on a red channel) adds nothing.
@@ -180,6 +180,8 @@ export function validateType(name, channels) {
   if (channels.length > 512) return 'A fixture type has at most 512 channels.';
   for (const row of groupRows(channels)) {
     const ch = channels[row.index];
+    // A fine byte that is its own row has no first channel of the same job just before it.
+    if (ch.fine) return `Channel ${row.first}: the second channel of a 16-bit pair needs its first channel just before it.`;
     if (row.job === 'cct') {
       const k = ch.kelvin;
       // Text that is not a whole number (the editor keeps what was typed) counts as not typed yet.

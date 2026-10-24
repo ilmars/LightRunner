@@ -136,7 +136,7 @@ test('the comparison shows two types channel by channel', () => {
 
 test('channel texts', () => {
   assert.equal(channelText({ role: 'dimmer' }), 'Dimmer');
-  assert.equal(channelText({ role: 'dimmer', fine: true }), 'Dimmer, fine');
+  assert.equal(channelText({ role: 'dimmer', fine: true }), 'Dimmer (16-bit, 2nd channel)');
   assert.equal(channelText({ role: 'strobe', default: 0 }), 'Strobe 0');
   assert.equal(channelText({ role: 'strobe' }), 'Strobe 0');
   assert.equal(channelText({ role: 'other', default: 255 }), 'Fixed value 255');
@@ -199,6 +199,22 @@ test('validation says the first problem in plain words, and never lets a number 
     validateType('X', [{ role: 'dimmer' }, { role: 'dimmer', fine: true }, { role: 'other', default: 300 }]),
     'Channel 3: a value is a whole number from 0 to 255.',
   );
+});
+
+test('a 16-bit second channel needs its first channel just before it', () => {
+  const lone = 'Channel 1: the second channel of a 16-bit pair needs its first channel just before it.';
+  assert.equal(validateType('X', [{ role: 'red', fine: true }]), lone);
+  // A fine red right after a green is not that green's pair.
+  assert.equal(
+    validateType('X', [{ role: 'red' }, { role: 'green' }, { role: 'red', fine: true }]),
+    'Channel 3: the second channel of a 16-bit pair needs its first channel just before it.',
+  );
+  // A third channel of the same job does not make a pair of three.
+  assert.equal(
+    validateType('X', [{ role: 'dimmer' }, { role: 'dimmer', fine: true }, { role: 'dimmer', fine: true }]),
+    'Channel 3: the second channel of a 16-bit pair needs its first channel just before it.',
+  );
+  assert.equal(validateType('X', [{ role: 'red' }, { role: 'red', fine: true }, { role: 'green' }]), null);
 });
 
 test('adding a channel gives it its starting values', () => {
