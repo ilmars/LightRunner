@@ -255,7 +255,7 @@ table.patch { width: 100%; min-width: 900px; border-collapse: collapse; font-siz
 .type-sheet:focus { outline: none; }
 .type-name { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
 .type-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-/* Task 3's buttons (Copy and edit, Edit) join these; Close stays last. */
+/* Copy and edit, and Edit (not on a type that can only be copied), sit before Close. */
 .type-actions .ds-btn { padding: 0 14px; }
 .type-compare-bar { max-width: 520px; }
 .type-compare-bar .hint:empty { display: none; }
@@ -287,3 +287,46 @@ table.patch { width: 100%; min-width: 900px; border-collapse: collapse; font-siz
 .type-cell { display: flex; align-items: center; gap: 4px; }
 .type-cell select { flex: 1; min-width: 0; }
 .patch .type-cell .type-open { flex: none; min-width: 44px; padding: 0; font-size: 18px; }
+
+/* ---- The fixture type editor: a panel in the same place as the type's view ---- */
+.lib-head { display: flex; align-items: center; justify-content: space-between; gap: 6px 8px; flex-wrap: wrap; }
+.lib-head .ds-btn { padding: 0 10px; font-size: 13px; }
+.type-editor { scroll-margin-top: 84px; }
+.type-editor:focus { outline: none; }
+.type-editor .hint:empty { display: none; }
+.te-name { max-width: 520px; }
+.te-rows { display: flex; flex-direction: column; }
+.te-seg { padding: 14px 0 4px 2px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ds-muted-on); }
+.te-seg:first-child { padding-top: 2px; }
+.te-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; min-height: 52px; padding: 4px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.08); }
+.te-rows > .te-row:last-child { border-bottom: 0; }
+.te-n { flex: none; width: 52px; text-align: right; color: var(--ds-muted); font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.te-job { flex: none; width: 210px; font-size: 14px; }
+.te-16 { flex: none; width: 96px; font-size: 13px; color: var(--ds-muted-on); gap: 10px; }
+.te-extra { flex: 1 1 240px; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.te-num { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ds-muted); }
+.te-num .ds-field { width: 88px; font-size: 14px; padding: 0 10px; font-variant-numeric: tabular-nums; }
+.te-unit { font-size: 13px; color: var(--ds-muted); }
+.te-own { font-size: 13px; color: var(--ds-muted); min-width: 0; overflow-wrap: anywhere; }
+.te-btns { flex: none; margin-left: auto; display: flex; gap: 2px; }
+.te-btns .ds-btn { min-width: 44px; padding: 0; font-size: 16px; }
+.te-btns .te-remove:hover { color: var(--ds-danger-text); }
+.te-add { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin-top: 2px; }
+.te-add .member-add { flex: none; width: auto; min-height: 44px; padding: 0 34px 0 14px; border-radius: var(--ds-r-pill); font-size: 13px; color: var(--ds-muted); background-color: transparent; box-shadow: none; border: 1px dashed rgba(148, 163, 184, 0.28); }
+.te-summary { margin: 0; padding: 12px 14px; border-radius: var(--ds-r-small); background: var(--ds-tile-fill); box-shadow: inset 0 0 0 1px var(--ds-edge); font-size: 14px; color: var(--ds-muted-on); }
+.te-ticks { display: flex; flex-wrap: wrap; gap: 6px; }
+.te-tick {
+  position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border-radius: var(--ds-r-pill);
+  background: var(--ds-tile-fill); box-shadow: inset 0 0 0 1px var(--ds-edge); font-size: 14px; color: var(--ds-muted-on); cursor: pointer; user-select: none; -webkit-user-select: none;
+}
+.te-tick input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.te-tick:focus-within { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.te-tick-mark { width: 12px; font-size: 13px; visibility: hidden; }
+.te-tick small { color: var(--ds-muted); font-size: 12px; }
+.te-tick.on { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-text); }
+.te-tick.on:focus-within { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.te-tick.on .te-tick-mark { visibility: visible; }
+.te-tick.locked { cursor: default; }
+.te-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.te-foot-gap { flex: 1; }
+.te-foot .ds-btn { min-width: 96px; }
