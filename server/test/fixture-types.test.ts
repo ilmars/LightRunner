@@ -6,6 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { WebSocket } from 'ws';
 import { App } from '../src/app.ts';
 import {
   JOBS, addChannel, channelRows, channelText, compareRows, copyOf, isReadOnly, moveRow, newTypeId, removeRow, repeatLastSegment,
@@ -440,6 +441,78 @@ test('GET /api/profiles gives each type its channels, and says which are read-on
     assert.equal(mine[0].readOnly, true);
     assert.equal(mine[0].builtIn, true);
   } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- Cutting a type down while its fixtures are running (Review focus 3) ----
+
+test('a type with fewer segments saves, and the engine carries on with its fixtures in a running group', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'light-runner-types-'));
+  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'server/seed/demo-show.json'), webDir: join(root, 'web'), output: { kind: 'none' }, log: () => {} });
+  const base = () => `http://127.0.0.1:${app.port}`;
+  const put = async (body: unknown) => {
+    const res = await fetch(`${base()}/api/show?source=patch`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: res.status, body: (await res.json()) as any };
+  };
+  const wait = async <T>(get: () => T | null | undefined | false, what: string): Promise<T> => {
+    for (const until = Date.now() + 3000; ;) {
+      const value = get();
+      if (value) return value;
+      if (Date.now() > until) throw new Error(`timed out waiting for ${what}`);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
+  let ws: WebSocket | undefined;
+  try {
+    await app.start();
+    const stage = JSON.parse(readFileSync(join(root, 'shows/stage-l1.json'), 'utf8'));
+    stage.operator.manualForOperators = true;
+    assert.equal((await put(stage)).status, 200);
+
+    ws = new WebSocket(`ws://127.0.0.1:${app.port}/ws`);
+    const seen: any[] = [];
+    ws.on('message', (data, isBinary) => { if (!isBinary) seen.push(JSON.parse(String(data))); });
+    await new Promise((r) => ws!.once('open', r));
+    const latest = (type: string) => seen.findLast((m) => m.type === type)?.[type];
+    let ref = 0;
+    const send = async (cmd: unknown): Promise<string | null> => {
+      const mine = ++ref;
+      ws!.send(JSON.stringify({ type: 'command', ref: mine, cmd }));
+      return (await wait(() => seen.find((m) => m.type === 'result' && m.ref === mine), `the reply to ${JSON.stringify(cmd)}`)).error;
+    };
+    await wait(() => latest('layout') && latest('state'), 'the first layout and state');
+
+    // The two SixBars run an effect as a group, and the third segment of one of them is held by hand.
+    const wave = {
+      kind: 'effect', effect: 'wave', colours: [{ hex: '#12ab34' }, { hex: '#3456cd', white: 0.2 }], speed: { beats: 4 },
+      direction: 'ltr', waves: 3, size: 0.5, edge: 'soft', intensity: 1,
+    };
+    assert.equal(await send({ type: 'groupEffect', group: 'key-lights', effect: wave, fade: 0 }), null);
+    assert.equal(await send({ type: 'manual', target: { fixture: 'b1', segment: 2 }, colour: '#ff0000', intensity: 1 }), null);
+    await wait(() => latest('state').held?.some((h: any) => h.fixture === 'b1' && h.segment === 2), 'the held segment');
+
+    // Cut the SixBar 500 to two segments (12 channels): the show is accepted.
+    const current = (await (await fetch(`${base()}/api/show`)).json()) as any;
+    const cut = { ...current, profiles: current.profiles.map((p: any) => (p.id === sixbar.id ? { ...p, channels: p.channels.slice(0, 12) } : p)) };
+    assert.equal(cut.profiles.find((p: any) => p.id === sixbar.id).channels.length, 12);
+    assert.equal(segmentCount(cut.profiles.find((p: any) => p.id === sixbar.id).channels), 2);
+    assert.equal((await put(cut)).status, 200);
+
+    // The state is still published, and the engine still answers: a look, then Blackout.
+    const framesBefore = seen.filter((m) => m.type === 'state').length;
+    assert.equal(await send({ type: 'look', id: 'worship', fade: 0 }), null);
+    await wait(() => latest('state').look === 'worship', 'worship on stage');
+    assert.ok(seen.filter((m) => m.type === 'state').length > framesBefore, 'state keeps coming');
+    assert.equal(await send({ type: 'blackout' }), null);
+    await wait(() => latest('state').look === 'blackout', 'blackout');
+    const profiles = (await (await fetch(`${base()}/api/profiles`)).json()) as any[];
+    assert.equal(profiles.find((p) => p.id === sixbar.id).channels, 12);
+    assert.equal(profiles.find((p) => p.id === sixbar.id).segments, 2);
+  } finally {
+    ws?.close();
     await app.stop();
     rmSync(dir, { recursive: true, force: true });
   }
