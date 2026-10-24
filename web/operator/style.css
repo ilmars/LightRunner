@@ -366,6 +366,36 @@ body.prepare .save.holding { border-color: var(--prep-text); }
 /* Held: tinted, like a held Flash button. */
 .puff.down { background: var(--ds-selected); border-color: var(--ds-edge-held); }
 
+/* The name and the colour button (or "Smoke" and Puff) share a line; one row has them as its own grid items. */
+.row .top { display: contents; }
+
+/* More than 6 groups (app.js sets .two-col and --col-rows): two columns, filled down the left one first. Each cell is
+   56 px: the name and the colour button on top, a thin dimmer under them, the level on the right. The whole cell drags
+   the dimmer (app.js); a vertical swipe still scrolls the panel when there are more groups than fit. Not on the phone. */
+body:not(.phone) .rows.two-col {
+  display: grid; grid-auto-flow: column; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(var(--col-rows), 56px);
+  column-gap: 18px; align-content: start;
+}
+body:not(.phone) .rows.two-col .row {
+  grid-template-columns: minmax(0, 1fr) 52px; grid-template-rows: 28px 22px; align-content: center; gap: 4px 8px;
+  min-height: 0; height: 56px; border-top: 0; touch-action: pan-y;
+}
+body:not(.phone) .rows.two-col .row .top { display: flex; align-items: center; gap: 8px; min-width: 0; grid-column: 1; grid-row: 1; }
+body:not(.phone) .rows.two-col .row .g { flex: 0 1 auto; min-width: 2ch; font-size: 13px; }
+body:not(.phone) .rows.two-col .row .chip {
+  flex: 0 1 auto; min-height: 28px; gap: 6px; padding: 0 8px; border-radius: 8px; font-size: 12px; position: relative;
+}
+body:not(.phone) .rows.two-col .row .chip i { width: 10px; height: 10px; }
+body:not(.phone) .rows.two-col .row .chip svg { width: 10px; height: 10px; }
+/* The tap area is bigger than the button, within the cell. */
+body:not(.phone) .rows.two-col .row .chip::after, body:not(.phone) .rows.two-col .row .puff::after { content: ""; position: absolute; inset: -1px -6px -1px; }
+body:not(.phone) .rows.two-col .row .smoke-cell { flex: 0 1 auto; justify-content: flex-start; gap: 8px; }
+body:not(.phone) .rows.two-col .row .smoke-tag { font-size: 12px; }
+body:not(.phone) .rows.two-col .row .puff { position: relative; min-height: 28px; min-width: 56px; padding: 0 12px; border-radius: 8px; font-size: 12px; }
+body:not(.phone) .rows.two-col .row .ds-fill { grid-column: 1; grid-row: 2; height: 22px; border-radius: 8px; }
+body:not(.phone) .rows.two-col .row .ds-fill::after { height: 10px; left: 8px; }
+body:not(.phone) .rows.two-col .row .pct { grid-column: 2; grid-row: 1 / 3; align-self: center; font-size: 16px; }
+
 
 /* ---- Sheets over the Groups panel (the quick-look sheet; the colour picker below) ---- */
 .picker {

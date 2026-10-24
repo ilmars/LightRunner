@@ -1443,7 +1443,9 @@ function buildDetails() {
       wireHold(puff, [group.id]);
       const cell = el('span', 'smoke-cell');
       cell.append(el('span', 'smoke-tag', 'Smoke'), puff);
-      box.append(el('span', 'g', group.name), cell, dim, pct);
+      const top = el('div', 'top');
+      top.append(el('span', 'g', group.name), cell);
+      box.append(top, dim, pct);
     } else {
       const sw = el('i');
       const chipName = el('span');
@@ -1457,13 +1459,21 @@ function buildDetails() {
       chip.append(sw, chipName, chevron);
       chip.addEventListener('click', () => openPicker(group.id));
       Object.assign(row, { chip, sw, chipName });
-      box.append(el('span', 'g', group.name), chip, dim, pct);
+      const top = el('div', 'top');
+      top.append(el('span', 'g', group.name), chip);
+      box.append(top, dim, pct);
     }
+    row.box = box;
     root.append(box);
     detailRows.push(row);
     showLevel(row, 0);
     wireDimmer(row);
   }
+  // More than 6 groups: two columns, filled down the left one first (the left gets the extra when it is odd).
+  // The row count goes to the stylesheet; the phone keeps its one column (the stylesheet only applies it off the phone).
+  const many = layout.groups.length > 6;
+  root.classList.toggle('two-col', many);
+  root.style.setProperty('--col-rows', String(Math.ceil(layout.groups.length / 2)));
   // A new layout can drop the group the picker was showing.
   if (picker.group && !layout.groups.some((g) => g.id === picker.group)) closePicker();
   else if (picker.group) buildPickerGrid();
@@ -1481,7 +1491,7 @@ function wireDimmer(row) {
     if (row.smoke) send(cmd); else sendStage(cmd, target);
   });
   let startX = 0, startV = 0;
-  row.dim.addEventListener('pointerdown', (ev) => {
+  const down = (ev) => {
     ev.preventDefault();
     // The server refuses smoke during Blackout; say so once and leave the slider where it is.
     if (row.smoke && state?.look === 'blackout') {
@@ -1494,6 +1504,13 @@ function wireDimmer(row) {
     row.dim.classList.add('ds-dragging');
     startX = ev.clientX;
     startV = row.value;
+  };
+  row.dim.addEventListener('pointerdown', down);
+  // In two columns the whole cell drags the slider (the slider is thin there); the colour button and Puff keep their taps.
+  row.box.addEventListener('pointerdown', (ev) => {
+    if (!row.box.parentElement.classList.contains('two-col') || document.body.classList.contains('phone')) return;
+    if (row.dim.contains(ev.target) || ev.target.closest('.chip, .puff')) return;
+    down(ev);
   });
   row.dim.addEventListener('pointermove', (ev) => {
     if (!row.dragging) return;
