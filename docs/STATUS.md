@@ -26,7 +26,7 @@ Tests: 427 (`npm test`): 426 pass, 1 is skipped (the Lightkey project test, need
 
 ## Not built yet (in rough priority order)
 
-1. **Run as a service on the church Mac** (launchd, start at boot, restart on crash, sleep off). Today it only runs while someone starts it.
+1. **Service: done for macOS, Linux and Windows** (`deploy/`), installed on the church Mac as a login service. Still to do on that Mac: turn sleep off (`sudo pmset -a sleep 0 disksleep 0`), and optionally reinstall with `--system` so it starts before anyone logs in. The Windows and Linux scripts are written but not yet run on real machines.
 2. **Test on the real iPad**: add to home screen, Auto-Lock Never (Wake Lock needs HTTPS), check sizes in the dark room, short volunteer trial.
 3. **Spec Phase 2b**: layered effects (several effects on one group, with blend modes) and a fuller effect library and editor. **Lightkey effect import**: bring the church's Lightkey effects across with the importer, once the project file can be looked at.
 4. **Programmer niceties from the spec**: channel test view, manual tab with raw values, stage photo background, operator layout editor.

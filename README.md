@@ -46,7 +46,12 @@ Open http://localhost:8080/. `LIGHT_RUNNER_OUTPUT=none` makes sure nothing is se
 
 1. **A computer that stays on** next to the lighting network: a Mac mini, a small PC or a Raspberry Pi 4/5. Turn sleep off.
 2. **A DMX interface:** an Art-Net or sACN node on the network, or an ENTTEC DMX USB Pro on the computer.
-3. **Start Light Runner** (`npm start`) and open `http://<computer's address>:8080/settings/`:
+3. **Install Light Runner as a service**, so it starts at boot and restarts itself if it ever stops:
+   - macOS: `deploy/macos/install.sh` (starts at login) or `sudo deploy/macos/install.sh --system` (starts at boot)
+   - Linux / Raspberry Pi: `sudo deploy/linux/install.sh`
+   - Windows (PowerShell as administrator): `powershell -ExecutionPolicy Bypass -File deploy\windows\install.ps1`
+
+   Then open `http://<computer's address>:8080/settings/`:
    - Set a programmer PIN.
    - Under DMX output, pick Art-Net, sACN or ENTTEC. For Art-Net, **Find nodes** lists the nodes on your network with the universe they listen on; tap **Use**.
    - Download the fixture database.
@@ -54,7 +59,7 @@ Open http://localhost:8080/. `LIGHT_RUNNER_OUTPUT=none` makes sure nothing is se
 5. **Switch on Send DMX** when no other desk is driving the lights.
 6. **On the tablet**, open `/operator/`, add it to the home screen, and set Auto-Lock to Never so the screen stays on during the service.
 
-Light Runner doesn't start itself on boot yet; see [docs/STATUS.md](docs/STATUS.md).
+Each install script has an uninstall counterpart (`uninstall.sh`, or `install.ps1 -Uninstall`); your show in `data/` is kept. Logs: `data/logs/light-runner.log` (macOS, Windows) or `journalctl -u light-runner -f` (Linux). To run without installing anything, `npm run service` starts the same self-restarting supervisor in a terminal.
 
 ## Bringing in a Lightkey project
 

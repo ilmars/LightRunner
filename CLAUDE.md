@@ -41,7 +41,8 @@ Pages: `/operator/` (volunteers, no login), `/patch/` and `/settings/` (programm
 
 ## The rig (stage L1)
 
-- Art-Net node "NetWork Node 2" at **192.168.0.114**, both ports on **Art-Net universe 1**. The server Mac is 192.168.0.195.
+- Art-Net node: **Showtec NET-2** (replaced the old node on 2026-10-25) at **192.168.0.114**, Art-Net mode. Port 1 listens on universe 1, Port 2 on universe 2 (the old node had both on 1); the whole rig is patched on universe 1. Its web page (port 80, password) sets protocol, universes, RDM and frame rate. The server Mac is 192.168.0.195.
+- On the church Mac Light Runner runs as a launchd login service (`~/Library/LaunchAgents/org.lightrunner.server.plist`, logs in `data/logs/`). `LIGHT_RUNNER_OUTPUT=none` in that file blocks all DMX; it was removed on 2026-10-25 so the app drives the node.
 - Groups: **Front lights** P1–P4 (Neewer AS600B, CCT 2 ch), **Key lights** B1–B2 (Elation SixBar 500, 18 ch RGBWAUV × 3), **Background** B3–B6 (Stairville SonicPulse LED Bar 10, 39 ch), **Drum cage** L1 (LED strip RGB), **B8 side bar** (SonicPulse Bar 05, 23 ch). **P5 (Wild Wash) is not used** and is left out.
 - The show (`shows/stage-l1.json`) came from the church's Lightkey project via `tools/import-stage-l1.sh <project>` (or set `LIGHTKEY_PROJECT`). Lightkey import is a feature to keep (owner's request): the CLI importer and Settings > "Compare with a file" both accept `.lightkeyproj`. Lightkey and Light Runner must not send to the node at the same time: use Settings > Send DMX to hand over.
 - SixBar 500 and AS600B are not in the Open Fixture Library; their types come from Lightkey.
