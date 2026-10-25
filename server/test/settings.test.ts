@@ -19,12 +19,19 @@ async function withApp(fn: (call: (method: string, path: string, body?: unknown)
   // Real output selection, but sending to "none" by default so tests never hit the network.
   const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath, webDir: join(root, 'web'), log: () => {}, ...extra });
   let cookie = '';
+  // A Patch save sends the revision of the show last fetched, as the page does.
+  let revision = '';
   const call = async (method: string, path: string, body?: unknown) => {
     const res = await fetch(`http://127.0.0.1:${app.port}${path}`, {
       method,
-      headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(cookie ? { cookie } : {}) },
+      headers: {
+        ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+        ...(cookie ? { cookie } : {}),
+        ...(path.includes('source=patch') ? { 'x-show-revision': revision } : {}),
+      },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
+    revision = res.headers.get('x-show-revision') ?? revision;
     const set = res.headers.get('set-cookie');
     if (set) cookie = set.split(';')[0];
     const text = await res.text();

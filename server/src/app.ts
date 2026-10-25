@@ -4,7 +4,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
@@ -1423,6 +1423,7 @@ export class App {
         res.writeHead(200, {
           'content-type': 'application/json; charset=utf-8',
           'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file)}`,
+          'x-show-revision': showRevision(this.show),
         });
         // A show file is shared and kept: it never carries this installation's PIN hash (a 4 to 6 digit PIN is easy
         // to work out from its hash). Opening a file keeps the PIN here, so a file without one loses nothing.
@@ -1440,6 +1441,14 @@ export class App {
           throw new HttpError(400, `not a valid show: ${(err as Error).message}`);
         }
         const fromPatch = url.searchParams.get('source') === 'patch';
+        // Patch saves the whole show from the copy it loaded. If the show changed since (an import, an edit on the
+        // iPad), that copy would put back the old looks, presets and running order: refuse it, and the page loads the
+        // show again with its own changes on top. The revision comes from GET /api/show. Opening a show file means to
+        // replace whatever is there, so it needs none; a page that sends one is checked all the same.
+        const revision = req.headers['x-show-revision'];
+        if ((fromPatch || revision !== undefined) && revision !== showRevision(this.show)) {
+          throw new HttpError(409, 'The show was changed somewhere else since this page loaded it. Load it again, then save.');
+        }
         // Patch never edits settings, and a Patch page left open holds an old copy of them: keep the live ones
         // (Send DMX, output, routes), or saving the patch could start sending DMX again.
         // An imported file keeps this installation's PIN: it must not change who can log in. It keeps this computer's
@@ -1452,6 +1461,7 @@ export class App {
           : withIgnored({ ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash, outputEnabled: this.show.settings.outputEnabled } }, this.show.operator.controller?.ignored);
         await this.setShow(show);
         this.log(fromPatch ? 'Patch saved' : `Imported show "${show.name}"`);
+        res.setHeader('x-show-revision', showRevision(this.show));
         json(res, 200, this.settingsView());
         return true;
       }
@@ -1860,6 +1870,19 @@ function withIgnored(show: Show, ignored: string[] | undefined): Show {
   if (ignored?.length) controller.ignored = [...ignored];
   else delete controller.ignored;
   return { ...show, operator: { ...show.operator, controller } };
+}
+
+/**
+ * Which version of the show a page has (`x-show-revision`): a hash of everything but the settings and the controller
+ * keys, which change while Patch is open and which a Patch save keeps from the live show anyway. The order of an
+ * object's fields is left out (a save can rebuild one in another order without changing it).
+ */
+export function showRevision(show: Show): string {
+  const { settings: _settings, operator: { controller: _controller, ...operator }, ...rest } = show;
+  const sorted = (_key: string, value: unknown) => (value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+    : value);
+  return createHash('sha256').update(JSON.stringify({ ...rest, operator }, sorted)).digest('base64url').slice(0, 22);
 }
 
 /**

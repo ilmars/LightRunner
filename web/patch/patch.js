@@ -1,5 +1,7 @@
 // Patch page: fixtures, groups and the stage plan. Edits a copy of the show
 // and saves it whole; the server checks it and keeps a backup of the old one.
+// A save from a copy older than the live show is refused: the page loads the
+// show again and does its own changes again on top (rebase.js).
 
 import {
   aimBeam, alignFixtures, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setShape, shapeOf, spaceEvenly, touches, turnBar,
@@ -8,6 +10,7 @@ import {
   JOBS, addChannel, channelRows, compareRows, copyOf, isReadOnly, moveRow, newTypeId, removeRow, repeatLastSegment, segmentCount,
   setJob, setKelvin, setSixteenBit, setValue, summary, validateType,
 } from './types.js';
+import { rebasePatch } from './rebase.js';
 import { PLAN_ASPECT, barAxis, beamCone } from '../shared/stage.js';
 import { request, startClock, watchState } from '../shared/appbar.js';
 
@@ -21,6 +24,7 @@ const el = (tag, cls, text) => {
 
 let show = null; // working copy
 let savedJson = ''; // the show as last saved
+let revision = ''; // which version of the show that is (the server refuses a save from an older one)
 let profiles = []; // [{ id, name, channels (a count), segments, roles, defs (the channels), readOnly }]
 const profileById = new Map();
 let builtInIds = new Set(); // the built-in types' ids: read-only, like the Open Fixture Library's
@@ -64,14 +68,28 @@ $('loginForm').addEventListener('submit', async (ev) => {
   }
 });
 
-async function load() {
-  const [loaded, profs] = await Promise.all([call('GET', '/api/show'), call('GET', '/api/profiles')]);
-  show = loaded;
-  savedJson = JSON.stringify(show);
+/** The live show and its revision. */
+async function getShow() {
+  const res = await request('/api/show');
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) showLogin();
+  if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
+  return { show: data, revision: res.headers.get('x-show-revision') ?? '' };
+}
+
+function setProfiles(profs) {
   profiles = profs;
   profileById.clear();
   for (const p of profiles) profileById.set(p.id, p);
   builtInIds = new Set(profs.filter((p) => p.builtIn).map((p) => p.id));
+}
+
+async function load() {
+  const [loaded, profs] = await Promise.all([getShow(), call('GET', '/api/profiles')]);
+  show = loaded.show;
+  revision = loaded.revision;
+  savedJson = JSON.stringify(show);
+  setProfiles(profs);
   closeTypeSheet();
   closeEditor();
   $('main').hidden = false;
@@ -1709,9 +1727,19 @@ $('save').addEventListener('click', async () => {
   const problems = addressProblems();
   if (problems.size && !confirm(`${problems.size} fixtures have address problems. Save anyway?`)) return;
   try {
-    await call('PUT', '/api/show?source=patch', show);
+    const res = await request('/api/show?source=patch', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'x-show-revision': revision },
+      body: JSON.stringify(show),
+    });
+    if (res.status === 409) return await catchUp();
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) showLogin();
+    if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
     // The server adds a few things on the way in (a new group's starter colours): carry on from what it stored.
-    show = await call('GET', '/api/show');
+    const saved = await getShow();
+    show = saved.show;
+    revision = saved.revision;
     savedJson = JSON.stringify(show);
     renderAll();
     toast('Patch saved');
@@ -1719,6 +1747,24 @@ $('save').addEventListener('click', async () => {
     toast(err.message, true);
   }
 });
+
+/**
+ * The show changed somewhere else since this page loaded it (an import, the iPad): load it again with this page's
+ * unsaved changes on top, and say so. Nothing is saved until Save patch is pressed again.
+ */
+async function catchUp() {
+  const [fresh, profs] = await Promise.all([getShow(), call('GET', '/api/profiles')]);
+  show = rebasePatch(JSON.parse(savedJson), show, fresh.show);
+  revision = fresh.revision;
+  savedJson = JSON.stringify(fresh.show);
+  // The type list is the server's, less the ones this page deleted, plus its own types not saved yet.
+  setProfiles(profs.filter((p) => p.builtIn || show.profiles.some((x) => x.id === p.id)));
+  for (const p of show.profiles) putProfile(p);
+  fillAddForm(false);
+  renderAll();
+  alert('The show was changed somewhere else since this page was opened (an import, or the iPad). '
+    + 'It is loaded again, with your changes here on top. Nothing was saved: check the patch, then press Save patch again.');
+}
 
 window.addEventListener('beforeunload', (e) => {
   if (show && (JSON.stringify(show) !== savedJson || editorChanged())) e.preventDefault();
