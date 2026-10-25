@@ -437,9 +437,12 @@ test('Patch saving an old copy of the show keeps the keys', () => withKeys(async
   const { midi, url, layout } = rig;
   midi.plug('nanoKONTROL2');
   const port = await portNamed(midi, 'nanoKONTROL2');
-  const old = await (await fetch(`${url}/api/show`)).json();
+  const got = await fetch(`${url}/api/show`);
+  const old = await got.json();
+  // A key learnt while Patch is open doesn't make its copy out of date.
   await learn(rig, { kind: 'song', id: layout.runningOrder[1].id }, () => tap(port, 9));
-  const res = await fetch(`${url}/api/show?source=patch`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(old) });
+  const headers = { 'content-type': 'application/json', 'x-show-revision': got.headers.get('x-show-revision') ?? '' };
+  const res = await fetch(`${url}/api/show?source=patch`, { method: 'PUT', headers, body: JSON.stringify(old) });
   assert.equal(res.status, 200);
   assert.equal((await call(url, 'GET', '/api/controller')).body.keys.length, 1);
 }));
