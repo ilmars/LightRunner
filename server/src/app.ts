@@ -284,8 +284,10 @@ export class App {
     }
     this.show = migrated;
     // A recording no timeline uses (taken off a timeline, or left by a page that went away while adding it) goes after
-    // a day; a newer one may still be on its way into a timeline.
-    const used = new Set(this.show.timelines.flatMap((t) => (t.recording ? [t.recording.id] : [])));
+    // a day; a newer one may still be on its way into a timeline. One a show backup's timeline uses stays: that
+    // backup may be loaded again.
+    const used = this.store.backupRecordings();
+    for (const t of this.show.timelines) if (t.recording) used.add(t.recording.id);
     const swept = this.recordings.sweep(used, ORPHAN_RECORDING_MS);
     if (swept) this.log(`Deleted ${swept} recording${swept === 1 ? '' : 's'} no timeline uses`);
     this.latestRuntime = this.store.loadRuntime();

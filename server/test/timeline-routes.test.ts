@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { WebSocket } from 'ws';
 import { tmpdir } from 'node:os';
@@ -228,6 +228,34 @@ test('on start, recordings no timeline uses and older than a day are deleted; ne
     await app.start();
     assert.deepEqual(readdirSync(rec).filter((f) => f.endsWith('.wav')), [`${fresh}.wav`]);
     assert.equal(logs.filter((l) => /recording/i.test(l) && /deleted|removed/i.test(l)).length, 1);
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('on start, a recording only a show backup uses stays (Undo or a backup may bring that timeline back)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'light-runner-tl-'));
+  const rec = join(dir, 'recordings');
+  mkdirSync(rec, { recursive: true });
+  mkdirSync(join(dir, 'backups'), { recursive: true });
+  const kept = 'eeeeeeeeeeeeeeee', gone = 'ffffffffffffffff';
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 3600_000);
+  for (const id of [kept, gone]) {
+    writeFileSync(join(rec, `${id}.wav`), wav());
+    utimesSync(join(rec, `${id}.wav`), twoDaysAgo, twoDaysAgo);
+  }
+  const seed = JSON.parse(readFileSync(seedPath, 'utf8'));
+  const recording = { id: kept, name: 'Intro.wav', duration: 1, loudness: 'AA==', peaks: 'AA==' };
+  writeFileSync(join(dir, 'backups', 'show-2026-10-01T00-00-00-000Z-0000.json'), JSON.stringify({ ...seed, timelines: [intro({ recording, offsetMs: 0 })] }));
+  // The show itself has no timelines (without show.json the newest backup would be loaded as the show).
+  writeFileSync(join(dir, 'show.json'), JSON.stringify({ ...seed, timelines: [] }));
+  // A backup that can't be read is passed over.
+  writeFileSync(join(dir, 'backups', 'show-2026-10-02T00-00-00-000Z-0000.json'), '{ not json');
+  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath, webDir: join(root, 'web'), output: { kind: 'none' }, log: () => {} });
+  try {
+    await app.start();
+    assert.deepEqual(readdirSync(rec).filter((f) => f.endsWith('.wav')), [`${kept}.wav`]);
   } finally {
     await app.stop();
     rmSync(dir, { recursive: true, force: true });
