@@ -34,10 +34,15 @@ export class BlindSession {
   }
 
   /** Run a command on the draft. What acts on the real stage only is refused, as is a smoke machine's dimmer. */
-  apply(cmd: StageCommand, now: number, isSmoke: (group: string) => boolean): string | null {
+  apply(cmd: StageCommand, now: number, isSmoke: (group: string) => boolean, opts?: { quiet?: boolean }): string | null {
     if (LIVE_ONLY.has(cmd.type) || (cmd.type === 'groupLevel' && isSmoke(cmd.group))) return REAL_STAGE_ONLY;
     this.stateDue = true;
-    return this.engine.apply(cmd, now);
+    return this.engine.apply(cmd, now, opts);
+  }
+
+  /** What a light group's level in the draft follows (a voice, 0–1), or null for nothing (the timeline runner's Follow the voice). */
+  followLevel(group: string, value: number | null, now: number): void {
+    this.engine.setLevelFollow(group, value, now);
   }
 
   setShow(show: Show, now: number): void {

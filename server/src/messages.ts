@@ -11,7 +11,10 @@ export type ToWorker =
   | { type: 'init'; show: Show; runtime: RuntimeState | null; artnetRedirect?: Record<string, { host: string; port: number }> }
   /** `keep`: an edit from Prepare (or its Undo), which never moves the lights; its pins (see Engine.setShow). */
   | { type: 'show'; show: Show; keep?: { pins: PresetPin[] } }
-  | { type: 'command'; id: number; cmd: StageCommand }
+  /** `quiet`: the timeline's own change, which adds no Undo step. */
+  | { type: 'command'; id: number; cmd: StageCommand; quiet?: boolean }
+  /** What a light group's level follows (a voice, 0–1), or null for nothing; the engine smooths it. */
+  | { type: 'follow'; group: string; value: number | null }
   | { type: 'snapshot'; id: number }
   | { type: 'timing'; id: number; reset?: boolean }
   | { type: 'stop' };

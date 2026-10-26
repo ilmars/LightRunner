@@ -31,6 +31,15 @@ const BLACKOUT_FADE = 1;
 const LEVEL_FADE_FACTOR = 1;
 /** Fader and dial moves are smoothed over this long so they never step. */
 const SMOOTH = 0.2;
+/**
+ * A level that follows a voice rises at most FOLLOW_RISE a second (0.03 a 25 ms frame) and falls at most FOLLOW_FALL
+ * (0.02 a frame); when the follow ends it goes back to 1 at FOLLOW_RELEASE (1 s). Per second, so they hold at any
+ * frame rate (a Prepare draft renders at 20 fps). The rise is below the 0.05 the plan allows: the follow multiplies
+ * the look's own fades, and at 0.05 a frame the two together stepped 5.5–6.4 % in jump-check.
+ */
+const FOLLOW_RISE = 1.2;
+const FOLLOW_FALL = 0.8;
+const FOLLOW_RELEASE = 1;
 /** Manual takes over this fast, and follows the finger with this smoothing. */
 const MANUAL_IN = 0.2;
 /** Release fades back to the running preset over this long. */
@@ -138,6 +147,13 @@ class GroupRun {
   presets = new Crossfade<PresetRun>();
   manual: ManualRun | null = null;
   level = new Ramp(1);
+  /**
+   * What the group's level follows (a voice, 0–1), or null for nothing. It is a multiplier on the
+   * level, kept apart from `level` so it never reaches Undo, the saved runtime or the live state.
+   */
+  followTarget: number | null = null;
+  /** The multiplier in force this frame: followTarget, smoothed (see FOLLOW_RISE and FOLLOW_FALL). */
+  follow = 1;
   /**
    * A smoke or haze machine. It has no presets: its output is its level (or
    * PUFF_LEVEL while Puff is held), and only its slider, Puff, Basic lights
@@ -358,6 +374,7 @@ export class Engine {
       if (smoke && !run.smoke) {
         // A new smoke group, or a light group that became one, starts off. A flash held on it is no Puff.
         run.level.set(0, now, 0);
+        run.followTarget = null;
         run.presets = new Crossfade<PresetRun>();
         run.manual = null;
         this.flash.delete(g.id);
@@ -589,9 +606,28 @@ export class Engine {
     }
   }
 
-  /** Apply a command. Returns an error message, or null when it worked. */
-  apply(cmd: StageCommand, now: number): string | null {
+  /**
+   * Make a light group's level follow `value` (0–1, a voice's loudness), or stop following (null: the level comes
+   * back to 1 over about a second). The engine smooths it in frame(); it is not part of the group's level, so
+   * Undo, the saved runtime and the live state never see it. Smoke groups and unknown groups ignore it.
+   */
+  setLevelFollow(group: string, value: number | null, _now: number): void {
+    const run = this.groups.get(group);
+    if (!run || run.smoke) return;
+    run.followTarget = value === null || Number.isNaN(value) ? null : Math.min(1, Math.max(0, value));
+  }
+
+  /**
+   * Apply a command. Returns an error message, or null when it worked.
+   * With `quiet` (the timeline's own changes) no Undo step is added.
+   */
+  apply(cmd: StageCommand, now: number, opts?: { quiet?: boolean }): string | null {
     this.recorded = false;
+    if (opts?.quiet && cmd.type !== 'undo') {
+      const error = this.run(cmd, now);
+      if (cmd.type === 'groupEffect' || cmd.type === 'applyStage') this.pruneLiveEffects();
+      return error;
+    }
     if (cmd.type === 'undo') {
       this.lastColourStep = null;
       this.tempoRunAt = null;
@@ -794,7 +830,7 @@ export class Engine {
         if (!group) return `unknown group "${cmd.group}"`;
         // Blackout keeps smoke off: its slider waits until the lights are back, like Puff.
         if (group.smoke && this.look === BLACKOUT) return 'Blackout is on.';
-        group.level.set(cmd.value, now, SMOOTH);
+        group.level.set(cmd.value, now, cmd.fade ?? SMOOTH);
         return null;
       }
     }
@@ -1116,6 +1152,15 @@ export class Engine {
     }
   }
 
+  /** Move a group's follow multiplier toward what it follows by at most its per-second rates, and return it. */
+  private followStep(group: GroupRun, dt: number): number {
+    const target = group.followTarget ?? 1;
+    const gap = target - group.follow;
+    if (gap > 0) group.follow += Math.min(gap, (group.followTarget === null ? FOLLOW_RELEASE : FOLLOW_RISE) * dt);
+    else if (gap < 0) group.follow += Math.max(gap, -FOLLOW_FALL * dt);
+    return group.follow;
+  }
+
   /** Render one frame at time `now`. */
   frame(now: number): Frame {
     const dt = this.last === null ? 0 : Math.min(0.5, Math.max(0, now - this.last));
@@ -1152,7 +1197,7 @@ export class Engine {
         // A preset that moves remembers each segment's level, to tell its own motion from fades.
         if (moves(item.preset) && item.levels.length !== length) item.levels = new Array<number>(length).fill(NaN);
       }
-      const level = group.level.value(now);
+      const level = group.level.value(now) * this.followStep(group, dt);
       const manual = this.liveManual(group, now, dt);
       const motion = group.motion;
       // One light per segment of the group's line.

@@ -104,7 +104,8 @@ const STAGE_COMMANDS = [
   z.object({ type: z.literal('speed'), value: z.number().min(0.5).max(2) }),
   /** The stage tempo in beats per minute. Effects count their speed in beats. */
   z.object({ type: z.literal('tempo'), bpm }),
-  z.object({ type: z.literal('groupLevel'), group: id, value: unit }),
+  /** A group's level. `fade` (seconds) eases it over that long; without it the slider's 0.2 s smoothing. */
+  z.object({ type: z.literal('groupLevel'), group: id, value: unit, fade }),
   z.object({ type: z.literal('undo') }),
   /** Fade time for every look and preset change; null = each look's own fade. */
   z.object({ type: z.literal('fadeTime'), value: z.number().min(0).max(600).nullable() }),

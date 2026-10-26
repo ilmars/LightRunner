@@ -13,6 +13,9 @@
 // The show gets a few effect presets for every light group (every kind, soft and hard
 // edges, beats and seconds, a third over a base colour), half of the looks' entries run one, and each look has a
 // tempo between 60 and 200.
+// Timeline traffic: group levels with a fade (1 to 60 s, applied quietly as the timeline runner does), and Follow the
+// voice on a few light groups, whose value jumps between 0 and 1 (or anywhere) every frame and is sometimes let go. Both
+// are judged under the same 5% rule.
 // Fades are at least 1 s, the spec's shortest (Safe and Blackout): a full
 // 0–100% fade shorter than 0.75 s cannot stay under 5% per frame at 40 fps.
 //
@@ -160,8 +163,26 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
   if (r < 0.9) return { cmd: { type: 'safe' }, fast: false };
   if (r < 0.94) return { cmd: { type: 'blackout' }, fast: false };
   if (r < 0.97) return { cmd: { type: 'master', value: rand() }, fast: true };
+  // A timeline's level block fades over its Rise; the slider's 0.2 s smoothing follows the finger.
+  if (rand() < 0.5) return { cmd: { type: 'groupLevel', group: pick(show.groups).id, value: rand(), fade: 1 + rand() * 59 }, fast: false };
   return { cmd: { type: 'groupLevel', group: pick(show.groups).id, value: rand() }, fast: true };
 }
+
+/** The light groups whose level follows a (random) voice right now. */
+const following = new Set<string>();
+const lightGroupIds = show.groups.filter((g) => g.kind !== 'smoke').map((g) => g.id);
+/** Start or stop one group following, as a timeline's Follow-the-voice block starting or ending would. */
+function toggleFollow(t: number): string {
+  const id = pick(lightGroupIds);
+  if (following.delete(id)) {
+    engine.setLevelFollow(id, null, t);
+    return `${t.toFixed(2)}s follow ${id} off`;
+  }
+  following.add(id);
+  return `${t.toFixed(2)}s follow ${id} on`;
+}
+/** A loudness value for this frame: jumps between silence and full, or lands anywhere. */
+const voice = () => (rand() < 0.4 ? 0 : rand() < 0.5 ? 1 : rand());
 
 const engine = new Engine(show, 0);
 // One name per segment, in the order of visibleLevels(): "b3" or "b3 segment 2".
@@ -185,14 +206,18 @@ for (let n = 0; n * FRAME <= end; n++) {
   const t = n * FRAME;
   if (t >= next) {
     const { cmd, fast } = randomCommand();
-    engine.apply(cmd, t);
+    // A faded level is a timeline's own change: no Undo step.
+    engine.apply(cmd, t, { quiet: cmd.type === 'groupLevel' && cmd.fade !== undefined });
     commands++;
     recent.push(`${t.toFixed(2)}s ${JSON.stringify(cmd)}`);
+    if (rand() < 0.15) recent.push(toggleFollow(t));
     if (recent.length > 6) recent.shift();
     if (fast) skipUntil = t + 0.25;
     // Mostly mid-fade interruptions: 0.2–4 s apart, sometimes a long settle.
     next = t + (rand() < 0.8 ? 0.2 + rand() * 4 : 5 + rand() * 30);
   }
+  // The voice moves every frame, for every group that follows it.
+  for (const id of following) if (rand() < 0.5) engine.setLevelFollow(id, voice(), t);
   const before = performance.now();
   engine.frame(t);
   slowest = Math.max(slowest, performance.now() - before);

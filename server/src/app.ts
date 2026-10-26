@@ -600,6 +600,16 @@ export class App {
     return (await this.run(input, role, tablet)).error;
   }
 
+  /** A stage command from the timeline runner: runs on the live stage and adds no Undo step. Returns an error message or null. */
+  async quietStageCommand(cmd: StageCommand): Promise<string | null> {
+    return (await this.stageCommand(cmd, { quiet: true })).error;
+  }
+
+  /** What a live light group's level follows (a voice, 0–1), or null for nothing; the engine smooths it. */
+  followLevel(group: string, value: number | null): void {
+    this.post({ type: 'follow', group, value });
+  }
+
   /** Like `command`, and also says whether the command added a step to the Undo list. */
   private async run(input: unknown, role: Role, tablet?: WebSocket): Promise<{ error: string | null; recorded: boolean }> {
     const parsed = Command.safeParse(input);
@@ -624,7 +634,7 @@ export class App {
   }
 
   /** Run a command on the live stage (Undo of a show edit puts the show back instead). */
-  private async stageCommand(cmd: StageCommand): Promise<{ error: string | null; recorded: boolean }> {
+  private async stageCommand(cmd: StageCommand, opts?: { quiet?: boolean }): Promise<{ error: string | null; recorded: boolean }> {
     if (cmd.type === 'undo') {
       const last = this.undoLog.at(-1);
       if (last && last !== 'stage') {
@@ -647,7 +657,7 @@ export class App {
       // A stage step (or an empty list, after a restart) is the engine's to undo.
       if (last) this.undoLog.pop();
     }
-    const reply = await this.request<{ error: string | null; recorded?: boolean }>((id) => ({ type: 'command', id, cmd }));
+    const reply = await this.request<{ error: string | null; recorded?: boolean }>((id) => ({ type: 'command', id, cmd, ...(opts?.quiet ? { quiet: true } : {}) }));
     if (reply.recorded) this.remember('stage');
     return { error: reply.error, recorded: !!reply.recorded };
   }

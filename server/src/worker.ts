@@ -131,11 +131,14 @@ port.on('message', (msg: ToWorker) => {
       stateDue = true;
       break;
     case 'command': {
-      const error = engine ? engine.apply(msg.cmd, clock() / 1000) : 'engine not started';
+      const error = engine ? engine.apply(msg.cmd, clock() / 1000, msg.quiet ? { quiet: true } : undefined) : 'engine not started';
       post({ type: 'result', id: msg.id, error, recorded: !!engine?.recorded });
       stateDue = true;
       break;
     }
+    case 'follow':
+      engine?.setLevelFollow(msg.group, msg.value, clock() / 1000);
+      break;
     case 'snapshot':
       if (engine) post({ type: 'snapshot', id: msg.id, runtime: engine.runtime(), clock: engine.stageClock() });
       break;
