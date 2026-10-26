@@ -269,6 +269,20 @@ export const TimelineMessage = z.discriminatedUnion('type', [
 ]);
 export type TimelineMessage = z.infer<typeof TimelineMessage>;
 
+/** Why a live timeline ended: ■ Stop (on any page), something else took the lights, or it came to its end. */
+export type TimelineEndReason = 'stop' | 'taken' | 'end';
+
+/**
+ * Sent to the page that plays a live timeline's recording when that run ends, before the live state says so: on 'stop'
+ * the page stops its sound too; on 'taken' (Blackout, Basic lights, a song, Go, Back to saved, another page's Start)
+ * the sound plays on and the page offers Lights follow again; on 'end' nothing changes.
+ */
+export interface TimelineEnded {
+  type: 'timelineEnded';
+  run: number;
+  reason: TimelineEndReason;
+}
+
 /** A running timeline, as the pages are told of it. */
 export interface TimelineStatus {
   id: string;

@@ -196,9 +196,9 @@ Sound that goes through the mixer or a projector can reach the room a little lat
 
 **What stops it, and what keeps going**
 
-- **■ Stop** on the Timeline page, or **Stop** on the operator page's timeline line (on any page, by anyone), stops the lights where they are. A timeline also stops when it reaches its end, and when another timeline is started Live (only one is Live at a time; the first one's sound stops on its page).
+- **■ Stop** on the Timeline page, or **Stop** on the operator page's timeline line (on any page, by anyone), stops the timeline and its recording; the lights stay where they are. A timeline also stops when it reaches its end, and when another timeline is started Live (only one is Live at a time; the first one's sound stops on its page).
 - **Go ▸** (from Prepare) and **Back to saved** also stop it, as starting a song does.
-- If a volunteer taps **Blackout**, **Basic lights**, **Next ▸** or a song, or presses **Stop** on the operator page, the lights stop following the timeline and do what that button does, but the **recording keeps playing** on the computer where it was started: cutting the spoken word in the middle of a service is worse than a recording playing on in the dark. The Timeline page there says "The lights were taken over…", and **Lights follow again** starts the lights again from where the recording is. **■ Stop** there silences the sound.
+- If a volunteer taps **Blackout**, **Basic lights**, **Next ▸** or a song, the lights stop following the timeline and do what that button does, but the **recording keeps playing** on the computer where it was started: cutting the spoken word in the middle of a service is worse than a recording playing on in the dark. The Timeline page there says "The lights were taken over…", and **Lights follow again** starts the lights again from where the recording is. **■ Stop** there silences the sound.
 - Flash, Master and Individual lights work on top of a running timeline as always, and do not stop it.
 - If the computer that plays the recording drops off (a Wi-Fi blip, a closed tab), the lights carry on by themselves to the end of the timeline, without sound, so the stage never freezes half way.
 

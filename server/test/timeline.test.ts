@@ -860,6 +860,54 @@ test('server: a timeline started in Blackout takes the stage from there: no Blac
   p.ws.close();
 }));
 
+test('server: the page that plays a live timeline is told why it ended: stop, taken or end', () => withApp(async (app) => {
+  await withTimelines(app, long(), shortB());
+  const owner = await page(app);
+  const other = await page(app);
+  await waitFor(owner.state);
+  const ended = () => owner.seen.filter((m) => m.type === 'timelineEnded');
+  const runOf = () => owner.seen.findLast((m) => m.type === 'result')?.run;
+  const startLong = async () => {
+    assert.equal(await owner.timeline({ type: 'timelineStart', id: 'long', at: 0 }), null);
+    await waitFor(() => other.state()?.timeline?.id === 'long', 2000, 'running');
+    return runOf();
+  };
+  // Stop on the operator page (another page, no run number): 'stop', before the live state says it has gone.
+  let run = await startLong();
+  assert.equal(await other.timeline({ type: 'timelineStop' }), null);
+  await waitFor(() => ended().length === 1, 2000, 'told of the Stop');
+  assert.deepEqual(ended()[0], { type: 'timelineEnded', run, reason: 'stop' });
+  const at = owner.seen.indexOf(ended()[0]);
+  assert.ok(owner.seen.slice(0, at).findLast((m) => m.type === 'state')?.state.timeline, 'the reason comes first');
+  // Blackout, Basic lights, a song, Back to saved and another page's Start take the lights: 'taken'.
+  for (const take of [
+    () => other.send({ type: 'blackout' }),
+    () => other.send({ type: 'safe' }),
+    () => other.send({ type: 'look', id: 'worship' }),
+    () => other.send({ type: 'backToLook' }),
+    () => other.timeline({ type: 'timelineStart', id: 'b', at: 0 }),
+  ]) {
+    const n = ended().length;
+    run = await startLong();
+    assert.equal(await take(), null);
+    await waitFor(() => ended().length === n + 1, 2000, 'told it was taken');
+    assert.deepEqual(ended().at(-1), { type: 'timelineEnded', run, reason: 'taken' });
+  }
+  // The other page's own timeline (b) ends by itself: only that page is told, with 'end'.
+  await waitFor(() => other.seen.some((m) => m.type === 'timelineEnded' && m.reason === 'end'), 3000, 'b to its end');
+  // Its own next Start tells it nothing (it knows); its own Stop says 'stop'.
+  const n = ended().length;
+  await startLong();
+  assert.equal(await owner.timeline({ type: 'timelineStart', id: 'long', at: 10 }), null);
+  await sleep(50);
+  assert.equal(await owner.timeline({ type: 'timelineStop' }), null);
+  await waitFor(() => other.state()?.timeline === null, 2000, 'stopped');
+  await sleep(100);
+  assert.deepEqual(ended().slice(n).map((m) => m.reason), ['stop']);
+  owner.ws.close();
+  other.ws.close();
+}));
+
 test('server: a device (HTTP) Blackout stops it too', () => withApp(async (app) => {
   await withTimelines(app, long());
   const p = await page(app);

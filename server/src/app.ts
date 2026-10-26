@@ -15,7 +15,7 @@ import { z, ZodError } from 'zod';
 import {
   BUILT_IN_PROFILES, Command, OscSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureRunningOrder, isManualCommand,
   applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,  type OflFixture, type Pick, type Scope,
-  BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
+  BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
   pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
 } from '../../packages/shared/src/index.ts';
@@ -217,6 +217,11 @@ export class App {
   private timelineTurn = 0;
   /** A live Start is stopping the live timeline it replaces: no live state is sent for that. */
   private replacingTimeline = false;
+  /**
+   * Why the live timeline is being stopped now, for the page that plays its recording ('stop': ■ Stop on any page;
+   * 'taken': something else took the lights), and a page not to tell (the one whose own Start replaces it).
+   */
+  private liveStopping: { reason: TimelineEndReason; quietFor: WebSocket | null } | null = null;
   /** Numbers every Start (live and Prepare), so a page can tell its own run from a later one. */
   private timelineRuns = 0;
   /** Each page's Prepare timeline, running in its own draft. */
@@ -1117,7 +1122,7 @@ export class App {
       if (msg.prepare) {
         if (prepare && fits(prepare)) prepare.stop();
       } else if (this.liveTimeline && fits(this.liveTimeline.runner)) {
-        this.stopLiveTimeline();
+        this.stopLiveTimeline('stop');
       }
       return null;
     }
@@ -1172,7 +1177,8 @@ export class App {
     // The pages hear of the new one at once, never of "none" in between (a page would take that for Blackout).
     this.replacingTimeline = true;
     try {
-      this.stopLiveTimeline();
+      // Another page's run is taken (its sound plays on until it hears of the new one); this page knows.
+      this.stopLiveTimeline('taken', ws);
     } finally {
       this.replacingTimeline = false;
     }
@@ -1193,6 +1199,15 @@ export class App {
       onStop: (why) => {
         if (this.liveTimeline === entry) this.liveTimeline = null;
         if (why !== 'stopped') this.log(`Timeline "${fresh.name}" ${why === 'end' ? 'came to its end' : 'stopped'}`);
+        // The page that plays the recording hears why, before the live state says the timeline has gone: on 'stop' its
+        // sound stops too, on 'taken' it plays on (Lights follow again), on 'end' nothing changes.
+        const owner = entry.owner;
+        const stopping = this.liveStopping;
+        const reason: TimelineEndReason = why === 'end' || why === 'gone' ? 'end' : why === 'stopped' ? stopping?.reason ?? 'taken' : 'taken';
+        if (owner && owner !== stopping?.quietFor && owner.readyState === owner.OPEN && !this.stopping) {
+          const msg: TimelineEnded = { type: 'timelineEnded', run: entry.runner.run, reason };
+          owner.send(JSON.stringify(msg));
+        }
         this.timelineTimerFits();
         if (!this.replacingTimeline) this.publishState();
       },
@@ -1252,10 +1267,18 @@ export class App {
     return null;
   }
 
-  /** Stop the live timeline where it is (Stop, Blackout, Basic lights, a song, another live Start). */
-  private stopLiveTimeline(): void {
+  /**
+   * Stop the live timeline where it is: 'stop' for ■ Stop, 'taken' for Blackout, Basic lights, a song, Go, Back to saved
+   * or another live Start (the page that plays its recording is told which; never `quietFor`).
+   */
+  private stopLiveTimeline(reason: TimelineEndReason = 'taken', quietFor: WebSocket | null = null): void {
     this.timelineTurn++;
-    this.liveTimeline?.runner.stop();
+    this.liveStopping = { reason, quietFor };
+    try {
+      this.liveTimeline?.runner.stop();
+    } finally {
+      this.liveStopping = null;
+    }
   }
 
   /** The page the live timeline follows has gone (or plays something else now): it goes on by itself. */

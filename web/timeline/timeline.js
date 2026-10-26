@@ -61,8 +61,9 @@ const prep = { on: false, startRef: null, state: null, visual: null };
  * recording's position (an idle page never does: it would take over the live timeline). `confirmed` once the server
  * said yes, with the Start's run `number` (a later Start anywhere has another); `audio` when the recording plays here
  * (else the page counts the time itself from basePos at baseAt); `ended` once the recording played out (the server goes
- * on by itself to the timeline's end); `detached` when Blackout, Basic lights, a song or a Stop elsewhere took the
+ * on by itself to the timeline's end); `detached` when Blackout, Basic lights, a song, Go or Back to saved took the
  * lights: the sound plays on (cutting the spoken word mid-service is worse) and Lights follow again starts them again.
+ * Stop on another page (the operator page's) stops the sound here too.
  * `following`: the Start of Lights follow again is on its way. `recDuration`: the recording's length.
  */
 let run = idleRun();
@@ -250,6 +251,8 @@ function connect() {
       if (!prep.on || prep.startRef !== null) return;
       setPrepare(false, false);
       toast(msg.reason, true);
+    } else if (msg.type === 'timelineEnded') {
+      onTimelineEnded(msg);
     } else if (msg.type === 'result') {
       onResult(msg);
     }
@@ -331,13 +334,24 @@ function onResult(msg) {
   if (msg.error) toast(msg.error, true);
 }
 
+/**
+ * The server says why this page's live run ended, before the live state shows it gone. 'stop' (Stop on another page,
+ * the operator page's): the sound stops too. 'taken' (Blackout, Basic lights, a song, Go, Back to saved) and 'end' are
+ * left to onLiveState: the sound plays on with Lights follow again, or the run ends as it played out.
+ */
+function onTimelineEnded(msg) {
+  if (!run.id || run.prepare || !run.confirmed || run.detached || run.number === null || msg.run !== run.number) return;
+  if (msg.reason === 'stop') endRun(stoppedWords() && 'Stop was pressed on another page: the timeline and its recording stopped.');
+}
+
 /** True when `tl` (a live or draft state's timeline) is this page's own run. */
 const isOurs = (tl) => Boolean(tl && tl.id === run.id && (run.number === null || tl.run === run.number));
 
 /**
  * The live state. The live timeline this page plays isn't there any more: another Start (on any page) replaced it, so
- * the sound stops here; or it came to its end; or Blackout, Basic lights, a song or a Stop elsewhere took the lights,
- * and then the recording plays on and the page offers Lights follow again.
+ * the sound stops here; or it came to its end; or Blackout, Basic lights, a song, Go or Back to saved took the lights,
+ * and then the recording plays on and the page offers Lights follow again (a Stop elsewhere ended it already, with
+ * its sound: onTimelineEnded).
  */
 function onLiveState() {
   const tl = liveState?.timeline ?? null;
