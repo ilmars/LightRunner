@@ -7,7 +7,7 @@ import {
   MAX_BARS, MAX_ZOOM, MIN_BLOCK, MIN_RISE, barsFor, blockMissing, blockSpans, clampEnd, clampScroll, dragBlock, fitZoom, followScroll,
   formatLength, formatRise, formatTime, hitTest, lookFade, markerRows, mixToMono, moveBlock, newBlockId, newBlockStart, newTimeline,
   nextMarkerText, normalisePeaks, parseTime, riseAfterLookChange, rulerStep, rulerTicks, shownRise, slugId, snapTime, timeToX, viewLength,
-  withGroupLayers, xToTime, zoomed,
+  addableGroups, dragIntent, shownLayers, xToTime, zoomed,
 } from '../../web/timeline/model.js';
 
 const near = (a: number, b: number, tol = 1e-9, what = '') => assert.ok(Math.abs(a - b) <= tol, `${what} ${a} is not ${b}`);
@@ -214,7 +214,7 @@ test('dragging the right edge gives the block its own end; onto the next block i
 
 test('moving a block to a time (typed, or the play position) keeps its length and never lands on another block\'s start', () => {
   const blocks = [blk('a', 0), blk('b', 10, 20), blk('c', 40)];
-  assert.deepEqual(moveBlock(blocks, 'b', 30), { start: 30, end: 40 });
+  assert.deepEqual(moveBlock(blocks, 'b', 25), { start: 25, end: 35 });
   assert.deepEqual(moveBlock(blocks, 'c', 12.34), { start: 12.3 });
   assert.deepEqual(moveBlock(blocks, 'c', -4), { start: 0.1 }, 'block a starts at 0: the next tenth');
   assert.deepEqual(moveBlock(blocks, 'b', 40), { start: 40.1, end: 50.1 });
@@ -304,19 +304,38 @@ test('missing references: a deleted colour, effect, look or group, or a block th
   for (const [g, what] of bad) assert.equal(blockMissing(g, what as never, show), true, `${g} ${JSON.stringify(what)}`);
 });
 
-test('layers: a new timeline has one per light group; one made before gets them when opened; removed ones stay removed', () => {
+test('layers: made once with a new timeline; then only its own are shown, in the show\'s order; ＋ Layer offers the rest', () => {
   const t = newTimeline('Intro', [], ['front', 'key']);
   assert.deepEqual(t.layers.map((l) => l.group), [STAGE_LAYER, 'front', 'key']);
   Timeline.parse(t);
-  const old = { layers: [{ group: STAGE_LAYER, blocks: [blk('b1', 0)] }] };
-  assert.equal(withGroupLayers(old, ['front', 'key']), true);
-  assert.deepEqual(old.layers.map((l) => l.group), [STAGE_LAYER, 'front', 'key']);
-  // One whose group layers were laid out (some removed since) is left as it is.
-  const kept = { layers: [{ group: STAGE_LAYER, blocks: [] }, { group: 'key', blocks: [] }] };
-  assert.equal(withGroupLayers(kept, ['front', 'key']), false);
-  assert.deepEqual(kept.layers.map((l) => l.group), [STAGE_LAYER, 'key']);
-  // Without a Whole stage layer it gets one too, first.
-  const bare: { layers: { group: string; blocks: never[] }[] } = { layers: [] };
-  assert.equal(withGroupLayers(bare, ['front']), true);
-  assert.deepEqual(bare.layers.map((l) => l.group), [STAGE_LAYER, 'front']);
+  const groups = [{ id: 'front' }, { id: 'key' }, { id: 'back' }, { id: 'smoke', kind: 'smoke' }];
+  // Its own layers in the show's order (whatever order they were added in), Whole stage first, a gone group's last.
+  const tl = { layers: [{ group: 'key', blocks: [] }, { group: 'gone', blocks: [] }, { group: STAGE_LAYER, blocks: [] }, { group: 'front', blocks: [] }] };
+  assert.deepEqual(shownLayers(tl, groups), [
+    { group: STAGE_LAYER, missing: false }, { group: 'front', missing: false }, { group: 'key', missing: false }, { group: 'gone', missing: true },
+  ]);
+  // Whole stage is always there, even before it has a layer of its own; a removed layer stays removed.
+  assert.deepEqual(shownLayers({ layers: [{ group: 'key' }] }, groups).map((r) => r.group), [STAGE_LAYER, 'key']);
+  // ＋ Layer: the light groups without a layer (one added to the show later too), never a smoke group.
+  assert.deepEqual(addableGroups(tl, groups), ['back']);
+  assert.deepEqual(addableGroups({ layers: [] }, groups), ['front', 'key', 'back']);
+});
+
+test('a finger drags a block only when it moves sideways; up or down it scrolls the page', () => {
+  assert.equal(dragIntent(4, 1, true), null, 'not far enough yet');
+  assert.equal(dragIntent(12, 3, true), 'drag');
+  assert.equal(dragIntent(-12, 5, true), 'drag');
+  assert.equal(dragIntent(6, 14, true), 'scroll');
+  assert.equal(dragIntent(10, 10, true), 'scroll', 'diagonal: the page');
+  assert.equal(dragIntent(6, 0, false), 'drag', 'a mouse drags after 5 px');
+  assert.equal(dragIntent(0, 30, false), null, 'a mouse moving straight down does not drag');
+});
+
+test('a block moved so its own end runs past the next block\'s start lasts until the next block', () => {
+  const blocks = [blk('a', 0), blk('b', 10, 20), blk('c', 40)];
+  const ctx = { targets: [], pxPerSec: 10, length: 100 };
+  assert.deepEqual(dragBlock(blocks, 'b', 'move', 25, ctx), { start: 35 }, 'its end (45) was past c (40)');
+  assert.deepEqual(dragBlock(blocks, 'b', 'move', 15, ctx), { start: 25, end: 35 }, 'still before c: kept');
+  assert.deepEqual(moveBlock(blocks, 'b', 35), { start: 35 });
+  assert.deepEqual(moveBlock(blocks, 'a', 41), { start: 41 });
 });

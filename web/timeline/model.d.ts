@@ -30,7 +30,9 @@ export function viewLength(timeline: { layers: { blocks: { start: number; end?: 
 export function slugId(name: string, taken: Iterable<string>, fallback?: string): string;
 export function newBlockId(timeline: { layers: { blocks: { id: string }[] }[] }): string;
 export function newTimeline(name: string, takenIds: Iterable<string>, groupIds?: string[]): NewTimeline;
-export function withGroupLayers(timeline: { layers: { group: string; blocks: unknown[] }[] }, groupIds: string[]): boolean;
+export function shownLayers(timeline: { layers: { group: string }[] }, groups: { id: string }[]): { group: string; missing: boolean }[];
+export function addableGroups(timeline: { layers: { group: string }[] }, groups: { id: string; kind?: string }[]): string[];
+export function dragIntent(dx: number, dy: number, finger: boolean): 'drag' | 'scroll' | null;
 
 export interface Times { start: number; end?: number }
 export interface Hit { id: string; part: 'start' | 'end' | 'move' }

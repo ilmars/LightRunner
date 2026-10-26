@@ -55,10 +55,15 @@
       <div id="openTools" class="row wrap open-tools" hidden>
         <label class="field name-field"><span class="label">Name</span><input id="nameField" class="ds-field" type="text" maxlength="80" autocomplete="off" spellcheck="false"></label>
         <!-- Sound that reaches the room late (through the mixer or a projector): the lights wait for it. -->
-        <label class="field offset-field" title="Positive: the lights come later than the sound; negative: earlier. From −500 to 500 ms.">
+        <div class="field offset-field" role="group" aria-label="Lights earlier / later" title="Positive: the lights come later than the sound; negative: earlier. From −500 to 500 ms.">
           <span class="label">Lights earlier / later</span>
-          <span class="row"><input id="offsetField" class="ds-field" type="number" inputmode="numeric" step="10" min="-500" max="500"><span class="unit">ms</span></span>
-        </label>
+          <span class="row offset-row">
+            <button id="offsetLess" class="ds-btn ds-btn--quiet step" type="button" aria-label="Lights 10 ms earlier">−</button>
+            <input id="offsetField" class="ds-field" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="Lights earlier or later, in ms">
+            <button id="offsetMore" class="ds-btn ds-btn--quiet step" type="button" aria-label="Lights 10 ms later">+</button>
+            <span class="unit">ms</span>
+          </span>
+        </div>
         <span class="grow"></span>
         <span id="saveNote" class="save-note" role="status"></span>
         <button id="deleteBtn" class="ds-btn ds-btn--danger" type="button">Delete timeline</button>
@@ -99,10 +104,11 @@
       <div class="bar">
         <span class="ds-caps">Recording and layers</span>
         <span id="runNote" class="run-note" role="status"></span>
+        <!-- An edit that could not be saved: said here too, where the person is working. -->
+        <span id="laneSave" class="lane-save" role="alert" hidden></span>
         <span class="grow"></span>
         <button id="markBtn" class="ds-btn ds-btn--quiet" type="button" title="Drop a marker at the play position">◆ Mark here</button>
-        <button id="addBlockBtn" class="ds-btn ds-btn--quiet" type="button" title="Add a block at the play position on the chosen layer">＋ Block</button>
-        <select id="addLayer" class="ds-btn ds-btn--quiet add-layer" aria-label="Add a layer" title="Add back a group's layer"></select>
+        <select id="addLayer" class="ds-btn ds-btn--quiet add-layer" aria-label="Add a layer" title="Add a group's layer"></select>
         <button id="undoBtn" class="ds-btn ds-btn--quiet" type="button" title="Undo the last change to the layers and blocks">Undo</button>
         <div class="zoom" role="group" aria-label="Zoom">
           <button id="zoomOut" type="button" aria-label="Zoom out">−</button>
@@ -122,7 +128,7 @@
           </div>
         </div>
       </div>
-      <p class="legend">Tap the ruler or the waveform to move the play position. Tap a block to choose it, then drag it, or its edges to change when it starts or ends; it snaps to markers and the play position. Tap empty space on a layer, or double-tap anywhere on it, to add a block there. The dark fade at the front of a block is its rise. ◆ Mark here drops a marker at the play position while you listen; markers are notes and do nothing to the lights.</p>
+      <p class="legend">Tap the ruler or the waveform to move the play position. Tap a block to choose it, then drag it, or its edges to change when it starts or ends; it snaps to markers and the play position. Tap empty space on a layer to add a block there, or a layer's ＋ to add one at the play position. The dark fade at the front of a block is its rise. ◆ Mark here drops a marker at the play position while you listen; markers are notes and do nothing to the lights.</p>
     </section>
 
     <!-- The chosen block (or layer): what it does, when it starts, how long it rises, until when. -->

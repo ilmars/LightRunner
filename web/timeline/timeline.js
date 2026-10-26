@@ -9,7 +9,7 @@ import { drawStagePicture, shown } from '/shared/stagedraw.js';
 import {
   MAX_ZOOM, MIN_RISE, barsFor, blockMissing, blockSpans, clampEnd, dragBlock, fitZoom, followScroll, formatLength, formatRise,
   formatTime, hitTest, lookFade, markerRows, mixToMono, moveBlock, newBlockId, newBlockStart, newTimeline, nextMarkerText,
-  normalisePeaks, parseTime, riseAfterLookChange, rulerTicks, shownRise, timeToX, viewLength, withGroupLayers, xToTime, zoomed,
+  addableGroups, dragIntent, normalisePeaks, parseTime, shownLayers, riseAfterLookChange, rulerTicks, shownRise, timeToX, viewLength, xToTime, zoomed,
 } from './model.js';
 
 const $ = (id) => document.getElementById(id);
@@ -157,12 +157,18 @@ $('logout').addEventListener('click', async () => {
 async function load() {
   const [full, list] = await Promise.all([call('GET', '/api/show'), call('GET', '/api/recordings')]);
   show = showParts(full);
-  timelines = full.timelines ?? [];
+  // Edits not saved yet (the server restarted, or the PIN was asked again) are kept and saved now; the rest is the server's.
+  const kept = timelines.filter((t) => dirty.has(t.id) || sending.has(t.id));
+  const fresh = (full.timelines ?? []).map((t) => kept.find((k) => k.id === t.id) ?? t);
+  timelines = [...fresh, ...kept.filter((k) => !fresh.includes(k))];
+  // Undo only for what is still this page's own copy: a snapshot of a timeline read again from the server is stale.
+  undoStack = undoStack.filter((s) => kept.some((k) => k.id === s.id));
   onMac = new Set(list.map((r) => r.id));
   $('main').hidden = false;
   const wanted = decodeURIComponent(location.hash.slice(1));
   open(timelines.some((t) => t.id === wanted) ? wanted : timelines[0]?.id ?? null);
   if (!socket) connect();
+  if (dirty.size) void flushSaves();
 }
 
 /** What the page needs of the show: its groups, looks and colours (the timelines are kept apart, as edited here). */
@@ -220,7 +226,7 @@ function connect() {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'layout') {
       // The layout comes again after every save; the show's names are read again only when they changed.
-      const sign = JSON.stringify([msg.layout.groups, msg.layout.looks]);
+      const sign = JSON.stringify([msg.layout.groups, msg.layout.looks, msg.layout.members]);
       if (layout && sign !== layoutSign) refreshShow();
       layoutSign = sign;
       layout = msg.layout;
@@ -600,8 +606,6 @@ function open(id) {
   openId = id;
   const t = current();
   if (t) history.replaceState(null, '', `#${encodeURIComponent(t.id)}`);
-  // A timeline made before layers could be removed gets a layer for each light group (saved with the next edit).
-  if (t) withGroupLayers(t, lightGroups().map((g) => g.id));
   sel = { group: null, block: null };
   for (const part of ['transport', 'lanesCard', 'blockCard', 'markersCard', 'stageCard', 'openTools']) $(part).hidden = !t;
   $('nameField').value = t?.name ?? '';
@@ -666,14 +670,27 @@ $('nameField').addEventListener('change', () => {
 });
 
 // Lights earlier / later: in milliseconds, −500 to 500 (positive: the lights wait for sound that reaches the room late).
+// Typed (a minus sign of either kind), or − / + by 10 ms (the iPad's number keys have no minus).
+function setOffset(ms) {
+  const t = current();
+  if (!t) return;
+  const v = Math.round(Math.min(500, Math.max(-500, ms)));
+  $('offsetField').value = String(v);
+  if (v !== (t.offsetMs ?? 0)) edit('offset', (tl) => { tl.offsetMs = v; });
+}
 $('offsetField').addEventListener('change', () => {
   const t = current();
   if (!t) return;
-  const v = Number($('offsetField').value);
-  const ms = Number.isFinite(v) && $('offsetField').value.trim() !== '' ? Math.round(Math.min(500, Math.max(-500, v))) : t.offsetMs ?? 0;
-  $('offsetField').value = String(ms);
-  if (ms !== t.offsetMs) edit(null, (tl) => { tl.offsetMs = ms; });
+  const text = $('offsetField').value.trim().replace(/^[−–]/, '-');
+  const v = Number(text);
+  if (text === '' || !Number.isFinite(v)) {
+    $('offsetField').value = String(t.offsetMs ?? 0);
+    return;
+  }
+  setOffset(v);
 });
+$('offsetLess').addEventListener('click', () => setOffset((current()?.offsetMs ?? 0) - 10));
+$('offsetMore').addEventListener('click', () => setOffset((current()?.offsetMs ?? 0) + 10));
 
 $('deleteBtn').addEventListener('click', async () => {
   const t = current();
@@ -701,6 +718,8 @@ $('deleteBtn').addEventListener('click', async () => {
 
 /** Timelines with edits not saved yet. */
 const dirty = new Set();
+/** Timelines being sent now (kept, like the edited ones, if the page reads the show again meanwhile). */
+const sending = new Set();
 let saveTimer = 0;
 let retryTimer = 0;
 let saving = null;
@@ -724,6 +743,7 @@ async function flushSaves() {
   if (!dirty.size) return true;
   const ids = [...dirty];
   dirty.clear();
+  for (const id of ids) sending.add(id);
   let problem = null;
   saving = (async () => {
     for (const id of ids) {
@@ -734,6 +754,8 @@ async function flushSaves() {
       } catch (err) {
         problem = err.message;
         dirty.add(id);
+      } finally {
+        sending.delete(id);
       }
     }
   })();
@@ -752,8 +774,15 @@ async function flushSaves() {
 
 function setSaveNote(text, bad = false) {
   const note = $('saveNote');
+  const was = note.classList.contains('bad');
   note.textContent = text;
   note.classList.toggle('bad', bad);
+  // Said where the person is working too: in the layers' bar while it lasts, and once as a message.
+  const lane = $('laneSave');
+  lane.hidden = !bad;
+  lane.textContent = bad ? `${text.replace(/\.$/, '')}. Your changes are kept here and saved when Light Runner answers.` : '';
+  lane.title = lane.textContent;
+  if (bad && !was) toast(lane.textContent, true);
 }
 
 window.addEventListener('beforeunload', (e) => {
@@ -1002,27 +1031,26 @@ const groupName = (group) => (group === STAGE ? 'Whole stage' : show.groups.find
 const groupGone = (group) => group !== STAGE && !show.groups.some((g) => g.id === group);
 
 /**
- * The layers shown: Whole stage, then each light group that has a layer, in the show's order, then any layer whose group
- * is gone (its blocks are skipped; they can be deleted, or the layer removed).
+ * The layers shown: Whole stage, then the timeline's own group layers in the show's order, then any whose group is gone
+ * (its blocks are skipped; they can be deleted, or the layer removed). Made once with the timeline; ＋ Layer adds more.
  */
 function layerRows(t) {
-  const rows = [{ group: STAGE, name: 'Whole stage', note: 'every group' }];
-  for (const g of lightGroups()) {
-    if (!layerOf(t, g.id)) continue;
-    rows.push({ group: g.id, name: g.name, note: `${g.fixtures.length} ${g.fixtures.length === 1 ? 'light' : 'lights'}` });
-  }
-  for (const layer of t.layers) {
-    if (groupGone(layer.group)) rows.push({ group: layer.group, name: layer.group, note: 'group missing', missing: true });
-  }
-  return rows;
+  return shownLayers(t, show.groups).map(({ group, missing }) => {
+    if (group === STAGE) return { group, name: 'Whole stage', note: 'every group' };
+    if (missing) return { group, name: group, note: 'group missing', missing: true };
+    const g = show.groups.find((x) => x.id === group);
+    return { group, name: g.name, note: `${g.fixtures.length} ${g.fixtures.length === 1 ? 'light' : 'lights'}` };
+  });
 }
 
 function renderLanes() {
   const t = current();
   if (!t) return;
-  const length = viewLength(t);
+  // While a block is dragged the zoom stays as it is (the timeline's length may change under the finger).
+  const dragging = press?.dragging === true;
+  const length = dragging ? press.length : viewLength(t);
   const width = lanes.clientWidth || 600;
-  if (fitted) view = { pxPerSec: fitZoom(length, width), scroll: 0 };
+  if (fitted && !dragging) view = { pxPerSec: fitZoom(length, width), scroll: 0 };
   track.style.width = `${Math.max(width, length * view.pxPerSec)}px`;
   renderRows();
   renderMarkerLines();
@@ -1034,38 +1062,66 @@ function renderLanes() {
   tick();
 }
 
-/** The layer labels and the layers with their blocks (again after every edit, and while a block is dragged). */
+/** The layer labels and the layers with their blocks (again after every edit). */
 function renderRows() {
   const t = current();
   if (!t) return;
-  const length = viewLength(t);
   const recLabel = el('div', 'lane-label rec');
   recLabel.append(el('b', null, 'Recording'), el('small', null, t.recording ? t.recording.name : 'none yet'));
   const labels = [el('div', 'spacer'), recLabel];
   const rows = [];
   for (const row of layerRows(t)) {
-    const isSel = sel.group === row.group;
-    const label = el('button', `lane-label${row.missing ? ' missing' : ''}${isSel ? ' sel' : ''}`);
-    label.type = 'button';
-    label.title = `Choose the ${row.name} layer`;
-    label.append(el('b', null, row.name), el('small', null, row.note));
-    label.addEventListener('click', () => select(row.group, null));
-    labels.push(label);
-    const lane = el('div', `row-lane${isSel && !sel.block ? ' sel' : ''}`);
-    lane.dataset.group = row.group;
-    const spans = blockSpans(layerOf(t, row.group)?.blocks ?? [], length);
-    spans.forEach((span, k) => {
-      lane.append(blockEl(row, span));
-      // The chosen block's edges: handles a finger can hold (44 px), drawn as small grips.
-      if (span.block.id === sel.block) {
-        lane.append(gripEl(span.start, 'start'));
-        if (span.block.end !== undefined || k === spans.length - 1) lane.append(gripEl(span.end, 'end'));
-      }
-    });
-    rows.push(lane);
+    labels.push(labelEl(row));
+    rows.push(laneEl(t, row));
   }
   $('labels').replaceChildren(...labels);
   $('rows').replaceChildren(...rows);
+}
+
+/** One layer drawn again (while its block is dragged: the other layers stay as they are). */
+function renderLane(group) {
+  const t = current();
+  const row = t && layerRows(t).find((r) => r.group === group);
+  const old = rowsEl.querySelector(`.row-lane[data-group="${CSS.escape(group)}"]`);
+  if (!row || !old) return renderRows();
+  old.replaceWith(laneEl(t, row));
+}
+
+/** A layer's name (it chooses the layer) and its ＋ (a block at the play position). */
+function labelEl(row) {
+  const isSel = sel.group === row.group;
+  const label = el('div', `lane-label${row.missing ? ' missing' : ''}${isSel ? ' sel' : ''}`);
+  const name = el('button', 'lane-name');
+  name.type = 'button';
+  name.title = `Choose the ${row.name} layer`;
+  name.append(el('b', null, row.name), el('small', null, row.note));
+  name.addEventListener('click', () => select(row.group, null));
+  label.append(name);
+  if (!row.missing) {
+    const add = el('button', 'lane-add', '＋');
+    add.type = 'button';
+    add.title = `Add a block on ${row.name} at the play position`;
+    add.setAttribute('aria-label', add.title);
+    add.addEventListener('click', () => addBlockAt(row.group, position()));
+    label.append(add);
+  }
+  return label;
+}
+
+function laneEl(t, row) {
+  const isSel = sel.group === row.group;
+  const lane = el('div', `row-lane${isSel && !sel.block ? ' sel' : ''}`);
+  lane.dataset.group = row.group;
+  const spans = blockSpans(layerOf(t, row.group)?.blocks ?? [], press?.dragging ? press.length : viewLength(t));
+  spans.forEach((span, k) => {
+    lane.append(blockEl(row, span));
+    // The chosen block's edges: handles a finger can hold (44 px), drawn as small grips.
+    if (span.block.id === sel.block) {
+      lane.append(gripEl(span.start, 'start'));
+      if (span.block.end !== undefined || k === spans.length - 1) lane.append(gripEl(span.end, 'end'));
+    }
+  });
+  return lane;
 }
 
 function gripEl(t, part) {
@@ -1107,9 +1163,12 @@ function blockEl(row, span) {
  * A colour on a block: a third of it greyed (so a saturated blue or red is quiet), then mixed into the panel's navy at
  * 8 % to 26 % by level, so no block is bright and a lower level looks darker.
  */
-const fillOf = (hex, level = 1) => `color-mix(in srgb, color-mix(in srgb, ${shown(hex)} 66%, #8a93a6) ${Math.round(8 + 18 * Math.min(1, Math.max(0, level)))}%, #141D30)`;
-const NEUTRAL = '#cfd6e3';
-const VOICE = '#B0A6F5';
+const fillOf = (colour, level = 1) => `color-mix(in srgb, color-mix(in srgb, ${shown(colour)} 66%, var(--ds-muted)) ${Math.round(8 + 18 * Math.min(1, Math.max(0, level)))}%, var(--ds-surface))`;
+/** A level, a look without a swatch: the light text tone. Follow the voice with no colour of its own: the muted grey-blue. */
+const NEUTRAL = 'var(--ds-muted-on)';
+const VOICE = 'var(--ds-muted)';
+/** Dark: the deepest ground. */
+const DARK = 'var(--ds-bg-deep)';
 
 const isEffect = (p) => p.layers?.some((l) => l.kind === 'effect');
 /** A group's colours and effects, as its lists on the operator page have them. */
@@ -1152,8 +1211,8 @@ function describeBlock(group, block) {
   const gone = (text) => ({ text, missing: true });
   if (missing && groupGone(group)) return gone('Group missing');
   switch (what.kind) {
-    case 'dark': return { text: 'Dark', fill: '#0b0f18' };
-    case 'full': return { text: 'Everything full', fill: fillOf('#ffd9a8', 1) };
+    case 'dark': return { text: 'Dark', fill: DARK };
+    case 'full': return { text: 'Everything full', fill: fillOf('var(--ds-text)', 1) };
     case 'level': return missing ? gone('Not for Whole stage') : { text: `Level ${pct(what.level)}`, fill: fillOf(NEUTRAL, what.level) };
     case 'look': {
       if (missing) return gone(group === STAGE ? 'Look missing' : 'Look: only on Whole stage');
@@ -1169,7 +1228,8 @@ function describeBlock(group, block) {
     case 'effect': {
       if (missing) return gone(group === STAGE ? 'Not for Whole stage' : 'Effect missing');
       const sw = swatchOf(what.preset);
-      return { text: `${presetOf(what.preset).name} (effect)`, dot: sw, fill: fillOf(sw ?? NEUTRAL, 0.7) };
+      const level = what.level ?? 1;
+      return { text: `${presetOf(what.preset).name} (effect) · ${pct(level)}`, dot: sw, fill: fillOf(sw ?? NEUTRAL, 0.7 * level) };
     }
     case 'follow': {
       if (missing) return gone(group === STAGE ? 'Not for Whole stage' : 'Follow the voice: colour missing');
@@ -1258,7 +1318,6 @@ $('undoBtn').addEventListener('click', undo);
 function updateBlockButtons() {
   const t = current();
   $('undoBtn').disabled = !t || !undoStack.some((s) => s.id === t.id);
-  $('addBlockBtn').disabled = !t || !sel.group || groupGone(sel.group);
 }
 
 /** ＋ Layer: a light group whose layer was removed gets it back. */
@@ -1266,7 +1325,7 @@ function renderLayerMenu() {
   const t = current();
   const menu = $('addLayer');
   if (!t) return;
-  const free = lightGroups().filter((g) => !layerOf(t, g.id));
+  const free = addableGroups(t, show.groups).map((id) => show.groups.find((g) => g.id === id));
   const first = el('option', null, '＋ Layer');
   first.value = '';
   menu.replaceChildren(first, ...free.map((g) => {
@@ -1276,7 +1335,7 @@ function renderLayerMenu() {
   }));
   menu.value = '';
   menu.disabled = !free.length;
-  menu.title = free.length ? 'Add back a group\'s layer' : 'Every group has its layer';
+  menu.title = free.length ? 'Add a group\'s layer' : 'Every group has its layer';
   updateBlockButtons();
 }
 $('addLayer').addEventListener('change', () => {
@@ -1327,10 +1386,6 @@ function addBlockAt(group, at, targets = []) {
   });
 }
 
-$('addBlockBtn').addEventListener('click', () => {
-  if (sel.group) addBlockAt(sel.group, position());
-});
-
 function deleteChosen() {
   const c = chosen();
   if (!c) return;
@@ -1346,8 +1401,8 @@ function deleteChosen() {
 const rowsEl = $('rows');
 /** The press on the layers now: where it began, what it is on, and the drag once it is one. */
 let press = null;
-/** The last tap on a layer (a second one close by soon after adds a block there). */
-let lastTap = null;
+/** A drag's next position waits for the next frame (one redraw a frame, however fast the pointer moves). */
+let dragFrame = 0;
 
 const trackX = (ev) => ev.clientX - track.getBoundingClientRect().left;
 const isFinger = (ev) => ev.pointerType === 'touch' || ev.pointerType === 'pen';
@@ -1387,7 +1442,7 @@ rowsEl.addEventListener('pointerdown', (ev) => {
   const hit = hitTest(spansOf(t, group), x, view.pxPerSec, hitOpts(finger));
   // A finger drags only the chosen block (elsewhere it scrolls the layers); a mouse drags any block.
   const canDrag = Boolean(hit) && !groupGone(group) && (!finger || hit.id === sel.block);
-  press = { id: ev.pointerId, group, x0: ev.clientX, y0: ev.clientY, x, hit, canDrag, finger, moved: false, dragging: false };
+  press = { id: ev.pointerId, group, x0: ev.clientX, y0: ev.clientY, x, hit, canDrag, finger, moved: false, dragging: false, dx: 0 };
   if (canDrag) {
     try {
       rowsEl.setPointerCapture(ev.pointerId);
@@ -1405,27 +1460,38 @@ rowsEl.addEventListener('pointermove', (ev) => {
   }
   if (ev.pointerId !== press.id) return;
   const dx = ev.clientX - press.x0;
+  const dy = ev.clientY - press.y0;
   if (!press.dragging) {
-    if (Math.hypot(dx, ev.clientY - press.y0) > (press.finger ? 10 : 5)) press.moved = true;
-    if (!press.canDrag || Math.abs(dx) < (press.finger ? 10 : 5)) return;
+    if (Math.hypot(dx, dy) > (press.finger ? 10 : 5)) press.moved = true;
+    const intent = press.canDrag ? dragIntent(dx, dy, press.finger) : null;
+    // Up or down first: the page scrolls (the chosen block lets the browser have a vertical swipe).
+    if (intent === 'scroll') press.canDrag = false;
+    if (intent !== 'drag') return;
     startDrag();
+    if (!press.dragging) return;
   }
-  dragTo(dx);
+  press.dx = dx;
+  if (!dragFrame) dragFrame = requestAnimationFrame(applyDrag);
 });
 
 rowsEl.addEventListener('pointerup', (ev) => {
   if (!press || ev.pointerId !== press.id) return;
+  if (press.dragging) {
+    applyDrag();
+    press = null;
+    return endDrag();
+  }
   const p = press;
   press = null;
-  if (p.dragging) return endDrag();
   if (!p.moved) tap(p);
 });
 
 rowsEl.addEventListener('pointercancel', (ev) => {
   if (!press || ev.pointerId !== press.id) return;
-  const p = press;
+  const dragging = press.dragging;
+  if (dragging) applyDrag();
   press = null;
-  if (p.dragging) endDrag();
+  if (dragging) endDrag();
 });
 
 function startDrag() {
@@ -1440,22 +1506,32 @@ function startDrag() {
   press.orig = { start: block.start, end: block.end };
   press.length = viewLength(t);
   press.targets = snapTargets(t, block.id);
-  sel = { group: press.group, block: block.id };
   document.body.classList.add('dragging');
+  if (sel.block !== block.id) {
+    // Chosen by the drag itself (a mouse): every layer once, for the old block's grips and the layer's name.
+    sel = { group: press.group, block: block.id };
+    renderRows();
+    renderDetails();
+  }
 }
 
-function dragTo(dx) {
+/** The block where the pointer has it now: worked out from where it was when the drag began, so snapping never creeps. */
+function applyDrag() {
+  cancelAnimationFrame(dragFrame);
+  dragFrame = 0;
+  if (!press?.dragging) return;
   const t = current();
   const layer = layerOf(t, press.group);
   const block = layer?.blocks.find((b) => b.id === press.hit.id);
   if (!block) return;
-  // Worked out from where the block was when the drag began, so snapping never creeps.
   const blocks = layer.blocks.map((b) => (b === block ? { ...b, start: press.orig.start, end: press.orig.end } : b));
-  const times = dragBlock(blocks, block.id, press.hit.part, dx / view.pxPerSec, { targets: press.targets, pxPerSec: view.pxPerSec, length: press.length });
+  const times = dragBlock(blocks, block.id, press.hit.part, press.dx / view.pxPerSec, { targets: press.targets, pxPerSec: view.pxPerSec, length: press.length });
+  if (times.start === block.start && times.end === block.end) return;
   block.start = times.start;
   if (times.end === undefined) delete block.end;
   else block.end = times.end;
-  renderRows();
+  // Only the dragged layer and the details: the rest of the page stays as it is until the drag ends.
+  renderLane(press.group);
   renderDetails();
 }
 
@@ -1470,16 +1546,15 @@ function endDrag() {
   renderTransport();
 }
 
-/** A tap: on a block, chooses it; on empty space, adds a block there; a second tap close by soon after adds one there too. */
+/** A tap: on a block, chooses it (a second tap or a double-click only chooses it too); on empty space, adds a block there. */
 function tap(p) {
   const t = current();
   if (!t) return;
-  const at = Math.min(viewLength(t), Math.max(0, p.x / view.pxPerSec));
-  const now = performance.now();
-  const again = lastTap && lastTap.group === p.group && now - lastTap.at < 400 && Math.abs(lastTap.x - p.x) < 24;
-  lastTap = again ? null : { group: p.group, x: p.x, at: now };
-  if (again || !p.hit) return addBlockAt(p.group, at, again ? [] : snapTargets(t, null));
-  if (sel.block !== p.hit.id) select(p.group, p.hit.id);
+  if (p.hit) {
+    if (sel.block !== p.hit.id) select(p.group, p.hit.id);
+    return;
+  }
+  addBlockAt(p.group, Math.min(viewLength(t), Math.max(0, p.x / view.pxPerSec)), snapTargets(t, null));
 }
 
 /** With a mouse: the pointer shows what a press would do (move, an edge, add). */
@@ -1598,7 +1673,7 @@ function buildDetails(t, head, body) {
   const c = chosen(t);
   if (!sel.group) {
     head.replaceChildren(el('span', 'ds-caps', 'Block'));
-    body.replaceChildren(el('p', 'hint', 'Tap a block to change it. Tap empty space on a layer, or double-tap anywhere on it, to add a block there; or choose a layer by its name and press ＋ Block to add one at the play position.'));
+    body.replaceChildren(el('p', 'hint', 'Tap a block to change it. Tap empty space on a layer to add a block there, or a layer’s ＋ to add one at the play position.'));
     return;
   }
   const name = groupName(sel.group);
@@ -1668,7 +1743,7 @@ function buildDetails(t, head, body) {
   if (what.kind === 'colour') {
     whatBox.append(dotBox(swatchOf(what.preset)), pick(coloursOf(group), what.preset, 'Deleted colour', (id) => set(null, (b) => { b.what = { ...b.what, preset: id }; }), 'Colour'));
   } else if (what.kind === 'effect') {
-    whatBox.append(dotBox(swatchOf(what.preset)), pick(effectsOf(group), what.preset, 'Deleted effect', (id) => set(null, (b) => { b.what = { kind: 'effect', preset: id, ...(b.what.speed ? { speed: b.what.speed } : {}) }; }), 'Effect'));
+    whatBox.append(dotBox(swatchOf(what.preset)), pick(effectsOf(group), what.preset, 'Deleted effect', (id) => set(null, (b) => { b.what = { ...b.what, kind: 'effect', preset: id }; }), 'Effect'));
   } else if (what.kind === 'look') {
     const look = lookOf(what.look);
     whatBox.append(dotBox(look ? lookSwatch(look) : null), pick(show.looks, what.look, 'Deleted look', (id) => set(null, (b) => {
@@ -1679,8 +1754,8 @@ function buildDetails(t, head, body) {
   }
   parts.push(part('What', whatBox, null, 'wide'));
 
-  if (what.kind === 'colour' || what.kind === 'level') {
-    parts.push(part('Level', numberEl(Math.round(what.level * 100), { min: 0, max: 100, step: 1, unit: '%', label: 'Level' }, (v) => set(null, (b) => { b.what = { ...b.what, level: v / 100 }; }))));
+  if (what.kind === 'colour' || what.kind === 'level' || what.kind === 'effect') {
+    parts.push(part('Level', numberEl(Math.round((what.level ?? 1) * 100), { min: 0, max: 100, step: 1, unit: '%', label: 'Level' }, (v) => set(null, (b) => { b.what = { ...b.what, level: v / 100 }; }))));
   }
   if (what.kind === 'effect') {
     const own = presetOf(what.preset)?.layers?.find((l) => l.kind === 'effect')?.speed;
@@ -1689,7 +1764,8 @@ function buildDetails(t, head, body) {
     for (const s of list) opts.push(option(speedKey(s), speedText(s), speedKey(s) === speedKey(what.speed)));
     parts.push(part('Speed', selectEl(opts, (key) => set(null, (b) => {
       const s = list.find((x) => speedKey(x) === key);
-      b.what = { kind: 'effect', preset: b.what.preset, ...(s ? { speed: s } : {}) };
+      const { speed: _drop, ...rest } = b.what;
+      b.what = s ? { ...rest, speed: s } : rest;
     }), 'Speed')));
   }
   if (what.kind === 'follow') {
@@ -1754,7 +1830,7 @@ function whatFor(kind, group, old) {
     case 'effect': {
       const fx = effectsOf(group);
       const id = old.kind === 'effect' && fx.some((p) => p.id === old.preset) ? old.preset : fx[0]?.id;
-      return id ? { kind, preset: id } : null;
+      return id ? { kind, preset: id, level } : null;
     }
     case 'follow': return { kind, low: 0.1, high: 1, ...(keep ? { preset: keep } : {}) };
     case 'look': {

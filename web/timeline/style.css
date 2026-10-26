@@ -1,7 +1,7 @@
 /* Timeline: the page's own parts, on the shared design system (/shared/theme.css) and the programmer pages'
    frame (/shared/programmer.css). Panels one above the other: the list of timelines, the top bar of the open one
    (Live / Prepare, the play position, Start and Stop), the recording and its layers, the markers, the stage view. */
-:root { --page-max: 1600px; --label-w: 150px; --row-h: 54px; }
+:root { --page-max: 1600px; --label-w: 176px; --row-h: 54px; }
 
 /* ---- The list of timelines ---- */
 .tl-list { display: flex; flex-wrap: wrap; gap: var(--ds-gap-tight); }
@@ -76,12 +76,19 @@ body.prepare .start-btn[aria-pressed="true"] { background: rgba(161, 147, 242, 0
 .lane-label small { color: var(--ds-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lane-label.rec { height: 70px; border-top: 0; }
 .lane-label.missing b { color: var(--ds-warn-text); }
-/* A layer's name chooses the layer (＋ Block, Remove layer). */
-button.lane-label {
-  width: 100%; margin: 0; padding-left: 8px; border: 0; border-top: 1px solid var(--ds-edge); border-radius: 0; background: transparent;
-  color: var(--ds-text); font: inherit; text-align: left; cursor: pointer;
+/* A layer's name chooses the layer (Remove layer); its ＋ adds a block at the play position. */
+.lane-label:not(.rec) { flex-direction: row; align-items: center; gap: 0; padding-right: 0; }
+.lane-name {
+  flex: 1; min-width: 0; height: 100%; margin: 0; padding: 0 4px 0 8px; border: 0; border-radius: 0; background: transparent;
+  color: var(--ds-text); font: inherit; text-align: left; cursor: pointer; display: flex; flex-direction: column; justify-content: center; gap: 1px;
 }
-button.lane-label.sel { background: var(--ds-tile-fill-on); box-shadow: inset 2px 0 0 var(--ds-accent); }
+.lane-add {
+  flex: none; width: 36px; height: 44px; margin-right: 2px; border: 0; border-radius: var(--ds-r-small); background: transparent;
+  color: var(--ds-muted); font: inherit; font-size: 15px; cursor: pointer;
+}
+.lane-add:hover { color: var(--ds-text); }
+.lane-add:active { background: var(--ds-elevated); }
+.lane-label.sel { background: var(--ds-tile-fill-on); box-shadow: inset 2px 0 0 var(--ds-accent); }
 
 /* The lanes scroll sideways (a finger or a trackpad); the ruler and the waveform stay put and are drawn for what is in view. */
 .lanes { position: relative; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: rgba(148, 163, 184, 0.25) transparent; }
@@ -90,7 +97,8 @@ button.lane-label.sel { background: var(--ds-tile-fill-on); box-shadow: inset 2p
 .ruler { height: 24px; cursor: pointer; touch-action: none; }
 .wave { height: 70px; cursor: pointer; }
 .rows { position: relative; }
-/* A finger scrolls the layers sideways; a tap chooses or adds; only the chosen block (and its grips) can be dragged. */
+/* A finger scrolls the layers sideways; a tap chooses or adds; only the chosen block (and its grips) can be dragged sideways
+   (a swipe up or down on them still scrolls the page). */
 .row-lane { position: relative; height: var(--row-h); border-top: 1px solid var(--ds-edge); touch-action: manipulation; }
 .row-lane.sel { background: rgba(67, 137, 232, 0.05); }
 .block {
@@ -102,11 +110,11 @@ button.lane-label.sel { background: var(--ds-tile-fill-on); box-shadow: inset 2p
 .block .label { position: relative; }
 .block .name { display: flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; }
 .block .dot { flex: none; width: 9px; height: 9px; border-radius: 50%; opacity: 0.85; }
-.block.sel { box-shadow: inset 0 0 0 2px var(--ds-accent); touch-action: none; z-index: 2; cursor: grab; }
+.block.sel { box-shadow: inset 0 0 0 2px var(--ds-accent); touch-action: pan-y; z-index: 2; cursor: grab; }
 .block.missing { color: var(--ds-warn-text); box-shadow: inset 0 0 0 1px var(--ds-warn-edge); background: var(--ds-warn-tint); }
 .block.missing.sel { box-shadow: inset 0 0 0 2px var(--ds-warn); }
 /* The chosen block's edges: a 44 px handle each, drawn as a small grip. */
-.grip { position: absolute; top: 7px; width: 44px; height: 40px; margin-left: -22px; z-index: 3; touch-action: none; cursor: ew-resize; }
+.grip { position: absolute; top: 7px; width: 44px; height: 40px; margin-left: -22px; z-index: 3; touch-action: pan-y; cursor: ew-resize; }
 .grip::after { content: ""; position: absolute; left: 19px; top: 11px; width: 6px; height: 18px; border-radius: 3px; background: var(--ds-muted-on); opacity: 0.85; box-shadow: 0 0 0 1px rgba(9, 15, 28, 0.7); }
 body.dragging, body.dragging .block, body.dragging .row-lane { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
 /* The rise: a dark fade at the front of the block. */
@@ -149,7 +157,13 @@ select.add-layer:disabled { opacity: 0.4; }
 
 /* Lights earlier / later, beside the name. */
 .offset-field { flex: 0 0 auto; }
-.offset-field .ds-field { width: 110px; flex: none; }
+.offset-row { gap: 4px; }
+.offset-row .ds-field { width: 84px; flex: none; text-align: center; }
+.offset-row .step { width: 44px; padding: 0; font-size: 18px; }
+.offset-row .unit { margin-left: 4px; }
+
+/* An edit that could not be saved, in the layers' bar. */
+.lane-save { color: var(--ds-warn-text); font-size: 13px; flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- Markers ---- */
 .marker-list { display: flex; flex-direction: column; gap: 6px; }
@@ -178,7 +192,7 @@ body.stage-hidden:not(.prepare) .stage-card { align-self: flex-start; }
 
 /* ---- An iPad, and narrower ---- */
 @media (max-width: 1100px) {
-  :root { --label-w: 120px; }
+  :root { --label-w: 154px; }
   .tname { max-width: 180px; }
   .rec-chip { max-width: 240px; }
 }

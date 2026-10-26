@@ -193,21 +193,37 @@ export function newTimeline(name, takenIds, groupIds = []) {
 }
 
 /**
- * Lays out the layers of a timeline that has none for any group yet (one made before layers could be removed): Whole
- * stage first, then one per group of `groupIds`. A timeline with group layers keeps them as they are (a removed layer
- * stays removed). True when it changed.
+ * The layers the page shows: Whole stage (always), then the timeline's own group layers in the show's group order, then
+ * any whose group is gone from the show (`missing`: its blocks are skipped). A removed layer isn't there.
+ * @param {{ layers: { group: string }[] }} timeline
+ * @param {{ id: string }[]} groups the show's groups, in order
+ * @returns {{ group: string, missing: boolean }[]}
  */
-export function withGroupLayers(timeline, groupIds) {
-  let changed = false;
-  if (!timeline.layers.some((l) => l.group === STAGE)) {
-    timeline.layers.unshift({ group: STAGE, blocks: [] });
-    changed = true;
+export function shownLayers(timeline, groups) {
+  const has = new Set(timeline.layers.map((l) => l.group));
+  const rows = [{ group: STAGE, missing: false }];
+  for (const g of groups) if (has.has(g.id)) rows.push({ group: g.id, missing: false });
+  for (const l of timeline.layers) {
+    if (l.group !== STAGE && !groups.some((g) => g.id === l.group)) rows.push({ group: l.group, missing: true });
   }
-  if (!timeline.layers.some((l) => l.group !== STAGE)) {
-    for (const group of groupIds) timeline.layers.push({ group, blocks: [] });
-    changed ||= groupIds.length > 0;
-  }
-  return changed;
+  return rows;
+}
+
+/** The light groups ＋ Layer can add: those without a layer (one added to the show later too). Never a smoke group. */
+export function addableGroups(timeline, groups) {
+  const has = new Set(timeline.layers.map((l) => l.group));
+  return groups.filter((g) => g.kind !== 'smoke' && !has.has(g.id)).map((g) => g.id);
+}
+
+/**
+ * Whether a press that moved (dx, dy) pixels is a drag of a block: a finger only once it went 10 px and more sideways
+ * than up or down (otherwise it is the page scrolling: 'scroll'); a mouse after 5 px sideways. Null: not yet.
+ */
+export function dragIntent(dx, dy, finger) {
+  const ax = Math.abs(dx), ay = Math.abs(dy);
+  if (!finger) return ax >= 5 ? 'drag' : null;
+  if (Math.max(ax, ay) < 10) return null;
+  return ax > ay ? 'drag' : 'scroll';
 }
 
 // ---- Editing blocks ----
@@ -268,6 +284,13 @@ function freeStart(blocks, id, start) {
   return s;
 }
 
+/** A moved block's own end, or undefined (until the next block) when it now runs onto the next block's start. */
+function endAfterMove(blocks, id, start, end) {
+  if (end === undefined) return undefined;
+  const next = blocks.filter((b) => b.id !== id && b.start > start).sort((a, b) => a.start - b.start)[0];
+  return next && end >= next.start - 1e-6 ? undefined : end;
+}
+
 /** The block as `{ start, end? }` with a start and maybe an end. */
 const timesOf = (start, end) => (end === undefined ? { start: round6(start) } : { start: round6(start), end: round6(end) });
 
@@ -309,7 +332,7 @@ export function dragBlock(blocks, id, part, dt, ctx) {
     }
     start = Math.min(Math.max(0, start), Math.max(0, ctx.length - MIN_BLOCK));
     start = freeStart(blocks, id, round6(start));
-    return timesOf(start, len === null ? undefined : start + len);
+    return timesOf(start, endAfterMove(blocks, id, start, len === null ? undefined : start + len));
   }
   if (part === 'start') {
     const low = prev ? prev.start + MIN_BLOCK : 0;
@@ -326,7 +349,7 @@ export function dragBlock(blocks, id, part, dt, ctx) {
 export function moveBlock(blocks, id, t) {
   const { block } = placeOf(blocks, id);
   const start = freeStart(blocks, id, Math.max(0, tenth(t)));
-  return timesOf(start, block.end === undefined ? undefined : start + (block.end - block.start));
+  return timesOf(start, endAfterMove(blocks, id, start, block.end === undefined ? undefined : start + (block.end - block.start)));
 }
 
 /**
