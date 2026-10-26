@@ -227,21 +227,38 @@ export function softShareAt(p, x, y) {
 }
 
 /**
- * Pools and washes that overlap would add up to a bright floor (an All white look, a long bar's pools). Each light's
- * strength `a` is made fainter (in place) by how much light falls where it is strongest, so overlapping light grows
- * only a little brighter (about the fifth root of how many overlap) and never gets near white. A light alone keeps
- * its strength. Returns `lights`.
+ * Where soft lights (pools and washes) overlap, worked out once for a picture: for each light, the others that reach
+ * its strongest point and how much of each falls there (`[index, share]`, share 0..1). See sharedStrengths.
  */
-export function shareSoftLight(lights) {
+export function softLightOverlaps(lights) {
   const peak = (p) => (p.sprite === 'arch' ? [p.x + p.w / 2, p.y + p.h] : [p.x + p.w / 2, p.y + p.h / 2]);
-  const sums = lights.map((p) => {
+  return lights.map((p, i) => {
     const [x, y] = peak(p);
-    return lights.reduce((sum, q) => sum + q.a * softShareAt(q, x, y), 0);
+    const out = [];
+    lights.forEach((q, j) => {
+      if (j === i) return;
+      const share = softShareAt(q, x, y);
+      if (share > 0) out.push([j, share]);
+    });
+    return out;
   });
-  lights.forEach((p, i) => {
-    if (sums[i] > p.a) p.a *= (p.a / sums[i]) ** 0.8;
-  });
-  return lights;
+}
+
+/**
+ * How strongly each soft light is drawn now. Overlapping light that is lit would add up to a bright floor (an All
+ * white look, a long bar's pools), so each light is made fainter by how much lit light falls where it is strongest:
+ * overlapping lit light grows only a little brighter (about the fifth root of how many overlap) and never gets near
+ * white. A light whose neighbours are dark keeps its own strength. `lit[i]` is how bright light i is now (0..1, its
+ * colour's brightest channel); `overlaps` from softLightOverlaps; `out` (optional) is filled and returned.
+ */
+export function sharedStrengths(lights, overlaps, lit, out = new Array(lights.length)) {
+  for (let i = 0; i < lights.length; i++) {
+    const own = lights[i].a * (lit[i] || 0);
+    let sum = own;
+    for (const [j, share] of overlaps[i]) sum += lights[j].a * (lit[j] || 0) * share;
+    out[i] = own > 0 && sum > own ? lights[i].a * (own / sum) ** 0.8 : lights[i].a;
+  }
+  return out;
 }
 
 // ---- The view each browser shows, and the size of its stage view ----

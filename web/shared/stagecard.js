@@ -70,7 +70,7 @@ export function stageViewSwitch(wrap, onChange) {
   });
   let current = storedStageView();
   // The styles show the chosen one (data-on). As one button (a small picture) it is named for what a tap does
-  // ("Switch to from the audience"); as two, each is named for its view and the chosen one is pressed.
+  // ("Show from the audience"); as two, each is named for its view and the chosen one is pressed.
   const paint = () => {
     for (const b of buttons) b.dataset.on = String(b.dataset.view === current);
     const off = buttons.find((b) => b.dataset.view !== current);
@@ -79,7 +79,7 @@ export function stageViewSwitch(wrap, onChange) {
       const other = buttons.find((o) => o !== b);
       if (compact) {
         b.removeAttribute('aria-pressed');
-        b.setAttribute('aria-label', `Switch to ${other.dataset.long.toLowerCase()}`);
+        b.setAttribute('aria-label', `Show ${other.dataset.long.toLowerCase()}`);
         b.title = `${b.dataset.title}. Tap for ${other.dataset.long.toLowerCase()}`;
       } else {
         b.setAttribute('aria-pressed', String(b.dataset.view === current));

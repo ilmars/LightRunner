@@ -44,4 +44,5 @@ export function fitStageLength(want: number, min: number, max: number): number;
 
 export interface SoftLight { sprite: string; x: number; y: number; w: number; h: number; a: number }
 export function softShareAt(p: SoftLight, x: number, y: number): number;
-export function shareSoftLight<T extends SoftLight>(lights: T[]): T[];
+export function softLightOverlaps(lights: SoftLight[]): [number, number][][];
+export function sharedStrengths(lights: SoftLight[], overlaps: [number, number][][], lit: ArrayLike<number>, out?: number[]): number[];

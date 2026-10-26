@@ -11,7 +11,7 @@ import { operatorLayout } from '../src/layout.ts';
 import { copyOf } from '../../web/patch/types.js';
 import { PLAN_ASPECT, barEnds } from '../../web/shared/stage.js';
 import {
-  fitStageLength, frontPlacement, frontScene, hangsOf, isPanel, isStrip, ledLayout, ledPoints, panelGrid, poolOf, shareSoftLight, softShareAt,
+  fitStageLength, frontPlacement, frontScene, hangsOf, isPanel, isStrip, ledLayout, ledPoints, panelGrid, poolOf, sharedStrengths, softLightOverlaps, softShareAt,
   stageSizeFrom, stageSizeWith, stageViewFrom,
 } from '../../web/shared/stageview.js';
 
@@ -426,18 +426,41 @@ test('a soft light is strongest at its middle (a wash: at the foot of the wall) 
   assert.equal(softShareAt(wash, 50, 260), 0, 'nothing under the floor line');
 });
 
-test('overlapping pools share their light: All white never adds up to a bright floor, a lone pool keeps its strength', () => {
-  const alone = shareSoftLight([{ sprite: 'round', x: 0, y: 0, w: 40, h: 30, a: 0.38 }]);
-  near(alone[0].a, 0.38, 'alone');
-  const apart = shareSoftLight([{ sprite: 'round', x: 0, y: 0, w: 40, h: 30, a: 0.3 }, { sprite: 'round', x: 100, y: 0, w: 40, h: 30, a: 0.3 }]);
-  assert.deepEqual(apart.map((p) => p.a), [0.3, 0.3], 'apart: untouched');
-  // Twelve pools on top of each other at 0.34 would add up to 4; shared, they stay under about 0.34 * 12^0.2 (0.56).
-  const stack = shareSoftLight(Array.from({ length: 12 }, () => ({ sprite: 'round', x: 0, y: 0, w: 40, h: 30, a: 0.34 })));
-  const total = stack.reduce((sum, p) => sum + p.a, 0);
+test('overlapping lit pools share their light: All white never adds up to a bright floor', () => {
+  const lone = [{ sprite: 'round', x: 0, y: 0, w: 40, h: 30, a: 0.38 }];
+  near(sharedStrengths(lone, softLightOverlaps(lone), [1])[0], 0.38, 'alone');
+  const apart = [{ sprite: 'round', x: 0, y: 0, w: 40, h: 30, a: 0.3 }, { sprite: 'round', x: 100, y: 0, w: 40, h: 30, a: 0.3 }];
+  assert.deepEqual(sharedStrengths(apart, softLightOverlaps(apart), [1, 1]), [0.3, 0.3], 'apart: untouched');
+  // Twelve pools on one spot, all lit, at 0.34 would add up to 4; shared, they stay under about 0.34 * 12^0.2 (0.56).
+  const stack = Array.from({ length: 12 }, () => ({ sprite: 'round', x: 0, y: 0, w: 40, h: 30, a: 0.34 }));
+  const all = sharedStrengths(stack, softLightOverlaps(stack), stack.map(() => 1));
+  const total = all.reduce((sum, a) => sum + a, 0);
   assert.ok(total < 0.6, `the stack adds up to ${total}`);
   assert.ok(total > 0.34, 'but a little brighter than one');
-  // Washes side by side up a wall (the church's background bars): the sum at the foot stays dim.
-  const washes = shareSoftLight(Array.from({ length: 32 }, (_, k) => ({ sprite: 'arch', x: k * 18 - 54, y: 0, w: 108, h: 190, a: 0.3 })));
-  const atFoot = (x: number) => washes.reduce((sum, p) => sum + p.a * softShareAt(p, x, 190), 0);
+  // Washes side by side up a wall (the church's background bars), all lit: the sum at the foot stays dim.
+  const washes = Array.from({ length: 32 }, (_, k) => ({ sprite: 'arch', x: k * 18 - 54, y: 0, w: 108, h: 190, a: 0.3 }));
+  const strong = sharedStrengths(washes, softLightOverlaps(washes), washes.map(() => 1));
+  const atFoot = (x: number) => washes.reduce((sum, p, i) => sum + strong[i] * softShareAt(p, x, 190), 0);
   for (const x of [100, 250, 400]) assert.ok(atFoot(x) < 0.5, `the foot of the wall at ${x}: ${atFoot(x)}`);
+});
+
+test('a lit pool among dark ones keeps its own strength; dimmer neighbours share less', () => {
+  // A key light's pool under the background bars' pools: only the key light is on.
+  const pools = [
+    { sprite: 'round', x: 40, y: 0, w: 60, h: 40, a: 0.42 },
+    ...Array.from({ length: 6 }, (_, k) => ({ sprite: 'round', x: k * 25, y: 5, w: 40, h: 30, a: 0.3 })),
+  ];
+  const overlaps = softLightOverlaps(pools);
+  assert.ok(overlaps[0].length > 0, 'they do overlap');
+  const lit = [1, 0, 0, 0, 0, 0, 0];
+  near(sharedStrengths(pools, overlaps, lit)[0], 0.42, 'dark neighbours take nothing');
+  const allOn = sharedStrengths(pools, overlaps, pools.map(() => 1));
+  assert.ok(allOn[0] < 0.42, 'all on: shared');
+  const halfOn = sharedStrengths(pools, overlaps, [1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
+  assert.ok(halfOn[0] < 0.42 && halfOn[0] > allOn[0], 'neighbours at half share less than at full');
+  // A light that is off: its strength doesn't matter, and nothing breaks.
+  assert.ok(sharedStrengths(pools, overlaps, [0, 1, 1, 1, 1, 1, 1]).every((a) => Number.isFinite(a) && a > 0));
+  // The answer goes into `out` when one is given.
+  const out = new Array(pools.length);
+  assert.equal(sharedStrengths(pools, overlaps, lit, out), out);
 });

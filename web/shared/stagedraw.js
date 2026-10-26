@@ -12,7 +12,9 @@
 // gradients per frame, into a small canvas that is then stretched over the picture.
 
 import { barAxis, barEnds, beamCone, outlineCells } from './stage.js';
-import { frontPlacement, frontScene, hangsOf, isStrip, ledLayout, ledPoints, panelGrid, poolOf, shareSoftLight } from './stageview.js';
+import {
+  frontPlacement, frontScene, hangsOf, isStrip, ledLayout, ledPoints, panelGrid, poolOf, sharedStrengths, softLightOverlaps,
+} from './stageview.js';
 
 /**
  * How a light's colour is drawn on screen. Whites (light colours with little
@@ -197,6 +199,10 @@ function paint(ctx, scene, layout, visual, smokeLevel) {
 
   // Light on the floor and the wall, added together as light is. Soft light needs no sharpness: it is painted into a
   // small canvas and stretched over the picture in one go (far less to fill than painting it at full size).
+  // How strongly each pool and wash is drawn now: overlapping ones share their light only where their neighbours are lit.
+  const { soft, lit, strengths } = scene;
+  for (const item of items) for (const p of item.under) lit[p.i] = litOf(colourOf(item, p.seg));
+  sharedStrengths(soft, scene.overlaps, lit, strengths);
   const lights = (pass, list) => {
     const light = scene.light[pass], lg = light.g;
     lg.save();
@@ -206,7 +212,10 @@ function paint(ctx, scene, layout, visual, smokeLevel) {
     lg.globalCompositeOperation = 'lighter';
     let any = false;
     for (const item of list) {
-      for (const p of item[pass]) any = addLight(lg, sp[p.sprite], p.x, p.y, p.w, p.h, colourOf(item, p.seg), p.a) || any;
+      for (const p of item[pass]) {
+        const a = pass === 'under' ? strengths[p.i] : p.a;
+        any = addLight(lg, sp[p.sprite], p.x, p.y, p.w, p.h, colourOf(item, p.seg), a) || any;
+      }
     }
     lg.globalAlpha = 1;
     if (!any) return;
@@ -341,9 +350,13 @@ function buildScene(view, w, h, layout, scale, old) {
   // and an eighth on a big one; beams and LED glows at twice that.
   const k = w * h > 200_000 ? 0.125 : 0.25;
   const light = { under: layer(w, h, k, old?.light.under), over: layer(w, h, 2 * k, old?.light.over) };
-  shareSoftLight(items.flatMap((item) => item.under));
+  // Pools and washes that overlap share their light when lit (sharedStrengths, each picture): where each one reaches.
+  const soft = items.flatMap((item) => item.under);
+  soft.forEach((p, i) => (p.i = i));
+  const overlaps = softLightOverlaps(soft);
   return {
-    w, h, back: back.c, bodies: bodies.c, backLayer: back, bodiesLayer: bodies, light, items,
+    w, h, back: back.c, bodies: bodies.c, backLayer: back, bodiesLayer: bodies, light, items, soft, overlaps,
+    lit: new Float32Array(soft.length), strengths: new Array(soft.length),
     covers: items.filter((i) => i.cover).map((i) => i.cover),
     behind: items.filter((i) => i.behind), inFront: items.filter((i) => !i.behind),
   };
