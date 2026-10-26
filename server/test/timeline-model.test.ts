@@ -4,8 +4,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Timeline, STAGE_LAYER } from '../../packages/shared/src/index.ts';
 import {
-  MAX_BARS, MAX_ZOOM, barsFor, blockSpans, clampScroll, fitZoom, followScroll, formatLength, formatTime, markerRows, mixToMono,
-  newBlockId, newTimeline, nextMarkerText, normalisePeaks, parseTime, rulerStep, rulerTicks, slugId, timeToX, viewLength, xToTime, zoomed,
+  MAX_BARS, MAX_ZOOM, MIN_BLOCK, MIN_RISE, barsFor, blockMissing, blockSpans, clampEnd, clampScroll, dragBlock, fitZoom, followScroll,
+  formatLength, formatRise, formatTime, hitTest, lookFade, markerRows, mixToMono, moveBlock, newBlockId, newBlockStart, newTimeline,
+  nextMarkerText, normalisePeaks, parseTime, riseAfterLookChange, rulerStep, rulerTicks, shownRise, slugId, snapTime, timeToX, viewLength,
+  withGroupLayers, xToTime, zoomed,
 } from '../../web/timeline/model.js';
 
 const near = (a: number, b: number, tol = 1e-9, what = '') => assert.ok(Math.abs(a - b) <= tol, `${what} ${a} is not ${b}`);
@@ -151,4 +153,170 @@ test('audio: channels are mixed to mono, peaks scaled to the loudest, at most 40
   assert.equal(barsFor(10), 200);
   assert.equal(barsFor(15 * 60), MAX_BARS);
   assert.equal(barsFor(0), 1);
+});
+
+// ---- Editing blocks ----
+
+const blk = (id: string, start: number, end?: number) => ({ id, start, ...(end !== undefined ? { end } : {}), rise: 0, what: { kind: 'dark' as const } });
+
+test('snapping: to a target (a marker, the playhead, another block) within 12 px, else to a tenth of a second', () => {
+  // 10 px a second: 12 px is 1.2 s.
+  assert.deepEqual(snapTime(12.34, [], 10), { t: 12.3, to: null });
+  assert.deepEqual(snapTime(12.34, [13], 10), { t: 13, to: 13 });
+  assert.deepEqual(snapTime(12.34, [14], 10), { t: 12.3, to: null }, '1.66 s away is 16.6 px: too far');
+  assert.deepEqual(snapTime(12.34, [11.5, 12.9], 10), { t: 12.9, to: 12.9 }, 'the closest one');
+  // Zoomed in (200 px a second) a marker 0.1 s away is 20 px: no snap, the tenth.
+  assert.deepEqual(snapTime(12.34, [12.44], 200), { t: 12.3, to: null });
+  assert.equal(snapTime(-3, [], 10).t, 0, 'never before 0');
+  assert.equal(snapTime(0.04, [], 10).t, 0);
+});
+
+test('dragging a block moves it whole, snapped, never before 0 nor past the end', () => {
+  const blocks = [blk('a', 0), blk('b', 10, 20), blk('c', 40)];
+  const ctx = { targets: [], pxPerSec: 10, length: 100 };
+  assert.deepEqual(dragBlock(blocks, 'b', 'move', 2.04, ctx), { start: 12, end: 22 }, 'its length is kept');
+  assert.deepEqual(dragBlock(blocks, 'b', 'move', -50, ctx), { start: 0.1, end: 10.1 }, 'never before 0, never on another block\'s start');
+  assert.deepEqual(dragBlock(blocks, 'c', 'move', 3.33, ctx), { start: 43.3 }, '"until the next block" stays so');
+  // The end lands near a marker: the block moves so its end is on it.
+  assert.deepEqual(dragBlock(blocks, 'b', 'move', 4.5, { ...ctx, targets: [25] }), { start: 15, end: 25 });
+  // The start is nearer a marker than the end is: the start goes there.
+  assert.deepEqual(dragBlock(blocks, 'b', 'move', 4.5, { ...ctx, targets: [14.8, 25.5] }), { start: 14.8, end: 24.8 });
+  assert.deepEqual(dragBlock(blocks, 'c', 'move', 500, ctx), { start: 100 - MIN_BLOCK });
+});
+
+test('dragging the left edge changes the start only, between the block before and the block\'s end', () => {
+  const blocks = [blk('a', 0), blk('b', 10, 20), blk('c', 40)];
+  const ctx = { targets: [], pxPerSec: 10, length: 100 };
+  assert.deepEqual(dragBlock(blocks, 'b', 'start', 3.06, ctx), { start: 13.1, end: 20 });
+  assert.deepEqual(dragBlock(blocks, 'b', 'start', 30, ctx), { start: 20 - MIN_BLOCK, end: 20 }, 'at least MIN_BLOCK long');
+  assert.deepEqual(dragBlock(blocks, 'b', 'start', -30, ctx), { start: MIN_BLOCK, end: 20 }, 'never over the block before');
+  assert.deepEqual(dragBlock(blocks, 'a', 'start', -5, ctx), { start: 0 }, 'never before 0');
+  assert.deepEqual(dragBlock(blocks, 'a', 'start', 30, ctx), { start: 10 - MIN_BLOCK }, 'until the next block: up to MIN_BLOCK before it');
+  assert.deepEqual(dragBlock(blocks, 'b', 'start', 1.1, { ...ctx, targets: [11] }), { start: 11, end: 20 }, 'snaps to a marker');
+});
+
+test('dragging the right edge gives the block its own end; onto the next block it is "until the next block" again', () => {
+  const blocks = [blk('a', 0), blk('b', 10, 20), blk('c', 40)];
+  const ctx = { targets: [], pxPerSec: 10, length: 100 };
+  assert.deepEqual(dragBlock(blocks, 'a', 'end', -3.04, ctx), { start: 0, end: 7 }, 'from where the next block starts (10) back');
+  assert.deepEqual(dragBlock(blocks, 'b', 'end', 5.02, ctx), { start: 10, end: 25 });
+  assert.deepEqual(dragBlock(blocks, 'b', 'end', -50, ctx), { start: 10, end: 10 + MIN_BLOCK }, 'at least MIN_BLOCK long');
+  assert.deepEqual(dragBlock(blocks, 'b', 'end', 25, ctx), { start: 10 }, 'on or past the next block: until the next block');
+  assert.deepEqual(dragBlock(blocks, 'c', 'end', -20.01, ctx), { start: 40, end: 80 }, 'the last block: from the end of the timeline');
+  assert.deepEqual(dragBlock(blocks, 'c', 'end', 5, ctx), { start: 40 }, 'to the end: until the end');
+  assert.deepEqual(dragBlock(blocks, 'b', 'end', 2.9, { ...ctx, targets: [23] }), { start: 10, end: 23 }, 'snaps to a marker');
+  // A typed end: the same rule, but past the end of the recording is allowed.
+  assert.equal(clampEnd(blocks, 'b', 30), 30);
+  assert.equal(clampEnd(blocks, 'b', 45), undefined);
+  assert.equal(clampEnd(blocks, 'b', 3), 10 + MIN_BLOCK);
+  assert.equal(clampEnd(blocks, 'c', 120), 120);
+});
+
+test('moving a block to a time (typed, or the play position) keeps its length and never lands on another block\'s start', () => {
+  const blocks = [blk('a', 0), blk('b', 10, 20), blk('c', 40)];
+  assert.deepEqual(moveBlock(blocks, 'b', 30), { start: 30, end: 40 });
+  assert.deepEqual(moveBlock(blocks, 'c', 12.34), { start: 12.3 });
+  assert.deepEqual(moveBlock(blocks, 'c', -4), { start: 0.1 }, 'block a starts at 0: the next tenth');
+  assert.deepEqual(moveBlock(blocks, 'b', 40), { start: 40.1, end: 50.1 });
+});
+
+test('hit-testing: a block\'s edges, its body, or empty space', () => {
+  // 10 px a second: b is 100 to 200 px, c 400 to 1000 px.
+  const spans = [{ id: 'b', start: 10, end: 20, endEdge: true }, { id: 'c', start: 40, end: 100, endEdge: true }];
+  const mouse = { selected: null, handlePx: 12, selectedHandlePx: 44 };
+  assert.deepEqual(hitTest(spans, 150, 10, mouse), { id: 'b', part: 'move' });
+  assert.deepEqual(hitTest(spans, 103, 10, mouse), { id: 'b', part: 'start' });
+  assert.deepEqual(hitTest(spans, 95, 10, mouse), { id: 'b', part: 'start' }, 'a little outside counts too');
+  assert.deepEqual(hitTest(spans, 198, 10, mouse), { id: 'b', part: 'end' });
+  assert.equal(hitTest(spans, 300, 10, mouse), null, 'empty space');
+  assert.equal(hitTest(spans, 80, 10, mouse), null);
+  // Selected: 44 px handles, 22 px each side of the edge.
+  assert.deepEqual(hitTest(spans, 80, 10, { ...mouse, selected: 'b' }), { id: 'b', part: 'start' });
+  assert.deepEqual(hitTest(spans, 220, 10, { ...mouse, selected: 'b' }), { id: 'b', part: 'end' });
+  // A narrow block keeps a body to grab: the handles reach at most a third of the way in.
+  const narrow = [{ id: 'n', start: 10, end: 13, endEdge: true }];
+  assert.deepEqual(hitTest(narrow, 115, 10, { ...mouse, selected: 'n' }), { id: 'n', part: 'move' });
+  assert.deepEqual(hitTest(narrow, 108, 10, { ...mouse, selected: 'n' }), { id: 'n', part: 'start' });
+  // A finger grabs only the selected block's edges (elsewhere a drag scrolls the lanes).
+  assert.deepEqual(hitTest(spans, 103, 10, { ...mouse, handlePx: 0 }), { id: 'b', part: 'move' });
+  // An end that is only where the next block starts has no handle: the next block's start is there.
+  const joined = [{ id: 'a', start: 0, end: 10, endEdge: false }, { id: 'b', start: 10, end: 20, endEdge: true }];
+  assert.deepEqual(hitTest(joined, 99, 10, mouse), { id: 'b', part: 'start' });
+  // Two edges in reach: the closer one.
+  const close = [{ id: 'a', start: 0, end: 9.9, endEdge: true }, { id: 'b', start: 10, end: 20, endEdge: true }];
+  assert.deepEqual(hitTest(close, 98, 10, mouse), { id: 'a', part: 'end' });
+  assert.deepEqual(hitTest(close, 100.5, 10, mouse), { id: 'b', part: 'start' });
+});
+
+test('a new block goes where it was asked for, snapped, but not on a block that starts there', () => {
+  const blocks = [blk('a', 0), blk('b', 10, 20)];
+  assert.equal(newBlockStart(blocks, 31.27, [], 10), 31.3);
+  assert.equal(newBlockStart(blocks, 31.27, [32], 10), 32);
+  assert.equal(newBlockStart(blocks, 10.2, [], 10), null, 'b starts there');
+  assert.equal(newBlockStart(blocks, 9.4, [], 10), 9.4, 'MIN_BLOCK before b is fine');
+  assert.equal(newBlockStart([], 0, [], 10), 0);
+});
+
+test('rise: at least 1.5 s is shown (the runner never fades faster); a look block rises over the look\'s own fade', () => {
+  assert.equal(MIN_RISE, 1.5);
+  assert.equal(shownRise(0), 1.5);
+  assert.equal(shownRise(20), 20);
+  assert.equal(formatRise(0), '1.5 s');
+  assert.equal(formatRise(20), '20 s');
+  assert.equal(formatRise(2.25), '2.3 s');
+  const presets = [{ id: 'warm', fade: 3 }, { id: 'blue', fade: 8 }];
+  assert.equal(lookFade({ groups: [{ group: 'a', preset: 'warm' }, { group: 'b', preset: 'blue' }] }, presets), 8, 'the slowest of its groups');
+  assert.equal(lookFade({ groups: [{ group: 'a', preset: 'warm', fade: 12 }] }, presets), 12, 'the look\'s own fade for a group wins');
+  assert.equal(lookFade({ groups: [{ group: 'a', preset: 'gone' }] }, presets), 3, 'nothing to go by: 3 s');
+  assert.equal(lookFade(undefined, presets), 3);
+  // Another look: the rise follows unless it was set by hand.
+  assert.equal(riseAfterLookChange(8, 8, 3), 3);
+  assert.equal(riseAfterLookChange(20, 8, 3), 20);
+});
+
+test('missing references: a deleted colour, effect, look or group, or a block that does not fit its layer', () => {
+  const show = {
+    groups: [{ id: 'front' }, { id: 'key' }],
+    presets: [{ id: 'warm', group: 'front' }, { id: 'blue', group: 'key' }],
+    looks: [{ id: 'worship' }],
+  };
+  const ok: [string, unknown][] = [
+    ['front', { kind: 'colour', preset: 'warm', level: 1 }],
+    ['front', { kind: 'level', level: 0.5 }],
+    ['front', { kind: 'effect', preset: 'warm' }],
+    ['front', { kind: 'follow', low: 0.1, high: 1 }],
+    ['front', { kind: 'follow', low: 0.1, high: 1, preset: 'warm' }],
+    [STAGE_LAYER, { kind: 'look', look: 'worship' }],
+    [STAGE_LAYER, { kind: 'dark' }],
+    [STAGE_LAYER, { kind: 'full' }],
+  ];
+  for (const [g, what] of ok) assert.equal(blockMissing(g, what as never, show), false, JSON.stringify(what));
+  const bad: [string, unknown][] = [
+    ['front', { kind: 'colour', preset: 'gone', level: 1 }],
+    ['front', { kind: 'colour', preset: 'blue', level: 1 }],
+    ['front', { kind: 'effect', preset: 'gone' }],
+    ['front', { kind: 'follow', low: 0, high: 1, preset: 'gone' }],
+    [STAGE_LAYER, { kind: 'look', look: 'gone' }],
+    [STAGE_LAYER, { kind: 'colour', preset: 'warm', level: 1 }],
+    ['front', { kind: 'look', look: 'worship' }],
+    ['gone', { kind: 'dark' }],
+  ];
+  for (const [g, what] of bad) assert.equal(blockMissing(g, what as never, show), true, `${g} ${JSON.stringify(what)}`);
+});
+
+test('layers: a new timeline has one per light group; one made before gets them when opened; removed ones stay removed', () => {
+  const t = newTimeline('Intro', [], ['front', 'key']);
+  assert.deepEqual(t.layers.map((l) => l.group), [STAGE_LAYER, 'front', 'key']);
+  Timeline.parse(t);
+  const old = { layers: [{ group: STAGE_LAYER, blocks: [blk('b1', 0)] }] };
+  assert.equal(withGroupLayers(old, ['front', 'key']), true);
+  assert.deepEqual(old.layers.map((l) => l.group), [STAGE_LAYER, 'front', 'key']);
+  // One whose group layers were laid out (some removed since) is left as it is.
+  const kept = { layers: [{ group: STAGE_LAYER, blocks: [] }, { group: 'key', blocks: [] }] };
+  assert.equal(withGroupLayers(kept, ['front', 'key']), false);
+  assert.deepEqual(kept.layers.map((l) => l.group), [STAGE_LAYER, 'key']);
+  // Without a Whole stage layer it gets one too, first.
+  const bare: { layers: { group: string; blocks: never[] }[] } = { layers: [] };
+  assert.equal(withGroupLayers(bare, ['front']), true);
+  assert.deepEqual(bare.layers.map((l) => l.group), [STAGE_LAYER, 'front']);
 });
