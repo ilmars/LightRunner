@@ -15,7 +15,7 @@ import { z, ZodError } from 'zod';
 import {
   BUILT_IN_PROFILES, Command, OscSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureRunningOrder, isManualCommand,
   applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,  type OflFixture, type Pick, type Scope,
-  BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, type Timeline,
+  BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
   pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
 } from '../../packages/shared/src/index.ts';
@@ -1598,6 +1598,7 @@ export class App {
       'GET /api/ofl/manufacturers', 'GET /api/ofl/manufacturer',
       'PUT /api/controller', 'POST /api/keys/reset',
       'GET /api/recordings', 'POST /api/recordings', 'GET /api/recordings/file', 'DELETE /api/recordings',
+      'PUT /api/timeline', 'DELETE /api/timeline',
     ];
     if (!routes.includes(route)) return false;
     if (!open && !this.isProgrammer(req)) throw new HttpError(401, 'enter the programmer PIN');
@@ -1776,6 +1777,32 @@ export class App {
         const id = url.searchParams.get('id') ?? '';
         this.recordings.remove(id, (rec) => this.show.timelines.some((t) => t.recording?.id === rec));
         this.log('A recording was removed');
+        json(res, 200, { ok: true });
+        return true;
+      }
+      case 'PUT /api/timeline': {
+        // The Timeline page saves one timeline at a time (it never sends the whole show): replaced by id, or added.
+        const parsed = Timeline.safeParse(await readJson(req, 4 * 1024 * 1024));
+        if (!parsed.success) throw new HttpError(400, `That isn't a timeline: ${parsed.error.issues.map((i) => i.message).join('; ')}`);
+        const timeline = parsed.data;
+        const timelines = [...this.show.timelines];
+        const at = timelines.findIndex((t) => t.id === timeline.id);
+        if (at >= 0) timelines[at] = timeline;
+        else timelines.push(timeline);
+        // Saved like Settings' controller switches: no Undo step, the Undo list stays, and only the first save after a
+        // programmer save keeps a backup (the page saves after each pause in editing). A running timeline takes the edit
+        // on its next tick.
+        await this.controllerSave(parseShow({ ...this.show, timelines }));
+        json(res, 200, timeline);
+        return true;
+      }
+      case 'DELETE /api/timeline': {
+        const id = url.searchParams.get('id') ?? '';
+        const gone = this.show.timelines.find((t) => t.id === id);
+        if (!gone) throw new HttpError(404, 'There is no such timeline.');
+        // A timeline running now stops on its next tick (it is gone from the show).
+        await this.controllerSave({ ...this.show, timelines: this.show.timelines.filter((t) => t !== gone) }, true);
+        this.log(`Timeline "${gone.name}" deleted`);
         json(res, 200, { ok: true });
         return true;
       }
