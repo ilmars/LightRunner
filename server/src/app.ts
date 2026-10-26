@@ -15,7 +15,7 @@ import { z, ZodError } from 'zod';
 import {
   BUILT_IN_PROFILES, Command, OscSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureRunningOrder, isManualCommand,
   applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,  type OflFixture, type Pick, type Scope,
-  BLACKOUT, LiveEffectLayer, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand,
+  BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, type Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
   pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
 } from '../../packages/shared/src/index.ts';
@@ -34,6 +34,7 @@ import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from '
 import { isLocalAddress, isThisComputer } from './net.ts';
 import { AlreadyRunning, liveMarker, removeMarker, writeMarker } from './marker.ts';
 import { RuntimeSaver, Store } from './store.ts';
+import { TICK_MS, TimelineRunner } from './timeline.ts';
 
 export interface AppOptions {
   port: number;
@@ -195,6 +196,17 @@ export class App {
   private readonly blindTurn = new Map<WebSocket, number>();
   /** Frames the drafts and sends each its tablet's picture and state; runs while any tablet is in Blind. */
   private blindTimer: NodeJS.Timeout | null = null;
+  /** The one live timeline, and the page whose recording it follows (null once that page has gone). */
+  private liveTimeline: { runner: TimelineRunner; owner: WebSocket | null } | null = null;
+  /** A live Start, Stop, Blackout, Basic lights or song: a live Start still waiting for the stage makes no timeline now. */
+  private timelineTurn = 0;
+  /** Each page's Prepare timeline, running in its own draft. */
+  private readonly prepareTimelines = new Map<WebSocket, TimelineRunner>();
+  /** Ticks the timelines while any runs. */
+  private timelineTimer: NodeJS.Timeout | null = null;
+  /** When the live state last went out, and which timeline (and whether it played) it showed. */
+  private publishedAt = 0;
+  private publishedTimeline = '';
   private latestRuntime: RuntimeState | null = null;
   private ready!: Promise<void>;
   private readonly sessions = new Sessions();
@@ -302,6 +314,9 @@ export class App {
     clearTimeout(this.keysTimer);
     this.nodeWatch.stop();
     if (this.heartbeat) clearInterval(this.heartbeat);
+    this.stopLiveTimeline();
+    for (const runner of [...this.prepareTimelines.values()]) runner.stop();
+    this.timelineTimerFits();
     this.blind.clear();
     this.blindTurn.clear();
     this.blindTimerFits();
@@ -345,8 +360,11 @@ export class App {
     const output = problem && state.output === 'ok' ? 'lost' : state.output;
     // A worker problem (an output it can't send to) is never another desk.
     const kind = output !== 'lost' ? null : !state.outputProblem && this.outputProblem && this.otherDeskOnly ? 'other-desk' : 'not-answering';
-    const merged: LiveState = { ...state, canUndo, output, outputProblem: problem, outputProblemKind: kind };
+    const timeline = this.liveTimeline?.runner.state ?? null;
+    const merged: LiveState = { ...state, canUndo, output, outputProblem: problem, outputProblemKind: kind, timeline };
     this.latestState = merged;
+    this.publishedAt = performance.now();
+    this.publishedTimeline = timeline ? `${timeline.id}:${timeline.playing}` : '';
     this.broadcast(JSON.stringify({ type: 'state', state: merged }));
     this.midi?.update(this.layout, merged);
   }
@@ -632,6 +650,9 @@ export class App {
       }
       return { error: null, recorded: true };
     }
+    // A song, Basic lights or Blackout from anyone (a tablet, a device) stops a live timeline; the timeline's own changes
+    // never come this way (they go straight to stageCommand, quiet), and Prepare's taps came back above.
+    if (cmd.type === 'look' || cmd.type === 'safe' || cmd.type === 'blackout') this.stopLiveTimeline();
     return this.stageCommand(cmd);
   }
 
@@ -770,6 +791,8 @@ export class App {
         } catch (err) {
           return done(this.draftProblem(tablet, err));
         }
+        // A Prepare timeline ran in the draft this one replaces.
+        this.prepareTimelines.get(tablet)?.stop();
         this.blind.set(tablet, fresh);
         this.blindTimerFits();
         this.sendDraft(tablet);
@@ -781,6 +804,8 @@ export class App {
         return done(null);
       case 'draft': {
         if (!session) return done(BLIND_OFF);
+        // A song or Basic lights in Prepare stops that page's Prepare timeline, as they stop the live one.
+        if (cmd.cmd.type === 'look' || cmd.cmd.type === 'safe') this.prepareTimelines.get(tablet)?.stop();
         let error: string | null;
         try {
           error = session.apply(cmd.cmd, performance.now() / 1000, (g) => this.isSmokeGroup(g));
@@ -814,6 +839,8 @@ export class App {
   }
 
   private dropDraft(tablet: WebSocket): void {
+    // Its Prepare timeline goes with it.
+    this.prepareTimelines.get(tablet)?.stop();
     this.blind.delete(tablet);
     this.blindTimerFits();
   }
@@ -866,7 +893,7 @@ export class App {
   private sendDraft(tablet: WebSocket, now = performance.now() / 1000): void {
     let state: LiveState | null | undefined;
     try {
-      state = this.blind.get(tablet)?.state(now, this.latestState, (g) => this.isSmokeGroup(g));
+      state = this.blind.get(tablet)?.state(now, this.latestState, (g) => this.isSmokeGroup(g), this.prepareTimelines.get(tablet)?.state ?? null);
     } catch (err) {
       this.draftProblem(tablet, err);
       return;
@@ -1021,6 +1048,164 @@ export class App {
     this.midi?.update(this.layout, this.latestState);
   }
 
+  // ---- Timelines: one live, and one per page in Prepare ----
+
+  /** Start or Stop from a page. Returns an error in plain words, or null. */
+  private async timelineMessage(input: unknown, role: Role, ws: WebSocket): Promise<string | null> {
+    const parsed = TimelineMessage.safeParse(input);
+    if (!parsed.success) return `invalid message: ${parsed.error.issues.map((i) => i.message).join('; ')}`;
+    const msg = parsed.data;
+    if (msg.type === 'timelineStop') {
+      // Anyone may stop the live timeline (the operator page's Stop); a page stops its own Prepare one.
+      if (msg.prepare) this.prepareTimelines.get(ws)?.stop();
+      else if (this.liveTimeline && (msg.id === undefined || msg.id === this.liveTimeline.runner.id)) this.stopLiveTimeline();
+      return null;
+    }
+    if (msg.type !== 'timelineStart') return null;
+    if (role !== 'programmer') return 'Only the programmer can start a timeline. Enter the PIN on the Timeline page.';
+    const timeline = this.show.timelines.find((t) => t.id === msg.id);
+    if (!timeline) return `There is no timeline "${msg.id}" in the show.`;
+    return msg.prepare ? this.startPrepareTimeline(ws, timeline, msg.at) : this.startLiveTimeline(ws, timeline, msg.at);
+  }
+
+  /** A page's position report: it moves the timeline that page started (the live one, or its Prepare one). */
+  private timelinePosition(input: unknown, ws: WebSocket): void {
+    const parsed = TimelineMessage.safeParse(input);
+    if (!parsed.success || parsed.data.type !== 'timelinePosition') return;
+    const { id, pos, playing } = parsed.data;
+    const live = this.liveTimeline;
+    if (live && live.owner === ws && live.runner.id === id) {
+      live.runner.report(pos, playing);
+      return;
+    }
+    const prepare = this.prepareTimelines.get(ws);
+    if (prepare?.id === id) prepare.report(pos, playing);
+  }
+
+  /** The live timeline; a live one running already stops first. */
+  private async startLiveTimeline(ws: WebSocket, timeline: Timeline, at: number): Promise<string | null> {
+    const turn = ++this.timelineTurn;
+    // The stage as it is now: a group the timeline lets go of goes back to this.
+    let before: RuntimeState | null = null;
+    try {
+      before = await this.stage();
+    } catch {
+      // Without it, such a group is left as it is.
+    }
+    // Another Start, a Stop, Blackout, Basic lights or a song came meanwhile.
+    if (turn !== this.timelineTurn || this.stopping) return null;
+    const fresh = this.show.timelines.find((t) => t.id === timeline.id);
+    if (!fresh) return `There is no timeline "${timeline.id}" in the show.`;
+    this.stopLiveTimeline();
+    // One recording per page: a Prepare timeline this page ran stops.
+    this.prepareTimelines.get(ws)?.stop();
+    const entry: { runner: TimelineRunner; owner: WebSocket | null } = { runner: null!, owner: ws.readyState === ws.OPEN ? ws : null };
+    entry.runner = new TimelineRunner({
+      show: () => this.show,
+      apply: (cmd) => {
+        this.quietStageCommand(cmd).then(
+          (error) => { if (error) this.log(`Timeline "${fresh.name}": ${cmd.type} not done: ${error}`); },
+          (err) => this.log(`Timeline "${fresh.name}": ${(err as Error).message}`),
+        );
+      },
+      follow: (group, value) => this.followLevel(group, value),
+      now: () => performance.now() / 1000,
+      // The page is gone when its WebSocket goes (leaveLiveTimeline), never because its reports slowed down.
+      staleAfter: null,
+      log: this.log,
+      onStop: (why) => {
+        if (this.liveTimeline === entry) this.liveTimeline = null;
+        if (why !== 'stopped') this.log(`Timeline "${fresh.name}" ${why === 'end' ? 'came to its end' : 'stopped'}`);
+        this.timelineTimerFits();
+        this.publishState();
+      },
+    });
+    this.liveTimeline = entry;
+    this.log(`Timeline "${fresh.name}" started at ${at.toFixed(1)} s`);
+    entry.runner.start(fresh, at, before);
+    this.timelineTimerFits();
+    this.publishState();
+    return null;
+  }
+
+  /** A timeline in this page's own Prepare draft (made for it when the page has none); it never touches the lights. */
+  private async startPrepareTimeline(ws: WebSocket, timeline: Timeline, at: number): Promise<string | null> {
+    // One recording per page: a live timeline this page played goes on by itself.
+    this.leaveLiveTimeline(ws);
+    if (!this.blind.has(ws)) {
+      const made = await this.blindCommand({ type: 'blindStart' }, ws);
+      if (made.error) return made.error;
+    }
+    const session = this.blind.get(ws);
+    if (!session) return BLIND_OFF;
+    const fresh = this.show.timelines.find((t) => t.id === timeline.id);
+    if (!fresh) return `There is no timeline "${timeline.id}" in the show.`;
+    this.prepareTimelines.get(ws)?.stop();
+    const now = () => performance.now() / 1000;
+    const runner: TimelineRunner = new TimelineRunner({
+      show: () => this.show,
+      apply: (cmd, opts) => {
+        if (this.blind.get(ws) !== session) return;
+        try {
+          session.apply(cmd, now(), (g) => this.isSmokeGroup(g), opts);
+        } catch (err) {
+          // Only this draft ends (and its timeline with it), never the service.
+          this.draftProblem(ws, err);
+        }
+      },
+      follow: (group, value) => {
+        if (this.blind.get(ws) === session) session.followLevel(group, value, now());
+      },
+      now,
+      // Its draft goes with the page.
+      staleAfter: null,
+      log: this.log,
+      onStop: () => {
+        if (this.prepareTimelines.get(ws) === runner) this.prepareTimelines.delete(ws);
+        this.timelineTimerFits();
+      },
+    });
+    this.prepareTimelines.set(ws, runner);
+    runner.start(fresh, at, session.engine.runtime());
+    this.timelineTimerFits();
+    this.sendDraft(ws);
+    return null;
+  }
+
+  /** Stop the live timeline where it is (Stop, Blackout, Basic lights, a song, another live Start). */
+  private stopLiveTimeline(): void {
+    this.timelineTurn++;
+    this.liveTimeline?.runner.stop();
+  }
+
+  /** The page the live timeline follows has gone (or plays something else now): it goes on by itself. */
+  private leaveLiveTimeline(ws: WebSocket): void {
+    const live = this.liveTimeline;
+    if (!live || live.owner !== ws) return;
+    live.owner = null;
+    live.runner.release();
+  }
+
+  private tickTimelines(): void {
+    this.liveTimeline?.runner.tick();
+    for (const runner of [...this.prepareTimelines.values()]) runner.tick();
+    // The pages hear where the live one is twice a second, and at once when it pauses or plays.
+    const state = this.liveTimeline?.runner.state;
+    if (state && (`${state.id}:${state.playing}` !== this.publishedTimeline || performance.now() - this.publishedAt >= 500)) this.publishState();
+  }
+
+  /** The timeline timer runs while any timeline does. */
+  private timelineTimerFits(): void {
+    const any = !!this.liveTimeline || this.prepareTimelines.size > 0;
+    if (any && !this.timelineTimer && !this.stopping) {
+      this.timelineTimer = setInterval(() => this.tickTimelines(), TICK_MS);
+      this.timelineTimer.unref();
+    } else if (!any && this.timelineTimer) {
+      clearInterval(this.timelineTimer);
+      this.timelineTimer = null;
+    }
+  }
+
   // ---- WebSocket ----
 
   private onSocket(ws: WebSocket, role: Role): void {
@@ -1042,6 +1227,8 @@ export class App {
       // Its Blind draft goes with it; nothing reaches the stage.
       this.blindTurn.delete(ws);
       this.dropDraft(ws);
+      // A live timeline it played goes on by itself, to its end.
+      this.leaveLiveTimeline(ws);
     });
     ws.on('message', async (data, isBinary) => {
       if (isBinary) return;
@@ -1053,6 +1240,22 @@ export class App {
       }
       // Valid JSON that isn't an object ("null", a number) is ignored, never thrown on.
       if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'timelinePosition') {
+        // Several times a second: no answer.
+        this.timelinePosition(msg, ws);
+        return;
+      }
+      if (msg.type === 'timelineStart' || msg.type === 'timelineStop') {
+        let error: string | null;
+        try {
+          error = await this.timelineMessage(msg, role, ws);
+        } catch (err) {
+          this.log(`Timeline failed: ${(err as Error)?.stack ?? String(err)}`);
+          error = 'That did not work. The lights were not changed.';
+        }
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'result', ref: msg.ref ?? null, error }));
+        return;
+      }
       if (msg.type === 'command') {
         let error: string | null;
         try {

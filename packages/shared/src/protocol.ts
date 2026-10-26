@@ -249,6 +249,37 @@ export interface HeldLight {
   level: number;
 }
 
+// ---- Timelines: what the Timeline page sends over the WebSocket (not commands: the engine never sees them) ----
+
+const position = z.number().min(0).max(24 * 3600);
+
+/**
+ * Messages about a running timeline. Start and the position reports are the programmer's; Stop of the live one is
+ * anyone's (the operator page's Stop). `prepare`: the timeline runs in that page's own Prepare draft, never on the lights.
+ * A page that started a timeline reports where its recording is about 4 times a second, playing or paused, and at once
+ * on play, pause, a seek and the end; when its reports stop, the server carries on by itself to the end.
+ */
+export const TimelineMessage = z.discriminatedUnion('type', [
+  /** Start the timeline at `at` seconds (0 = the beginning). A live Start stops the live one that is running. */
+  z.object({ type: z.literal('timelineStart'), id, at: position, prepare: z.boolean().optional() }),
+  /** Where the page's recording is (seconds) and whether it plays. */
+  z.object({ type: z.literal('timelinePosition'), id, pos: position, playing: z.boolean() }),
+  /** Stop the live timeline (only if it is `id`, when given), or with `prepare` this page's Prepare one. The stage stays as it is. */
+  z.object({ type: z.literal('timelineStop'), id: id.optional(), prepare: z.boolean().optional() }),
+]);
+export type TimelineMessage = z.infer<typeof TimelineMessage>;
+
+/** A running timeline, as the pages are told of it. */
+export interface TimelineStatus {
+  id: string;
+  name: string;
+  /** Where the recording is, seconds. */
+  pos: number;
+  /** Seconds: the last block's start or end, or the recording's length, whichever is later. */
+  duration: number;
+  playing: boolean;
+}
+
 export type OutputStatus = 'ok' | 'lost' | 'off';
 
 export interface LiveState {
@@ -285,6 +316,11 @@ export interface LiveState {
    * every problem is another desk sending; anything else lost is "not-answering".
    */
   outputProblemKind: 'other-desk' | 'not-answering' | null;
+  /**
+   * The live timeline running now, or null. The server always sets it (the engine leaves it out); a Prepare draft's
+   * state has that page's own Prepare timeline here instead.
+   */
+  timeline?: TimelineStatus | null;
 }
 
 /** What is saved to disk so a restart restores the stage as it was. */

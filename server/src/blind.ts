@@ -3,7 +3,7 @@
 // Go hands the draft's runtime to the live engine as one applyStage.
 
 import { Engine, type StageClock } from '../../packages/engine/src/index.ts';
-import type { LiveState, RuntimeState, Show, StageCommand } from '../../packages/shared/src/index.ts';
+import type { LiveState, RuntimeState, Show, StageCommand, TimelineStatus } from '../../packages/shared/src/index.ts';
 
 export const REAL_STAGE_ONLY = 'That works on the real stage only.';
 export const BLIND_OFF = 'Prepare is off.';
@@ -69,8 +69,9 @@ export class BlindSession {
   /**
    * The draft's state to send the tablet, or null when nothing changed (or it isn't time yet).
    * What stays live (output, Master, speed, Fade, Flash, manual control and smoke) is copied from the live state.
+   * `timeline`: the Prepare timeline running in this draft (the live one is never shown here).
    */
-  state(now: number, live: LiveState | null, isSmoke: (group: string) => boolean): LiveState | null {
+  state(now: number, live: LiveState | null, isSmoke: (group: string) => boolean, timeline: TimelineStatus | null = null): LiveState | null {
     if (!this.stateDue && now - this.lastStateAt < STATE_EVERY) return null;
     const own = this.engine.liveState(now, live?.output ?? 'off');
     const state: LiveState = live ? {
@@ -85,7 +86,8 @@ export class BlindSession {
       output: live.output,
       outputProblem: live.outputProblem,
       outputProblemKind: live.outputProblemKind,
-    } : own;
+      timeline,
+    } : { ...own, timeline };
     this.stateDue = false;
     this.lastStateAt = now;
     const json = JSON.stringify(state);
