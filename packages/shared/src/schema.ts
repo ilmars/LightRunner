@@ -363,6 +363,80 @@ export const StagePlan = z.object({
 });
 export type StagePlan = z.infer<typeof StagePlan>;
 
+// ---- Timelines ----
+
+/** What a block puts on its layer. 'stage' layers take only look, dark and full. */
+export const BlockWhat = z.discriminatedUnion('kind', [
+  /** A colour of the group, at a level. */
+  z.object({ kind: z.literal('colour'), preset: id, level: unit }),
+  /** A level, keeping the group's colour. */
+  z.object({ kind: z.literal('level'), level: unit }),
+  /** An effect of the group, at its own speed when given. */
+  z.object({ kind: z.literal('effect'), preset: id, speed: EffectSpeed.optional() }),
+  /** A song's own colours and levels (on the stage layer). */
+  z.object({ kind: z.literal('look'), look: id }),
+  /** Level 0, keeping the colour. */
+  z.object({ kind: z.literal('dark') }),
+  /** Level 1, keeping the colour. */
+  z.object({ kind: z.literal('full') }),
+  /** The group's level follows the loudness of the recording, between low and high; it may bring a colour of its own. */
+  z.object({ kind: z.literal('follow'), low: unit, high: unit, preset: id.optional() }),
+]);
+export type BlockWhat = z.infer<typeof BlockWhat>;
+
+export const TimelineBlock = z.object({
+  id,
+  /** Seconds from the start of the timeline. */
+  start: z.number().min(0),
+  /** Seconds. Missing means until the next block on the layer. */
+  end: z.number().min(0).optional(),
+  /** Seconds to fade in. */
+  rise: seconds.default(0),
+  what: BlockWhat,
+});
+export type TimelineBlock = z.infer<typeof TimelineBlock>;
+
+/** One row of blocks: a group's, or 'stage' for the whole stage. */
+export const TimelineLayer = z.object({
+  group: id,
+  blocks: z.array(TimelineBlock),
+});
+export type TimelineLayer = z.infer<typeof TimelineLayer>;
+
+const base64 = z.string().regex(/^[A-Za-z0-9+/]*={0,2}$/, 'a base64 string');
+
+/** The sound a timeline is laid out against. The file itself is kept in the data folder; this is what the page and the runner need. */
+export const Recording = z.object({
+  id,
+  name: z.string(),
+  /** Seconds. */
+  duration: z.number().min(0),
+  /** One byte per 1/25 s: how loud it is, 0..255. */
+  loudness: base64,
+  /** One byte per bar of the waveform, at most 4000 bars. */
+  peaks: base64.max(Math.ceil(4000 / 3) * 4),
+});
+export type Recording = z.infer<typeof Recording>;
+
+export const TimelineMarker = z.object({ t: z.number().min(0), text: z.string() });
+export type TimelineMarker = z.infer<typeof TimelineMarker>;
+
+/**
+ * A recording with layers of blocks. What the stage shows at any moment follows from the blocks alone
+ * (see timeline.ts). A block may point at a colour, effect, look or group that is gone: it is shown as
+ * missing and skipped, so timelines have no entries in checkReferences.
+ */
+export const Timeline = z.object({
+  id,
+  name: z.string(),
+  recording: Recording.optional(),
+  layers: z.array(TimelineLayer),
+  markers: z.array(TimelineMarker).default([]),
+  /** Milliseconds the lights run earlier (negative) or later (positive) than the sound. */
+  offsetMs: z.number().min(-500).max(500).default(0),
+});
+export type Timeline = z.infer<typeof Timeline>;
+
 export const Show = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
   name: z.string(),
@@ -375,6 +449,7 @@ export const Show = z.object({
   operator: OperatorLayout.default({ looks: [], groups: [], manualForOperators: false, runningOrder: [], quickLooks: [] }),
   settings: Settings.default({ output: { kind: 'artnet', host: '2.255.255.255' }, outputEnabled: true, frameRate: 40, gamma: 2.2 }),
   stage: StagePlan.default({ grid: 10 }),
+  timelines: z.array(Timeline).default([]),
 });
 export type Show = z.infer<typeof Show>;
 

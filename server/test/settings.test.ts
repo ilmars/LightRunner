@@ -418,3 +418,22 @@ test('the exported show file has no PIN hash, and a file put back keeps the PIN 
     assert.match(big.body.error, /too large/);
   });
 });
+
+test('a Patch page left open does not put back old timelines', async () => {
+  await withApp(async (call) => {
+    const stale = (await call('GET', '/api/show')).body;
+    assert.deepEqual(stale.timelines, []);
+    // Meanwhile, on the Timeline page: a timeline is saved into the show.
+    const timeline = { id: 'sunday', name: 'Sunday', markers: [], offsetMs: 0, layers: [{ group: 'stage', blocks: [{ id: 'a', start: 0, rise: 0, what: { kind: 'dark' } }] }] };
+    assert.equal((await call('PUT', '/api/show', { ...stale, timelines: [timeline] })).status, 200);
+    // Patch saves its old copy, with no timelines, and then one with another timeline in it.
+    stale.fixtures[0].name = 'Renamed in Patch';
+    assert.equal((await call('PUT', '/api/show?source=patch', stale)).status, 200);
+    let now = (await call('GET', '/api/show')).body;
+    assert.equal(now.fixtures[0].name, 'Renamed in Patch');
+    assert.deepEqual(now.timelines, [timeline]);
+    assert.equal((await call('PUT', '/api/show?source=patch', { ...stale, timelines: [{ ...timeline, id: 'other', name: 'Other' }] })).status, 200);
+    now = (await call('GET', '/api/show')).body;
+    assert.deepEqual(now.timelines.map((t: any) => t.id), ['sunday']);
+  });
+});

@@ -3,10 +3,10 @@
 
 import { presetsUsingPaletteEntry, swatchOf } from './presets.ts';
 import { uniqueId } from './runningorder.ts';
-import { isEffectPreset, layerColours, parseShow, type ColourSpec, type Fixture, type Group, type Look, type Palette, type Preset, type Profile, type Show } from './schema.ts';
+import { isEffectPreset, layerColours, parseShow, type ColourSpec, type Fixture, type Group, type Look, type Palette, type Preset, type Profile, type Show, type Timeline } from './schema.ts';
 
 /** `palette`: the shared colours (from Lightkey) that colours in every group can point to. */
-export type ItemKind = 'profile' | 'fixture' | 'group' | 'palette' | 'preset' | 'look';
+export type ItemKind = 'profile' | 'fixture' | 'group' | 'palette' | 'preset' | 'look' | 'timeline';
 export type Change = 'added' | 'changed' | 'removed';
 
 export interface DiffItem {
@@ -27,12 +27,13 @@ export interface Pick {
   change: Change;
 }
 
-type Item = Profile | Fixture | Group | Palette | Preset | Look;
-const LISTS: Record<ItemKind, 'profiles' | 'fixtures' | 'groups' | 'palettes' | 'presets' | 'looks'> = {
-  profile: 'profiles', fixture: 'fixtures', group: 'groups', palette: 'palettes', preset: 'presets', look: 'looks',
+type Item = Profile | Fixture | Group | Palette | Preset | Look | Timeline;
+const LISTS: Record<ItemKind, 'profiles' | 'fixtures' | 'groups' | 'palettes' | 'presets' | 'looks' | 'timelines'> = {
+  profile: 'profiles', fixture: 'fixtures', group: 'groups', palette: 'palettes', preset: 'presets', look: 'looks', timeline: 'timelines',
 };
 // Shared colours come before presets: a preset is checked against the shared colours it points to.
-const ORDER: ItemKind[] = ['profile', 'fixture', 'group', 'palette', 'preset', 'look'];
+// Timelines come last: they point at groups, colours and looks, though nothing checks it (a missing one is skipped when it runs).
+const ORDER: ItemKind[] = ['profile', 'fixture', 'group', 'palette', 'preset', 'look', 'timeline'];
 const kindsFor = (scope: Scope): ItemKind[] => (scope === 'patch' ? ['profile', 'fixture'] : ORDER);
 
 /**
@@ -164,6 +165,14 @@ function describe(kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show):
       if (la.section !== lb.section) out.push(`section "${la.section ?? ''}" → "${lb.section ?? ''}"`);
       break;
     }
+    case 'timeline': {
+      const ta = a as Timeline, tb = b as Timeline;
+      if (!same(ta.recording, tb.recording)) out.push('recording changed');
+      if (!same(ta.layers, tb.layers)) out.push('blocks or layers changed');
+      if (!same(ta.markers, tb.markers)) out.push('markers changed');
+      if (ta.offsetMs !== tb.offsetMs) out.push('lights earlier or later changed');
+      break;
+    }
   }
   if (!out.length) out.push('details changed');
   return out;
@@ -283,6 +292,8 @@ function cascadeRemove(show: Show, kind: ItemKind, id: string): void {
       break;
     case 'preset':
       for (const l of show.looks) l.groups = l.groups.filter((e) => e.preset !== id);
+      break;
+    case 'timeline':
       break;
     case 'look':
       show.operator.looks = show.operator.looks.filter((l) => l !== id);

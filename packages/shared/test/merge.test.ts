@@ -257,3 +257,55 @@ test('hidden colours (Custom, and the copies Prepare keeps) are left out of the 
   assert.notEqual(used, 'custom-9');
   assert.deepEqual(both.presets.find((p) => p.id === used)!.layers, hidden('custom-9', '#00ff00').layers);
 });
+
+test('timelines are compared and taken like the other items, and removing what they point to leaves them alone', () => {
+  const current = rig();
+  const incoming = rig();
+  const tl = (name: string, level = 1) => ({
+    id: 'sunday', name, markers: [], offsetMs: 0,
+    layers: [{ group: 'front-lights', blocks: [{ id: 'a', start: 0, rise: 2, what: { kind: 'level' as const, level } }] }],
+  });
+  assert.deepEqual(diffShows(current, incoming), []);
+  incoming.timelines = [tl('Sunday')];
+  let items = diffShows(current, incoming);
+  assert.deepEqual(items, [{ kind: 'timeline', id: 'sunday', change: 'added', name: 'Sunday', details: [] }]);
+  const taken = applyPicks(current, incoming, [{ kind: 'timeline', id: 'sunday', change: 'added' }]);
+  assert.deepEqual(taken.timelines, incoming.timelines);
+  assert.deepEqual(diffShows(taken, incoming), []);
+
+  current.timelines = [tl('Sunday')];
+  incoming.timelines = [tl('Sunday morning', 0.5)];
+  items = diffShows(current, incoming);
+  assert.equal(items.length, 1);
+  assert.equal(items[0]!.change, 'changed');
+  assert.deepEqual(items[0]!.details, ['name "Sunday" → "Sunday morning"', 'blocks or layers changed']);
+  assert.equal(applyPicks(current, incoming, [{ kind: 'timeline', id: 'sunday', change: 'changed' }]).timelines[0]!.name, 'Sunday morning');
+  // Same name, other blocks; and markers and the offset on their own.
+  incoming.timelines = [tl('Sunday', 0.5)];
+  assert.deepEqual(diffShows(current, incoming)[0]!.details, ['blocks or layers changed']);
+  incoming.timelines = [{ ...tl('Sunday'), offsetMs: 80, markers: [{ t: 3, text: 'Hi' }] }];
+  assert.deepEqual(diffShows(current, incoming)[0]!.details, ['markers changed', 'lights earlier or later changed']);
+
+  incoming.timelines = [];
+  assert.deepEqual(diffShows(current, incoming), [{ kind: 'timeline', id: 'sunday', change: 'removed', name: 'Sunday', details: [] }]);
+  assert.deepEqual(applyPicks(current, incoming, [{ kind: 'timeline', id: 'sunday', change: 'removed' }]).timelines, []);
+
+  // Removing the group, a preset or a look a timeline uses does not touch the timeline.
+  const withTl = rig();
+  withTl.timelines = [{ ...tl('Sunday'), layers: [{ group: 'front-lights', blocks: [{ id: 'a', start: 0, rise: 0, what: { kind: 'colour', preset: 'front-lights-silti-3200k', level: 1 } }] }, { group: 'stage', blocks: [{ id: 'b', start: 0, rise: 0, what: { kind: 'look', look: 'worship' } }] }] }];
+  const gone = rig();
+  gone.timelines = withTl.timelines;
+  const frontFixtures = withTl.groups.find((g) => g.id === 'front-lights')!.fixtures;
+  gone.groups = gone.groups.filter((g) => g.id !== 'front-lights');
+  gone.presets = gone.presets.filter((p) => p.group !== 'front-lights');
+  gone.looks = gone.looks.filter((l) => l.id !== 'worship');
+  gone.fixtures = gone.fixtures.filter((f) => !frontFixtures.includes(f.id));
+  gone.operator.groups = gone.operator.groups.filter((g) => g !== 'front-lights');
+  gone.operator.looks = gone.operator.looks.filter((l) => l !== 'worship');
+  gone.operator.runningOrder = gone.operator.runningOrder.filter((l) => l !== 'worship');
+  gone.operator.quickLooks = gone.operator.quickLooks.filter((q) => q.look !== 'worship');
+  const picks = diffShows(withTl, gone).filter((i) => i.kind !== 'timeline').map((i) => ({ kind: i.kind, id: i.id, change: i.change }));
+  assert.ok(picks.length);
+  const after = applyPicks(withTl, gone, picks);
+  assert.deepEqual(after.timelines, withTl.timelines);
+});
