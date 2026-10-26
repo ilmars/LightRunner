@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import { BUILT_IN_PROFILES } from './profiles.ts';
 import { routeProblems } from './routing.ts';
+import { PlannedService } from './planning.ts';
 
 export const SCHEMA_VERSION = 1;
 
@@ -297,6 +298,10 @@ export const OperatorLayout = z.object({
   effectsAdded: z.boolean().optional(),
   /** Keys on MIDI controllers; absent in older shows. */
   controller: ControllerSettings.optional(),
+  /** The service last loaded from the planning service, each item with the look it was given. Absent until one is loaded. */
+  service: PlannedService.optional(),
+  /** Looks kept for items of loaded services (key from `rememberKey` to look id), so a song has its look again next week. */
+  remembered: z.record(z.string().max(300), id).optional(),
 });
 export type OperatorLayout = z.infer<typeof OperatorLayout>;
 
@@ -338,6 +343,18 @@ export function contactOf(input: unknown): Contact | undefined {
   return contact.name || contact.phone ? contact : undefined;
 }
 
+/** Loading the service from the planning service (Settings > Planning service). Absent in older shows: off. */
+export const PlanningSettings = z.object({
+  enabled: z.boolean().default(false),
+  /** The planning service account the church's services are in. */
+  account: z.string().min(1).max(64).optional(),
+  /** Which kind of service to load (for example the Sunday service). */
+  serviceType: z.string().min(1).max(64).optional(),
+  /** The look a new song starts from; the first quick look when not set. */
+  newSongLook: id.optional(),
+});
+export type PlanningSettings = z.infer<typeof PlanningSettings>;
+
 export const Settings = z.object({
   /** The default output: every universe goes here unless a route says otherwise. */
   output: OutputSettings.default({ kind: 'artnet', host: '2.255.255.255' }),
@@ -352,6 +369,8 @@ export const Settings = z.object({
   osc: OscSettings.optional(),
   /** Who to call, shown in the operator page's problem explanation. Absent when nobody is set. */
   contact: Contact.transform((c) => (c.name || c.phone ? c : undefined)).optional(),
+  /** Absent in older shows: no planning service. */
+  planning: PlanningSettings.optional(),
 }).superRefine((s, ctx) => {
   for (const message of routeProblems(s.output, s.routes)) ctx.addIssue({ code: 'custom', message, path: ['routes'] });
 });

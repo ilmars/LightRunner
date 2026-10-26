@@ -5,6 +5,8 @@
 import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, liveEffectId, livePresetId, parseLiveEffect, parseLivePreset } from './protocol.ts';
 import { effectKey, isEffectPreset, resolveColour } from './schema.ts';
 import { followQuickLook } from './keys.ts';
+import { rememberKey } from './planning.ts';
+import type { PlannedService } from './planning.ts';
 import type { EffectLayer, Layer, Look, LookEntry, Preset, QuickLook, QuickTab, Show } from './schema.ts';
 
 /** Where the stage is going: preset ids (possibly live ones) and level targets, as in RuntimeState. */
@@ -210,6 +212,94 @@ export function ensureBasicLights(show: Show): Show {
   return out;
 }
 
+// ---- The planned service ----
+// loadService and ensurePlanning live here, not in planning.ts: planning.ts must not import from
+// schema.ts (which imports it), and these need uniqueId and the look rules from this file.
+
+/** Cuts a planned name to a look's 40 characters; `fallback` when nothing is left of it. */
+function planLookName(name: string, fallback: string): string {
+  return name.trim().slice(0, MAX_NAME).trim() || fallback;
+}
+
+/** Forgets, in place, everything the planning feature keeps that names a look that is gone. */
+function forgetMissing(show: Show): void {
+  const exists = new Set(show.looks.map((l) => l.id));
+  const op = show.operator;
+  if (op.remembered) {
+    for (const [key, look] of Object.entries(op.remembered)) if (!exists.has(look)) delete op.remembered[key];
+  }
+  for (const item of op.service?.items ?? []) if (item.look !== undefined && !exists.has(item.look)) delete item.look;
+  const planning = show.settings.planning;
+  if (planning?.newSongLook !== undefined && !exists.has(planning.newSongLook)) delete planning.newSongLook;
+}
+
+/** Drops the planning references (remembered looks, the loaded service's looks, the look for new songs) that name a look the show no longer has. */
+export function ensurePlanning(show: Show): Show {
+  const out = structuredClone(show);
+  forgetMissing(out);
+  return out;
+}
+
+const QUICK_TABS: QuickTab[] = ['plain', 'colours', 'effects'];
+
+/** The look a new song is copied from: the one chosen in Settings if it exists, else the first quick look (tabs in the order they are shown). */
+export function newSongLookOf(show: Show): string | undefined {
+  const chosen = show.settings.planning?.newSongLook;
+  if (chosen !== undefined && show.looks.some((l) => l.id === chosen)) return chosen;
+  for (const tab of QUICK_TABS) {
+    const quick = show.operator.quickLooks.find((q) => q.tab === tab && show.looks.some((l) => l.id === q.look));
+    if (quick) return quick.look;
+  }
+  return undefined;
+}
+
+/**
+ * Puts a planned service into the running order: Basic lights first (untouched), then each item's look in the
+ * service's order, each look once. A look the planner has given before comes back (renamed to the item's name);
+ * a new song gets a copy of the look for new songs, remembered at once. Running-order looks nothing remembers are
+ * removed; quick looks and remembered looks stay, hidden when the service does not use them.
+ */
+export function loadService(show: Show, service: PlannedService): Show {
+  const out = ensureBasicLights(show);
+  const safe = out.operator.safeLook!;
+  forgetMissing(out);
+  const remembered = (out.operator.remembered ??= {});
+  // Basic lights is never anything's look.
+  for (const [key, look] of Object.entries(remembered)) if (look === safe) delete remembered[key];
+
+  const keep = new Set<string>([safe, ...Object.values(remembered), ...out.operator.quickLooks.map((q) => q.look)]);
+  const forNew = out.settings.planning?.newSongLook;
+  if (forNew !== undefined) keep.add(forNew);
+  const dropped = new Set(out.operator.runningOrder.filter((id) => !keep.has(id)));
+  out.looks = out.looks.filter((l) => !dropped.has(l.id));
+  out.operator.looks = out.operator.looks.filter((id) => !dropped.has(id));
+
+  const source = newSongLookOf(out);
+  const order: string[] = [safe];
+  const items = service.items.map((planned) => {
+    const item = structuredClone(planned);
+    delete item.look;
+    const key = rememberKey(item);
+    let id = key === null ? undefined : remembered[key];
+    if (id !== undefined) {
+      lookIn(out, id).name = planLookName(item.name, lookIn(out, id).name);
+    } else if (item.kind === 'song') {
+      const from = source === undefined ? undefined : lookIn(out, source);
+      id = addLook(out, planLookName(item.name, 'Song'), structuredClone(from?.groups ?? []));
+      if (item.tempo !== undefined) lookIn(out, id).tempo = item.tempo;
+      if (key !== null) remembered[key] = id;
+    }
+    if (id !== undefined) {
+      item.look = id;
+      if (!order.includes(id)) order.push(id);
+    }
+    return item;
+  });
+  out.operator.runningOrder = order;
+  out.operator.service = { ...service, items };
+  return out;
+}
+
 /** True when the stage preset is an effect: a live one (`fx:`) or a preset of the show with an effect in it. */
 function isEffect(show: Show, preset: string): boolean {
   if (parseLiveEffect(preset)) return true;
@@ -275,6 +365,8 @@ export function deleteItem(show: Show, id: string): Show {
   if (!out.operator.quickLooks.some((q) => q.look === id)) {
     out.looks = out.looks.filter((l) => l.id !== id);
     out.operator.looks = out.operator.looks.filter((x) => x !== id);
+    // A song's look that was remembered for the planned service is forgotten with it.
+    forgetMissing(out);
   }
   return out;
 }
