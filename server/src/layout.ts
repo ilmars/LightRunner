@@ -1,7 +1,7 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
 import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupSegments, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect } from '../../packages/shared/src/index.ts';
-import type { ChannelRole, FixtureShape, GroupKind, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
+import type { ChannelRole, FixtureShape, GroupKind, Hangs, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 import { keyLabel, keyPlace, keyShort } from './keynames.ts';
 
@@ -120,6 +120,10 @@ export interface OperatorLayout {
     id: string; name: string; x: number; y: number; w: number | null; h: number | null; segments: number; reversed: boolean;
     /** How it is drawn, worked out (a fixture in a smoke group is a cloud); `angle` and `reach` as the show has them, or null. */
     shape: FixtureShape; angle: number | null; reach: number | null;
+    /** How many LEDs its type really has (spread over its segments), or null when the type doesn't say. */
+    leds: number | null;
+    /** Where it hangs (the stage view from the audience), or null when the show doesn't say: the page guesses from the plan. */
+    hangs: Hangs | null;
   }[];
   /** Fixture ids of each group, for tapping a group on the mini visualiser. */
   members: Record<string, string[]>;
@@ -216,6 +220,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
       return [{
         id, name: f.name, x: f.x, y: f.y, w: f.w ?? null, h: f.h ?? null, segments, reversed: f.reversed ?? false,
         shape: fixtureShape(show, f), angle: f.angle ?? null, reach: f.reach ?? null,
+        leds: profile.leds ?? null, hangs: f.hangs ?? null,
       }];
     }),
     members: Object.fromEntries(show.groups.map((g) => [g.id, g.fixtures])),

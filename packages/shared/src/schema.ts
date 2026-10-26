@@ -37,6 +37,8 @@ export const Profile = z.object({
   name: z.string(),
   channels: z.array(ProfileChannel).min(1).max(512),
   gamma: z.number().min(1).max(4).optional(),
+  /** How many LEDs the light really has, spread over its segments; the stage view draws them. Missing = one per segment. */
+  leds: z.number().int().min(1).max(512).optional(),
   /** Where the definition came from, e.g. { ofl: 'stairville/sonicpulse-led-bar-10', mode: '39-channel' }. */
   source: z.object({ ofl: z.string(), mode: z.string() }).optional(),
 });
@@ -47,6 +49,10 @@ export type Profile = z.infer<typeof Profile>;
 /** How a fixture is drawn on the stage plan: a dot, a dot with a cone, a bar, a strip round something, or a smoke cloud. */
 export const FixtureShape = z.enum(['dot', 'beam', 'bar', 'outline', 'smoke']);
 export type FixtureShape = z.infer<typeof FixtureShape>;
+
+/** Where a fixture hangs, for the stage view from the audience: from the truss, on the floor at the back wall, on the riser, on a stand at the front, or upright at the side. */
+export const Hangs = z.enum(['truss', 'wall', 'riser', 'stand', 'side']);
+export type Hangs = z.infer<typeof Hangs>;
 
 export const Fixture = z.object({
   id,
@@ -66,6 +72,8 @@ export const Fixture = z.object({
   angle: z.number().min(-180).max(180).optional(),
   /** How far a beam's cone reaches, as a fraction of the plan's width. */
   reach: unit.optional(),
+  /** Where it hangs, for the stage view from the audience; missing = guessed from its place on the plan. */
+  hangs: Hangs.optional(),
   gamma: z.number().min(1).max(4).optional(),
   /** Hung the other way round: its segments run backwards along a group's line. */
   reversed: z.boolean().optional(),
