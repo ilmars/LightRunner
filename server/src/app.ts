@@ -35,7 +35,7 @@ import { isLocalAddress, isThisComputer } from './net.ts';
 import { AlreadyRunning, liveMarker, removeMarker, writeMarker } from './marker.ts';
 import { RuntimeSaver, Store } from './store.ts';
 import { TICK_MS, TimelineRunner } from './timeline.ts';
-import { RecordingError, Recordings } from './recordings.ts';
+import { RecordingError, Recordings, UploadAborted } from './recordings.ts';
 
 export interface AppOptions {
   port: number;
@@ -84,6 +84,10 @@ export interface AppOptions {
   version?: string;
   /** The most a timeline's recording may be (bytes); 100 MB. Tests make it small. */
   recordingLimit?: number;
+  /** The most all recordings may take together (bytes); 1 GB. Tests make it small. */
+  recordingsTotal?: number;
+  /** Test only: where an uploaded recording is written (one that fails, for a full disk). */
+  recordingWriter?: (path: string) => import('node:stream').Writable;
 }
 
 export type Role = 'operator' | 'programmer';
@@ -240,7 +244,7 @@ export class App {
     this.store = new Store(opts.dataDir, opts.seedPath);
     this.saver = new RuntimeSaver(this.store);
     this.ofl = new OflClient(join(opts.dataDir, 'ofl'), opts.fetch);
-    this.recordings = new Recordings(opts.dataDir, opts.recordingLimit);
+    this.recordings = new Recordings(opts.dataDir, { limit: opts.recordingLimit, total: opts.recordingsTotal, writer: opts.recordingWriter });
   }
 
   get state(): LiveState | null {
@@ -1487,7 +1491,14 @@ export class App {
       }
       await this.serveStatic(url.pathname, res);
     } catch (err) {
+      // The client went away in the middle of an upload: nobody to tell.
+      if (err instanceof UploadAborted) return;
       const status = err instanceof HttpError || err instanceof RecordingError ? err.status : 500;
+      if (err instanceof RecordingError && err.close) {
+        // The rest of its body is not wanted: answer, then drop the connection.
+        res.setHeader('connection', 'close');
+        res.once('finish', () => req.destroy());
+      }
       if (status === 500) this.log(`HTTP error: ${(err as Error).stack}`);
       json(res, status, { error: (err as Error).message });
     }

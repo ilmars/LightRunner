@@ -6,11 +6,14 @@ import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSyn
 import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { basename, extname, join } from 'node:path';
-import { finished, pipeline } from 'node:stream/promises';
+import { Transform, type Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { writeAtomic } from './store.ts';
 
 export const RECORDING_LIMIT = 100 * 1024 * 1024;
+/** All the recordings together. */
+export const RECORDINGS_TOTAL = 1024 * 1024 * 1024;
 
 /** The kinds Light Runner keeps, by extension. */
 const TYPES: Record<string, string> = { mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav' };
@@ -27,10 +30,29 @@ const FILE = /^([0-9a-f]{16})\.(mp3|m4a|aac|wav)$/;
 
 export class RecordingError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /** The answer is sent with `Connection: close` and the request dropped: the rest of the body is not wanted. */
+  readonly close: boolean;
+  constructor(status: number, message: string, close = false) {
     super(message);
     this.status = status;
+    this.close = close;
   }
+}
+
+/** The client went away in the middle of an upload: nobody is left to answer. */
+export class UploadAborted extends Error {
+  constructor() {
+    super('the upload was cut off');
+  }
+}
+
+export interface RecordingsOptions {
+  /** The most one recording may be (bytes). */
+  limit?: number;
+  /** The most all recordings may be (bytes). */
+  total?: number;
+  /** Where an upload is written; tests pass one that fails. */
+  writer?: (path: string) => Writable;
 }
 
 export interface RecordingInfo {
@@ -43,11 +65,36 @@ export class Recordings {
   private readonly dir: string;
   private readonly indexPath: string;
   private readonly limit: number;
+  private readonly total: number;
+  private readonly writer: (path: string) => Writable;
 
-  constructor(dataDir: string, limit = RECORDING_LIMIT) {
+  constructor(dataDir: string, opts: RecordingsOptions = {}) {
     this.dir = join(dataDir, 'recordings');
     this.indexPath = join(this.dir, 'index.json');
-    this.limit = limit;
+    this.limit = opts.limit ?? RECORDING_LIMIT;
+    this.total = opts.total ?? RECORDINGS_TOTAL;
+    this.writer = opts.writer ?? ((path) => createWriteStream(path));
+  }
+
+  /** What the folder holds now: recordings and uploads still coming in (so uploads at the same time count). */
+  private used(): number {
+    if (!existsSync(this.dir)) return 0;
+    let sum = 0;
+    for (const f of readdirSync(this.dir)) {
+      if (!FILE.test(f) && !f.endsWith('.upload')) continue;
+      try {
+        sum += statSync(join(this.dir, f)).size;
+      } catch {
+        // removed while counting
+      }
+    }
+    return sum;
+  }
+
+  private tooBig(why: 'file' | 'total', close: boolean): RecordingError {
+    return new RecordingError(413, why === 'file'
+      ? `That recording is too big. Light Runner keeps recordings up to ${megabytes(this.limit)}.`
+      : `Recordings take more than ${megabytes(this.total)} on the Mac: delete one first.`, close);
   }
 
   /** Removes the half-written files an upload left when the server stopped in the middle of it. */
@@ -77,41 +124,67 @@ export class Recordings {
     const name = cleanName(rawName);
     const ext = extensionFor(name, String(req.headers['content-type'] ?? ''));
     if (!ext) throw new RecordingError(415, 'Light Runner plays mp3, m4a, aac or wav recordings.');
+    const existing = this.used();
+    // What the page says it is sending is checked first: a file that is too big is refused before any of it comes.
+    const declared = req.headers['content-length'] === undefined ? NaN : Number(req.headers['content-length']);
+    if (declared > this.limit) throw this.tooBig('file', true);
+    if (declared + existing > this.total) throw this.tooBig('total', true);
+    // What may still come in: the per-file limit, or what is left of the total, whichever is less.
+    const room = Math.min(this.limit, this.total - existing);
     mkdirSync(this.dir, { recursive: true });
     const id = randomBytes(8).toString('hex');
     const file = `${id}.${ext}`;
     const tmp = join(this.dir, `${file}.upload`);
-    const out = createWriteStream(tmp);
-    // Without a listener a write error (disk full) would take the server down; the loop below sees it too.
-    out.on('error', () => {});
+    const out = this.writer(tmp);
+    let writeError = null as Error | null;
+    // The pipeline hands its own failures (too big, client gone) on to the file as well; only the file's are write errors.
+    out.on('error', (err) => {
+      if (!(err instanceof RecordingError) && !(err instanceof UploadAborted)) writeError ??= err;
+    });
+
     let size = 0;
-    let over = false;
+    let over: 'file' | 'total' | null = null;
+    const counter = new Transform({
+      transform: (chunk: Buffer, _enc, done) => {
+        size += chunk.length;
+        if (size <= room) return done(null, chunk);
+        over ??= room < this.limit ? 'total' : 'file';
+        // Up to twice the limit it is read and thrown away, so the page hears 413 and not a dropped connection;
+        // past that, the connection is closed on it.
+        return size > this.limit * 2 ? done(this.tooBig(over, true)) : done();
+      },
+    });
+    // The request is piped by hand: a failed `pipeline` would destroy it, and with it the connection the answer needs.
+    const gone = () => counter.destroy(new UploadAborted());
+    const onClose = () => { if (!req.complete) gone(); };
+    req.on('error', gone);
+    req.once('close', onClose);
+    req.pipe(counter);
     try {
-      // An upload that is too big is read to its end and thrown away rather than cut off, so the page hears 413
-      // and not a dropped connection.
-      for await (const chunk of req) {
-        size += (chunk as Buffer).length;
-        if (size > this.limit) {
-          over = true;
-          continue;
-        }
-        if (!out.write(chunk)) await once(out, 'drain');
-      }
-      out.end();
-      await finished(out);
+      await pipeline(counter, out);
     } catch (err) {
-      out.destroy();
-      rmSync(tmp, { force: true });
-      if ((err as NodeJS.ErrnoException).code === 'ENOSPC') throw new RecordingError(507, 'The Mac has no room left for this recording.');
+      req.unpipe(counter);
+      await discard(out, tmp);
+      if (writeError && err === writeError) {
+        const full = ['ENOSPC', 'EDQUOT'].includes((writeError as NodeJS.ErrnoException).code ?? '');
+        throw new RecordingError(507, full ? "The Mac's disk is full: delete something and try again." : 'The Mac could not save the recording.');
+      }
       throw err;
+    } finally {
+      req.off('close', onClose);
     }
     if (over) {
-      rmSync(tmp, { force: true });
-      throw new RecordingError(413, `That recording is too big. Light Runner keeps recordings up to ${megabytes(this.limit)}.`);
+      await discard(out, tmp);
+      throw this.tooBig(over, false);
     }
     if (size === 0) {
-      rmSync(tmp, { force: true });
+      await discard(out, tmp);
       throw new RecordingError(400, 'That file is empty.');
+    }
+    // Two uploads at once could both have fitted when they began.
+    if (this.used() > this.total) {
+      await discard(out, tmp);
+      throw this.tooBig('total', false);
     }
     renameSync(tmp, join(this.dir, file));
     const names = this.names();
@@ -137,12 +210,25 @@ export class Recordings {
   async send(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
     const file = this.fileOf(id);
     if (!file) throw new RecordingError(404, 'There is no such recording.');
-    const size = statSync(file).size;
+    let size: number;
+    try {
+      size = statSync(file).size;
+    } catch {
+      // Deleted a moment ago.
+      throw new RecordingError(404, 'There is no such recording.');
+    }
+    const etag = `"${id}"`;
     const headers: Record<string, string | number> = {
       'content-type': TYPES[extname(file).slice(1)] ?? 'application/octet-stream',
+      'x-content-type-options': 'nosniff',
       'accept-ranges': 'bytes',
       'cache-control': 'private, no-cache',
+      etag,
     };
+    if (req.headers.range === undefined && req.headers['if-none-match']?.split(',').some((t) => t.trim() === etag)) {
+      res.writeHead(304, headers).end();
+      return;
+    }
     let start = 0;
     let end = size - 1;
     const asked = req.headers.range;
@@ -186,6 +272,13 @@ export class Recordings {
   }
 }
 
+/** Closes the upload's file (Windows won't remove an open one) and removes it. */
+async function discard(out: Writable, path: string): Promise<void> {
+  out.destroy();
+  if (!out.closed) await once(out, 'close').catch(() => {});
+  rmSync(path, { force: true, maxRetries: 5, retryDelay: 20 });
+}
+
 /** The file name as the person knows it: no folders, no stray control characters, not endless. */
 function cleanName(raw: string): string {
   // eslint-disable-next-line no-control-regex
@@ -223,5 +316,6 @@ export function parseRange(header: string, size: number): [number, number] | nul
 
 function megabytes(bytes: number): string {
   const mb = bytes / (1024 * 1024);
+  if (mb >= 1024) return `${Math.round((mb / 1024) * 10) / 10} GB`;
   return mb >= 1 ? `${Math.round(mb)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }

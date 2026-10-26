@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
+import { Writable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -251,5 +253,141 @@ test('with a PIN set, every recordings route needs the programmer session', asyn
     // The session that set the PIN stays in, so the page's audio element (same origin, with its cookie) can read.
     assert.equal((await raw('GET', url, { headers: { range: 'bytes=0-9' } })).status, 206);
     assert.equal((await json('GET', '/api/recordings')).body.length, 1);
+  });
+});
+
+/** A POST by hand, for what fetch won't do: no Content-Length, a Content-Length that lies, a client that goes away. */
+function post(app: App, path: string, chunks: Buffer[], headers: Record<string, string | number> = {}, { abort = false, hold = false } = {}) {
+  return new Promise<{ status: number; connection: string | undefined; body: any } | 'aborted'>((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port: app.port, path, method: 'POST', headers: { 'content-type': 'audio/wav', ...headers } }, (res) => {
+      const parts: Buffer[] = [];
+      res.on('data', (c) => parts.push(c));
+      res.on('end', () => {
+        resolve({ status: res.statusCode!, connection: res.headers.connection, body: JSON.parse(Buffer.concat(parts).toString() || 'null') });
+        if (hold) req.destroy();
+      });
+    });
+    let answered = false;
+    req.on('response', () => { answered = true; });
+    // The server may close on us after it has answered: that is fine.
+    req.on('error', (err) => { if (abort) resolve('aborted'); else if (!answered) reject(err); });
+    (async () => {
+      for (const c of chunks) {
+        req.write(c);
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      if (abort) req.destroy();
+      else if (!hold) req.end();
+    })();
+  });
+}
+
+const waitUntil = async (ok: () => boolean, ms = 3000) => {
+  const end = Date.now() + ms;
+  while (!ok() && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(ok(), 'timed out');
+};
+
+test('a write error (disk full) answers 507 at once and leaves nothing behind', async () => {
+  const logs: string[] = [];
+  await withApp(async ({ upload, json, dir }) => {
+    const r = await Promise.race([
+      upload('big.wav', Buffer.alloc(300_000, 1)),
+      new Promise<never>((_, no) => setTimeout(() => no(new Error('the upload hung')), 5000)),
+    ]);
+    assert.equal(r.status, 507);
+    assert.match(r.body.error, /disk is full/);
+    assert.deepEqual(files(dir).filter((f) => f !== 'index.json'), []);
+    assert.deepEqual((await json('GET', '/api/recordings')).body, []);
+    assert.ok(!logs.some((l) => /HTTP error/.test(l)), logs.join('\n'));
+  }, {
+    log: (m) => logs.push(m),
+    // The file exists (it is made when the upload starts) and the second write fails.
+    recordingWriter: (path) => {
+      writeFileSync(path, '');
+      let writes = 0;
+      return new Writable({
+        write(_chunk, _enc, cb) {
+          cb(++writes > 1 ? Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }) : null);
+        },
+      });
+    },
+  });
+});
+
+test('the recordings folder has a total cap, counted before the upload is taken', async () => {
+  await withApp(async ({ upload, json, dir, app }) => {
+    const a = await upload('a.wav', Buffer.alloc(15_000, 1));
+    const b = await upload('b.wav', Buffer.alloc(15_000, 1));
+    assert.equal(a.status, 200);
+    assert.equal(b.status, 200);
+    // Full to the brim: even one more byte (said up front by Content-Length) is refused.
+    const c1 = await upload('c.wav', Buffer.alloc(1, 1));
+    assert.equal(c1.status, 413);
+    assert.match(c1.body.error, /Recordings take more than .* on the Mac: delete one first/);
+    // Without a Content-Length it is found while it comes in, and nothing is kept.
+    const chunked = await post(app, '/api/recordings?name=d.wav', [Buffer.alloc(5000, 1), Buffer.alloc(5000, 1)]);
+    assert.ok(chunked !== 'aborted');
+    assert.equal(chunked.status, 413);
+    assert.match(chunked.body.error, /delete one first/);
+    assert.deepEqual(files(dir).filter((f) => f !== 'index.json').sort(), [`${a.body.id}.wav`, `${b.body.id}.wav`].sort());
+    // Deleting one makes room.
+    assert.equal((await json('DELETE', `/api/recordings?id=${a.body.id}`)).status, 200);
+    assert.equal((await upload('e.wav', Buffer.alloc(15_000, 1))).status, 200);
+  }, { recordingLimit: 20_000, recordingsTotal: 30_000 });
+});
+
+test('a Content-Length over the limit is refused before the body comes, and the connection is closed', async () => {
+  await withApp(async ({ app, dir }) => {
+    // Says 5 MB, sends 100 bytes, and waits: the answer must not wait for the rest.
+    const r = await Promise.race([
+      post(app, '/api/recordings?name=a.wav', [Buffer.alloc(100, 1)], { 'content-length': 5_000_000 }, { hold: true }),
+      new Promise<never>((_, no) => setTimeout(() => no(new Error('no answer')), 3000)),
+    ]);
+    assert.ok(r !== 'aborted');
+    assert.equal(r.status, 413);
+    assert.equal(r.connection, 'close');
+    assert.deepEqual(files(dir).filter((f) => f !== 'index.json'), []);
+  }, { recordingLimit: 20_000 });
+});
+
+test('an upload far over the limit is cut off with 413 and the connection closed', async () => {
+  await withApp(async ({ app, dir }) => {
+    // No Content-Length (chunked): 5 x the limit is more than the 2 x the server is willing to read.
+    const chunks = Array.from({ length: 50 }, () => Buffer.alloc(2000, 1));
+    const r = await post(app, '/api/recordings?name=a.wav', chunks);
+    assert.ok(r !== 'aborted');
+    assert.equal(r.status, 413);
+    assert.equal(r.connection, 'close');
+    assert.deepEqual(files(dir).filter((f) => f !== 'index.json'), []);
+  }, { recordingLimit: 20_000 });
+});
+
+test('a client that goes away mid-upload leaves nothing behind and nothing in the log', async () => {
+  const logs: string[] = [];
+  await withApp(async ({ app, dir, upload }) => {
+    // Promises 1 MB, sends some, and is gone.
+    const r = await post(app, '/api/recordings?name=a.wav', [Buffer.alloc(8000, 1), Buffer.alloc(8000, 1)], { 'content-length': 1_000_000 }, { abort: true });
+    assert.equal(r, 'aborted');
+    await waitUntil(() => files(dir).filter((f) => f !== 'index.json').length === 0);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.ok(!logs.some((l) => /HTTP error/.test(l)), logs.join('\n'));
+    // The server is fine.
+    assert.equal((await upload('b.wav', wav(1))).status, 200);
+  }, { log: (m) => logs.push(m) });
+});
+
+test('the file route says nosniff and has an ETag', async () => {
+  await withApp(async ({ upload, raw }) => {
+    const { body } = await upload('a.wav', wav(1));
+    for (const range of [undefined, 'bytes=0-9']) {
+      const res = await raw('GET', `/api/recordings/file?id=${body.id}`, { headers: range ? { range } : {} });
+      assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+      assert.equal(res.headers.get('etag'), `"${body.id}"`);
+      await res.arrayBuffer();
+    }
+    // A player that already has it is told so.
+    const again = await raw('GET', `/api/recordings/file?id=${body.id}`, { headers: { 'if-none-match': `"${body.id}"` } });
+    assert.equal(again.status, 304);
   });
 });
