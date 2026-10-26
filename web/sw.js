@@ -9,7 +9,7 @@ const PAGE_FILES = ['.html', '.js', '.css', '.svg', '.png', '.woff2', '.webmanif
 // Kept from the first visit, so the installed app still opens its page (and says the connection is lost).
 const SHELL = [
   '/operator/', '/operator/app.js', '/operator/style.css',
-  '/shared/theme.css', '/shared/stage.js', '/shared/press.js', '/shared/colour.js', '/shared/pwa.js', '/shared/fullscreen.js',
+  '/shared/theme.css', '/shared/stage.js', '/shared/stagedraw.js', '/shared/press.js', '/shared/colour.js', '/shared/pwa.js', '/shared/fullscreen.js',
   '/shared/fonts/inter-latin-wght-normal.woff2', '/shared/icon.svg', '/shared/icon-16.svg', '/shared/icon-192.png',
   '/manifest.webmanifest',
 ];
