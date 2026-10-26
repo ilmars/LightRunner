@@ -233,7 +233,8 @@ export class App {
   private publishedTimeline = '';
   private latestRuntime: RuntimeState | null = null;
   private ready!: Promise<void>;
-  private readonly sessions = new Sessions();
+  /** The programmer's sessions, kept in the data folder so a restart (the Mac's, mid-service) doesn't log the Timeline page out. */
+  private readonly sessions: Sessions;
   private outputProblem: string | null = null;
   /** Every node-watch problem is another desk sending (no node missing). */
   private otherDeskOnly = false;
@@ -256,6 +257,7 @@ export class App {
     this.saver = new RuntimeSaver(this.store);
     this.ofl = new OflClient(join(opts.dataDir, 'ofl'), opts.fetch);
     this.recordings = new Recordings(opts.dataDir, { limit: opts.recordingLimit, total: opts.recordingsTotal, writer: opts.recordingWriter });
+    this.sessions = new Sessions({ file: join(opts.dataDir, 'sessions.json'), pin: () => this.show?.settings.pinHash });
   }
 
   get state(): LiveState | null {
