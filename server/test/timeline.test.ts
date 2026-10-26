@@ -908,6 +908,37 @@ test('server: the page that plays a live timeline is told why it ended: stop, ta
   other.ws.close();
 }));
 
+test('server: a page that was offline when its run ended is told why when it reports for that run again', () => withApp(async (app) => {
+  await withTimelines(app, long());
+  const owner = await page(app);
+  const other = await page(app);
+  await waitFor(owner.state);
+  assert.equal(await owner.timeline({ type: 'timelineStart', id: 'long', at: 0 }), null);
+  const run = owner.seen.findLast((m) => m.type === 'result').run;
+  await waitFor(() => other.state()?.timeline?.id === 'long', 2000, 'running');
+  // A Wi-Fi blip: the owner is gone when the operator page's Stop comes.
+  owner.ws.terminate();
+  await sleep(100);
+  assert.equal(await other.timeline({ type: 'timelineStop' }), null);
+  await waitFor(() => other.state()?.timeline === null, 2000, 'stopped');
+  // Back on a new connection, its first report (for its run) gets the reason; only once on that connection.
+  const back = await page(app);
+  const ended = () => back.seen.filter((m) => m.type === 'timelineEnded');
+  const report = (r: number) => back.ws.send(JSON.stringify({ type: 'timelinePosition', id: 'long', pos: 3, playing: true, run: r }));
+  report(run + 7);
+  await sleep(150);
+  assert.equal(ended().length, 0, 'another run: nothing');
+  report(run);
+  await waitFor(() => ended().length === 1, 2000, 'told of the Stop');
+  assert.deepEqual(ended()[0], { type: 'timelineEnded', run, reason: 'stop' });
+  report(run);
+  await sleep(150);
+  assert.equal(ended().length, 1);
+  assert.equal(back.state().timeline, null, 'the report starts nothing');
+  back.ws.close();
+  other.ws.close();
+}));
+
 test('server: a device (HTTP) Blackout stops it too', () => withApp(async (app) => {
   await withTimelines(app, long());
   const p = await page(app);

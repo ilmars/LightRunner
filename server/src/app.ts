@@ -124,6 +124,8 @@ const PROGRAMMER_KEYS = 'Only the programmer can change that key. Enter the PIN 
 const NOT_PROGRAMMER = 'Only the programmer can start a timeline. Enter the PIN on the Timeline page.';
 /** A recording no timeline uses is deleted at start once it is this old (ms): a day. */
 const ORPHAN_RECORDING_MS = 24 * 3600_000;
+/** How long (ms) the server remembers why the last live run ended, for its page if that was offline then. */
+const ENDED_KEPT_MS = 10 * 60_000;
 /** The key of a device Flash's time limit. */
 const flashKey = (source: string, group: string) => JSON.stringify([source, group]);
 
@@ -224,6 +226,10 @@ export class App {
    * 'taken': something else took the lights), and a page not to tell (the one whose own Start replaces it).
    */
   private liveStopping: { reason: TimelineEndReason; quietFor: WebSocket | null } | null = null;
+  /** The last live run that ended, why, and when (performance.now()): told to its page when it reports for it again. */
+  private lastLiveEnd: { run: number; reason: TimelineEndReason; at: number } | null = null;
+  /** The ended run each page was last told of on its connection, so it is told once. */
+  private readonly toldEnded = new WeakMap<WebSocket, number>();
   /** Numbers every Start (live and Prepare), so a page can tell its own run from a later one. */
   private timelineRuns = 0;
   /** Each page's Prepare timeline, running in its own draft. */
@@ -1161,6 +1167,15 @@ export class App {
     if (live && live.owner === null && role === 'programmer' && fits(live.runner) && ws.readyState === ws.OPEN) {
       live.owner = ws;
       live.runner.report(pos, playing);
+      return;
+    }
+    // The page that played a run which ended while it was offline (a Wi-Fi blip) reports for it again: it hears why,
+    // so a Stop stops its sound as if it had been there.
+    const ended = this.lastLiveEnd;
+    if (ended && run === ended.run && performance.now() - ended.at < ENDED_KEPT_MS && this.toldEnded.get(ws) !== run && ws.readyState === ws.OPEN) {
+      this.toldEnded.set(ws, run);
+      const msg: TimelineEnded = { type: 'timelineEnded', run, reason: ended.reason };
+      ws.send(JSON.stringify(msg));
     }
   }
 
@@ -1208,6 +1223,7 @@ export class App {
         const owner = entry.owner;
         const stopping = this.liveStopping;
         const reason: TimelineEndReason = why === 'end' || why === 'gone' ? 'end' : why === 'stopped' ? stopping?.reason ?? 'taken' : 'taken';
+        this.lastLiveEnd = { run: entry.runner.run, reason, at: performance.now() };
         if (owner && owner !== stopping?.quietFor && owner.readyState === owner.OPEN && !this.stopping) {
           const msg: TimelineEnded = { type: 'timelineEnded', run: entry.runner.run, reason };
           owner.send(JSON.stringify(msg));

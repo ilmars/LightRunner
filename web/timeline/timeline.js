@@ -64,13 +64,14 @@ const prep = { on: false, startRef: null, state: null, visual: null };
  * on by itself to the timeline's end); `detached` when Blackout, Basic lights, a song, Go or Back to saved took the
  * lights: the sound plays on (cutting the spoken word mid-service is worse) and Lights follow again starts them again.
  * Stop on another page (the operator page's) stops the sound here too.
- * `following`: the Start of Lights follow again is on its way. `recDuration`: the recording's length.
+ * `following`: the Start of Lights follow again is on its way. `recDuration`: the recording's length. `lastNumber`: the
+ * run number it had when it was taken over (a late word from the server about that run still counts).
  */
 let run = idleRun();
 function idleRun() {
   return {
     id: null, prepare: false, startRef: null, confirmed: false, number: null, audio: false, ended: false, detached: false,
-    following: false, basePos: 0, baseAt: 0, length: 0, recDuration: 0,
+    following: false, basePos: 0, baseAt: 0, length: 0, recDuration: 0, lastNumber: null,
   };
 }
 /** A Stop pressed while the connection was down: sent when it is back (and the live timeline isn't shown as someone else's meanwhile). */
@@ -241,6 +242,8 @@ function connect() {
   ws.onopen = () => {
     if (socket !== ws) return;
     setConnected(true);
+    // Back after a blip: the server hears at once which run this page plays (if that run ended meanwhile, it says why).
+    report();
     // Back after the server restarted: this browser may need the PIN again (its Start, reports and recording would be refused).
     void checkSession();
     // A Stop pressed while the connection was down goes now (only for that Start: a later one stays).
@@ -381,7 +384,9 @@ function onResult(msg) {
  * left to onLiveState: the sound plays on with Lights follow again, or the run ends as it played out.
  */
 function onTimelineEnded(msg) {
-  if (!run.id || run.prepare || !run.confirmed || run.detached || run.number === null || msg.run !== run.number) return;
+  // Its own run, or the one it was taken off just now (back after a blip, the live state came before the reason).
+  const mine = run.confirmed && !run.detached ? run.number : run.detached && !run.following ? run.lastNumber : null;
+  if (!run.id || run.prepare || mine === null || msg.run !== mine) return;
   if (msg.reason === 'stop') endRun(stoppedWords() && 'Stop was pressed on another page: the timeline and its recording stopped.');
 }
 
@@ -414,6 +419,7 @@ function onLiveState() {
 function detach() {
   run.detached = true;
   run.confirmed = false;
+  run.lastNumber = run.number;
   run.number = null;
   renderTransport();
 }
