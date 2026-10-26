@@ -30,7 +30,8 @@ export function segmentCount(channels: Channel[]): number;
 export function channelText(ch: Channel): string;
 export function summary(channels: Channel[]): string;
 export function compareRows(a: Channel[], b: Channel[]): CompareRow[];
-export function validateType(name: string, channels: Channel[]): string | null;
+export function ledsAreValid(leds: unknown): boolean;
+export function validateType(name: string, channels: Channel[], leds?: number | string): string | null;
 
 // Edits return a new list. rowIndex: the row's position in channelRows(), from 0 (a 16-bit channel is one row).
 export function addChannel(channels: Channel[], job: Job): Channel[];

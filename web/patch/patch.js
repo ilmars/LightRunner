@@ -2,11 +2,12 @@
 // and saves it whole; the server checks it and keeps a backup of the old one.
 
 import {
-  aimBeam, alignFixtures, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setShape, shapeOf, spaceEvenly, touches, turnBar,
+  HANGS_CHOICES, aimBeam, alignFixtures, guessHangs, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setHangs, setShape, shapeOf,
+  spaceEvenly, touches, turnBar,
 } from './plan.js';
 import {
   JOBS, addChannel, channelRows, compareRows, copyOf, isReadOnly, moveRow, newTypeId, removeRow, repeatLastSegment, segmentCount,
-  setJob, setKelvin, setSixteenBit, setValue, summary, validateType,
+  ledsAreValid, setJob, setKelvin, setSixteenBit, setValue, summary, validateType,
 } from './types.js';
 import { PLAN_ASPECT, barAxis, beamCone } from '../shared/stage.js';
 import { request, startClock, watchState } from '../shared/appbar.js';
@@ -706,7 +707,9 @@ function renderTypeSheet() {
 function refreshTypeSheet() {
   const p = typeView && profileById.get(typeView.id);
   if (!p) return;
-  $('typeSummary').textContent = summary(p.defs);
+  // The LEDs number is the show's own copy of the type (a library or built-in type has none unless the show says).
+  const leds = show.profiles.find((x) => x.id === p.id)?.leds;
+  $('typeSummary').textContent = leds ? `${summary(p.defs)} · ${leds} ${leds === 1 ? 'LED' : 'LEDs'}` : summary(p.defs);
   $('typeEdit').hidden = p.readOnly; // library and built-in types: Copy and edit only
   const users = show.fixtures.filter((f) => f.profile === p.id).length;
   const note = [users ? `Used by ${users} ${users === 1 ? 'fixture' : 'fixtures'}.` : 'No fixture uses this type.'];
@@ -799,7 +802,8 @@ const TAKES_LEVEL = new Set(['dimmer', ...COLOUR_ROLES, 'cct']);
 /**
  * The type being made or changed, as a working copy; nothing reaches the show before Save type, and the lights
  * before Save patch. Null while the editor is closed.
- * { id: null for a new type, else the type's id (fixed), name, channels, extra: what else the type has (gamma...),
+ * { id: null for a new type, else the type's id (fixed), name, channels, leds: the LEDs field (a number, what was typed
+ *   if it is not one, or undefined for empty), extra: what else the type has (gamma...),
  *   from: the type a copy came from, ticks: ids of the fixtures ticked to use it, armed: Delete type's timer }
  */
 let editor = null;
@@ -822,6 +826,7 @@ function openEditor(draft) {
     ? 'A change here changes every fixture that uses this type.'
     : source ? `Starts as a copy of ${source.name}. The original stays as it is.` : "Name it, then add its channels in the order the light's manual lists them.";
   $('teName').value = editor.name;
+  $('teLeds').value = shownNumber(editor.leds);
   renderEditorRows();
   renderTicks();
   refreshEditor();
@@ -837,7 +842,7 @@ function openEditor(draft) {
 }
 
 /** What the editor holds, to tell whether anything was changed since it opened. */
-const editorKey = () => JSON.stringify([editor.name, editor.channels, [...editor.ticks].sort()]);
+const editorKey = () => JSON.stringify([editor.name, editor.channels, editor.leds ?? null, [...editor.ticks].sort()]);
 /** An open editor with changes in it. */
 const editorChanged = () => Boolean(editor) && editorKey() !== editor.start;
 /** Before something takes the editor's place: false when the person wants to keep working in it. */
@@ -967,6 +972,8 @@ function renderEditorRows(focus = []) {
   }
 }
 
+const LEDS_HINT = $('teLedsHint').textContent;
+
 /** Everything in the editor that follows the working copy, except the rows and the ticks (so typing keeps its focus). */
 function refreshEditor() {
   if (!editor) return;
@@ -984,7 +991,12 @@ function refreshEditor() {
   const canDelete = editor.id !== null && users === 0;
   $('teDelete').hidden = !canDelete;
   if (!canDelete) disarmDelete();
-  const problem = validateType(editor.name, channels);
+  const leds = editor.leds;
+  const spread = typeof leds === 'number' && ledsAreValid(leds) && segments > 1
+    ? (leds < segments ? ` That is fewer than the ${segments} segments, so one per segment is drawn.` : ` ${leds} LEDs over ${segments} segments.`)
+    : '';
+  $('teLedsHint').textContent = LEDS_HINT + spread;
+  const problem = validateType(editor.name, channels, leds);
   $('teMessage').textContent = problem ?? '';
   $('teSave').disabled = problem !== null;
 }
@@ -1025,12 +1037,15 @@ function renderTicks() {
 
 /** Save type: the type goes in the working show, the ticked fixtures switch to it, and the page follows. */
 function saveEditorType() {
-  if (!editor || validateType(editor.name, editor.channels) !== null) return;
+  if (!editor || validateType(editor.name, editor.channels, editor.leds) !== null) return;
   const name = editor.name.trim();
   const id = editor.id ?? newTypeId(name, takenTypeIds()); // fixed from here on; a rename changes only the name
   const wasNew = editor.id === null;
   // An edit keeps the type as stored (its key order too), so saving with no change leaves the patch as it was.
-  putProfile(editor.base ? { ...editor.base, name, channels: structuredClone(editor.channels) } : { id, name, channels: structuredClone(editor.channels), ...editor.extra });
+  const type = editor.base ? { ...editor.base, name, channels: structuredClone(editor.channels) } : { id, name, channels: structuredClone(editor.channels), ...editor.extra };
+  if (editor.leds === undefined) delete type.leds; // empty: one LED per segment is drawn
+  else type.leds = editor.leds;
+  putProfile(type);
   for (const f of show.fixtures) if (editor.ticks.has(f.id)) f.profile = id;
   fillAddForm(false);
   if (wasNew) $('addProfile').value = id;
@@ -1078,8 +1093,8 @@ function deleteEditorType() {
 function copyDraft(p) {
   const own = show.profiles.find((x) => x.id === p.id); // the whole type (gamma...) when the show has it
   const copy = copyOf(own ?? { id: p.id, name: p.name, channels: p.defs }, takenTypeIds());
-  const { id: _id, name, channels, ...extra } = copy;
-  return { id: null, name, channels, extra, from: p.id };
+  const { id: _id, name, channels, leds, ...extra } = copy;
+  return { id: null, name, channels, leds, extra, from: p.id };
 }
 
 $('libNew').addEventListener('click', () => openEditor({ id: null, name: '', channels: [] }));
@@ -1092,12 +1107,17 @@ $('typeEdit').addEventListener('click', () => {
   const own = p && !p.readOnly && show.profiles.find((x) => x.id === p.id);
   if (!own) return;
   const base = structuredClone(own);
-  openEditor({ id: base.id, name: base.name, channels: structuredClone(base.channels), base });
+  openEditor({ id: base.id, name: base.name, channels: structuredClone(base.channels), leds: base.leds, base });
 });
 
 $('teName').addEventListener('input', () => {
   if (!editor) return;
   editor.name = $('teName').value;
+  refreshEditor();
+});
+$('teLeds').addEventListener('input', () => {
+  if (!editor) return;
+  editor.leds = typedNumber($('teLeds').value);
   refreshEditor();
 });
 $('teAdd').replaceChildren(new Option('＋ Add channel…', ''), ...JOBS.map((j) => new Option(j.label, j.job)));
@@ -1598,6 +1618,7 @@ const SHAPE_HINTS = {
 function renderPlanTools() {
   const chosen = chosenFixtures();
   $('planTools').hidden = !chosen.length;
+  $('planHangsHint').hidden = !chosen.length;
   $('planHelp').hidden = chosen.length > 0;
   $('planArrange').hidden = chosen.length < 2;
   if (!chosen.length) return;
@@ -1610,11 +1631,38 @@ function renderPlanTools() {
   $('planTurn').hidden = shape !== 'bar';
   $('planAngle').textContent = angles.size === 1 ? `${[...angles][0]}°` : '';
   $('planToolsHint').textContent = chosen.length === 1 ? SHAPE_HINTS[shape] : '';
+  renderHangs(chosen);
   for (const b of $('planSpace').children) {
     b.disabled = chosen.length < 3;
     b.title = b.disabled ? 'Select three or more to space them evenly' : '';
   }
 }
+
+const MIXED = 'different';
+
+/** Hangs on: what the selected lights say, or the guess (named when it is the same for all of them). */
+function renderHangs(chosen) {
+  const select = $('planHangs');
+  const says = new Set(chosen.map((f) => f.hangs ?? ''));
+  const guesses = new Set(chosen.map((f) => guessHangs(f, inSmokeGroup(f))));
+  const label = (value) => HANGS_CHOICES.find((c) => c.value === value)?.label ?? '';
+  const options = [new Option(guesses.size === 1 ? `Guess: ${label([...guesses][0])}` : 'Guess from the plan', '')];
+  for (const c of HANGS_CHOICES) options.push(new Option(c.label, c.value));
+  if (says.size > 1) {
+    const mixed = new Option('Different', MIXED);
+    mixed.disabled = true;
+    options.unshift(mixed);
+  }
+  select.replaceChildren(...options);
+  select.value = says.size > 1 ? MIXED : [...says][0];
+}
+
+$('planHangs').addEventListener('change', (ev) => {
+  const chosen = chosenFixtures();
+  if (!chosen.length || ev.target.value === MIXED) return;
+  for (const f of chosen) setHangs(f, ev.target.value);
+  changed();
+});
 
 $('planShape').addEventListener('click', (ev) => {
   const b = ev.target.closest('button[data-shape]');

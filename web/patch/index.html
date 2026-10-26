@@ -121,6 +121,11 @@
           <span id="teRepeatHint" class="hint"></span>
         </div>
         <p id="teSummary" class="te-summary"></p>
+        <div class="field te-leds">
+          <label for="teLeds">LEDs</label>
+          <input id="teLeds" class="ds-field" type="text" inputmode="numeric" autocomplete="off" aria-describedby="teLedsHint">
+          <p id="teLedsHint" class="hint">How many the light really has (spread over its segments). Leave empty to draw one per segment.</p>
+        </div>
       </div>
       <div class="sub">
         <h3 class="ds-caps">Use it for</h3>
@@ -210,8 +215,13 @@
           <button type="button" class="ds-btn ds-btn--quiet" data-angle="0">Across</button>
           <button type="button" class="ds-btn ds-btn--quiet" data-angle="90">Upright</button>
         </span>
+        <span class="plan-hangs">
+          <label for="planHangs" class="ds-caps plan-label">Hangs on</label>
+          <select id="planHangs" class="ds-field" aria-describedby="planHangsHint"></select>
+        </span>
         <span id="planToolsHint" class="hint"></span>
       </div>
+      <p id="planHangsHint" class="hint plan-hangs-hint" hidden>Where the light is in the stage view from the audience. Guess works it out from its place on the plan.</p>
       <div id="planArrange" class="plan-tools" hidden>
         <span class="ds-caps plan-label">Align</span>
         <div id="planAlign" class="ds-seg" role="group" aria-label="Align">

@@ -333,3 +333,11 @@ table.patch { width: 100%; min-width: 900px; border-collapse: collapse; font-siz
 .te-foot .ds-btn { min-width: 96px; }
 /* Delete type, once tapped: the second tap deletes (tinted like the operator page's delete). */
 .te-foot .del.armed { color: var(--ds-danger-text); background: var(--ds-danger-fill); box-shadow: inset 0 0 0 1px var(--ds-danger-edge); }
+
+/* Hangs on (the selected light's place in the stage view from the audience) and the LEDs a type has: quiet, beside what they belong to. */
+.plan-hangs { display: inline-flex; align-items: center; gap: 8px; }
+.plan-hangs .plan-label { margin-left: 0; white-space: nowrap; }
+.plan-hangs .ds-field { min-width: 190px; font-size: 14px; }
+.plan-hangs-hint { margin-top: -6px; }
+.te-leds { max-width: 520px; }
+.te-leds .ds-field { width: 120px; font-variant-numeric: tabular-nums; }

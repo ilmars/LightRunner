@@ -4,6 +4,7 @@
 // Lengths along an angle are measured in the plan's proportions, as a fraction of its width.
 
 import { BEAM_REACH, PLAN_ASPECT, barAxis } from '../shared/stage.js';
+import { HANGS, hangsOf } from '../shared/stageview.js';
 
 /** A new bar: a fifth of the plan wide, and thin. */
 export const BAR_LENGTH = 0.2;
@@ -210,4 +211,26 @@ export function moveTogether(list, starts, dx, dy) {
 export function touches(f, box, inSmoke = false) {
   const b = boundsOf(f, inSmoke);
   return b.right >= box.left && b.left <= box.right && b.bottom >= box.top && b.top <= box.bottom;
+}
+
+// ---- Where a light hangs (the stage view from the audience) ----
+
+/** What Patch offers for Hangs on, in the order of the select. */
+export const HANGS_CHOICES = [
+  { value: 'truss', label: 'Truss' },
+  { value: 'wall', label: 'Back-wall floor' },
+  { value: 'riser', label: 'Riser' },
+  { value: 'stand', label: 'Stand' },
+  { value: 'side', label: 'Side' },
+];
+
+/** What the stage view would guess for a fixture with no Hangs on, from its place and shape on the plan. */
+export function guessHangs(f, inSmoke = false) {
+  return hangsOf({ ...f, shape: shapeOf(f, inSmoke), hangs: null });
+}
+
+/** Say where a fixture hangs; an empty value (or one that isn't a place) takes it back to the guess. */
+export function setHangs(f, value) {
+  if (HANGS.includes(value)) f.hangs = value;
+  else delete f.hangs;
 }

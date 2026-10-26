@@ -4,8 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BAR_LENGTH, BAR_THICKNESS, MIN_THICKNESS, aimBeam, alignFixtures, boundsOf, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness,
-  setBarAngle, setShape, shapeOf, spaceEvenly, touches, turnBar,
+  BAR_LENGTH, BAR_THICKNESS, HANGS_CHOICES, MIN_THICKNESS, aimBeam, alignFixtures, boundsOf, guessHangs, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness,
+  setBarAngle, setHangs, setShape, shapeOf, spaceEvenly, touches, turnBar,
 } from '../../web/patch/plan.js';
 import { BEAM_REACH, barAxis, barEnds, beamCone, outlineCells } from '../../web/shared/stage.js';
 
@@ -264,4 +264,25 @@ test('a box selects every fixture it touches', () => {
   // A bar whose end reaches into the box.
   assert.equal(touches({ x: 0.75, y: 0.5, w: 0.4, h: 0.03 }, box), true);
   assert.equal(touches({ x: 0.85, y: 0.5, w: 0.4, h: 0.03 }, box), false);
+});
+
+test('Hangs on: what Patch offers, the guess it names, and taking a choice back', () => {
+  assert.deepEqual(HANGS_CHOICES.map((c) => c.value), ['truss', 'wall', 'riser', 'stand', 'side']);
+  assert.equal(HANGS_CHOICES.find((c) => c.value === 'wall')?.label, 'Back-wall floor');
+  // The guess is the stage view's: near the back is the floor at the wall, near the front a stand, the middle the truss.
+  assert.equal(guessHangs({ x: 0.5, y: 0.1 }), 'wall');
+  assert.equal(guessHangs({ x: 0.5, y: 0.9 }), 'stand');
+  assert.equal(guessHangs({ x: 0.5, y: 0.5 }), 'truss');
+  assert.equal(guessHangs({ x: 0.5, y: 0.5, w: 0.2, h: 0.03 }), 'wall', 'a bar in the middle of the stage');
+  assert.equal(guessHangs({ x: 0.9, y: 0.5, w: 0.0125, h: 0.48 }), 'side', 'an upright bar');
+  assert.equal(guessHangs({ x: 0.5, y: 0.5 }, true), 'wall', 'smoke is at the back wall');
+  assert.equal(guessHangs({ x: 0.5, y: 0.5, hangs: 'side' }), 'truss', 'the guess ignores what is stored');
+  const f: { x: number; y: number; hangs?: 'truss' | 'wall' | 'riser' | 'stand' | 'side' } = { x: 0.5, y: 0.5 };
+  setHangs(f, 'stand');
+  assert.equal(f.hangs, 'stand');
+  setHangs(f, '');
+  assert.equal('hangs' in f, false, 'the guess is no field at all');
+  setHangs(f, 'riser');
+  setHangs(f, 'nonsense');
+  assert.equal('hangs' in f, false);
 });
