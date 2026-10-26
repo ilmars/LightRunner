@@ -81,7 +81,7 @@ test('the runner sends each block at its time, with its rise, and stops at the e
   r.start(t);
   // Start at 0:00: Dark on every light group, over its rise.
   assert.deepEqual(r.sent.map((s) => s.cmd), LIGHT_GROUPS.map((group) => ({ type: 'groupLevel', group, value: 0, fade: 2 })));
-  assert.deepEqual(r.runner.state, { id: 'xmas', name: 'Timeline xmas', pos: 0, duration: 10, playing: true });
+  assert.deepEqual(r.runner.state, { id: 'xmas', name: 'Timeline xmas', pos: 0, duration: 10, playing: true, run: 0 });
 
   r.run(3.1);
   const front = r.cmds('groupPreset', 'front-wash');
@@ -939,4 +939,39 @@ test('server: the page\'s reports move the live timeline (a seek)', () => withAp
   await sleep(300);
   assert.equal(p.state().timeline.pos, 20);
   p.ws.close();
+}));
+
+test('server: every Start has its own run number; reports and a Stop for an older run are ignored', () => withApp(async (app) => {
+  await withTimelines(app, long());
+  const a = await page(app);
+  const b = await page(app);
+  await waitFor(a.state);
+  const runOf = (p: { seen: any[] }) => p.seen.findLast((m) => m.type === 'result')?.run;
+  assert.equal(await a.timeline({ type: 'timelineStart', id: 'long', at: 0 }), null);
+  const runA = runOf(a);
+  assert.equal(typeof runA, 'number');
+  await waitFor(() => b.state()?.timeline?.run === runA, 2000, 'the live state shows the run');
+  // The same timeline started again on another page: a new run.
+  assert.equal(await b.timeline({ type: 'timelineStart', id: 'long', at: 30 }), null);
+  const runB = runOf(b);
+  assert.ok(runB > runA);
+  await waitFor(() => a.state()?.timeline?.run === runB, 2000, 'the second run');
+  // The second page drops: the first page's reports (its old run) don't take the timeline up.
+  b.ws.terminate();
+  await sleep(300);
+  a.ws.send(JSON.stringify({ type: 'timelinePosition', id: 'long', pos: 2, playing: true, run: runA }));
+  await sleep(200);
+  assert.ok(a.state().timeline.pos >= 30, 'not moved back to 2');
+  // Nor does its Stop for the old run.
+  assert.equal(await a.timeline({ type: 'timelineStop', id: 'long', run: runA }), null);
+  await sleep(100);
+  assert.equal(a.state().timeline?.run, runB);
+  // The second page back on a new connection, with the live run's number, takes it up.
+  const back = await page(app);
+  back.ws.send(JSON.stringify({ type: 'timelinePosition', id: 'long', pos: 50, playing: true, run: runB }));
+  await waitFor(() => (a.state()?.timeline?.pos ?? 0) >= 50, 2000, 'the page back moves it');
+  assert.equal(await back.timeline({ type: 'timelineStop', id: 'long', run: runB }), null);
+  await waitFor(() => a.state()?.timeline === null, 2000, 'stopped');
+  a.ws.close();
+  back.ws.close();
 }));

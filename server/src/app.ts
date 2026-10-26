@@ -119,6 +119,8 @@ const TEMPO_RUN_MS = 3000;
 /** A Master step this soon (ms) after another carries on from it instead of from the state. */
 const DEVICE_MASTER_MS = 300;
 /** What an operator is told for a key only the programmer may change (Settings, behind the PIN). */
+/** A recording no timeline uses is deleted at start once it is this old (ms): a day. */
+const ORPHAN_RECORDING_MS = 24 * 3600_000;
 const PROGRAMMER_KEYS = 'Only the programmer can change that key. Enter the PIN in Settings.';
 /** The key of a device Flash's time limit. */
 const flashKey = (source: string, group: string) => JSON.stringify([source, group]);
@@ -213,6 +215,8 @@ export class App {
   private liveTimeline: { runner: TimelineRunner; owner: WebSocket | null } | null = null;
   /** A live Start, Stop, Blackout, Basic lights or song: a live Start still waiting for the stage makes no timeline now. */
   private timelineTurn = 0;
+  /** Numbers every Start (live and Prepare), so a page can tell its own run from a later one. */
+  private timelineRuns = 0;
   /** Each page's Prepare timeline, running in its own draft. */
   private readonly prepareTimelines = new Map<WebSocket, TimelineRunner>();
   /** Ticks the timelines while any runs. */
@@ -277,6 +281,11 @@ export class App {
       this.log('Gave the show a running order, ready-made effects and starter colours where they were missing');
     }
     this.show = migrated;
+    // A recording no timeline uses (taken off a timeline, or left by a page that went away while adding it) goes after
+    // a day; a newer one may still be on its way into a timeline.
+    const used = new Set(this.show.timelines.flatMap((t) => (t.recording ? [t.recording.id] : [])));
+    const swept = this.recordings.sweep(used, ORPHAN_RECORDING_MS);
+    if (swept) this.log(`Deleted ${swept} recording${swept === 1 ? '' : 's'} no timeline uses`);
     this.latestRuntime = this.store.loadRuntime();
     if (this.latestRuntime) this.log(`Restoring last state: look "${this.latestRuntime.look ?? 'none'}"`);
     this.startWorker();
@@ -691,7 +700,8 @@ export class App {
           // Groups an edit in Prepare moved onto copies go back onto their own colours, which look the same again.
           const pins = this.undoKeep.get(last);
           // The programmer's keys and the controller switches aren't Undo steps: they stay as they are.
-          await this.operatorSave(keepControllerKeys(keepCustomPresets(last, this.show), this.show), pins && { pins });
+          // Nor are the timelines (saved by the Timeline page, no Undo steps): they stay as they are now.
+          await this.operatorSave({ ...keepControllerKeys(keepCustomPresets(last, this.show), this.show), timelines: this.show.timelines }, pins && { pins });
         } catch (err) {
           this.undoLog.push(last); // still there to try again
           return { error: (err as Error).message, recorded: false };
@@ -775,6 +785,19 @@ export class App {
    */
   private async controllerSave(show: Show, backup = false): Promise<void> {
     await this.putShow(show, backup || !this.operatorBackedUp);
+    this.operatorBackedUp = true;
+  }
+
+  /**
+   * The Timeline page's saves: only the show's timelines change, so the show is saved (no Undo step, the Undo list stays,
+   * a backup only for the first save after a programmer save, or with `backup`) without handing it to the engine, the
+   * drafts or the devices, and with no new layout for the pages: none of them use timelines. The runners read
+   * this.show's timelines on every tick.
+   */
+  private timelinesSave(timelines: Timeline[], backup = false): void {
+    const show: Show = { ...this.show, timelines };
+    this.store.saveShow(show, { backup: backup || !this.operatorBackedUp });
+    this.show = show;
     this.operatorBackedUp = true;
   }
 
@@ -1081,8 +1104,14 @@ export class App {
     const msg = parsed.data;
     if (msg.type === 'timelineStop') {
       // Anyone may stop the live timeline (the operator page's Stop); a page stops its own Prepare one.
-      if (msg.prepare) this.prepareTimelines.get(ws)?.stop();
-      else if (this.liveTimeline && (msg.id === undefined || msg.id === this.liveTimeline.runner.id)) this.stopLiveTimeline();
+      // A Stop for an older run (a page that was taken over, sending it late) leaves the running one alone.
+      const fits = (runner: TimelineRunner) => (msg.id === undefined || msg.id === runner.id) && (msg.run === undefined || msg.run === runner.run);
+      const prepare = this.prepareTimelines.get(ws);
+      if (msg.prepare) {
+        if (prepare && fits(prepare)) prepare.stop();
+      } else if (this.liveTimeline && fits(this.liveTimeline.runner)) {
+        this.stopLiveTimeline();
+      }
       return null;
     }
     if (msg.type !== 'timelineStart') return null;
@@ -1100,18 +1129,20 @@ export class App {
   private timelinePosition(input: unknown, role: Role, ws: WebSocket): void {
     const parsed = TimelineMessage.safeParse(input);
     if (!parsed.success || parsed.data.type !== 'timelinePosition') return;
-    const { id, pos, playing } = parsed.data;
+    const { id, pos, playing, run } = parsed.data;
+    // A report for an older Start (a page that was taken over) never moves the timeline.
+    const fits = (runner: TimelineRunner) => runner.id === id && (run === undefined || run === runner.run);
     const live = this.liveTimeline;
-    if (live && live.owner === ws && live.runner.id === id) {
+    if (live && live.owner === ws && fits(live.runner)) {
       live.runner.report(pos, playing);
       return;
     }
     const prepare = this.prepareTimelines.get(ws);
-    if (prepare?.id === id) {
+    if (prepare && fits(prepare)) {
       prepare.report(pos, playing);
       return;
     }
-    if (live && live.owner === null && role === 'programmer' && live.runner.id === id && ws.readyState === ws.OPEN) {
+    if (live && live.owner === null && role === 'programmer' && fits(live.runner) && ws.readyState === ws.OPEN) {
       live.owner = ws;
       live.runner.report(pos, playing);
     }
@@ -1155,7 +1186,7 @@ export class App {
     });
     this.liveTimeline = entry;
     this.log(`Timeline "${fresh.name}" started at ${at.toFixed(1)} s`);
-    entry.runner.start(fresh, at, before);
+    entry.runner.start(fresh, at, before, ++this.timelineRuns);
     this.timelineTimerFits();
     this.publishState();
     return null;
@@ -1199,7 +1230,7 @@ export class App {
       },
     });
     this.prepareTimelines.set(ws, runner);
-    runner.start(fresh, at, session.engine.runtime());
+    runner.start(fresh, at, session.engine.runtime(), ++this.timelineRuns);
     this.timelineTimerFits();
     this.sendDraft(ws);
     return null;
@@ -1286,7 +1317,13 @@ export class App {
           this.log(`Timeline failed: ${(err as Error)?.stack ?? String(err)}`);
           error = 'That did not work. The lights were not changed.';
         }
-        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'result', ref: msg.ref ?? null, error }));
+        // A Start is told its run number, so the page knows its own run from a later one.
+        let run: number | undefined;
+        if (!error && msg.type === 'timelineStart') {
+          const live = this.liveTimeline;
+          run = (msg as { prepare?: unknown }).prepare ? this.prepareTimelines.get(ws)?.run : live?.owner === ws ? live.runner.run : undefined;
+        }
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'result', ref: msg.ref ?? null, error, ...(run !== undefined ? { run } : {}) }));
         return;
       }
       if (msg.type === 'command') {
@@ -1792,7 +1829,7 @@ export class App {
         // Saved like Settings' controller switches: no Undo step, the Undo list stays, and only the first save after a
         // programmer save keeps a backup (the page saves after each pause in editing). A running timeline takes the edit
         // on its next tick.
-        await this.controllerSave(parseShow({ ...this.show, timelines }));
+        this.timelinesSave(timelines);
         json(res, 200, timeline);
         return true;
       }
@@ -1801,7 +1838,7 @@ export class App {
         const gone = this.show.timelines.find((t) => t.id === id);
         if (!gone) throw new HttpError(404, 'There is no such timeline.');
         // A timeline running now stops on its next tick (it is gone from the show).
-        await this.controllerSave({ ...this.show, timelines: this.show.timelines.filter((t) => t !== gone) }, true);
+        this.timelinesSave(this.show.timelines.filter((t) => t !== gone), true);
         this.log(`Timeline "${gone.name}" deleted`);
         json(res, 200, { ok: true });
         return true;

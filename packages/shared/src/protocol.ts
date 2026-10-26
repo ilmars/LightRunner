@@ -262,10 +262,10 @@ const position = z.number().min(0).max(24 * 3600);
 export const TimelineMessage = z.discriminatedUnion('type', [
   /** Start the timeline at `at` seconds (0 = the beginning). A live Start stops the live one that is running. */
   z.object({ type: z.literal('timelineStart'), id, at: position, prepare: z.boolean().optional() }),
-  /** Where the page's recording is (seconds) and whether it plays. */
-  z.object({ type: z.literal('timelinePosition'), id, pos: position, playing: z.boolean() }),
-  /** Stop the live timeline (only if it is `id`, when given), or with `prepare` this page's Prepare one. The stage stays as it is. */
-  z.object({ type: z.literal('timelineStop'), id: id.optional(), prepare: z.boolean().optional() }),
+  /** Where the page's recording is (seconds) and whether it plays; `run`: the Start it belongs to (ignored when that isn't the running one). */
+  z.object({ type: z.literal('timelinePosition'), id, pos: position, playing: z.boolean(), run: z.number().int().optional() }),
+  /** Stop the live timeline (only if it is `id`, and that `run`, when given), or with `prepare` this page's Prepare one. The stage stays as it is. */
+  z.object({ type: z.literal('timelineStop'), id: id.optional(), prepare: z.boolean().optional(), run: z.number().int().optional() }),
 ]);
 export type TimelineMessage = z.infer<typeof TimelineMessage>;
 
@@ -278,6 +278,11 @@ export interface TimelineStatus {
   /** Seconds: the last block's start or end, or the recording's length, whichever is later. */
   duration: number;
   playing: boolean;
+  /**
+   * Which Start this is: every Start (on any page) gets a new number, and the page that pressed it is told it. A page
+   * whose number isn't the running one's has been taken over; its reports and Stop carry the number and are ignored then.
+   */
+  run: number;
 }
 
 export type OutputStatus = 'ok' | 'lost' | 'off';

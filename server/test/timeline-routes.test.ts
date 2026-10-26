@@ -2,11 +2,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { WebSocket } from 'ws';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { App } from '../src/app.ts';
+import { Recordings } from '../src/recordings.ts';
 import { STAGE_LAYER } from '../../packages/shared/src/index.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -154,3 +157,97 @@ function wav(): Buffer {
   for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(Math.sin(i / 10) * 3000), 44 + i * 2);
   return b;
 }
+
+/** A WebSocket page on the app: what it was sent, and commands with their answers. */
+async function socket(app: App) {
+  const ws = new WebSocket(`ws://127.0.0.1:${app.port}/ws`);
+  const seen: any[] = [];
+  ws.on('message', (data, isBinary) => {
+    if (!isBinary) seen.push(JSON.parse(String(data)));
+  });
+  await new Promise((r) => ws.once('open', r));
+  let ref = 0;
+  const send = async (cmd: unknown) => {
+    const mine = ++ref;
+    ws.send(JSON.stringify({ type: 'command', ref: mine, cmd }));
+    for (let i = 0; i < 300; i++) {
+      const answer = seen.find((m) => m.type === 'result' && m.ref === mine);
+      if (answer) return answer.error as string | null;
+      await sleep(10);
+    }
+    throw new Error('no answer');
+  };
+  return { ws, seen, send };
+}
+
+test("an operator's Undo of an earlier show edit keeps the timelines as they are now", async () => {
+  await withApp(async ({ json, app }) => {
+    const p = await socket(app);
+    const show = (await json('GET', '/api/show')).body;
+    const id = show.operator.runningOrder[1];
+    const name = show.looks.find((l: any) => l.id === id).name;
+    assert.equal(await p.send({ type: 'renameItem', id, name: 'Renamed song' }), null);
+    // The timeline is made after the edit; undoing the edit must not take it away.
+    assert.equal((await json('PUT', '/api/timeline', intro())).status, 200);
+    assert.equal(await p.send({ type: 'undo' }), null);
+    const after = (await json('GET', '/api/show')).body;
+    assert.equal(after.looks.find((l: any) => l.id === id).name, name, 'the rename was undone');
+    assert.deepEqual(after.timelines.map((t: any) => t.id), ['intro'], 'the timeline stays');
+    p.ws.close();
+  });
+});
+
+test('a timeline save sends the pages no new layout and leaves the engine alone', async () => {
+  await withApp(async ({ json, app }) => {
+    const p = await socket(app);
+    await sleep(200);
+    const layouts = () => p.seen.filter((m) => m.type === 'layout').length;
+    const before = layouts();
+    assert.ok(before >= 1);
+    assert.equal((await json('PUT', '/api/timeline', intro())).status, 200);
+    assert.equal((await json('PUT', '/api/timeline', intro({ name: 'Again' }))).status, 200);
+    assert.equal((await json('DELETE', '/api/timeline?id=intro')).status, 200);
+    await sleep(300);
+    assert.equal(layouts(), before);
+    p.ws.close();
+  });
+});
+
+test('on start, recordings no timeline uses and older than a day are deleted; newer ones stay', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'light-runner-tl-'));
+  const rec = join(dir, 'recordings');
+  mkdirSync(rec, { recursive: true });
+  const old = 'aaaaaaaaaaaaaaaa', fresh = 'bbbbbbbbbbbbbbbb';
+  writeFileSync(join(rec, `${old}.wav`), wav());
+  writeFileSync(join(rec, `${fresh}.wav`), wav());
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 3600_000);
+  utimesSync(join(rec, `${old}.wav`), twoDaysAgo, twoDaysAgo);
+  const logs: string[] = [];
+  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath, webDir: join(root, 'web'), output: { kind: 'none' }, log: (m) => logs.push(m) });
+  try {
+    await app.start();
+    assert.deepEqual(readdirSync(rec).filter((f) => f.endsWith('.wav')), [`${fresh}.wav`]);
+    assert.equal(logs.filter((l) => /recording/i.test(l) && /deleted|removed/i.test(l)).length, 1);
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Recordings.sweep keeps the ones a timeline uses, however old', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'light-runner-tl-'));
+  try {
+    const rec = join(dir, 'recordings');
+    mkdirSync(rec, { recursive: true });
+    for (const id of ['cccccccccccccccc', 'dddddddddddddddd']) {
+      writeFileSync(join(rec, `${id}.mp3`), 'x');
+      const old = new Date(Date.now() - 3 * 24 * 3600_000);
+      utimesSync(join(rec, `${id}.mp3`), old, old);
+    }
+    const removed = new Recordings(dir).sweep(new Set(['cccccccccccccccc']), 24 * 3600_000);
+    assert.equal(removed, 1);
+    assert.deepEqual(readdirSync(rec).filter((f) => f.endsWith('.mp3')), ['cccccccccccccccc.mp3']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

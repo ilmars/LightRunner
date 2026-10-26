@@ -97,6 +97,27 @@ export class Recordings {
       : `Recordings take more than ${megabytes(this.total)} on the Mac: delete one first.`, close);
   }
 
+  /** Deletes the recordings not in `used` whose files are older than `olderThanMs`. Returns how many. */
+  sweep(used: Set<string>, olderThanMs: number, now = Date.now()): number {
+    if (!existsSync(this.dir)) return 0;
+    const names = this.names();
+    let removed = 0;
+    for (const file of readdirSync(this.dir)) {
+      const id = FILE.exec(file)?.[1];
+      if (!id || used.has(id)) continue;
+      try {
+        if (now - statSync(join(this.dir, file)).mtimeMs < olderThanMs) continue;
+        rmSync(join(this.dir, file), { force: true });
+      } catch {
+        continue;
+      }
+      removed++;
+      delete names[id];
+    }
+    if (removed) this.saveNames(names);
+    return removed;
+  }
+
   /** Removes the half-written files an upload left when the server stopped in the middle of it. */
   tidy(): void {
     if (!existsSync(this.dir)) return;

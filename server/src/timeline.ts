@@ -59,6 +59,8 @@ const fadeOf = (seconds: number): { fade: number } => ({ fade: Math.min(600, Mat
 export class TimelineRunner {
   private readonly opts: TimelineRunnerOptions;
   private timelineId: string | null = null;
+  /** Which Start this is (the App numbers them). */
+  private runNo = 0;
   private name = '';
   private duration = 0;
   /** The stage when it started: a group the timeline no longer has a block for goes back to this. */
@@ -89,6 +91,11 @@ export class TimelineRunner {
     return this.timelineId !== null;
   }
 
+  /** Which Start it runs (see TimelineStatus.run). */
+  get run(): number {
+    return this.runNo;
+  }
+
   /** The id of the timeline it runs, or null. */
   get id(): string | null {
     return this.timelineId;
@@ -97,16 +104,17 @@ export class TimelineRunner {
   /** What the pages are told: null when it isn't running. */
   get state(): TimelineStatus | null {
     if (!this.timelineId) return null;
-    return { id: this.timelineId, name: this.name, pos: Math.round(this.position(this.opts.now()) * 1000) / 1000, duration: this.duration, playing: this.playing };
+    return { id: this.timelineId, name: this.name, pos: Math.round(this.position(this.opts.now()) * 1000) / 1000, duration: this.duration, playing: this.playing, run: this.runNo };
   }
 
   /**
    * Play `timeline` from `at` seconds. At 0:00 its first blocks come with their rise (from whatever is on stage);
-   * in the middle, the stage fades to the state there over 1 s. `before`: the stage as it is now.
+   * in the middle, the stage fades to the state there over 1 s. `before`: the stage as it is now. `run`: which Start this is.
    */
-  start(timeline: Timeline, at: number, before: RuntimeState | null = null): void {
+  start(timeline: Timeline, at: number, before: RuntimeState | null = null, run = 0): void {
     const now = this.opts.now();
     this.timelineId = timeline.id;
+    this.runNo = run;
     this.name = timeline.name;
     this.duration = timelineLength(timeline);
     this.before = before;
