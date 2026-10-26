@@ -15,12 +15,17 @@ import {
 
 /** How often the App ticks a runner (ms). */
 export const TICK_MS = 25;
-/** A seek, Start in the middle or an edit fades over this long (seconds). */
-export const SEEK_FADE = 1;
-/** The end of a Follow the voice block fades back to the timeline's level over this long (seconds). */
-export const FOLLOW_END_FADE = 1;
-/** Every change the timeline sends fades over at least this long (seconds): a rise of 0 never snaps. */
-export const MIN_FADE = 0.5;
+/**
+ * Every change the timeline sends fades over at least this long (seconds): a rise of 0 never snaps. A change of colour and
+ * level together is two eased fades multiplied (the colour's crossfade and the level), steepest at about 1.9 times the
+ * average, on top of whatever else moves on a shared fixture: jump-check with timelines needs 1.5 s to stay under 5 % a
+ * frame on both shows (0.8 s reaches 6.7 %, 1 s 5.8 %, 1.3 s 5.2 %).
+ */
+export const MIN_FADE = 1.5;
+/** A seek, Start in the middle or an edit fades over this long (seconds): the spec's 1 s, raised to MIN_FADE. */
+export const SEEK_FADE = MIN_FADE;
+/** The end of a Follow the voice block fades back to the timeline's level over this long (seconds): the spec's 1 s, raised to MIN_FADE. */
+export const FOLLOW_END_FADE = MIN_FADE;
 /** A report that the sound has stopped this close to its end (seconds) means the recording has played out. */
 export const END_SLACK = 0.5;
 

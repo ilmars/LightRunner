@@ -91,15 +91,15 @@ test('the runner sends each block at its time, with its rise, and stops at the e
   assert.deepEqual(r.cmds('groupLevel', 'front-wash').at(-1)!.cmd, { type: 'groupLevel', group: 'front-wash', value: 0.8, fade: 2 });
 
   r.run(2);
-  assert.deepEqual(r.cmds('groupPreset', 'back-wall').map((s) => s.cmd), [{ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 1 }]);
-  assert.deepEqual(r.cmds('groupLevel', 'back-wall').at(-1)!.cmd, { type: 'groupLevel', group: 'back-wall', value: 1, fade: 1 });
+  assert.deepEqual(r.cmds('groupPreset', 'back-wall').map((s) => s.cmd), [{ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 1.5 }]);
+  assert.deepEqual(r.cmds('groupLevel', 'back-wall').at(-1)!.cmd, { type: 'groupLevel', group: 'back-wall', value: 1, fade: 1.5 });
 
   // At 8 the back wall's block ends: it goes back to Dark, over the block's rise.
   const before = r.sent.length;
   r.run(5);
   const back = r.sent.slice(before).filter((s) => (s.cmd as any).group === 'back-wall');
   assert.equal(back[0]!.cmd.type, 'groupLevel');
-  assert.deepEqual(back[0]!.cmd, { type: 'groupLevel', group: 'back-wall', value: 0, fade: 1 });
+  assert.deepEqual(back[0]!.cmd, { type: 'groupLevel', group: 'back-wall', value: 0, fade: 1.5 });
   assert.ok(Math.abs(back[0]!.at - 8) < 0.03);
   // At 10 everything full over 4 s, and that is the end: the runner stops, the stage stays.
   for (const group of LIGHT_GROUPS) assert.deepEqual(r.cmds('groupLevel', group).at(-1)!.cmd, { type: 'groupLevel', group, value: 1, fade: 4 });
@@ -193,9 +193,9 @@ test('a page a little behind never takes the lights back: time only goes forward
     r.run(0.25);
     r.runner.report(Math.max(0, r.time - 0.2), true);
   }
-  // The front wash's block at 3 came with its rise, not the 1 s of a jump.
+  // The front wash's block at 3 came with its rise, not the fade of a jump.
   assert.deepEqual(r.cmds('groupPreset', 'front-wash').map((s) => s.cmd), [{ type: 'groupPreset', group: 'front-wash', preset: 'front-warm', fade: 2 }]);
-  assert.ok(r.sent.every((s) => (s.cmd as any).fade !== 1), 'no jump fades');
+  assert.ok(r.sent.every((s) => (s.cmd as any).fade !== 1.5), 'no jump fades');
 });
 
 test('the recording played out: the runner goes on by itself so the later lights still come, then stops', () => {
@@ -229,7 +229,7 @@ test('the recording played out: the runner goes on by itself so the later lights
   assert.deepEqual(p.stops, []);
 });
 
-test('every change fades over at least 0.5 s, even with no rise', () => {
+test('every change fades over at least 1.5 s, even with no rise', () => {
   const t = timeline('snap', [
     { group: STAGE_LAYER, blocks: [{ id: 'dark', start: 0, what: { kind: 'dark' } }] },
     { group: 'front-wash', blocks: [{ id: 'c', start: 1, rise: 0.1, what: { kind: 'colour', preset: 'front-warm', level: 1 } }] },
@@ -238,10 +238,10 @@ test('every change fades over at least 0.5 s, even with no rise', () => {
   r.start(t);
   r.run(1.1);
   assert.ok(r.sent.length >= 6);
-  for (const s of r.sent) assert.equal((s.cmd as any).fade, 0.5, JSON.stringify(s.cmd));
+  for (const s of r.sent) assert.equal((s.cmd as any).fade, 1.5, JSON.stringify(s.cmd));
 });
 
-test('after the engine restarts, the runner sends the whole state again over 1 s', () => {
+test('after the engine restarts, the runner sends the whole state again over 1.5 s', () => {
   const t = christmas();
   const r = rig(showWith(t));
   r.start(t);
@@ -251,7 +251,7 @@ test('after the engine restarts, the runner sends the whole state again over 1 s
   r.run(0.025);
   const again = r.sent.slice(n).map((s) => s.cmd);
   assert.deepEqual(new Set(again.map((c) => (c as any).group)), new Set(LIGHT_GROUPS));
-  for (const c of again) assert.equal((c as any).fade, 1);
+  for (const c of again) assert.equal((c as any).fade, 1.5);
   assert.ok(again.some((c) => c.type === 'groupPreset' && c.group === 'back-wall' && c.preset === 'back-amber'));
   // Then nothing until the next block.
   const m = r.sent.length;
@@ -259,17 +259,17 @@ test('after the engine restarts, the runner sends the whole state again over 1 s
   assert.equal(r.sent.length, m);
 });
 
-test('Start in the middle and every seek fade over 1 s; time passing uses the rise (RF 3)', () => {
+test('Start in the middle and every seek fade over 1.5 s; time passing uses the rise (RF 3)', () => {
   const t = christmas();
   const r = rig(showWith(t));
   r.start(t, 6);
-  // At 6: front wash warm 0.8 (from 3), back wall amber (5 to 8), the rest dark — all over 1 s.
+  // At 6: front wash warm 0.8 (from 3), back wall amber (5 to 8), the rest dark — all over 1.5 s.
   const first = r.sent.map((s) => s.cmd);
   assert.ok(first.length > 0);
-  for (const cmd of first) assert.equal((cmd as any).fade, 1, JSON.stringify(cmd));
+  for (const cmd of first) assert.equal((cmd as any).fade, 1.5, JSON.stringify(cmd));
   assert.deepEqual(first.filter((c) => (c as any).group === 'back-wall'), [
-    { type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 1 },
-    { type: 'groupLevel', group: 'back-wall', value: 1, fade: 1 },
+    { type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 1.5 },
+    { type: 'groupLevel', group: 'back-wall', value: 1, fade: 1.5 },
   ]);
   // Back and forth while playing.
   let n = r.sent.length;
@@ -278,15 +278,15 @@ test('Start in the middle and every seek fade over 1 s; time passing uses the ri
   r.run(0.05);
   const back = r.sent.slice(n);
   assert.ok(back.length > 0);
-  for (const s of back) assert.equal((s.cmd as any).fade, 1);
+  for (const s of back) assert.equal((s.cmd as any).fade, 1.5);
   // Before the front wash's block: it falls back to Dark (no colour of its own).
-  assert.deepEqual(back.filter((s) => (s.cmd as any).group === 'front-wash').map((s) => s.cmd), [{ type: 'groupLevel', group: 'front-wash', value: 0, fade: 1 }]);
+  assert.deepEqual(back.filter((s) => (s.cmd as any).group === 'front-wash').map((s) => s.cmd), [{ type: 'groupLevel', group: 'front-wash', value: 0, fade: 1.5 }]);
   // Played on from 2 past 3: the front wash's block comes with its own rise again.
   n = r.sent.length;
   r.run(1.2);
   assert.deepEqual(r.sent.slice(n).filter((s) => s.cmd.type === 'groupPreset').map((s) => s.cmd), [{ type: 'groupPreset', group: 'front-wash', preset: 'front-warm', fade: 2 }]);
 
-  // Many seeks in a row, some tiny, some large, never throw, and every change after a jump fades 1 s.
+  // Many seeks in a row, some tiny, some large, never throw, and every change after a jump fades 1.5 s.
   let seed = 7;
   const random = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
   for (let i = 0; i < 300; i++) {
@@ -295,7 +295,7 @@ test('Start in the middle and every seek fade over 1 s; time passing uses the ri
     r.runner.report(pos, random() < 0.8);
     const jumped = Math.abs(r.runner.state!.pos - pos) < 1e-9 && r.sent.length === from;
     r.run(0.025);
-    if (jumped) for (const s of r.sent.slice(from)) assert.equal((s.cmd as any).fade, 1);
+    if (jumped) for (const s of r.sent.slice(from)) assert.equal((s.cmd as any).fade, 1.5);
   }
   // Wherever it ends up, the last command for each group is what the timeline gives there.
   r.runner.report(9, false);
@@ -388,7 +388,7 @@ test('blocks that point at something gone are skipped, with no crash (RF 5)', ()
   const r = rig(showWith(t));
   r.start(t);
   r.run(3);
-  assert.deepEqual(r.sent.map((s) => s.cmd), [{ type: 'groupLevel', group: 'front-wash', value: 0.3, fade: 1 }]);
+  assert.deepEqual(r.sent.map((s) => s.cmd), [{ type: 'groupLevel', group: 'front-wash', value: 0.3, fade: 1.5 }]);
   assert.deepEqual(r.stops, ['end']);
 });
 
@@ -415,7 +415,7 @@ test('a look with no rise fades over the shortest fade', () => {
   const t = timeline('song', [{ group: STAGE_LAYER, blocks: [{ id: 'w', start: 0, what: { kind: 'look', look: 'worship' } }] }]);
   const r = rig(showWith(t));
   r.start(t);
-  assert.deepEqual(r.sent.map((s) => s.cmd), [{ type: 'look', id: 'worship', fade: 0.5 }]);
+  assert.deepEqual(r.sent.map((s) => s.cmd), [{ type: 'look', id: 'worship', fade: 1.5 }]);
 });
 
 test('an effect is sent as the group\'s effect, with the block\'s own speed when it has one', () => {
@@ -428,13 +428,13 @@ test('an effect is sent as the group\'s effect, with the block\'s own speed when
   ] }]);
   const r = rig({ ...show, timelines: [t] });
   r.start(t);
-  assert.deepEqual(r.sent[0]!.cmd, { type: 'groupPreset', group: 'back-wall', preset: fx.id, fade: 1 });
+  assert.deepEqual(r.sent[0]!.cmd, { type: 'groupPreset', group: 'back-wall', preset: fx.id, fade: 1.5 });
   r.run(1.1);
   const own = r.cmds('groupEffect', 'back-wall');
   assert.equal(own.length, 1);
   const cmd = own[0]!.cmd as Extract<StageCommand, { type: 'groupEffect' }>;
   assert.deepEqual(cmd.effect.speed, { seconds: 4 });
-  assert.equal(cmd.fade, 1);
+  assert.equal(cmd.fade, 1.5);
   assert.equal(cmd.effect.effect, (fx.layers.find((l) => l.kind === 'effect') as any).effect);
 });
 
@@ -471,7 +471,7 @@ test('Follow the voice: the level rides the recording between low and high, and 
   r.start(t);
   r.run(2.1);
   // The level comes up to full over the rise; the follow rides it.
-  assert.deepEqual(r.cmds('groupLevel', 'audience').at(-1)!.cmd, { type: 'groupLevel', group: 'audience', value: 1, fade: 1 });
+  assert.deepEqual(r.cmds('groupLevel', 'audience').at(-1)!.cmd, { type: 'groupLevel', group: 'audience', value: 1, fade: 1.5 });
   const quiet = r.follows.filter((f) => f.group === 'audience').at(-1)!;
   assert.ok(Math.abs(quiet.value! - 0.2) < 1e-6, `quiet ${quiet.value}`);
   r.run(2);
@@ -480,12 +480,12 @@ test('Follow the voice: the level rides the recording between low and high, and 
   // Sent on every tick, so a restarted engine gets it again.
   const ticks = r.follows.filter((f) => f.group === 'audience' && f.at > 3 && f.at <= 4).length;
   assert.ok(ticks >= 39, `${ticks} follow values in a second`);
-  // Its block ends at 6: let go, and back to the level the timeline gives (Dark) over 1 s.
+  // Its block ends at 6: let go, and back to the level the timeline gives (Dark) over 1.5 s.
   r.run(2);
   const after = r.follows.filter((f) => f.group === 'audience' && f.at > 6.05);
   assert.deepEqual(after, []);
   assert.equal(r.follows.filter((f) => f.group === 'audience' && f.value === null).length, 1);
-  assert.deepEqual(r.cmds('groupLevel', 'audience').at(-1)!.cmd, { type: 'groupLevel', group: 'audience', value: 0, fade: 1 });
+  assert.deepEqual(r.cmds('groupLevel', 'audience').at(-1)!.cmd, { type: 'groupLevel', group: 'audience', value: 0, fade: 1.5 });
   // The pulpit follows to the end, and is let go there.
   r.run(2.1);
   assert.deepEqual(r.stops, ['end']);
@@ -707,7 +707,7 @@ test('server: after the engine restarts, the live timeline sends its whole state
   await old.terminate();
   await waitFor(() => (app as any).worker !== old && sent.length >= n + 4, 3000, 'the whole state again');
   const again = sent.slice(n);
-  for (const c of again) assert.equal((c as any).fade, 1, JSON.stringify(c));
+  for (const c of again) assert.equal((c as any).fade, 1.5, JSON.stringify(c));
   assert.ok(again.some((c) => c.type === 'groupPreset' && c.group === 'back-wall' && c.preset === 'back-amber'));
   const f = follows.length;
   await sleep(200);

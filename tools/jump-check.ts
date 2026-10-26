@@ -16,6 +16,11 @@
 // Timeline traffic: group levels with a fade (1 to 60 s, applied quietly as the timeline runner does), and Follow the
 // voice on a few light groups, whose value jumps between 0 and 1 (or anywhere) every frame and is sometimes let go. Both
 // are judged under the same 5% rule.
+// Timelines: a real TimelineRunner (the server's) plays generated timelines on the same engine, alongside the random
+// commands: colours, levels, effects, Dark, Everything full, looks and Follow the voice (on a made-up loudness track), with
+// random rises (0 too) and now and then an explicit end, while a pretend page seeks, pauses, drifts a little ahead or
+// behind, changes Lights earlier / later, plays out to the end or goes away. A song, Basic lights, Blackout, Back to saved
+// or Go stops a running timeline, as in the server.
 // Fades are at least 1 s, the spec's shortest (Safe and Blackout): a full
 // 0–100% fade shorter than 0.75 s cannot stay under 5% per frame at 40 fps.
 //
@@ -24,8 +29,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { EffectKind, EffectLayer, parseShow, type ColourSpec, type ManualTarget, type StageCommand } from '../packages/shared/src/index.ts';
+import { EffectKind, EffectLayer, STAGE_LAYER, Timeline, isEffectPreset, parseShow, type BlockWhat, type ColourSpec, type ManualTarget, type StageCommand } from '../packages/shared/src/index.ts';
 import { Engine } from '../packages/engine/src/index.ts';
+import { TimelineRunner } from '../server/src/timeline.ts';
 
 const { values } = parseArgs({
   options: {
@@ -184,6 +190,66 @@ function toggleFollow(t: number): string {
 /** A loudness value for this frame: jumps between silence and full, or lands anywhere. */
 const voice = () => (rand() < 0.4 ? 0 : rand() < 0.5 ? 1 : rand());
 
+// ---- Timelines ----
+
+/** A rise as people set them: often none, often short, sometimes long. */
+const rise = () => (rand() < 0.3 ? 0 : rand() < 0.6 ? rand() * 2 : rand() * 30);
+let timelineCount = 0;
+/** A timeline of random blocks on Whole stage and on most light groups, with a made-up loudness track as long as it is. */
+function randomTimeline(): Timeline {
+  const length = 20 + rand() * 280;
+  let n = 0;
+  const block = (start: number, what: BlockWhat) => ({
+    id: `b${n++}`, start, rise: rise(), what,
+    // Now and then an explicit end: the layer is handed back.
+    ...(rand() < 0.2 ? { end: start + 0.5 + rand() * 20 } : {}),
+  });
+  const at = () => rand() * length;
+  const stage = [block(0, { kind: 'dark' })];
+  for (let k = Math.floor(rand() * 6); k > 0; k--) {
+    const r = rand();
+    stage.push(block(at(), r < 0.4 ? { kind: 'look', look: pick(show.looks).id } : r < 0.7 ? { kind: 'dark' } : { kind: 'full' }));
+  }
+  const layers = [{ group: STAGE_LAYER, blocks: stage }];
+  for (const group of lightGroupIds) {
+    if (rand() < 0.3) continue;
+    const colours = show.presets.filter((p) => p.group === group && !isEffectPreset(p));
+    const effects = show.presets.filter((p) => p.group === group && isEffectPreset(p));
+    const blocks = [];
+    for (let k = 1 + Math.floor(rand() * 8); k > 0; k--) {
+      const r = rand();
+      let what: BlockWhat;
+      if (r < 0.35 && colours.length) what = { kind: 'colour', preset: pick(colours).id, level: rand() };
+      else if (r < 0.55) what = { kind: 'level', level: rand() };
+      else if (r < 0.75 && effects.length) {
+        const speed = rand() < 0.5 ? undefined : rand() < 0.5 ? { beats: pick([0.5, 1, 2, 4, 8]) } : { seconds: 1 + rand() * 20 };
+        what = { kind: 'effect', preset: pick(effects).id, ...(speed ? { speed } : {}) };
+      } else {
+        const low = rand(), high = rand();
+        what = { kind: 'follow', low, high, ...(rand() < 0.3 && colours.length ? { preset: pick(colours).id } : {}) };
+      }
+      blocks.push(block(at(), what));
+    }
+    layers.push({ group, blocks });
+  }
+  // Loudness, 25 values a second: quiet stretches, loud stretches, and jumps between them.
+  const bytes = new Uint8Array(Math.ceil(length * 25));
+  let level = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    if (rand() < 0.05) level = rand() < 0.5 ? 0 : 255;
+    else level = Math.min(255, Math.max(0, level + (rand() - 0.5) * 80));
+    bytes[i] = Math.round(level);
+  }
+  return Timeline.parse({
+    id: `timeline-${++timelineCount}`, name: `Timeline ${timelineCount}`, layers,
+    recording: { id: 'rec', name: 'rec.wav', duration: length, loudness: Buffer.from(bytes).toString('base64'), peaks: '' },
+    offsetMs: rand() < 0.5 ? 0 : Math.round(-500 + rand() * 1000),
+  });
+}
+
+/** What stops a running timeline in the server: a song, Basic lights, Blackout, Back to saved, Go. */
+const STOPS_TIMELINE = new Set<StageCommand['type']>(['look', 'safe', 'blackout', 'backToLook', 'applyStage']);
+
 const engine = new Engine(show, 0);
 // One name per segment, in the order of visibleLevels(): "b3" or "b3 segment 2".
 const counts = engine.segmentCounts();
@@ -200,21 +266,109 @@ let commands = 0;
 let skipUntil = -1;
 let next = 0;
 const recent: string[] = [];
+const remember = (line: string) => {
+  recent.push(line);
+  if (recent.length > 6) recent.shift();
+};
+
+// The timeline runner on this engine and this clock, and a pretend page playing the recording.
+let clock = 0;
+const runs = { started: 0, ended: 0, stopped: 0, seeks: 0, pauses: 0, drifts: 0, offsets: 0, gone: 0, sent: 0, refused: 0 };
+const runner = new TimelineRunner({
+  show: () => show,
+  apply: (cmd, o) => {
+    runs.sent++;
+    if (engine.apply(cmd, clock, o)) runs.refused++;
+    remember(`${clock.toFixed(2)}s timeline ${JSON.stringify(cmd)}`);
+  },
+  follow: (group, value) => engine.setLevelFollow(group, value, clock),
+  now: () => clock,
+  onStop: (why) => {
+    if (why === 'end') runs.ended++;
+    else runs.stopped++;
+    nextTimeline = clock + 2 + rand() * 30;
+  },
+});
+const page = { pos: 0, playing: false, there: false };
+let nextTimeline = 5;
+let nextPageEvent = 0;
+let nextReport = 0;
+
+/** One frame of the pretend page: it plays, now and then does something, and reports 4 times a second while it is there. */
+function drivePage(t: number): void {
+  const timeline = show.timelines[0]!;
+  const duration = timeline.recording!.duration;
+  if (page.playing) page.pos += FRAME;
+  // The recording plays out: the page stops at its end.
+  if (page.playing && page.pos >= duration) {
+    page.pos = duration;
+    page.playing = false;
+  }
+  if (t >= nextPageEvent) {
+    const r = rand();
+    if (!page.there) {
+      // Back on a new connection: it takes the timeline up from where it is.
+      if (r < 0.3) Object.assign(page, { there: true, pos: runner.state?.pos ?? 0, playing: runner.state?.playing ?? false });
+    } else if (r < 0.35) {
+      page.pos = rand() * duration;
+      runs.seeks++;
+    } else if (r < 0.55) {
+      page.playing = !page.playing;
+      runs.pauses++;
+    } else if (r < 0.75) {
+      // A little ahead or behind.
+      page.pos = Math.max(0, page.pos + (rand() - 0.5) * 0.6);
+      runs.drifts++;
+    } else if (r < 0.9) {
+      timeline.offsetMs = Math.round(-500 + rand() * 1000);
+      runs.offsets++;
+    } else {
+      page.there = false;
+      runner.release();
+      runs.gone++;
+    }
+    remember(`${t.toFixed(2)}s page ${JSON.stringify(page)} offset ${timeline.offsetMs}`);
+    nextPageEvent = t + 0.2 + rand() * (rand() < 0.8 ? 3 : 20);
+  }
+  if (page.there && t >= nextReport) {
+    runner.report(page.pos, page.playing);
+    nextReport = t + 0.25;
+  }
+}
 
 const started = performance.now();
 for (let n = 0; n * FRAME <= end; n++) {
   const t = n * FRAME;
+  clock = t;
   if (t >= next) {
-    const { cmd, fast } = randomCommand();
+    let { cmd, fast } = randomCommand();
+    // While a timeline runs, most of what would stop it is drawn again, so timelines get to run for a while.
+    for (let k = 0; k < 10 && runner.running && STOPS_TIMELINE.has(cmd.type) && rand() < 0.9; k++) ({ cmd, fast } = randomCommand());
+    if (runner.running && STOPS_TIMELINE.has(cmd.type)) runner.stop();
     // A faded level is a timeline's own change: no Undo step.
     engine.apply(cmd, t, { quiet: cmd.type === 'groupLevel' && cmd.fade !== undefined });
     commands++;
-    recent.push(`${t.toFixed(2)}s ${JSON.stringify(cmd)}`);
-    if (rand() < 0.15) recent.push(toggleFollow(t));
-    if (recent.length > 6) recent.shift();
+    remember(`${t.toFixed(2)}s ${JSON.stringify(cmd)}`);
+    if (rand() < 0.15) remember(toggleFollow(t));
     if (fast) skipUntil = t + 0.25;
     // Mostly mid-fade interruptions: 0.2–4 s apart, sometimes a long settle.
     next = t + (rand() < 0.8 ? 0.2 + rand() * 4 : 5 + rand() * 30);
+  }
+  // A timeline now and then: from the start, or from the middle.
+  if (!runner.running && t >= nextTimeline) {
+    const timeline = randomTimeline();
+    show.timelines = [timeline];
+    const at = rand() < 0.6 ? 0 : rand() * timeline.recording!.duration;
+    Object.assign(page, { pos: at, playing: true, there: rand() < 0.9 });
+    nextReport = t + 0.25;
+    nextPageEvent = t + rand() * 3;
+    runs.started++;
+    remember(`${t.toFixed(2)}s timeline ${timeline.id} from ${at.toFixed(2)}`);
+    runner.start(timeline, at, engine.runtime());
+  }
+  if (runner.running) {
+    drivePage(t);
+    runner.tick();
   }
   // The voice moves every frame, for every group that follows it.
   for (const id of following) if (rand() < 0.5) engine.setLevelFollow(id, voice(), t);
@@ -239,6 +393,7 @@ for (let n = 0; n * FRAME <= end; n++) {
 
 const pass = worst <= limit;
 console.log(`Simulated ${values.hours} h: ${commands} commands, ${judged} frames judged, in ${((performance.now() - started) / 1000).toFixed(1)} s`);
+console.log(`Timelines: ${runs.started} played (${runs.ended} to their end, ${runs.stopped} stopped), ${runs.sent} changes sent (${runs.refused} refused); the page sought ${runs.seeks} times, paused or played ${runs.pauses}, drifted ${runs.drifts}, changed the offset ${runs.offsets} and went away ${runs.gone}`);
 console.log(`Largest brightness step between frames beyond the effects' own motion: ${(worst * 100).toFixed(2)}% (limit ${(limit * 100).toFixed(0)}%)`);
 console.log(`Largest own motion of an effect in one frame: ${(mostMotion * 100).toFixed(2)}%; slowest frame ${slowest.toFixed(2)} ms`);
 if (!pass) console.log(`Worst case: ${worstAt}`);
