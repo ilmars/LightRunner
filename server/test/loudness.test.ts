@@ -17,13 +17,15 @@ test('loudness: one value per 40 ms; silence is 0 and the loud end is 1, however
     const track = loudnessTrack(silenceThenTone(2, amp), RATE);
     assert.equal(track.length, 100);
     assert.ok(track.slice(0, 48).every((v) => v < 0.02), 'silence first');
-    assert.ok(track.slice(52).every((v) => v > 0.95 && v <= 1), `the tone is about 1 (amp ${amp})`);
+    // The envelope follower takes a few frames (about 60 ms) to reach the tone.
+    assert.ok(track.slice(56).every((v) => v > 0.95 && v <= 1), `the tone is about 1 (amp ${amp})`);
     assert.ok(track.every((v) => v >= 0 && v <= 1));
   }
 });
 
 test('loudness: the loudest 5% is clipped at 1, and a silent file stays at 0', () => {
-  const s = new Float32Array(RATE * 4).fill(0.1);
+  // A minute, so the burst and its slow fade are well under 5 % of it.
+  const s = new Float32Array(RATE * 60).fill(0.1);
   // A short loud burst: well above the 95th percentile.
   for (let i = RATE; i < RATE + 800; i++) s[i] = 0.9;
   const track = loudnessTrack(s, RATE);
@@ -77,6 +79,25 @@ test('loudness: a recording that is mostly silence still gets its loud part to 1
   const track = loudnessTrack(s, RATE);
   assert.equal(Math.max(...track), 1);
   assert.ok(track.slice(0, 250).every((v) => v === 0), 'silence stays 0');
-  assert.ok(track[250]! > 0.9);
+  assert.ok(Math.max(...track.slice(250, 256)) > 0.9);
   assert.deepEqual(loudnessTrack(new Float32Array(RATE * 3), RATE), new Array(75).fill(0));
+});
+
+test('loudness: speech with gaps gives a smooth track: it falls slowly and never steps far in 40 ms', () => {
+  // Words of 120 ms with gaps of 80 ms, loud and quiet: the raw RMS jumps from loud to silence in one 40 ms step.
+  const s = new Float32Array(RATE * 6);
+  for (let i = 0; i < s.length; i++) {
+    const phase = (i / RATE) % 0.2;
+    if (phase < 0.12) s[i] = (Math.floor(i / (RATE * 0.2)) % 2 ? 0.9 : 0.5) * Math.sin((2 * Math.PI * 300 * i) / RATE);
+  }
+  const track = loudnessTrack(s, RATE);
+  let fall = 0, rise = 0;
+  for (let k = 1; k < track.length; k++) {
+    fall = Math.max(fall, track[k - 1]! - track[k]!);
+    rise = Math.max(rise, track[k]! - track[k - 1]!);
+  }
+  assert.ok(fall <= 0.25, `largest fall in 40 ms ${fall}`);
+  assert.ok(rise > fall, `rises faster than it falls (${rise} vs ${fall})`);
+  // The words still show: the track is clearly above silence in the middle of speech.
+  assert.ok(track.slice(50).every((v) => v > 0.2));
 });

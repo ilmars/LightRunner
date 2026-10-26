@@ -32,12 +32,13 @@ const LEVEL_FADE_FACTOR = 1;
 /** Fader and dial moves are smoothed over this long so they never step. */
 const SMOOTH = 0.2;
 /**
- * A level that follows a voice rises at most FOLLOW_RISE a second (0.03 a 25 ms frame) and falls at most FOLLOW_FALL
+ * A level that follows a voice rises at most FOLLOW_RISE a second (0.025 a 25 ms frame) and falls at most FOLLOW_FALL
  * (0.02 a frame); when the follow ends it goes back to 1 at FOLLOW_RELEASE (1 s). Per second, so they hold at any
  * frame rate (a Prepare draft renders at 20 fps). The rise is below the 0.05 the plan allows: the follow multiplies
- * the look's own fades, and at 0.05 a frame the two together stepped 5.5–6.4 % in jump-check.
+ * the look's own fades, and above 1 a second the two together stepped past 5 % in jump-check. The recording's
+ * loudness track is already smoothed (loudness.js), so this is a safety cap.
  */
-const FOLLOW_RISE = 1.2;
+const FOLLOW_RISE = 1.0;
 const FOLLOW_FALL = 0.8;
 const FOLLOW_RELEASE = 1;
 /** Manual takes over this fast, and follows the finger with this smoothing. */
@@ -895,6 +896,7 @@ export class Engine {
       this.setPreset(group, preset, SAFE_FADE, now, false);
     }
     this.releaseAll(now);
+    this.letGoOfFollows();
     this.master.set(1, now, SAFE_RESET);
     this.speed.set(1, now, SAFE_RESET);
     // Basic lights recovers the stage: every dimmer back to full, and smoke off.
@@ -929,7 +931,13 @@ export class Engine {
       else this.setPreset(group, fixedPreset(BLACKOUT_ID, group.id, dark(), BLACKOUT_FADE), BLACKOUT_FADE, now, false);
     }
     this.releaseAll(now);
+    this.letGoOfFollows();
     this.setLook(BLACKOUT, now, BLACKOUT_FADE);
+  }
+
+  /** Basic lights and Blackout end every Follow the voice (the multipliers ease back to 1), so they never wait for the timeline runner. */
+  private letGoOfFollows(): void {
+    for (const group of this.groups.values()) group.followTarget = null;
   }
 
   private backToLook(now: number): string | null {

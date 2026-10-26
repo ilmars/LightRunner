@@ -5,6 +5,10 @@
 /** Loudness values per second. */
 export const LOUDNESS_RATE = 25;
 
+/** How quickly the loudness track rises and falls (seconds): quick to follow a word, slow to let go of it between words. */
+const ATTACK = 0.06;
+const RELEASE = 0.28;
+
 /** The p-quantile (0..1) of a list of numbers. */
 function quantile(values, p) {
   const sorted = Float64Array.from(values).sort();
@@ -12,7 +16,8 @@ function quantile(values, p) {
 }
 
 /**
- * How loud the recording is, one value per 40 ms (25 a second): the RMS of each 40 ms, scaled so the
+ * How loud the recording is, one value per 40 ms (25 a second): the RMS of each 40 ms, run through an envelope
+ * follower (attack about 60 ms, release about 280 ms, so speech does not flicker between words), scaled so the
  * loud end is 1 (the 95th percentile of the whole recording maps to 1; anything louder is clipped).
  * A silent recording stays 0.
  * @param {Float32Array} samples mono samples, -1..1
@@ -33,6 +38,10 @@ export function loudnessTrack(samples, sampleRate) {
     rms[w] = Math.sqrt(sum / (to - from));
   }
   if (!count) return rms;
+  // The envelope follower: each value moves toward the RMS by a share that is larger when it rises than when it falls.
+  const up = 1 - Math.exp(-1 / LOUDNESS_RATE / ATTACK);
+  const down = 1 - Math.exp(-1 / LOUDNESS_RATE / RELEASE);
+  for (let w = 1; w < count; w++) rms[w] = rms[w - 1] + (rms[w] - rms[w - 1]) * (rms[w] > rms[w - 1] ? up : down);
   // The 95th percentile is 1; in a recording that is mostly silence it is 0, so the loudest value is used instead.
   let top = quantile(rms, 0.95);
   if (!(top > 1e-6)) top = rms.reduce((m, v) => (v > m ? v : m), 0);

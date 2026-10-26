@@ -48,7 +48,7 @@ test('a group level without a fade still smooths over 0.2 s', () => {
   assert.ok(close(aud(e), 0));
 });
 
-test('a level that follows a voice rises at most 0.03 a frame (under the 0.05 limit) and falls at most 0.02', () => {
+test('a level that follows a voice rises at most 0.025 a frame (under the 0.05 limit) and falls at most 0.02', () => {
   const e = settled();
   // Down from 1 to 0 first: falls at most 0.02 a frame.
   e.setLevelFollow('audience', 0, 4);
@@ -77,9 +77,9 @@ test('a level that follows a voice rises at most 0.03 a frame (under the 0.05 li
     if (close(v, 1, 1e-9) && !frames) frames = n + 1;
     prev = v;
   }
-  assert.ok(worstRise <= 0.03 + 1e-9, `rise ${worstRise}`);
-  assert.ok(worstRise > 0.029, `rises as fast as allowed: ${worstRise}`);
-  assert.ok(frames > 0 && frames <= 34, `back to full in ${frames} frames`);
+  assert.ok(worstRise <= 0.025 + 1e-9, `rise ${worstRise}`);
+  assert.ok(worstRise > 0.024, `rises as fast as allowed: ${worstRise}`);
+  assert.ok(frames > 0 && frames <= 41, `back to full in ${frames} frames`);
 });
 
 test('the follow limits are per second, so they hold at 20 frames a second too', () => {
@@ -102,8 +102,8 @@ test('the follow limits are per second, so they hold at 20 frames a second too',
     worst = Math.max(worst, v - prev);
     prev = v;
   }
-  assert.ok(worst <= 0.06 + 1e-9, `rise per 50 ms frame ${worst}`);
-  assert.ok(worst > 0.059, `and not slower than the limit: ${worst}`);
+  assert.ok(worst <= 0.05 + 1e-9, `rise per 50 ms frame ${worst}`);
+  assert.ok(worst > 0.049, `and not slower than the limit: ${worst}`);
 });
 
 test('null hands the level back to 1 in about a second', () => {
@@ -124,7 +124,7 @@ test('null hands the level back to 1 in about a second', () => {
     if (Number.isNaN(back) && close(v, 1, 1e-9)) back = t - from;
     prev = v;
   }
-  assert.ok(worst <= 0.03 + 1e-9, `rise ${worst}`);
+  assert.ok(worst <= 0.025 + 1e-9, `rise ${worst}`);
   assert.ok(back > 0.9 && back < 1.2, `back to 1 after ${back} s`);
 });
 
@@ -182,4 +182,38 @@ test('quiet commands leave Undo alone', () => {
   assert.equal(s.look, 'walk-in');
   assert.equal(s.groups['back-wall'].preset, 'back-amber');
   assert.equal(s.canUndo, false);
+});
+
+/** Run `engine` for `secs` from `from` and return its time. */
+function run(e: Engine, from: number, secs: number): number {
+  let t = from;
+  for (const end = from + secs; t < end - 1e-9; ) e.frame((t += FRAME));
+  return t;
+}
+
+test('Basic lights and Blackout let go of a follow, so they never depend on the timeline runner', () => {
+  for (const type of ['safe', 'blackout'] as const) {
+    const e = settled();
+    e.setLevelFollow('audience', 0, 4);
+    let t = run(e, 4, 3);
+    assert.ok(close(aud(e), 0, 1e-9), 'dimmed by the follow');
+    e.apply({ type }, t);
+    t = run(e, t, 4);
+    // Whatever the button shows, nothing is held down now: the next look is at full.
+    e.apply({ type: 'look', id: 'walk-in', fade: 0 }, t);
+    t = run(e, t, 3);
+    assert.ok(close(aud(e), 1, 1e-6), `${type}: the follow is gone (${aud(e)})`);
+  }
+});
+
+test('a look from the timeline or anyone else leaves the follow alone', () => {
+  const e = settled();
+  e.setLevelFollow('audience', 0, 4);
+  let t = run(e, 4, 3);
+  e.apply({ type: 'look', id: 'worship', fade: 0 }, t, { quiet: true });
+  t = run(e, t, 3);
+  assert.ok(close(lightOf(e, 'aud-1').i, 0, 1e-9), 'still following');
+  e.apply({ type: 'look', id: 'walk-in', fade: 0 }, t);
+  t = run(e, t, 3);
+  assert.ok(close(lightOf(e, 'aud-1').i, 0, 1e-9), 'a look does not clear it');
 });

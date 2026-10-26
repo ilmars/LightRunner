@@ -602,6 +602,8 @@ export class App {
 
   /** A stage command from the timeline runner: runs on the live stage and adds no Undo step. Returns an error message or null. */
   async quietStageCommand(cmd: StageCommand): Promise<string | null> {
+    const parsed = Command.safeParse(cmd);
+    if (!parsed.success) throw new Error(`invalid command: ${parsed.error.issues.map((i) => i.message).join('; ')}`);
     return (await this.stageCommand(cmd, { quiet: true })).error;
   }
 
