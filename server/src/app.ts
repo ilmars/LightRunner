@@ -215,6 +215,8 @@ export class App {
   private liveTimeline: { runner: TimelineRunner; owner: WebSocket | null } | null = null;
   /** A live Start, Stop, Blackout, Basic lights or song: a live Start still waiting for the stage makes no timeline now. */
   private timelineTurn = 0;
+  /** A live Start is stopping the live timeline it replaces: no live state is sent for that. */
+  private replacingTimeline = false;
   /** Numbers every Start (live and Prepare), so a page can tell its own run from a later one. */
   private timelineRuns = 0;
   /** Each page's Prepare timeline, running in its own draft. */
@@ -1162,7 +1164,13 @@ export class App {
     if (turn !== this.timelineTurn || this.stopping) return 'The timeline did not start: something else changed the stage at the same moment. Press Start again.';
     const fresh = this.show.timelines.find((t) => t.id === timeline.id);
     if (!fresh) return `There is no timeline "${timeline.id}" in the show.`;
-    this.stopLiveTimeline();
+    // The pages hear of the new one at once, never of "none" in between (a page would take that for Blackout).
+    this.replacingTimeline = true;
+    try {
+      this.stopLiveTimeline();
+    } finally {
+      this.replacingTimeline = false;
+    }
     // One recording per page: a Prepare timeline this page ran stops.
     this.prepareTimelines.get(ws)?.stop();
     const entry: { runner: TimelineRunner; owner: WebSocket | null } = { runner: null!, owner: ws.readyState === ws.OPEN ? ws : null };
@@ -1181,7 +1189,7 @@ export class App {
         if (this.liveTimeline === entry) this.liveTimeline = null;
         if (why !== 'stopped') this.log(`Timeline "${fresh.name}" ${why === 'end' ? 'came to its end' : 'stopped'}`);
         this.timelineTimerFits();
-        this.publishState();
+        if (!this.replacingTimeline) this.publishState();
       },
     });
     this.liveTimeline = entry;

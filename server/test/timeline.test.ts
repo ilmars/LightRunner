@@ -956,6 +956,10 @@ test('server: every Start has its own run number; reports and a Stop for an olde
   const runB = runOf(b);
   assert.ok(runB > runA);
   await waitFor(() => a.state()?.timeline?.run === runB, 2000, 'the second run');
+  // The pages never see "no timeline" in between (a page would take that for Blackout and keep its sound playing).
+  const states = a.seen.filter((m) => m.type === 'state').map((m) => m.state.timeline?.run ?? null);
+  const firstA = states.indexOf(runA);
+  assert.ok(!states.slice(firstA, states.indexOf(runB)).includes(null), `states: ${states.join(' ')}`);
   // The second page drops: the first page's reports (its old run) don't take the timeline up.
   b.ws.terminate();
   await sleep(300);
