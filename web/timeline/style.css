@@ -174,20 +174,32 @@ select.add-layer:disabled { opacity: 0.4; }
 .marker-row .ds-btn { flex: none; }
 
 /* ---- The stage view ---- */
-.stage-card { display: flex; align-items: center; gap: 14px; padding: 8px 14px 8px 8px; }
+/* The picture, then the legend and Hide beside it; when the picture is made wide, the legend goes under it. */
+.stage-card {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "view legend toggle";
+  align-items: center; gap: 10px 14px; padding: 8px 14px 8px 8px;
+}
+.stage-card.wide { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "view toggle" "legend legend"; }
 /* In Prepare it stays in sight beside the waveform: a small glass panel kept at the bottom right while the page scrolls. */
 body.prepare .stage-card {
   position: sticky; bottom: max(10px, env(safe-area-inset-bottom)); z-index: 6; align-self: flex-end; padding: 8px;
+  grid-template-columns: auto auto; grid-template-areas: "view toggle";
   background: var(--ds-glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
   box-shadow: inset 0 0 0 1px var(--ds-violet-edge), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
 }
 body.prepare .stage-card .legend { display: none; }
-.stage { flex: none; width: 300px; height: 124px; background: #04070D; border-radius: 12px; display: block; }
-.stage-card .legend { margin: 0; max-width: 640px; font-size: 13px; }
+/* 300 × 124, or the size made with the grip (set on the box by the page, within the panel); always the small one in Prepare. */
+.stage-wrap { grid-area: view; position: relative; justify-self: start; width: var(--stage-w, 300px); max-width: 100%; container: stage / inline-size; }
+.stage { width: 100%; height: var(--stage-h, 124px); background: #04070D; border-radius: 12px; display: block; }
+body.prepare .stage-wrap { width: 300px; }
+body.prepare .stage { height: 124px; }
+body.prepare .stage-grip { display: none; }
+.stage-grip { right: 0; bottom: 0; }
+.stage-card .legend { grid-area: legend; margin: 0; max-width: 640px; font-size: 13px; }
 /* Hide / Show: folded away, only the button stays (in Prepare a small one at the bottom right). */
-.stage-toggle { order: 3; flex: none; align-self: flex-start; }
-body.stage-hidden .stage, body.stage-hidden .stage-card .legend { display: none; }
-body.stage-hidden .stage-card { padding: 2px; }
+.stage-toggle { grid-area: toggle; flex: none; align-self: start; }
+body.stage-hidden .stage-wrap, body.stage-hidden .stage-card .legend { display: none; }
+body.stage-hidden .stage-card { padding: 2px; grid-template-columns: auto; grid-template-areas: "toggle"; }
 body.stage-hidden:not(.prepare) .stage-card { align-self: flex-start; }
 
 /* ---- An iPad, and narrower ---- */
@@ -197,7 +209,9 @@ body.stage-hidden:not(.prepare) .stage-card { align-self: flex-start; }
   .rec-chip { max-width: 240px; }
 }
 @media (max-width: 760px) {
-  .stage-card { flex-direction: column; align-items: stretch; }
-  .stage { width: 100%; }
+  .stage-card, .stage-card.wide { grid-template-columns: minmax(0, 1fr); grid-template-areas: "view" "legend" "toggle"; }
+  .stage-toggle { justify-self: start; }
+  .stage-wrap { justify-self: stretch; width: auto; }
+  body.prepare .stage-card { grid-template-columns: minmax(0, 1fr); grid-template-areas: "view" "toggle"; }
   .time { min-width: 0; }
 }

@@ -325,3 +325,51 @@ select.ds-field option { background: var(--ds-surface); color: var(--ds-text); }
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
 }
 .ds-toast--bad { background: rgba(58, 22, 30, 0.88); color: #ffe3e6; box-shadow: inset 0 0 0 1px rgba(var(--ds-danger), 0.45), 0 18px 40px -12px rgba(0, 0, 0, 0.7); }
+
+/* The stage view's own controls (web/shared/stagecard.js), on the operator and Timeline pages. The box the canvas
+   sits in is `position: relative` with `container: stage / inline-size`.
+   Switch: From above / From the audience, quiet and small on the picture's top left (22 px to see, 44 px to tap). On a
+   small picture one button: the view's short name and two small arrows, a tap switches to the other; from 520 px a
+   segmented control with the whole words. */
+.ds-stage-switch {
+  position: absolute; top: 6px; left: 6px; z-index: 2; display: flex; gap: 1px; padding: 1px; border-radius: 8px;
+  background: rgba(4, 7, 13, 0.62); box-shadow: inset 0 0 0 1px var(--ds-edge);
+}
+.ds-stage-switch > button {
+  position: relative; min-width: 44px; height: 22px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent;
+  color: var(--ds-muted); font: inherit; font-size: 11px; font-weight: 500; white-space: nowrap; cursor: pointer; touch-action: manipulation;
+}
+/* The 44 px target, above and below the button. */
+.ds-stage-switch > button::before { content: ""; position: absolute; left: 0; right: 0; top: -11px; bottom: -11px; }
+.ds-stage-switch > button:focus-visible { outline: 1px solid var(--ds-accent); outline-offset: -1px; }
+.ds-stage-switch > button { display: inline-flex; align-items: center; gap: 5px; }
+.ds-stage-switch .sv-long { display: none; }
+.ds-stage-switch .sv-swap { flex: none; opacity: 0.7; }
+.ds-stage-switch > button[aria-pressed="false"] { display: none; }
+.ds-stage-switch > button[aria-pressed="true"] { color: var(--ds-muted-on); background: transparent; box-shadow: none; }
+@container stage (min-width: 520px) {
+  .ds-stage-switch > button[aria-pressed="false"] { display: inline-flex; }
+  .ds-stage-switch > button[aria-pressed="true"] { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px rgba(67, 137, 232, 0.35); }
+  .ds-stage-switch .sv-long { display: inline; }
+  .ds-stage-switch .sv-short, .ds-stage-switch .sv-swap { display: none; }
+}
+/* Grip: a short faint line (at the bottom edge) or two faint diagonals (at a corner) in a 44 px target; only it takes
+   the touch (touch-action: none), so the page scrolls everywhere else. */
+.ds-stage-grip {
+  position: absolute; z-index: 2; width: 72px; height: 44px; padding: 0; border: 0; border-radius: 10px; background: transparent;
+  cursor: ns-resize; touch-action: none; -webkit-user-select: none; user-select: none;
+}
+.ds-stage-grip::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 28px; height: 3px; margin: -1.5px 0 0 -14px; border-radius: 2px;
+  background: rgba(148, 163, 184, 0.24);
+}
+.ds-stage-grip:hover::after, .ds-stage-grip.dragging::after { background: rgba(148, 163, 184, 0.48); }
+.ds-stage-grip:focus-visible { outline: 1px solid var(--ds-accent); outline-offset: -1px; }
+.ds-stage-grip--corner { width: 44px; cursor: nwse-resize; }
+.ds-stage-grip--corner::after {
+  left: auto; top: auto; right: 7px; bottom: 7px; width: 11px; height: 11px; margin: 0; border-radius: 0;
+  background: linear-gradient(135deg, transparent 52%, rgba(148, 163, 184, 0.3) 52% 60%, transparent 60% 76%, rgba(148, 163, 184, 0.3) 76% 84%, transparent 84%);
+}
+.ds-stage-grip--corner:hover::after, .ds-stage-grip--corner.dragging::after {
+  background: linear-gradient(135deg, transparent 52%, rgba(148, 163, 184, 0.55) 52% 60%, transparent 60% 76%, rgba(148, 163, 184, 0.55) 76% 84%, transparent 84%);
+}

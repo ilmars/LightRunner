@@ -6,6 +6,8 @@
 import { NOT_ANSWERING, request, showProblem, startClock } from '/shared/appbar.js';
 import { LOUDNESS_RATE, decodeBytes, encodeBytes, loudnessTrack, peaksTrack } from '/shared/loudness.js';
 import { drawStagePicture, shown } from '/shared/stagedraw.js';
+import { keepStageSize, stageGrip, stageViewSwitch, storedStageSize } from '/shared/stagecard.js';
+import { fitStageLength } from '/shared/stageview.js';
 import {
   MAX_ZOOM, MIN_RISE, barsFor, blockMissing, blockSpans, clampEnd, dragBlock, fitZoom, followScroll, formatLength, formatRise,
   formatTime, hitTest, lookFade, markerRows, mixToMono, moveBlock, newBlockId, newBlockStart, newTimeline, nextMarkerText,
@@ -469,6 +471,7 @@ function setPrepare(on, tell = true) {
   prep.state = null;
   prep.visual = null;
   document.body.classList.toggle('prepare', on);
+  fitStageToPanel();
   $('liveBtn').setAttribute('aria-pressed', String(!on));
   $('prepBtn').setAttribute('aria-pressed', String(on));
   drawStage();
@@ -697,6 +700,7 @@ function open(id) {
   renderLanes();
   renderDetails();
   renderMarkers();
+  fitStageToPanel();
   drawStage();
 }
 
@@ -2178,8 +2182,63 @@ function showStageView(on) {
   }
   drawStage();
 }
-$('stageToggle').addEventListener('click', () => showStageView(stageHidden));
+$('stageToggle').addEventListener('click', () => {
+  showStageView(stageHidden);
+  fitStageToPanel();
+});
 showStageView(!stageHidden);
+
+// From above or from the audience: one choice per browser (the operator page's too), on the picture itself.
+const stageView = stageViewSwitch($('stageWrap'), () => drawStage());
+
+// Bigger or smaller by the grip at its corner: from 300 × 124 up to the panel's width (Hide keeps its place beside
+// it) and most of the window's height, never much taller than wide. In Prepare it is always the small one (the styles), and a phone keeps the
+// whole width.
+const STAGE_MIN = { w: 300, h: 124 };
+const stageWrap = $('stageWrap');
+const narrowQuery = window.matchMedia('(max-width: 760px)');
+function stageLimits() {
+  const card = $('stageCard'), cs = getComputedStyle(card);
+  const inner = card.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const maxW = inner - $('stageToggle').offsetWidth - parseFloat(cs.columnGap || '14');
+  return { maxW: Math.max(STAGE_MIN.w, maxW), maxH: Math.max(STAGE_MIN.h, window.innerHeight - 160), inner };
+}
+/** Sets the picture's size (each within its limits); `null` puts it back to its own size. */
+function setStageSize(want) {
+  if (!want) {
+    stageWrap.style.removeProperty('--stage-w');
+    stageCanvas.style.removeProperty('--stage-h');
+  } else {
+    const { maxW, maxH } = stageLimits();
+    if (want.w != null && !narrowQuery.matches) stageWrap.style.setProperty('--stage-w', `${Math.round(fitStageLength(want.w, STAGE_MIN.w, maxW))}px`);
+    // Never much taller than wide (a phone's narrow picture stays a picture of the stage).
+    const tallest = Math.min(maxH, stageWrap.offsetWidth * 0.8);
+    if (want.h != null) stageCanvas.style.setProperty('--stage-h', `${Math.round(fitStageLength(want.h, STAGE_MIN.h, tallest))}px`);
+  }
+  // A wide picture puts the legend under it, so the words keep their room.
+  const { inner } = stageLimits();
+  $('stageCard').classList.toggle('wide', stageWrap.offsetWidth + 14 + $('stageToggle').offsetWidth + 14 + 280 > inner);
+}
+stageGrip($('stageGrip'), {
+  axes: 'xy',
+  start: () => ({ w: stageWrap.offsetWidth, h: stageCanvas.clientHeight }),
+  apply: (size) => setStageSize(size),
+  done: () => keepStageSize('timeline', { w: stageWrap.offsetWidth, h: stageCanvas.clientHeight }),
+  reset: () => {
+    setStageSize(null);
+    keepStageSize('timeline', null);
+  },
+});
+/** The kept size, again within today's panel (the window may have changed). */
+function fitStageToPanel() {
+  if ($('stageCard').hidden || stageHidden) return;
+  const kept = storedStageSize('timeline');
+  setStageSize(kept.w || kept.h ? kept : null);
+}
+window.addEventListener('resize', fitStageToPanel);
+narrowQuery.addEventListener('change', fitStageToPanel);
+// Drawn again at its new size, whatever changed it.
+new ResizeObserver(() => drawStage()).observe(stageCanvas);
 
 function drawStage() {
   if (!layout || $('stageCard').hidden || stageHidden) return;
@@ -2194,7 +2253,7 @@ function drawStage() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   // In Prepare it is the draft, moving like the stage would: dark until its first frame.
-  drawStagePicture(ctx, w, h, layout, prep.on ? prep.visual ?? NO_VISUAL : visual, (g) => liveState?.groups?.[g]?.level ?? 0);
+  drawStagePicture(ctx, w, h, layout, prep.on ? prep.visual ?? NO_VISUAL : visual, (g) => liveState?.groups?.[g]?.level ?? 0, { view: stageView.view });
   if (!stageLabel) {
     const s = getComputedStyle(document.body);
     stageLabel = { font: `600 10px ${s.fontFamily}`, prep: s.getPropertyValue('--ds-violet').trim() || '#B0A6F5', live: s.getPropertyValue('--ds-muted').trim() || '#97A4BA' };
@@ -2204,7 +2263,8 @@ function drawStage() {
   ctx.fillStyle = prep.on ? stageLabel.prep : stageLabel.live;
   ctx.textBaseline = 'bottom';
   ctx.textAlign = 'right';
-  ctx.fillText(prep.on ? 'DRAFT' : 'LIVE', w - 8, h - 6);
+  // Left of the resize grip at the corner (in Prepare there is no grip).
+  ctx.fillText(prep.on ? 'DRAFT' : 'LIVE', prep.on ? w - 8 : w - 34, h - 6);
   ctx.textAlign = 'start';
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 }

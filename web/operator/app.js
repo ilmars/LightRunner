@@ -4,6 +4,8 @@
 import { FlashPresses, isSideways } from '/shared/press.js';
 import { setupFullscreen } from '/shared/fullscreen.js';
 import { drawStagePicture, shown, shownRgb } from '/shared/stagedraw.js';
+import { keepStageSize, stageGrip, stageViewSwitch, storedStageSize } from '/shared/stagecard.js';
+import { fitStageLength } from '/shared/stageview.js';
 import { barAxis, barEnds, beamCone, outlineCells } from '/shared/stage.js';
 import { HUE_STOPS, WHITE_STOPS, hexRgb, parseChannel, parseHex, rgbHex, stripColour, stripMix, stripPick } from '/shared/colour.js';
 
@@ -79,6 +81,8 @@ function connect() {
       if (!layout.manualForOperators) closeManual();
       else if (manualSel.open) buildManual();
       render();
+      // The running order's rows are there now: the stage view's kept height, within what leaves three of them.
+      fitStageToWindow();
     } else if (msg.type === 'state') {
       if (state && msg.state.look !== seenLook) previousLook = seenLook;
       seenLook = msg.state.look;
@@ -5462,6 +5466,50 @@ const canvas = $('stage');
 const ctx = canvas.getContext('2d');
 const NO_VISUAL = new Uint8Array(0);
 
+// From above or from the audience: one choice per browser, the switch on the picture itself.
+const stageView = stageViewSwitch($('stageWrap'), () => drawStage());
+
+// Taller or shorter by the grip under it: from its own 124 px up to what leaves the running order three rows.
+const STAGE_MIN_H = 124;
+const ORDER_ROWS_LEFT = 3;
+/** The tallest the picture may be now: the running order keeps at least three rows in sight (with the line under Basic lights). */
+function stageMaxH() {
+  const list = $('runningOrder');
+  const rows = [...list.children].filter((n) => !n.classList.contains('sep'));
+  const third = rows[ORDER_ROWS_LEFT - 1];
+  // Where the third row ends, measured from the top of the list (44 px rows, 2 px apart, until the list is built).
+  const need = third && rows[0]
+    ? third.getBoundingClientRect().bottom - rows[0].getBoundingClientRect().top
+    : ORDER_ROWS_LEFT * 44 + (ORDER_ROWS_LEFT - 1) * 2;
+  return canvas.clientHeight + list.clientHeight - need;
+}
+/** Sets the picture's height (kept within its limits); `null` puts it back to its own size. */
+function setStageHeight(want) {
+  if (want == null) canvas.style.removeProperty('--stage-h');
+  else canvas.style.setProperty('--stage-h', `${Math.round(fitStageLength(want, STAGE_MIN_H, stageMaxH()))}px`);
+}
+const stageBoxShown = () => $('stageBox').offsetParent !== null;
+stageGrip($('stageGrip'), {
+  axes: 'y',
+  start: () => ({ w: canvas.clientWidth, h: canvas.clientHeight }),
+  apply: ({ h }) => setStageHeight(h),
+  done: () => keepStageSize('operator', canvas.style.getPropertyValue('--stage-h') ? { h: canvas.clientHeight } : null),
+  reset: () => {
+    setStageHeight(null);
+    keepStageSize('operator', null);
+  },
+});
+/** The kept height, again within today's limits (the window or the list may have changed). */
+function fitStageToWindow() {
+  if (!stageBoxShown()) return;
+  const kept = storedStageSize('operator').h;
+  if (kept) setStageHeight(kept);
+}
+window.addEventListener('resize', fitStageToWindow);
+requestAnimationFrame(fitStageToWindow);
+// Whatever changed its size (the grip, the window, the phone's layout): drawn again at the new size.
+new ResizeObserver(() => drawStage()).observe(canvas);
+
 function drawStage() {
   if (!layout) return;
   const dpr = window.devicePixelRatio || 1;
@@ -5474,7 +5522,7 @@ function drawStage() {
   ctx.clearRect(0, 0, w, h);
   // In Prepare it is the draft, moving like the stage would: dark until its first frame.
   const shownVisual = prep.on ? prep.visual ?? NO_VISUAL : visual;
-  drawStagePicture(ctx, w, h, layout, shownVisual, (g) => state?.groups?.[g]?.level ?? 0);
+  drawStagePicture(ctx, w, h, layout, shownVisual, (g) => state?.groups?.[g]?.level ?? 0, { view: stageView.view });
   // A small label at the bottom right, so the picture can't be mistaken for something else: "Live", "Off" during
   // Blackout, or in violet "Draft · <name>" while preparing.
   if (!pictureLabel) readPictureLabel();

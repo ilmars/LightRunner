@@ -150,7 +150,11 @@
 
     <!-- The stage view, as on the operator page: the draft while in Prepare. -->
     <section id="stageCard" class="ds-panel stage-card" hidden>
-      <canvas id="stage" class="stage" aria-label="Stage view"></canvas>
+      <!-- The From above / From the audience switch sits on the picture; the grip at its bottom right corner resizes it. -->
+      <div id="stageWrap" class="stage-wrap">
+        <canvas id="stage" class="stage" aria-label="Stage view"></canvas>
+        <button id="stageGrip" class="ds-stage-grip ds-stage-grip--corner stage-grip" type="button" aria-label="Make the stage view bigger or smaller (double-tap: back to its size)" title="Drag to make the stage view bigger or smaller; double-tap to put it back"></button>
+      </div>
       <button id="stageToggle" class="ds-btn ds-btn--quiet stage-toggle" type="button" aria-controls="stage" aria-expanded="true">Hide</button>
       <p class="legend">The stage view. In <b>Prepare</b> the timeline plays here and on the sound only; the real lights stay as they are. In <b>Live</b>, Start plays the recording in this browser and the lights follow it. Blackout and Basic lights (on the operator page) stop a timeline at any time.</p>
     </section>

@@ -131,8 +131,10 @@
 
   <!-- Left column: the stage view (a picture of the lights; the draft while preparing), then the running order. -->
   <aside class="left">
-    <section class="stage-box" aria-label="Stage view">
-      <canvas id="stage" class="stage"></canvas>
+    <!-- The From above / From the audience switch sits on the picture; the grip at the bottom edge makes it taller. -->
+    <section id="stageBox" class="stage-box" aria-label="Stage view">
+      <div id="stageWrap" class="stage-wrap"><canvas id="stage" class="stage"></canvas></div>
+      <button id="stageGrip" class="ds-stage-grip stage-grip" type="button" aria-label="Make the stage view taller or shorter (double-tap: back to its size)" title="Drag to make the stage view taller or shorter; double-tap to put it back"></button>
     </section>
     <nav class="order" aria-label="Running order">
       <div id="orderHead" class="order-head">

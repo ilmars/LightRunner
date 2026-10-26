@@ -177,8 +177,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* ---- Left column: the stage view, then the running order ---- */
 .left { display: flex; flex-direction: column; gap: var(--ds-gap); min-height: 0; min-width: 0; }
-.stage-box { flex: none; padding: 8px; background: var(--ds-panel-fill); border-radius: var(--ds-r-panel); box-shadow: var(--ds-shadow-raise); }
-.stage { width: 100%; height: 124px; background: #04070D; border-radius: 12px; display: block; }
+.stage-box { position: relative; flex: none; padding: 8px; background: var(--ds-panel-fill); border-radius: var(--ds-r-panel); box-shadow: var(--ds-shadow-raise); }
+.stage-wrap { position: relative; container: stage / inline-size; }
+/* 124 px, or taller by the grip (the running order gives way; set by the page within its limits). */
+.stage { width: 100%; height: var(--stage-h, 124px); background: #04070D; border-radius: 12px; display: block; }
+/* The grip: at the middle of the bottom edge, its target over the picture's foot and the gap under the box. */
+.stage-grip { left: 50%; bottom: -18px; margin-left: -36px; }
 /* Panel titles. */
 .order-title, .sec-title { flex: none; color: var(--ds-text); font-size: 14px; font-weight: 600; white-space: nowrap; }
 .sec-sub { min-width: 0; color: var(--ds-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

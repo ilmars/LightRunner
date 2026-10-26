@@ -85,6 +85,7 @@ The designer's icon (`Icon.dc.html`, kept with the restyle plan): a run of six s
 | `ds-toast`, `ds-toast--bad` | Message near the bottom | Glass for a confirmation ("Saved"), red glass for a problem; 96 px from the bottom, above the save bar |
 | `ds-sheet` | Glass sheet over one panel | The only place blur is used |
 | `ds-swatch` | Colour square | Dimmed |
+| `ds-stage-switch`, `ds-stage-grip` (+ `--corner`) | The stage view's own controls (`web/shared/stagecard.js`) | The switch: From above / From the audience on the picture's top left, 22 px to see and 44 px to tap, on a dark glass with the edge; on a small picture one button (the view's short name and two small arrows; a tap switches), from 520 px a segmented control with the whole words. The grip: a faint 28 × 3 px line (at a bottom edge) or two faint diagonals (at a corner) in a 44 px target that alone takes the touch; double-tap puts the size back |
 
 ## Where it is applied
 
