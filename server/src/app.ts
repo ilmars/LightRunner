@@ -119,9 +119,11 @@ const TEMPO_RUN_MS = 3000;
 /** A Master step this soon (ms) after another carries on from it instead of from the state. */
 const DEVICE_MASTER_MS = 300;
 /** What an operator is told for a key only the programmer may change (Settings, behind the PIN). */
+const PROGRAMMER_KEYS = 'Only the programmer can change that key. Enter the PIN in Settings.';
+/** A timeline Start from a page without the programmer's session; the page is told to ask for the PIN (needsPin). */
+const NOT_PROGRAMMER = 'Only the programmer can start a timeline. Enter the PIN on the Timeline page.';
 /** A recording no timeline uses is deleted at start once it is this old (ms): a day. */
 const ORPHAN_RECORDING_MS = 24 * 3600_000;
-const PROGRAMMER_KEYS = 'Only the programmer can change that key. Enter the PIN in Settings.';
 /** The key of a device Flash's time limit. */
 const flashKey = (source: string, group: string) => JSON.stringify([source, group]);
 
@@ -1129,7 +1131,7 @@ export class App {
       return null;
     }
     if (msg.type !== 'timelineStart') return null;
-    if (role !== 'programmer') return 'Only the programmer can start a timeline. Enter the PIN on the Timeline page.';
+    if (role !== 'programmer') return NOT_PROGRAMMER;
     const timeline = this.show.timelines.find((t) => t.id === msg.id);
     if (!timeline) return `There is no timeline "${msg.id}" in the show.`;
     return msg.prepare ? this.startPrepareTimeline(ws, timeline, msg.at) : this.startLiveTimeline(ws, timeline, msg.at);
@@ -1364,7 +1366,8 @@ export class App {
           const live = this.liveTimeline;
           run = (msg as { prepare?: unknown }).prepare ? this.prepareTimelines.get(ws)?.run : live?.owner === ws ? live.runner.run : undefined;
         }
-        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'result', ref: msg.ref ?? null, error, ...(run !== undefined ? { run } : {}) }));
+        const needsPin = error === NOT_PROGRAMMER ? { needsPin: true } : {};
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'result', ref: msg.ref ?? null, error, ...needsPin, ...(run !== undefined ? { run } : {}) }));
         return;
       }
       if (msg.type === 'command') {

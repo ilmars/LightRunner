@@ -131,6 +131,43 @@ function showLogin() {
   $('pin').focus();
 }
 
+/**
+ * Something was refused for the PIN (a Start, the recording's next part) or the connection came back (the Mac may have
+ * restarted): if this browser's session has ended, the PIN form shows. Nothing stops: a recording playing here plays
+ * on, and a live timeline goes on by itself on the server until the PIN is in. One check at a time.
+ */
+let sessionCheck = null;
+function checkSession() {
+  sessionCheck ??= call('GET', '/api/session')
+    .then((session) => {
+      if (session.loggedIn) return false;
+      showLogin();
+      return true;
+    }, () => false)
+    .finally(() => { sessionCheck = null; });
+  return sessionCheck;
+}
+
+/**
+ * The recording stopped because the server refused its next part for the PIN: once the PIN is in, it plays on from
+ * where the lights are (the same file; the page counted the time meanwhile).
+ */
+let audioRefused = false;
+function resumeRefusedAudio() {
+  if (!audioRefused) return;
+  audioRefused = false;
+  const t = current();
+  if (!usableAudio(t)) return;
+  const at = position();
+  audio.load();
+  audio.currentTime = at;
+  if (run.id && !run.ended && t && run.id === t.id && run.recDuration > at) {
+    run.audio = true;
+    audio.play().catch(() => {});
+  }
+  renderTransport();
+}
+
 $('loginForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   $('loginError').textContent = '';
@@ -142,6 +179,7 @@ $('loginForm').addEventListener('submit', async (ev) => {
     // The WebSocket learns it is the programmer's when it connects: a fresh one after the PIN.
     disconnect();
     await load();
+    resumeRefusedAudio();
   } catch (err) {
     $('loginError').textContent = err.message;
     $('pin').select();
@@ -203,6 +241,8 @@ function connect() {
   ws.onopen = () => {
     if (socket !== ws) return;
     setConnected(true);
+    // Back after the server restarted: this browser may need the PIN again (its Start, reports and recording would be refused).
+    void checkSession();
     // A Stop pressed while the connection was down goes now (only for that Start: a later one stays).
     if (pendingStop) {
       ws.send(JSON.stringify({ type: 'timelineStop', id: pendingStop.id, ...(pendingStop.run !== null ? { run: pendingStop.run } : {}), ref: ++ref }));
@@ -312,6 +352,7 @@ function onResult(msg) {
   }
   if (msg.ref !== null && msg.ref === run.startRef) {
     run.startRef = null;
+    if (msg.error && msg.needsPin) void checkSession();
     if (msg.error) {
       if (run.following) {
         // Lights follow again didn't work: the sound plays on, the lights stay where they are.
@@ -548,15 +589,22 @@ audio.addEventListener('ended', () => {
   run.ended = true;
   renderTransport();
 });
-audio.addEventListener('error', () => {
+audio.addEventListener('error', async () => {
   if (!audio.getAttribute('src')) return;
-  audioBroken = true;
   if (run.id && run.audio) {
     // The lights carry on with the page's own count.
     run.basePos = audio.currentTime || run.basePos;
     run.baseAt = performance.now() / 1000;
     run.audio = false;
   }
+  renderTransport();
+  // Refused for the PIN (this browser's session ended): the PIN form shows, and the sound plays on once it is in.
+  const src = audio.getAttribute('src');
+  if (await checkSession()) {
+    if (audio.getAttribute('src') === src) audioRefused = true;
+    return;
+  }
+  audioBroken = true;
   toast("This browser can't play the recording. The timeline still runs, without sound.", true);
   renderTransport();
 });

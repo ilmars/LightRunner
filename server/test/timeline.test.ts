@@ -1019,7 +1019,10 @@ test('server: only the programmer starts a timeline; anyone can stop the live on
   const operator = await page(app);
   await waitFor(operator.state);
   assert.match(await operator.timeline({ type: 'timelineStart', id: 'long', at: 0 }) ?? '', /programmer/i);
+  // The page is told the refusal was for the PIN (after a restart it may have lost its session): it asks for it.
+  assert.equal(operator.seen.findLast((m) => m.type === 'result').needsPin, true);
   assert.match(await programmer.timeline({ type: 'timelineStart', id: 'nope', at: 0 }) ?? '', /no timeline/i);
+  assert.equal(programmer.seen.findLast((m) => m.type === 'result').needsPin, undefined);
   assert.match(await programmer.timeline({ type: 'timelineStart', id: 'long', at: -1 }) ?? '', /invalid/i);
   assert.equal(await programmer.timeline({ type: 'timelineStart', id: 'long', at: 0 }), null);
   await waitFor(() => operator.state()?.timeline, 2000, 'running');
