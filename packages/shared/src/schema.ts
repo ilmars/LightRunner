@@ -365,7 +365,7 @@ export type StagePlan = z.infer<typeof StagePlan>;
 
 // ---- Timelines ----
 
-/** What a block puts on its layer. 'stage' layers take only look, dark and full. */
+/** What a block puts on its layer. The Whole stage layer (`*`) takes only look, dark and full. */
 export const BlockWhat = z.discriminatedUnion('kind', [
   /** A colour of the group, at a level. */
   z.object({ kind: z.literal('colour'), preset: id, level: unit }),
@@ -396,9 +396,12 @@ export const TimelineBlock = z.object({
 });
 export type TimelineBlock = z.infer<typeof TimelineBlock>;
 
-/** One row of blocks: a group's, or 'stage' for the whole stage. */
+/** The layer id of Whole stage blocks. It is not an id a group can have, so a group called "Stage" is no clash. */
+export const STAGE_LAYER = '*';
+
+/** One row of blocks: a group's, or `*` for the whole stage. */
 export const TimelineLayer = z.object({
-  group: id,
+  group: z.union([id, z.literal(STAGE_LAYER)]),
   blocks: z.array(TimelineBlock),
 });
 export type TimelineLayer = z.infer<typeof TimelineLayer>;
@@ -434,6 +437,15 @@ export const Timeline = z.object({
   markers: z.array(TimelineMarker).default([]),
   /** Milliseconds the lights run earlier (negative) or later (positive) than the sound. */
   offsetMs: z.number().min(-500).max(500).default(0),
+}).superRefine((t, ctx) => {
+  // The runner tells blocks apart by id, across all the layers.
+  const seen = new Set<string>();
+  for (const layer of t.layers) {
+    for (const b of layer.blocks) {
+      if (seen.has(b.id)) ctx.addIssue({ code: 'custom', message: `two blocks have the id "${b.id}"`, path: ['layers'] });
+      seen.add(b.id);
+    }
+  }
 });
 export type Timeline = z.infer<typeof Timeline>;
 

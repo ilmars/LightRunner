@@ -424,7 +424,7 @@ test('a Patch page left open does not put back old timelines', async () => {
     const stale = (await call('GET', '/api/show')).body;
     assert.deepEqual(stale.timelines, []);
     // Meanwhile, on the Timeline page: a timeline is saved into the show.
-    const timeline = { id: 'sunday', name: 'Sunday', markers: [], offsetMs: 0, layers: [{ group: 'stage', blocks: [{ id: 'a', start: 0, rise: 0, what: { kind: 'dark' } }] }] };
+    const timeline = { id: 'sunday', name: 'Sunday', markers: [], offsetMs: 0, layers: [{ group: '*', blocks: [{ id: 'a', start: 0, rise: 0, what: { kind: 'dark' } }] }] };
     assert.equal((await call('PUT', '/api/show', { ...stale, timelines: [timeline] })).status, 200);
     // Patch saves its old copy, with no timelines, and then one with another timeline in it.
     stale.fixtures[0].name = 'Renamed in Patch';

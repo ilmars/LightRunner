@@ -60,3 +60,23 @@ test('bytes: values from 0 to 1 are kept as one byte each, as base64', () => {
   // The same base64 the show file holds.
   assert.equal(encodeBytes([0, 1 / 255, 2 / 255]), Buffer.from([0, 1, 2]).toString('base64'));
 });
+
+test('loudness: a sample rate that does not divide by 25 still gives exactly 25 values a second', () => {
+  for (const rate of [44117, 22050, 48000, 11025]) {
+    const track = loudnessTrack(new Float32Array(rate * 60).fill(0.2), rate);
+    assert.equal(track.length, 1500, `${rate} Hz over a minute`);
+  }
+  // Fifteen minutes at an odd rate stays in step (no drift from rounding the window).
+  assert.equal(loudnessTrack(new Float32Array(44117 * 900), 44117).length, 22500);
+});
+
+test('loudness: a recording that is mostly silence still gets its loud part to 1', () => {
+  // Under 5 % tone: the 95th percentile is silence, so the loudest value is used instead.
+  const s = silenceThenTone(10, 0.5);
+  s.fill(0, 80000 + 800);
+  const track = loudnessTrack(s, RATE);
+  assert.equal(Math.max(...track), 1);
+  assert.ok(track.slice(0, 250).every((v) => v === 0), 'silence stays 0');
+  assert.ok(track[250]! > 0.9);
+  assert.deepEqual(loudnessTrack(new Float32Array(RATE * 3), RATE), new Array(75).fill(0));
+});

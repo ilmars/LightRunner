@@ -20,18 +20,22 @@ function quantile(values, p) {
  * @returns {number[]} 0..1
  */
 export function loudnessTrack(samples, sampleRate) {
-  const window = Math.max(1, Math.round(sampleRate / LOUDNESS_RATE));
-  const count = Math.ceil(samples.length / window);
+  // Window w covers samples floor(w * rate / 25) up to floor((w + 1) * rate / 25): the boundaries are fractional,
+  // so any sample rate stays exactly 25 values a second however long the recording is.
+  const per = sampleRate / LOUDNESS_RATE;
+  const count = Math.ceil(samples.length / per - 1e-9);
   const rms = new Array(count);
   for (let w = 0; w < count; w++) {
-    const from = w * window;
-    const to = Math.min(samples.length, from + window);
+    const from = Math.floor(w * per);
+    const to = Math.min(samples.length, Math.max(from + 1, Math.floor((w + 1) * per)));
     let sum = 0;
     for (let i = from; i < to; i++) sum += samples[i] * samples[i];
     rms[w] = Math.sqrt(sum / (to - from));
   }
   if (!count) return rms;
-  const top = quantile(rms, 0.95);
+  // The 95th percentile is 1; in a recording that is mostly silence it is 0, so the loudest value is used instead.
+  let top = quantile(rms, 0.95);
+  if (!(top > 1e-6)) top = rms.reduce((m, v) => (v > m ? v : m), 0);
   if (!(top > 1e-6)) return rms.map(() => 0);
   return rms.map((v) => Math.min(1, v / top));
 }

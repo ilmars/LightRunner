@@ -292,7 +292,7 @@ test('timelines are compared and taken like the other items, and removing what t
 
   // Removing the group, a preset or a look a timeline uses does not touch the timeline.
   const withTl = rig();
-  withTl.timelines = [{ ...tl('Sunday'), layers: [{ group: 'front-lights', blocks: [{ id: 'a', start: 0, rise: 0, what: { kind: 'colour', preset: 'front-lights-silti-3200k', level: 1 } }] }, { group: 'stage', blocks: [{ id: 'b', start: 0, rise: 0, what: { kind: 'look', look: 'worship' } }] }] }];
+  withTl.timelines = [{ ...tl('Sunday'), layers: [{ group: 'front-lights', blocks: [{ id: 'a', start: 0, rise: 0, what: { kind: 'colour', preset: 'front-lights-silti-3200k', level: 1 } }] }, { group: '*', blocks: [{ id: 'b', start: 0, rise: 0, what: { kind: 'look', look: 'worship' } }] }] }];
   const gone = rig();
   gone.timelines = withTl.timelines;
   const frontFixtures = withTl.groups.find((g) => g.id === 'front-lights')!.fixtures;
