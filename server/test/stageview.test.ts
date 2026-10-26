@@ -11,7 +11,8 @@ import { operatorLayout } from '../src/layout.ts';
 import { copyOf } from '../../web/patch/types.js';
 import { PLAN_ASPECT, barEnds } from '../../web/shared/stage.js';
 import {
-  fitStageLength, frontPlacement, frontScene, hangsOf, isPanel, isStrip, ledLayout, ledPoints, panelGrid, poolOf, stageSizeFrom, stageSizeWith, stageViewFrom,
+  fitStageLength, frontPlacement, frontScene, hangsOf, isPanel, isStrip, ledLayout, ledPoints, panelGrid, poolOf, shareSoftLight, softShareAt,
+  stageSizeFrom, stageSizeWith, stageViewFrom,
 } from '../../web/shared/stageview.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -408,4 +409,35 @@ test('a wanted stage view length stays within its limits, the minimum winning wh
   assert.equal(fitStageLength(200, 124, 80), 124, 'less room than the minimum');
   assert.equal(fitStageLength(NaN, 124, 300), 124);
   assert.equal(fitStageLength(500, 124, NaN), 500, 'no maximum known');
+});
+
+// ---- Soft light that overlaps ----
+
+test('a soft light is strongest at its middle (a wash: at the foot of the wall) and gone at its edge', () => {
+  const spot = { sprite: 'round', x: 0, y: 0, w: 100, h: 50, a: 0.4 };
+  near(softShareAt(spot, 50, 25), 1);
+  assert.equal(softShareAt(spot, 100, 25), 0);
+  assert.equal(softShareAt(spot, 50, 0), 0);
+  assert.ok(softShareAt(spot, 75, 25) > 0 && softShareAt(spot, 75, 25) < 1);
+  const wash = { sprite: 'arch', x: 0, y: 0, w: 100, h: 200, a: 0.3 };
+  near(softShareAt(wash, 50, 200), 1, 'the foot of the wall, in the middle');
+  assert.ok(softShareAt(wash, 50, 100) < softShareAt(wash, 50, 160), 'fainter up the wall');
+  assert.equal(softShareAt(wash, 50, 0), 0, 'gone at the top');
+  assert.equal(softShareAt(wash, 50, 260), 0, 'nothing under the floor line');
+});
+
+test('overlapping pools share their light: All white never adds up to a bright floor, a lone pool keeps its strength', () => {
+  const alone = shareSoftLight([{ sprite: 'round', x: 0, y: 0, w: 40, h: 30, a: 0.38 }]);
+  near(alone[0].a, 0.38, 'alone');
+  const apart = shareSoftLight([{ sprite: 'round', x: 0, y: 0, w: 40, h: 30, a: 0.3 }, { sprite: 'round', x: 100, y: 0, w: 40, h: 30, a: 0.3 }]);
+  assert.deepEqual(apart.map((p) => p.a), [0.3, 0.3], 'apart: untouched');
+  // Twelve pools on top of each other at 0.34 would add up to 4; shared, they stay under about 0.34 * 12^0.2 (0.56).
+  const stack = shareSoftLight(Array.from({ length: 12 }, () => ({ sprite: 'round', x: 0, y: 0, w: 40, h: 30, a: 0.34 })));
+  const total = stack.reduce((sum, p) => sum + p.a, 0);
+  assert.ok(total < 0.6, `the stack adds up to ${total}`);
+  assert.ok(total > 0.34, 'but a little brighter than one');
+  // Washes side by side up a wall (the church's background bars): the sum at the foot stays dim.
+  const washes = shareSoftLight(Array.from({ length: 32 }, (_, k) => ({ sprite: 'arch', x: k * 18 - 54, y: 0, w: 108, h: 190, a: 0.3 })));
+  const atFoot = (x: number) => washes.reduce((sum, p) => sum + p.a * softShareAt(p, x, 190), 0);
+  for (const x of [100, 250, 400]) assert.ok(atFoot(x) < 0.5, `the foot of the wall at ${x}: ${atFoot(x)}`);
 });

@@ -2223,7 +2223,11 @@ stageGrip($('stageGrip'), {
   axes: 'xy',
   start: () => ({ w: stageWrap.offsetWidth, h: stageCanvas.clientHeight }),
   apply: (size) => setStageSize(size),
-  done: () => keepStageSize('timeline', { w: stageWrap.offsetWidth, h: stageCanvas.clientHeight }),
+  done: () => {
+    keepStageSize('timeline', { w: stageWrap.offsetWidth, h: stageCanvas.clientHeight });
+    // Drawn properly at the final size (while dragging, the last picture was stretched).
+    drawStage();
+  },
   reset: () => {
     setStageSize(null);
     keepStageSize('timeline', null);
@@ -2253,7 +2257,7 @@ function drawStage() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   // In Prepare it is the draft, moving like the stage would: dark until its first frame.
-  drawStagePicture(ctx, w, h, layout, prep.on ? prep.visual ?? NO_VISUAL : visual, (g) => liveState?.groups?.[g]?.level ?? 0, { view: stageView.view });
+  drawStagePicture(ctx, w, h, layout, prep.on ? prep.visual ?? NO_VISUAL : visual, (g) => liveState?.groups?.[g]?.level ?? 0, { view: stageView.view, resizing: $('stageGrip').classList.contains('dragging') });
   if (!stageLabel) {
     const s = getComputedStyle(document.body);
     stageLabel = { font: `600 10px ${s.fontFamily}`, prep: s.getPropertyValue('--ds-violet').trim() || '#B0A6F5', live: s.getPropertyValue('--ds-muted').trim() || '#97A4BA' };

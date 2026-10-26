@@ -208,6 +208,42 @@ export function frontPlacement(f, hangs, w, h) {
   return place;
 }
 
+// ---- Soft light that overlaps ----
+
+/**
+ * How much of a soft light's shape falls at x, y (0..1). A light is `{ sprite, x, y, w, h, a }` in pixels: 'arch' is
+ * a wash up a wall from the middle of its bottom edge ((1 - d)^1.5); anything else a round spot from its middle
+ * ((1 - d^2)^2), d being the distance as a fraction of the shape's half-width and half-height (height for an arch).
+ */
+export function softShareAt(p, x, y) {
+  if (p.sprite === 'arch') {
+    const X = (x - (p.x + p.w / 2)) / (p.w / 2), Y = (p.y + p.h - y) / p.h;
+    if (Y < -0.05) return 0;
+    const d = Math.hypot(X, Math.max(0, Y));
+    return d >= 1 ? 0 : (1 - d) ** 1.5;
+  }
+  const d2 = ((x - (p.x + p.w / 2)) / (p.w / 2)) ** 2 + ((y - (p.y + p.h / 2)) / (p.h / 2)) ** 2;
+  return d2 >= 1 ? 0 : (1 - d2) ** 2;
+}
+
+/**
+ * Pools and washes that overlap would add up to a bright floor (an All white look, a long bar's pools). Each light's
+ * strength `a` is made fainter (in place) by how much light falls where it is strongest, so overlapping light grows
+ * only a little brighter (about the fifth root of how many overlap) and never gets near white. A light alone keeps
+ * its strength. Returns `lights`.
+ */
+export function shareSoftLight(lights) {
+  const peak = (p) => (p.sprite === 'arch' ? [p.x + p.w / 2, p.y + p.h] : [p.x + p.w / 2, p.y + p.h / 2]);
+  const sums = lights.map((p) => {
+    const [x, y] = peak(p);
+    return lights.reduce((sum, q) => sum + q.a * softShareAt(q, x, y), 0);
+  });
+  lights.forEach((p, i) => {
+    if (sums[i] > p.a) p.a *= (p.a / sums[i]) ** 0.8;
+  });
+  return lights;
+}
+
 // ---- The view each browser shows, and the size of its stage view ----
 
 /** The stored choice of view ('above' or 'front'): from above unless it says from the audience. */

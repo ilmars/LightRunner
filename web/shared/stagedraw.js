@@ -12,7 +12,7 @@
 // gradients per frame, into a small canvas that is then stretched over the picture.
 
 import { barAxis, barEnds, beamCone, outlineCells } from './stage.js';
-import { frontPlacement, frontScene, hangsOf, isStrip, ledLayout, ledPoints, panelGrid, poolOf } from './stageview.js';
+import { frontPlacement, frontScene, hangsOf, isStrip, ledLayout, ledPoints, panelGrid, poolOf, shareSoftLight } from './stageview.js';
 
 /**
  * How a light's colour is drawn on screen. Whites (light colours with little
@@ -48,7 +48,7 @@ const LED_OFF = '#262a32';
 const DARK = [0, 0, 0];
 
 // How strongly the soft light is drawn (0..1 at a full-brightness colour). Kept low: the picture must glow, never flare.
-const LED_GLOW = 0.5, BEAM = 0.16, WASH = 0.34, FLOOR_POOL = 0.34, RISER_GLOW = 0.24, LINE_GLOW = 0.3;
+const LED_GLOW = 0.5, BEAM = 0.16, WASH = 0.3, FLOOR_POOL = 0.34, RISER_GLOW = 0.24, LINE_GLOW = 0.3, CONE = 0.2;
 
 // ---- Soft light from pre-made gradients ----
 
@@ -93,6 +93,11 @@ function spritesOf() {
       const d = Math.hypot(2 * u - 1, 1 - v);
       return d >= 1 ? 0 : (1 - d) ** 1.5;
     }),
+    // A beam's cone from above: from the lamp at the top middle to the far edge at the bottom, fading as it goes.
+    cone: spriteOf(48, 48, (u, v) => {
+      const x = Math.abs(2 * u - 1);
+      return v <= 0 || x >= v ? 0 : (1 - v) * Math.min(1, (v - x) * 12);
+    }),
     // A beam down through the haze: narrow at the lamp, wider and fading towards the floor, with soft sides.
     beam: spriteOf(48, 128, (u, v) => {
       const half = 0.08 + 0.92 * v;
@@ -125,22 +130,36 @@ const litOf = (c) => Math.max(c[0], c[1], c[2]) / 255;
 const kept = new WeakMap();
 let keptElsewhere = null;
 
+/** While the picture is being resized, the kept parts are worked out again at most this often (ms); in between the
+ *  last ones are stretched to the new size. */
+const RESIZE_REBUILD_MS = 150;
+
 /**
  * Draws the stage onto `ctx` (already scaled to CSS pixels), `w` by `h`: the layout's fixtures in the colours of
  * `visual` (r, g, b per segment, in fixture order; missing values are dark). Smoke machines are a small cloud,
  * brighter while `smokeLevel(groupId)` (0..1) is up. `options.view` is 'above' (the stage plan; the default) or
- * 'front' (from the audience).
+ * 'front' (from the audience). `options.resizing` is true while someone drags the picture's size: the last picture's
+ * parts are stretched (worked out again at most every 150 ms); draw once more without it when the drag ends.
  */
 export function drawStagePicture(ctx, w, h, layout, visual, smokeLevel = () => 0, options = {}) {
   if (!layout || !(w > 0) || !(h > 0)) return;
   const view = options.view === 'front' ? 'front' : 'above';
   const scale = ctx.getTransform ? Math.abs(ctx.getTransform().a) || 1 : 1;
   const key = `${view}|${w}|${h}|${scale}`;
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
   let scene = ctx.canvas ? kept.get(ctx.canvas) : keptElsewhere;
+  const same = scene && scene.layout === layout && scene.view === view && scene.scale === scale;
+  if (same && scene.key !== key && options.resizing && now - scene.builtAt < RESIZE_REBUILD_MS) {
+    ctx.save();
+    ctx.scale(w / scene.w, h / scene.h);
+    paint(ctx, scene, layout, visual ?? new Uint8Array(0), smokeLevel);
+    ctx.restore();
+    return;
+  }
   if (!scene || scene.key !== key || scene.layout !== layout) {
-    scene = buildScene(view, w, h, layout, scale);
-    scene.key = key;
-    scene.layout = layout;
+    // The canvases of the last scene are used again (resized in place), so a drag makes no new ones.
+    scene = buildScene(view, w, h, layout, scale, scene);
+    Object.assign(scene, { key, layout, view, scale, builtAt: now });
     if (ctx.canvas) kept.set(ctx.canvas, scene);
     else keptElsewhere = scene;
   }
@@ -178,7 +197,7 @@ function paint(ctx, scene, layout, visual, smokeLevel) {
 
   // Light on the floor and the wall, added together as light is. Soft light needs no sharpness: it is painted into a
   // small canvas and stretched over the picture in one go (far less to fill than painting it at full size).
-  const lights = (pass) => {
+  const lights = (pass, list) => {
     const light = scene.light[pass], lg = light.g;
     lg.save();
     lg.setTransform(1, 0, 0, 1, 0, 0);
@@ -186,7 +205,7 @@ function paint(ctx, scene, layout, visual, smokeLevel) {
     lg.restore();
     lg.globalCompositeOperation = 'lighter';
     let any = false;
-    for (const item of items) {
+    for (const item of list) {
       for (const p of item[pass]) any = addLight(lg, sp[p.sprite], p.x, p.y, p.w, p.h, colourOf(item, p.seg), p.a) || any;
     }
     lg.globalAlpha = 1;
@@ -195,64 +214,87 @@ function paint(ctx, scene, layout, visual, smokeLevel) {
     ctx.drawImage(light.c, 0, 0, w, h);
     ctx.globalCompositeOperation = 'source-over';
   };
-  lights('under');
+  lights('under', items);
 
-  // A beam's cone from above (a faint shape strongest at the lamp), and smoke clouds.
+  // A beam's cone from above (strongest at the lamp, gone at the tip), and smoke clouds.
+  ctx.globalCompositeOperation = 'lighter';
   for (const item of items) {
-    if (item.cone) drawCone(ctx, item.cone, colourOf(item, 0));
+    if (!item.cone) continue;
+    const { lamp, left, right } = item.cone;
+    // The cone sprite (apex at the top middle, its far edge along the bottom) mapped onto the lamp and the far corners.
+    ctx.save();
+    ctx.transform(
+      right[0] - left[0], right[1] - left[1],
+      (left[0] + right[0]) / 2 - lamp[0], (left[1] + right[1]) / 2 - lamp[1],
+      lamp[0] - (right[0] - left[0]) / 2, lamp[1] - (right[1] - left[1]) / 2,
+    );
+    addLight(ctx, sp.cone, 0, 0, 1, 1, colourOf(item, 0), CONE);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  for (const item of items) {
     if (item.smoke) drawSmoke(ctx, item.smoke, Math.max(0, ...item.smoke.groups.map((g) => smokeLevel(g) || 0)));
   }
 
   ctx.drawImage(scene.bodies, 0, 0, w, h);
 
-  // Beams through the haze in front of everything, and the glow round lit LEDs.
-  lights('over');
-  ctx.globalCompositeOperation = 'lighter';
-  for (const item of items) {
-    for (const l of item.lines) {
-      const c = colourOf(item, l.seg);
-      if (litOf(c) <= 0.02) continue;
-      ctx.globalAlpha = LINE_GLOW * (l.a ?? 1);
-      strokeLine(ctx, l.pts, l.glow, rgb(c));
-    }
-  }
-  ctx.globalAlpha = 1;
-  ctx.globalCompositeOperation = 'source-over';
-
-  // The LEDs themselves, and strips as lines; dark ones in the housing's LED grey, so every LED can be counted.
-  for (const item of items) {
-    // A riser stands in front of the wall's bars: it hides their LEDs and glow (items are in order, back to front).
-    if (item.cover) {
-      ctx.fillStyle = RISER;
-      ctx.fillRect(item.cover.x, item.cover.y, item.cover.w, item.cover.h);
-    }
-    for (const l of item.lines) {
-      const c = colourOf(item, l.seg);
-      const lit = litOf(c) > 0.02;
-      if (!lit && l.dark === false) continue;
-      ctx.globalAlpha = lit ? l.a ?? 1 : 1;
-      strokeLine(ctx, l.pts, l.width, lit ? rgb(c) : LED_OFF);
+  // Beams through the haze, the glow round lit LEDs, then the LEDs themselves and strips as lines (dark ones in the
+  // housing's LED grey, so every LED can be counted). With a riser in the picture, the lights behind it (the wall's
+  // bars) go first, then the riser hides them, then everything in front of it: their beams and glows stay whole.
+  const front = (list) => {
+    lights('over', list);
+    ctx.globalCompositeOperation = 'lighter';
+    for (const item of list) {
+      for (const l of item.lines) {
+        const c = colourOf(item, l.seg);
+        if (litOf(c) <= 0.02) continue;
+        ctx.globalAlpha = LINE_GLOW * (l.a ?? 1);
+        strokeLine(ctx, l.pts, l.glow, rgb(c));
+      }
     }
     ctx.globalAlpha = 1;
-    // LEDs in a row of the same colour (a segment's) go in one path, filled once.
-    let last = '', open = false;
-    for (const d of item.leds) {
-      const c = colourOf(item, d.seg);
-      const style = litOf(c) > 0.02 ? rgb(c) : LED_OFF;
-      if (style !== last) {
-        if (open) ctx.fill();
-        ctx.fillStyle = last = style;
-        ctx.beginPath();
-        open = true;
+    ctx.globalCompositeOperation = 'source-over';
+    for (const item of list) {
+      for (const l of item.lines) {
+        const c = colourOf(item, l.seg);
+        const lit = litOf(c) > 0.02;
+        if (!lit && l.dark === false) continue;
+        ctx.globalAlpha = lit ? l.a ?? 1 : 1;
+        strokeLine(ctx, l.pts, l.width, lit ? rgb(c) : LED_OFF);
       }
-      if (d.square) ctx.rect(d.x - d.r, d.y - d.r, d.r * 2, d.r * 2);
-      else {
-        ctx.moveTo(d.x + d.r, d.y);
-        ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+      ctx.globalAlpha = 1;
+      // LEDs in a row of the same colour (a segment's) go in one path, filled once.
+      let last = '', open = false;
+      for (const d of item.leds) {
+        const c = colourOf(item, d.seg);
+        const style = litOf(c) > 0.02 ? rgb(c) : LED_OFF;
+        if (style !== last) {
+          if (open) ctx.fill();
+          ctx.fillStyle = last = style;
+          ctx.beginPath();
+          open = true;
+        }
+        if (d.square) ctx.rect(d.x - d.r, d.y - d.r, d.r * 2, d.r * 2);
+        else {
+          ctx.moveTo(d.x + d.r, d.y);
+          ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+        }
       }
+      if (open) ctx.fill();
     }
-    if (open) ctx.fill();
-  }
+  };
+  if (scene.covers.length) {
+    // Everything but the risers: the wall's lights don't show through a riser (its box is in the bodies layer).
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    for (const c of scene.covers) ctx.rect(c.x, c.y, c.w, c.h);
+    ctx.clip('evenodd');
+    front(scene.behind);
+    ctx.restore();
+    front(scene.inFront);
+  } else front(items);
   ctx.restore();
 }
 
@@ -262,23 +304,6 @@ function strokeLine(ctx, pts, width, style) {
   ctx.lineWidth = width;
   ctx.strokeStyle = style;
   ctx.stroke();
-}
-
-/** A faint cone in the light's colour, strongest at the lamp and gone at the tip; nothing when it is off. */
-function drawCone(ctx, cone, c) {
-  const lit = litOf(c);
-  if (lit <= 0.02) return;
-  const { lamp, left, right, tip } = cone;
-  const fade = ctx.createLinearGradient(lamp[0], lamp[1], tip[0], tip[1]);
-  fade.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},${0.2 * lit})`);
-  fade.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
-  ctx.beginPath();
-  ctx.moveTo(...lamp);
-  ctx.lineTo(...left);
-  ctx.lineTo(...right);
-  ctx.closePath();
-  ctx.fillStyle = fade;
-  ctx.fill();
 }
 
 /** A small grey cloud, a little brighter while its smoke group's level is up. */
@@ -293,21 +318,35 @@ function drawSmoke(ctx, { x, y, r }, level) {
 
 // ---- Working out the static parts ----
 
-function layer(w, h, scale) {
-  const c = makeCanvas(Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale)));
-  const g = c.getContext('2d');
+/** A canvas for `w` by `h` CSS px at `scale`: `old` (a layer kept from before) resized in place, else a new one. */
+function layer(w, h, scale, old) {
+  const cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+  let c = old?.c, g = old?.g;
+  if (c) {
+    // Setting the size clears the canvas and its drawing state, even when it is the same.
+    c.width = cw;
+    c.height = ch;
+  } else {
+    c = makeCanvas(cw, ch);
+    g = c.getContext('2d');
+  }
   g.setTransform(scale, 0, 0, scale, 0, 0);
   return { c, g };
 }
 
-function buildScene(view, w, h, layout, scale) {
-  const back = layer(w, h, scale), bodies = layer(w, h, scale);
+function buildScene(view, w, h, layout, scale, old) {
+  const back = layer(w, h, scale, old?.backLayer), bodies = layer(w, h, scale, old?.bodiesLayer);
   const items = view === 'front' ? buildFront(back.g, bodies.g, w, h, layout) : buildAbove(back.g, bodies.g, w, h, layout);
   // The soft light's canvases: pools and washes (the softest) at a quarter of the picture's CSS size on a small view
   // and an eighth on a big one; beams and LED glows at twice that.
   const k = w * h > 200_000 ? 0.125 : 0.25;
-  const light = { under: layer(w, h, k), over: layer(w, h, 2 * k) };
-  return { w, h, back: back.c, bodies: bodies.c, light, items };
+  const light = { under: layer(w, h, k, old?.light.under), over: layer(w, h, 2 * k, old?.light.over) };
+  shareSoftLight(items.flatMap((item) => item.under));
+  return {
+    w, h, back: back.c, bodies: bodies.c, backLayer: back, bodiesLayer: bodies, light, items,
+    covers: items.filter((i) => i.cover).map((i) => i.cover),
+    behind: items.filter((i) => i.behind), inFront: items.filter((i) => !i.behind),
+  };
 }
 
 const shapeOf = (f) => f.shape ?? (f.w || f.h ? 'bar' : 'dot');
@@ -315,7 +354,7 @@ const segmentsOf = (f) => Math.max(1, Math.floor(Number(f.segments) || 1));
 const ledCount = (f) => ledLayout(segmentsOf(f), f.leds).length;
 
 function newItem(k, f) {
-  return { k, f, under: [], over: [], lines: [], leds: [], cone: null, smoke: null, cover: null };
+  return { k, f, under: [], over: [], lines: [], leds: [], cone: null, smoke: null, cover: null, behind: false };
 }
 
 /** The groups a smoke machine belongs to (whose level makes its cloud brighter). */
@@ -529,6 +568,8 @@ function buildFront(bg, fg, w, h, layout) {
     const item = newItem(k, f);
     const shape = shapeOf(f), n = segmentsOf(f);
     const place = frontPlacement(f, hangs, w, h);
+    // Behind a riser: the riser hides this light's LEDs and glow where it stands in front of them.
+    item.behind = hangs === 'wall';
     if (shape === 'smoke') {
       // A haze machine at the foot of the wall: its cloud drifts over the floor line.
       item.smoke = { x: place.x, y: floorY - 6 * u, r: Math.max(5, 10 * u), groups: smokeGroups(layout, f) };
@@ -568,9 +609,8 @@ function buildFront(bg, fg, w, h, layout) {
       else if (!panel) box(fg, place.left, place.top, place.length, place.height, 2 * u);
       const washH = (floorY - wallTop) * 0.8;
       const halfW = Math.max(spacing * 1.5, washH * 0.42, 14 * u);
-      const a = n > 1 ? Math.min(WASH, (WASH * 1.25 * spacing) / halfW) : WASH;
       for (const seg of place.segments) {
-        item.under.push({ sprite: 'arch', x: seg.x - halfW, y: floorY - washH, w: 2 * halfW, h: washH, seg: seg.segment, a });
+        item.under.push({ sprite: 'arch', x: seg.x - halfW, y: floorY - washH, w: 2 * halfW, h: washH, seg: seg.segment, a: WASH });
       }
       if (lamp) item.leds.push({ x: place.x, y: floorY - 4.5 * u, r: Math.max(0.9, 1.8 * u), seg: 0 });
       else if (panel) {
@@ -585,9 +625,8 @@ function buildFront(bg, fg, w, h, layout) {
       item.cover = { x: place.left, y: place.top, w: place.length, h: place.height };
       // One glow over the riser per segment, wide enough that they join.
       const gw = n === 1 ? place.length * 0.65 : Math.max(spacing * 1.2, 30 * u);
-      const ga = n === 1 ? RISER_GLOW : Math.min(RISER_GLOW, (RISER_GLOW * spacing) / gw);
       for (const seg of place.segments) {
-        item.under.push({ sprite: 'round', x: seg.x - gw, y: floorY - 22 * u - 36 * u, w: 2 * gw, h: 72 * u, seg: seg.segment, a: ga });
+        item.under.push({ sprite: 'round', x: seg.x - gw, y: floorY - 22 * u - 36 * u, w: 2 * gw, h: 72 * u, seg: seg.segment, a: RISER_GLOW });
       }
       if (strip) {
         const rect = { left: place.left, top: place.top, width: place.length, height: place.height };

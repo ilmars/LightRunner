@@ -41,3 +41,7 @@ export function stageViewFrom(stored: string | null | undefined): 'above' | 'fro
 export function stageSizeFrom(stored: string | null | undefined, page: string): { w: number | null; h: number | null };
 export function stageSizeWith(stored: string | null | undefined, page: string, size: { w?: number | null; h?: number | null } | null): string;
 export function fitStageLength(want: number, min: number, max: number): number;
+
+export interface SoftLight { sprite: string; x: number; y: number; w: number; h: number; a: number }
+export function softShareAt(p: SoftLight, x: number, y: number): number;
+export function shareSoftLight<T extends SoftLight>(lights: T[]): T[];

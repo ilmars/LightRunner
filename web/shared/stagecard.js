@@ -52,13 +52,13 @@ export function stageViewSwitch(wrap, onChange) {
     const b = document.createElement('button');
     b.type = 'button';
     b.dataset.view = view;
-    b.title = title;
-    b.setAttribute('aria-label', long);
+    b.dataset.long = long;
+    b.dataset.title = title;
     b.innerHTML = `<span class="sv-short">${short}</span><span class="sv-long">${long}</span>${SWAP}`;
     b.addEventListener('click', () => {
       // On a small picture only the current view's button shows (the other is hidden): it switches to the other.
       const other = buttons.find((o) => o !== b);
-      const next = current !== view ? view : other.offsetParent === null ? other.dataset.view : view;
+      const next = current !== view ? view : getComputedStyle(other).display === 'none' ? other.dataset.view : view;
       if (next === current) return;
       current = next;
       write(VIEW_KEY, current);
@@ -69,9 +69,29 @@ export function stageViewSwitch(wrap, onChange) {
     return b;
   });
   let current = storedStageView();
-  const paint = () => buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === current)));
-  paint();
+  // The styles show the chosen one (data-on). As one button (a small picture) it is named for what a tap does
+  // ("Switch to from the audience"); as two, each is named for its view and the chosen one is pressed.
+  const paint = () => {
+    for (const b of buttons) b.dataset.on = String(b.dataset.view === current);
+    const off = buttons.find((b) => b.dataset.view !== current);
+    const compact = getComputedStyle(off).display === 'none';
+    for (const b of buttons) {
+      const other = buttons.find((o) => o !== b);
+      if (compact) {
+        b.removeAttribute('aria-pressed');
+        b.setAttribute('aria-label', `Switch to ${other.dataset.long.toLowerCase()}`);
+        b.title = `${b.dataset.title}. Tap for ${other.dataset.long.toLowerCase()}`;
+      } else {
+        b.setAttribute('aria-pressed', String(b.dataset.view === current));
+        b.setAttribute('aria-label', b.dataset.long);
+        b.title = b.dataset.title;
+      }
+    }
+  };
   wrap.append(seg);
+  paint();
+  // One button or two follows the picture's width: the names follow too.
+  new ResizeObserver(paint).observe(wrap);
   // Another tab of this browser changed it: follow.
   window.addEventListener('storage', (ev) => {
     if (ev.key !== VIEW_KEY) return;

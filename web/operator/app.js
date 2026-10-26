@@ -81,8 +81,6 @@ function connect() {
       if (!layout.manualForOperators) closeManual();
       else if (manualSel.open) buildManual();
       render();
-      // The running order's rows are there now: the stage view's kept height, within what leaves three of them.
-      fitStageToWindow();
     } else if (msg.type === 'state') {
       if (state && msg.state.look !== seenLook) previousLook = seenLook;
       seenLook = msg.state.look;
@@ -284,6 +282,8 @@ function buildOrder() {
     const node = editing ? editRows.find((r) => r.id === added[0])?.el : orderRows.find((r) => r.item.id === added[0])?.button;
     if (node) reveal(node);
   }
+  // The rows changed (a song added or removed, Edit list): the stage view's kept height, again within what leaves three.
+  queueStageFit();
 }
 
 function replaceRows(nodes) {
@@ -5472,15 +5472,23 @@ const stageView = stageViewSwitch($('stageWrap'), () => drawStage());
 // Taller or shorter by the grip under it: from its own 124 px up to what leaves the running order three rows.
 const STAGE_MIN_H = 124;
 const ORDER_ROWS_LEFT = 3;
-/** The tallest the picture may be now: the running order keeps at least three rows in sight (with the line under Basic lights). */
+/**
+ * The tallest the picture may be now: the running order keeps at least three rows readable (with the line under
+ * Basic lights), and above the "N more ↓" cue when there are more rows than fit (the cue covers the list's foot).
+ */
 function stageMaxH() {
   const list = $('runningOrder');
   const rows = [...list.children].filter((n) => !n.classList.contains('sep'));
   const third = rows[ORDER_ROWS_LEFT - 1];
   // Where the third row ends, measured from the top of the list (44 px rows, 2 px apart, until the list is built).
-  const need = third && rows[0]
+  let need = third && rows[0]
     ? third.getBoundingClientRect().bottom - rows[0].getBoundingClientRect().top
     : ORDER_ROWS_LEFT * 44 + (ORDER_ROWS_LEFT - 1) * 2;
+  // The cue shows once two rows or more are out of sight.
+  if (rows.length >= ORDER_ROWS_LEFT + 2) {
+    const cue = list.parentElement.querySelector('.more-cue');
+    need += (cue && parseFloat(getComputedStyle(cue).height)) || 42;
+  }
   return canvas.clientHeight + list.clientHeight - need;
 }
 /** Sets the picture's height (kept within its limits); `null` puts it back to its own size. */
@@ -5493,7 +5501,11 @@ stageGrip($('stageGrip'), {
   axes: 'y',
   start: () => ({ w: canvas.clientWidth, h: canvas.clientHeight }),
   apply: ({ h }) => setStageHeight(h),
-  done: () => keepStageSize('operator', canvas.style.getPropertyValue('--stage-h') ? { h: canvas.clientHeight } : null),
+  done: () => {
+    keepStageSize('operator', canvas.style.getPropertyValue('--stage-h') ? { h: canvas.clientHeight } : null);
+    // Drawn properly at the final size (while dragging, the last picture was stretched).
+    drawStage();
+  },
   reset: () => {
     setStageHeight(null);
     keepStageSize('operator', null);
@@ -5507,6 +5519,16 @@ function fitStageToWindow() {
 }
 window.addEventListener('resize', fitStageToWindow);
 requestAnimationFrame(fitStageToWindow);
+/** Fits it once the page has laid out what just changed (the running order's rows, Edit list's head and foot). */
+let stageFitQueued = false;
+function queueStageFit() {
+  if (stageFitQueued) return;
+  stageFitQueued = true;
+  requestAnimationFrame(() => {
+    stageFitQueued = false;
+    fitStageToWindow();
+  });
+}
 // Whatever changed its size (the grip, the window, the phone's layout): drawn again at the new size.
 new ResizeObserver(() => drawStage()).observe(canvas);
 
@@ -5522,7 +5544,7 @@ function drawStage() {
   ctx.clearRect(0, 0, w, h);
   // In Prepare it is the draft, moving like the stage would: dark until its first frame.
   const shownVisual = prep.on ? prep.visual ?? NO_VISUAL : visual;
-  drawStagePicture(ctx, w, h, layout, shownVisual, (g) => state?.groups?.[g]?.level ?? 0, { view: stageView.view });
+  drawStagePicture(ctx, w, h, layout, shownVisual, (g) => state?.groups?.[g]?.level ?? 0, { view: stageView.view, resizing: $('stageGrip').classList.contains('dragging') });
   // A small label at the bottom right, so the picture can't be mistaken for something else: "Live", "Off" during
   // Blackout, or in violet "Draft · <name>" while preparing.
   if (!pictureLabel) readPictureLabel();
