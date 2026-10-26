@@ -40,6 +40,11 @@
         <span id="smokeNote" class="q" hidden></span>
       </span>
     </div>
+    <!-- A timeline is running (started on the Timeline page): its name and where it is, and a quiet Stop. -->
+    <div id="tlNote" class="tl-note" hidden>
+      <span class="tl-text"><span class="tl-label">Timeline ·</span><span id="tlName" class="tl-name"></span><span id="tlPos" class="tl-pos"></span></span>
+      <button id="tlStop" class="tl-stop" type="button" title="Stop the timeline. The lights stay as they are.">Stop</button>
+    </div>
     <!-- Only when something is wrong with the lights: tap for what it means and who to call. -->
     <div class="problem">
       <!-- The phone shows the short words (outputShort), the iPad the full ones. -->

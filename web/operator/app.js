@@ -154,6 +154,29 @@ function setConnected(on) {
   }
 }
 
+/** A timeline running on the stage (started on the Timeline page): a quiet line in the top bar, and Stop. */
+function renderTimelineNote() {
+  const tl = state.timeline ?? null;
+  $('tlNote').hidden = !tl;
+  document.body.classList.toggle('tl-on', !!tl);
+  if (!tl) return;
+  const clock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+  $('tlName').textContent = tl.name;
+  $('tlPos').textContent = `${clock(tl.pos)} / ${clock(tl.duration)}${tl.playing ? '' : ' · paused'}`;
+}
+
+/** Stop of the timeline on the stage: anyone may; it is the one named, whichever page started it. The lights stay as they are. */
+function stopTimeline() {
+  const tl = state?.timeline;
+  if (!tl) return;
+  if (!connected) {
+    toast('Not connected. Lights keep running; try again in a moment.');
+    return;
+  }
+  socket.send(JSON.stringify({ type: 'timelineStop', id: tl.id, ref: ++ref }));
+}
+$('tlStop').addEventListener('click', stopTimeline);
+
 /** Sends a command; returns its ref (to match the server's answer), or null when not connected. */
 function send(cmd) {
   if (!connected) {
@@ -1132,6 +1155,8 @@ function render() {
     $('contactBox').hidden = !who;
     $('contactText').textContent = who;
   }
+
+  renderTimelineNote();
 
   $('fading').hidden = !fading;
   if (fading) {

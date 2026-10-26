@@ -83,7 +83,7 @@ body.prepare .start-btn[aria-pressed="true"] { background: rgba(161, 147, 242, 0
   color: var(--ds-text); font: inherit; text-align: left; cursor: pointer; display: flex; flex-direction: column; justify-content: center; gap: 1px;
 }
 .lane-add {
-  flex: none; width: 36px; height: 44px; margin-right: 2px; border: 0; border-radius: var(--ds-r-small); background: transparent;
+  flex: none; width: 44px; height: 44px; margin-right: 2px; border: 0; border-radius: var(--ds-r-small); background: transparent;
   color: var(--ds-muted); font: inherit; font-size: 15px; cursor: pointer;
 }
 .lane-add:hover { color: var(--ds-text); }
