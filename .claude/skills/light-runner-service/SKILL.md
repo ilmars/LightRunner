@@ -52,6 +52,7 @@ The lights are real and people may be in the room, so:
 
 - Closing the Light Runner window does not stop it: it stays in the menu bar. **Quit** (which asks first) stops it, and then the lights stay on their last look and the iPads show "Connection lost". On a source install, closing the Terminal window does the same.
 - The amber pill on the operator page explains itself when tapped, and shows Who to call.
+- The stage view has a small Above / Audience switch (each tablet keeps its own) and a grip to resize it; a light's "Hangs on" and a type's "LEDs" are set in Patch (setting-up-a-show.md step 2 and 3), and are only for the picture.
 - Blackout needs a 1 second hold and doesn't toggle: a song, Basic lights or Next brings the lights back.
 - Prepare (violet) changes nothing on stage until Go; Live throws the draft away. The same switch on the Timeline page plays a timeline on the stage view only.
 - A volunteer's Blackout, Basic lights or song during a timeline takes the lights but the recording plays on (on purpose); the lights come back with **Lights follow again** on the Timeline page.

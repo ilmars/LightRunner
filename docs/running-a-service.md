@@ -71,6 +71,7 @@ Songs, colours, quick looks and effects are made on the operator page; the fixtu
 - **Quick looks**: one tap changes just their groups (for example "Prayer").
 - **Flash**: hold a Flash button; it goes out when you let go.
 - **Something looks wrong**: **Undo** takes back the last change, **Back to saved** brings the song back as saved, and **Safe · Basic lights** always brings back a warm stage.
+- **The stage view** (the small picture at the top left) shows what the lights are doing. Its switch in the corner shows the stage **Above** (as the plan) or from the **Audience** (as the congregation sees it); each tablet remembers its choice. Drag its grip, at the bottom, to make it bigger. It is only a picture: it never changes the lights.
 - **Blackout**: hold for 1 second. A song, Basic lights or Next brings the lights back.
 - **Preparing the next moment without touching the lights**: tap **Prepare** in the top bar (it turns violet). Now taps only change a draft, shown in the stage view. **Go ▸** sends the draft to the lights in one smooth change; **Live** throws it away. **Save to <song>** (hold) keeps the draft in that song.
 - **Tempo** for effects: tap **Tap** in time with the music, or type the number in the Tempo menu.

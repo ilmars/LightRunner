@@ -120,7 +120,7 @@ Settings (`/settings/`) is for whoever sets the system up. It has:
 
 Patch (`/patch/`) is where the rig is set up, much like in Lightkey. The **DMX map** shows each universe's channels: drag a fixture to re-address it, drag a fixture type from the library onto free channels, and overlaps show at once in red. There is also a fixture table, groups, and Identify to flash a fixture so you can find it. Fixture types come from the [Open Fixture Library](https://open-fixture-library.org) (about 650 fixtures; download it once to use it without internet), from a Lightkey project, or you make your own: see a type's channels, compare two types side by side, and copy one and change it (a light whose real colour-temperature range differs from its substitute's, say).
 
-The **stage plan** says where each light hangs, and the operator page draws the stage from it. Each light gets a shape: a dot, a beam (a cone you aim), a bar (any length, thickness and angle), an outline (a strip round something) or a smoke cloud. Select several to align them or space them evenly.
+The **stage plan** says where each light hangs, and the operator page draws the stage from it. Each light gets a shape: a dot, a beam (a cone you aim), a bar (any length, thickness and angle), an outline (a strip round something) or a smoke cloud. Select several to align them or space them evenly. Each light also says what it **hangs on** (truss, back-wall floor, riser, stand or side), and a fixture type can say how many LEDs the light really has. The stage view then draws the stage two ways, **from above** and **from the audience**, with a small switch that each tablet remembers.
 
 <table>
   <tr>
