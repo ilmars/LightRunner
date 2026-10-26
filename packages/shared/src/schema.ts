@@ -384,12 +384,15 @@ export const BlockWhat = z.discriminatedUnion('kind', [
 ]);
 export type BlockWhat = z.infer<typeof BlockWhat>;
 
+/** A time on a timeline (seconds): at most 24 hours, like the play position the pages send. */
+const timelineTime = z.number().min(0).max(24 * 3600);
+
 export const TimelineBlock = z.object({
   id,
   /** Seconds from the start of the timeline. */
-  start: z.number().min(0),
+  start: timelineTime,
   /** Seconds. Missing means until the next block on the layer. */
-  end: z.number().min(0).optional(),
+  end: timelineTime.optional(),
   /** Seconds to fade in. */
   rise: seconds.default(0),
   what: BlockWhat,
@@ -413,7 +416,7 @@ export const Recording = z.object({
   id,
   name: z.string(),
   /** Seconds. */
-  duration: z.number().min(0),
+  duration: timelineTime,
   /** One byte per 1/25 s: how loud it is, 0..255. */
   loudness: base64,
   /** One byte per bar of the waveform, at most 4000 bars. */

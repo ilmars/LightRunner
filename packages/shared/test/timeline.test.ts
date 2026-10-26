@@ -44,6 +44,11 @@ test('a show without timelines reads as having none, and one with a full timelin
   bad({ layers: [{ group: '*', blocks: [{ id: 'a', start: 0, rise: 0, what: { kind: 'spin' } }] }] });
   // Two blocks with the same id (even on different layers) are refused: the runner tells blocks apart by id.
   bad({ layers: [{ group: '*', blocks: [{ id: 'a', start: 0, rise: 0, what: { kind: 'dark' } }] }, { group: 'front-lights', blocks: [{ id: 'a', start: 5, rise: 0, what: { kind: 'full' } }] }] });
+  // Starts, ends and a recording's length are at most 24 hours, like the play position.
+  bad({ layers: [{ group: '*', blocks: [{ id: 'a', start: 86400.5, rise: 0, what: { kind: 'dark' } }] }] });
+  bad({ layers: [{ group: '*', blocks: [{ id: 'a', start: 0, end: 86401, rise: 0, what: { kind: 'dark' } }] }] });
+  bad({ recording: { ...full.recording, duration: 86401 } });
+  assert.equal(parseShow({ ...rigJson(), timelines: [{ ...full, recording: { ...full.recording, duration: 86400 }, layers: [{ group: '*', blocks: [{ id: 'a', start: 86400, end: 86400, rise: 0, what: { kind: 'dark' } }] }] }] }).timelines[0]!.recording!.duration, 86400);
   // A group called Stage (id stage) is an ordinary group: only * is the Whole stage layer.
   assert.equal(parseShow({ ...rigJson(), timelines: [{ id: 't', name: 'T', layers: [{ group: 'stage', blocks: [] }], markers: [] }] }).timelines[0]!.layers[0]!.group, 'stage');
 });
