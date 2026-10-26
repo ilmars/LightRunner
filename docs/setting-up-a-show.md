@@ -182,7 +182,7 @@ The lights are laid out in layers: **Whole stage**, then one per light group, in
 
 **Follow the voice**
 
-A **Follow the voice** block on a group's layer makes that group's brightness ride the recording's loudness: quiet bits dim it to **Low**, loud bits lift it to **High** (say 10 % and 100 %), smoothed so it never flickers. The loudness is worked out once, when the recording is added, so it never depends on a microphone, the room or the network. It rides the colour the group has at that moment; give the block a **Colour** of its own and the group fades to that colour when the block starts. The block ends at its **Until**, or when a later block on that layer that sets a level (a **Colour**, a **Level** or an **Effect**) starts. The group then fades back to what the timeline says, over 1 second.
+A **Follow the voice** block on a group's layer makes that group's brightness ride the recording's loudness: quiet bits dim it to **Low**, loud bits lift it to **High** (say 10 % and 100 %), smoothed so it never flickers. The loudness is worked out once, when the recording is added, so it never depends on a microphone, the room or the network. It rides the colour the group has at that moment; give the block a **Colour** of its own and the group fades to that colour when the block starts. The block ends at its **Until**, or when a later block that sets the group's level starts: a **Colour**, a **Level** or an **Effect** on that layer, or a **Dark**, **Everything full** or **Look** on **Whole stage** (the block that started last always wins). At its **Until** the group fades back to what the timeline says, over 1.5 seconds; a later block takes it over with that block's **Rise**.
 
 **Lights earlier / later**
 
