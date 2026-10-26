@@ -716,6 +716,34 @@ test('server: after the engine restarts, the live timeline sends its whole state
   p.ws.close();
 }));
 
+test('server: a stage Undo while a live timeline runs: it keeps running and sends its whole state again', () => withApp(async (app) => {
+  await withTimelines(app, long());
+  const sent: StageCommand[] = [];
+  const realCommand = app.quietStageCommand.bind(app);
+  app.quietStageCommand = (cmd) => {
+    sent.push(cmd);
+    return realCommand(cmd);
+  };
+  const p = await page(app);
+  await waitFor(p.state);
+  assert.equal(await p.send({ type: 'look', id: 'worship', fade: 0 }), null);
+  await waitFor(() => p.state()?.look === 'worship', 2000, 'worship');
+  assert.equal(await p.timeline({ type: 'timelineStart', id: 'long', at: 0 }), null);
+  await waitFor(() => p.state()?.groups['front-wash'].level === 0, 2000, 'its Dark');
+  await sleep(100);
+  const n = sent.length;
+  // Undo takes the stage back to before Worship (its levels too): the timeline puts its own state back.
+  assert.equal(await p.send({ type: 'undo' }), null);
+  await waitFor(() => sent.length >= n + 4, 2000, 'the whole state again');
+  const again = sent.slice(n);
+  for (const c of again) assert.equal((c as any).fade, 1.5, JSON.stringify(c));
+  for (const group of LIGHT_GROUPS) assert.ok(again.some((c) => c.type === 'groupLevel' && c.group === group && c.value === 0), group);
+  await sleep(200);
+  assert.equal(p.state().timeline?.id, 'long');
+  assert.equal(p.state().groups['front-wash'].level, 0);
+  p.ws.close();
+}));
+
 test('server: Go from Prepare and Back to saved stop the live timeline', () => withApp(async (app) => {
   await withTimelines(app, long());
   const p = await page(app);

@@ -718,6 +718,9 @@ export class App {
     }
     const reply = await this.request<{ error: string | null; recorded?: boolean }>((id) => ({ type: 'command', id, cmd, ...(opts?.quiet ? { quiet: true } : {}) }));
     if (reply.recorded) this.remember('stage');
+    // A stage Undo while a live timeline runs: it keeps running and sends its whole state again (over the seek fade),
+    // so the Undo can't leave the stage between what the timeline says and what was there before.
+    if (cmd.type === 'undo' && !reply.error) this.liveTimeline?.runner.resync();
     return { error: reply.error, recorded: !!reply.recorded };
   }
 

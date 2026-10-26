@@ -171,7 +171,8 @@ export class TimelineRunner {
   }
 
   /**
-   * The engine started again (its worker restarted): send the whole state again, over 1 s, as after a seek.
+   * The engine started again (its worker restarted), or a stage Undo moved the lights: send the whole state again,
+   * over the seek fade, as after a seek.
    * The follow values go again on every tick anyway.
    */
   resync(): void {
