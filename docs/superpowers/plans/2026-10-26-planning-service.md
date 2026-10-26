@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Load a service from the church's planning service into the running order (each song keeping its look), and start looks by themselves when the presentation app moves to the next item.
+**Goal:** Load a service from the church's planning service into the running order, each song keeping its look.
 
-**Architecture:** Pure rules (item kinds, loading, the rows the page shows, what to start for a live item) live in `packages/shared/src/planning.ts` with unit tests. The I/O (planning-service HTTP with the pasted login, and the live channel's WebSocket) lives in `server/src/planning/`, behind one `Planning` interface that the App gets through `AppOptions` and that tests replace with `FakePlanning`. Every action is a `Command` through `App.command()`; the follow status reaches tablets as its own `{type:'planning'}` message, so the engine is untouched.
+> **Scope change, 26 Oct (the owner):** following the presentation app is for later ("Presenter we will deal later"). This build covers the spec's goals 1, 2 and 4 (Load service, remembered looks, optional) and the rows, saving and "another look" parts of the running order. **Tasks 1, 5, 7 and 12 are deferred** and not dispatched; Tasks 8, 9, 13 and 14 below are already cut down to match. The spec's "Following the presentation app" section stays as the design for that later work.
+
+**Architecture:** Pure rules (item kinds, loading, the rows the page shows) live in `packages/shared/src/planning.ts` with unit tests. The I/O (planning-service HTTP with the pasted login) lives in `server/src/planning/`, behind one `Planning` interface that the App gets through `AppOptions` and that tests replace with `FakePlanning`. Every action is a `Command` through `App.command()`; the engine is untouched.
 
 **Tech Stack:** Node 24 (type stripping, global `fetch` and `WebSocket`), zod, node:test, plain HTML/JS pages with `web/shared/theme.css`.
 
@@ -20,20 +22,20 @@
 - **Basic lights is protected:** a load never replaces, renames, moves or removes it; it stays first.
 - **The login is never in the show** (export strips nothing for it because it isn't there): it lives in `<dataDir>/planning-login.json`, written with `writeAtomic(…, { mode: 0o600 })`, never sent to a page, never logged, never printed.
 - No new dependencies.
-- UI: plain words, sentence case, design-system tokens and `ds-` classes, quiet controls, 44 px targets, iPad 1080 × 810; nothing new on the phone except what Task 12 says.
+- UI: plain words, sentence case, design-system tokens and `ds-` classes, quiet controls, 44 px targets, iPad 1080 × 810; nothing new on the phone (Load service is hidden there).
 - Commits: small, descriptive, in the repo's style ("Planning: …"), ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Review Focus
 
-1. **The login runs out during a service** → the lights carry on untouched, the follow pill and Load service say "The planning login has run out. Paste a new one in Settings." (Task 8 test `a login that runs out stops following but never the lights`).
-2. **The presentation operator clicks through items quickly** (5 changes in under a second) → each is judged in order and the stage ends on the last one's look, no backlog (Task 9 test `a burst of live changes ends on the last item's look`).
+1. **The login runs out on a Sunday morning** → the lights and the running order are untouched, Load service says "The planning login has run out. Paste a new one in Settings." (Task 8 test `a login that runs out never touches the lights or the running order`).
+2. **Load is tapped while a song is on stage or during Blackout** → the stage keeps what it shows (a load changes the running order, never the lights); the song on stage, if it is in the service, keeps its look (Task 8 test `loading never changes the lights`).
 3. **The plan changes after a load and is loaded again** (a song removed, two swapped) → remembered looks come back, Basic lights first, one Undo returns the previous order (Task 3 test `loading again keeps remembered looks and Undo-able order`, Task 8 test `load is one Undo step`).
-4. **Two presentation computers are open** → the first one is followed; when it closes the other is followed; nothing changes twice (Task 7 test `follows the first presenter and moves to the next when it closes`).
+4. **A service with nothing planned yet, or with only verses and headers** → refused or loaded without breaking the running order: an empty service is refused ("Nothing is planned in this service yet."); a service with no songs leaves Basic lights alone in the order with its muted rows (Task 3 test `a service with no songs leaves Basic lights alone in the order`).
 5. **A show exported or imported** carries the loaded service and the remembered looks but never the login (Task 8 test `the login never reaches the show or an export`).
 
 ---
 
-### Task 1: Capture what the presentation app sends (owner, with the app open)
+### Task 1: Capture what the presentation app sends (owner, with the app open) — DEFERRED (scope change)
 
 Not code; no agent can do this. The owner opens Presenter on a test service on any computer, then in the main checkout (which has the saved login):
 
@@ -105,7 +107,7 @@ test('remember keys: songs by id, headers and slides by name, verses and blanks 
 - Consumes: Task 2 types.
 - Produces:
   - `OperatorLayout.service: PlannedService.optional()` and `OperatorLayout.remembered: z.record(z.string().max(300), id).optional()` (key from `rememberKey` → look id). Both absent in older shows.
-  - `PlanningSettings` (zod) on `Settings.planning` (optional): `{ enabled: boolean default false, account?: string(1..64), serviceType?: string(1..64), newSongLook?: id, follow: boolean default true }`.
+  - `PlanningSettings` (zod) on `Settings.planning` (optional): `{ enabled: boolean default false, account?: string(1..64), serviceType?: string(1..64), newSongLook?: id }`.
   - `loadService(show: Show, service: PlannedService): Show`
   - `ensurePlanning(show: Show): Show` — drops `remembered` entries and `service` item `look`s whose look no longer exists, and `newSongLook` if it is gone.
   - `newSongLookOf(show: Show): string | undefined` — `settings.planning.newSongLook` if it exists, else the first quick look on the first tab that has one (tab order `plain`, `colours`, `effects`), else undefined.
@@ -127,6 +129,7 @@ test('remember keys: songs by id, headers and slides by name, verses and blanks 
   - `loading again keeps remembered looks and Undo-able order` — load S1 then S2 (S1 with one song removed and two swapped); the kept songs keep their look ids.
   - `deleting a song's look forgets it` — `deleteItem` then `parseShow(ensurePlanning(show))` has no `remembered` entry and no item `look` pointing at it.
   - `the chosen look for new songs is used when it exists, the first quick look otherwise`.
+  - `a service with no songs leaves Basic lights alone in the order` (headers, verses and blanks only: `runningOrder` is `[safe]`, `service` set).
 - [ ] **Step 2:** Run → FAIL.
 - [ ] **Step 3:** Implement the schema fields, `loadService`, `newSongLookOf`, `ensurePlanning`; add `ensurePlanning` to `ensureShow` in `server/src/app.ts` (after `ensureBasicLights`); make `deleteItem` call the same forgetting.
 - [ ] **Step 4:** `npm test` → PASS (all, the existing running-order tests included); typecheck clean.
@@ -160,7 +163,7 @@ test('remember keys: songs by id, headers and slides by name, verses and blanks 
 
 ---
 
-### Task 5: What to start for a live item
+### Task 5: What to start for a live item — DEFERRED (scope change)
 
 **Files:**
 - Modify: `packages/shared/src/planning.ts`
@@ -229,7 +232,7 @@ The calls are the ones in the 21 Oct scripts in `tools/` (the three untracked fi
 
 ---
 
-### Task 7: The live link to the presentation app
+### Task 7: The live link to the presentation app — DEFERRED (scope change)
 
 **Files:**
 - Create: `server/src/planning/link.ts`
@@ -259,60 +262,54 @@ Protocol (as the 21 Oct live-following script in `tools/`): `GET /account/{a}/pu
 
 **Files:**
 - Create: `server/src/planning/index.ts` (`interface Planning`, `createPlanning`), `server/src/planning/fake.ts` (`FakePlanning`)
-- Modify: `server/src/app.ts`, `server/src/main.ts`, `packages/shared/src/protocol.ts`
+- Modify: `server/src/app.ts`, `server/src/main.ts`, `server/src/layout.ts`, `packages/shared/src/protocol.ts`
 - Test: `server/test/planning.test.ts`
 
 **Interfaces:**
 - Produces:
-  - `interface Planning { loggedIn(): boolean; setLogin(cookie: string): Promise<void>; accounts(): Promise<{id,name}[]>; serviceTypes(account): Promise<{id,name}[]>; services(account, type, now: Date): Promise<ServiceSummary[]>; service(account, id): Promise<PlannedService>; link(account: string, on: { live(e: LiveEvent): void; status(s: LinkStatus): void }): { stop(): void } }`
-  - `createPlanning(dataDir: string, log): Planning` (real: `PlanningClient` + `PresenterLink`)
-  - `class FakePlanning implements Planning` with `services`/`types`/`accounts` fields set by tests, `failWith?: string` to make every call throw `PlanningError`, and `emit(e: LiveEvent)`, `setStatus(s: LinkStatus)` driving the open link. `FakePlanning.fromFile(path: string, stepMs = 5000)` reads accounts, types, services and an optional `script: LiveEvent[]`, and once a link is open emits the script's events one every `stepMs`, round and round (for browser checks only).
+  - `interface Planning { loggedIn(): boolean; setLogin(cookie: string): Promise<void>; accounts(): Promise<{id,name}[]>; serviceTypes(account): Promise<{id,name}[]>; services(account, type, now: Date): Promise<ServiceSummary[]>; service(account, id): Promise<PlannedService> }`
+  - `createPlanning(dataDir: string, log): Planning` (real: `PlanningClient`)
+  - `class FakePlanning implements Planning` with `services`/`types`/`accounts` fields set by tests, `failWith?: string` to make every call throw `PlanningError`. `FakePlanning.fromFile(path: string)` reads accounts, types and services from a JSON file (for browser checks only); its `setLogin` accepts any non-empty cookie.
   - `AppOptions.planning?: Planning` (default `createPlanning(dataDir, log)`); `main.ts`: `LIGHT_RUNNER_FAKE_PLANNING=<json file>` builds a `FakePlanning` from a file (for browser checks).
-  - Command `loadService { id: string(1..64) }` (operator; show edit, one Undo step; the App fetches the service, then `loadService`, then `operatorSave`). Refused when Planning is off ("Planning is off."), with the planning error's message when the fetch fails (the show untouched).
+  - Command `loadService { id: string(1..64) }` (operator; show edit, one Undo step; the App fetches the service, then `loadService`, then `operatorSave`). Refused when Planning is off ("Planning is off."), for a service with no items ("Nothing is planned in this service yet."), and with the planning error's message when the fetch fails (the show untouched). A load never sends anything to the lights: the stage keeps what it shows.
   - Routes, programmer (add to the `programmerApi` whitelist): `GET /api/planning` → `{ loggedIn, problem: string|null, accounts, serviceTypes }`; `PUT /api/planning/login {cookie}` → same view or 400 with the message. `PUT /api/settings` accepts `planning` (parsed with `PlanningSettings`); `settingsView()` includes it.
   - Route, operator (in `api()`, no PIN): `GET /api/planning/services` → `{ type: string, services: (ServiceSummary & { withLook: number; newSongs: number })[] }` or `{ error }` with 503.
-  - Message to every tablet: `{ type: 'planning', planning: PlanningStatus }` on connect and on change, with `PlanningStatus = { enabled: boolean; follow: boolean; link: 'off' | LinkStatus['state']; presenter?: string; problem?: string; live?: { name: string; kind: ItemKind | null; inService: boolean; part?: string; look?: string } }` (in `protocol.ts`).
-  - The App opens the link when `settings.planning.enabled` and logged in (account: `settings.planning.account` or the first), closes it when switched off and in `stop()`.
+  - The layout view (`server/src/layout.ts`) gains `planning?: { enabled: boolean }`, so the page knows whether to offer Load service; it is refreshed (`refreshLayout()`) when the setting changes.
+  - The account used is `settings.planning.account`, else the first of `accounts()`.
 
 - [ ] **Step 1: Failing tests** (`withApp` as in `osc.test.ts`, `planning: fake`; tablets over WebSocket as in `keys.test.ts`):
-  - `Planning is off by default and nothing connects`.
+  - `Planning is off by default and the layout says so`.
   - `the login never reaches the show or an export` (after `PUT /api/planning/login`: `GET /api/show` and `show.json` contain no `refresh`/cookie value; `GET /api/planning` doesn't either).
   - `the services list counts songs that have a look and new ones`.
   - `loadService fills the running order and is one Undo step` (`undo` brings the previous `runningOrder` back).
   - `loadService is refused while Planning is off, and a failed fetch leaves the show as it was`.
-  - `a login that runs out stops following but never the lights` (fake `failWith`; status `problem` with the message; `app.state.look` unchanged; Load refused with the message).
-  - `the planning status reaches tablets on connect and on change`.
+  - `a login that runs out never touches the lights or the running order` (fake `failWith`; `GET /api/planning` gives the message as `problem`; `GET /api/planning/services` 503 with it; `loadService` refused with it; `app.state.look` and `runningOrder` unchanged).
+  - `loading never changes the lights` (a song on stage, then a load: `app.state.look` and the groups unchanged; same during Blackout).
+  - `an empty service is refused`.
 - [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** `npm test` PASS, typecheck clean. **Step 5:** Commit `"Planning: settings, login, the services list and Load service on the server"`.
 
 ---
 
-### Task 9: The App: following
+### Task 9: Saving to service items, and another look for a song
 
 **Files:**
-- Modify: `server/src/app.ts`, `packages/shared/src/protocol.ts`, `packages/shared/src/runningorder.ts` (or `planning.ts`) for `saveServiceItem`
-- Test: `server/test/planning.test.ts`
+- Modify: `server/src/app.ts`, `packages/shared/src/protocol.ts`, `packages/shared/src/planning.ts`, `packages/shared/src/runningorder.ts`
+- Test: `packages/shared/test/planning.test.ts`, `server/test/planning.test.ts`
 
 **Interfaces:**
-- Consumes: `liveItemOf`, `matchLive`, `followStep`, `liveLook`.
+- Consumes: Task 4's anchor rule (`serviceRows`), `saveItem`'s `Stage` (`runningorder.ts`).
 - Produces:
-  - Commands (operator): `follow { on: boolean }` (stored in `settings.planning.follow` with `controllerSave`, no Undo step; on → start `liveLook` of the live item when there is one and the stage isn't already on it), `followStart` (start `liveLook`; refused "Nothing to start." when there is none), `saveServiceItem { key: string }` (show edit: from the stage, or the tablet's draft as `saveItem` does; header, slides, media, other only; refused for a verse "Verses don't change the lights." and a blank "Blanks use their part's look."; creates the look, puts it in the running order right after its anchor (Task 4's rule), sets the item's `look` and `remembered`).
-  - `saveServiceItem(show: Show, key: string, stage: Stage): Show` (shared, pure).
-  - Command `itemCopyLook { item: id, from: id }` (show edit, one Undo step) and `copyLookToItem(show: Show, item: string, from: string): Show` (shared, pure, in `runningorder.ts`): the item's look takes a copy of `from`'s groups (and its tempo when it has one); its name, id and remembered key stay. Refused for Basic lights ("Basic lights is set by Save.") and for an unknown look. This is the spec's "pick another look from a menu".
-  - Following, on each live event: `index = matchLive(service, live, lastIndex)`; status `live` filled; if `index >= 0`: `look = followStep(service, lastIndex, index)`, `lastIndex = index`; start `look` with `this.command({ type: 'look', id: look }, 'operator')` only when following is on, the stage isn't in Blackout (`latestState.look === BLACKOUT`) and `latestState.look !== look`. Never a draft. `lastIndex` survives reconnects, not restarts.
+  - `saveServiceItem(show: Show, key: string, stage: Stage): Show` (shared, pure, in `planning.ts`): header, slides, media and other items only; refused for a verse ("Verses don't change the lights."), a blank ("Blanks use their part's look."), an item that already has a look ("<name> already has a look: use Save to <name>.") and an unknown key; creates the look from the stage as `saveItem` would, puts it in the running order right after its anchor (Task 4's rule), sets the item's `look` and `remembered[rememberKey(item)]`.
+  - Command `saveServiceItem { key: string(1..64) }` (show edit, one Undo step; from the stage, or the tablet's draft as `saveItem` does; refused during Blackout with `saveItem`'s message).
+  - `copyLookToItem(show: Show, item: string, from: string): Show` (shared, pure, in `runningorder.ts`): the item's look takes a copy of `from`'s groups (and its tempo when it has one); its name, id and remembered key stay. Refused for Basic lights ("Basic lights is set by Save.") and for an unknown look.
+  - Command `itemCopyLook { item: id, from: id }` (show edit, one Undo step). This is the spec's "pick another look from a menu".
 
 - [ ] **Step 1: Failing tests:**
-  - `following starts a song's look when the presentation app moves to it`.
-  - `verses during the sermon never change the lights` (blank → sermon look; 5 verses → still sermon look; `canUndo` steps unchanged by the verses).
-  - `a burst of live changes ends on the last item's look`.
-  - `following waits during Blackout and doesn't start the live item when the lights come back`.
-  - `with following off nothing starts; Start starts the live item's look`.
-  - `switching following on starts the live item's look`.
-  - `an item that isn't in the running order changes nothing and says so` (status `live.inService === false`).
-  - `catching up after a reconnect starts the item that went live meanwhile`.
-  - `a tablet in Prepare keeps its draft while following changes the real stage`.
-  - `saveServiceItem gives slides a look, remembered for the next load; refused for verses and blanks`.
-  - `itemCopyLook gives a song another look's groups, keeps its name and is one Undo step; Basic lights refuses it`.
-- [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** `npm test`, typecheck, `npm run jump-check` PASS. **Step 5:** Commit `"Planning: lights follow the presentation app"`.
+  - `saveServiceItem gives slides a look after their anchor, remembered for the next load` (pure; then `loadService` of the same service gives the slides that look).
+  - `saveServiceItem refuses verses, blanks and items that have a look`.
+  - `saveServiceItem from a tablet in Prepare saves the draft, not the stage` (server; pattern of `blind.test.ts`'s saveItem test).
+  - `itemCopyLook gives a song another look's groups, keeps its name and is one Undo step; Basic lights refuses it` (server).
+- [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** `npm test`, typecheck, `npm run jump-check` PASS. **Step 5:** Commit `"Planning: save a look to headers and slides, and give a song another look"`.
 
 ---
 
@@ -331,7 +328,7 @@ Card `#planningCard` modelled on `#oscCard` (`index.html:185-204`), named after 
 
 - [ ] **Step 1:** Implement. **Step 2:** Browser check: `LIGHT_RUNNER_FAKE_PLANNING=server/test/fixtures/planning-fake.json PORT=8099 LIGHT_RUNNER_OUTPUT=none LIGHT_RUNNER_DATA=<temp> npm start`, open `/settings/`: switch on, save a login, pick a type and a look, Save; reload shows the same; the cookie field is empty. **Step 3:** `npm test` PASS. **Step 4:** Commit `"Planning: the Settings card"`.
 
-(`server/test/fixtures/planning-fake.json` — accounts, two types, the 18 Oct, 25 Oct and 8 Nov services as `PlannedService`s — is written in this task and reused by Tasks 11–12.)
+(`server/test/fixtures/planning-fake.json` — accounts, two types, the 18 Oct, 25 Oct and 8 Nov services as `PlannedService`s — is written in this task and reused by Task 11.)
 
 ---
 
@@ -341,7 +338,8 @@ Card `#planningCard` modelled on `#oscCard` (`index.html:185-204`), named after 
 - Modify: `web/operator/index.html`, `web/operator/app.js`, `web/operator/style.css`
 
 What to build (mockups 1 and 2 in `.superpowers/brainstorm/…/service-follow.html`):
-- `#orderHead`: wrap the buttons so **Load service** (`button#loadBtn.ebtn`, only when `planning.enabled`) sits left of Edit list; hidden on phone (add to `style.css:1012`'s list). Under the title, when `layout.service`: a muted line "Sun 18 Oct · 08:00 · Rīga" (date from `start`, place = the type name up to " - ").
+- `#orderHead`: wrap the buttons so **Load service** (`button#loadBtn.ebtn`, only when Planning is on) sits left of Edit list; hidden on phone (add to `style.css:1012`'s list). Under the title, when `layout.service`: a muted line "Sun 18 Oct · 08:00 · Rīga" (date from `start`, place = the type name up to " - ").
+- Planning on or off comes from `layout.planning?.enabled`.
 - **Load panel** `section#loadSvc.block.cedit` in `main.right`, copying `#manual`'s head (‹ Running order, "Load service", the type's name); add it to `markEditorOpen()`, to `applyPhone()`'s closes and the phone hide list; opening it closes the colour editor, effect editor and Individual lights. It `fetch`es `/api/planning/services`; rows as mockup 2 (date, time, "11 items · 7 songs", "5 songs have a look · 2 new get "<look>"", "not planned yet" disabled, "this Sunday"/"last week" notes); Cancel and **Load** (`ds-btn--primary`) send `loadService`; the note "Replaces the songs after Basic lights with this service's items. Basic lights stays first. Undo takes it back."; a fetch error shows its message in the panel. Not offered in Prepare or Edit list (opening turns Prepare off like `setEditing`).
 - **Rows**: `buildPlainRows` walks `layout.rows`; `look` rows are today's `button.item` and the only entries in `orderRows` (so `render()`'s index match stays 1:1 with `runningOrder`); `look{header:true}` rows get class `item--part` (spaced capitals, as mockup 1); `header`, `item`, `verses` rows are `div.item.item--muted` (hollow dots, the kind as tag: "video", "slides", "picture", "blank"; the verses row "N Bible verses" with tag "lights stay"). A repeated song (`item` with `look`) is a `button.item` that starts its look but isn't in `orderRows`.
 - **Taps on muted rows:** Live → quiet toast "No look yet. Use Prepare to give it one." (verses: "Verses don't change the lights."; blanks: "Blanks use their part's look."). Prepare → the row becomes the prepared target (`prep.target = key`, violet "preparing"), and the Save button reads "Save to <name>" and sends `saveServiceItem {key}`; any running-order tap clears `prep.target`.
@@ -352,7 +350,7 @@ What to build (mockups 1 and 2 in `.superpowers/brainstorm/…/service-follow.ht
 
 ---
 
-### Task 12: Operator page: the follow pill
+### Task 12: Operator page: the follow pill — DEFERRED (scope change)
 
 **Files:**
 - Modify: `web/operator/index.html`, `web/operator/app.js`, `web/operator/style.css`
@@ -365,25 +363,23 @@ What to build (mockups 1 and 2 in `.superpowers/brainstorm/…/service-follow.ht
 
 ---
 
-### Task 13: Tools on the server code
+### Task 13: The service tool on the server code
 
 **Files:**
-- Create: `tools/planning-service.ts`, `tools/planning-live.ts`
-- Delete: the three 21 Oct scripts in `tools/` (untracked; the login helper, the service script and the live script)
+- Create: `tools/planning-service.ts`
+- Leave alone: the three untracked 21 Oct scripts in `tools/` (the live one is kept for the later Presenter work; never commit them)
 
-Thin CLIs over `PlanningClient` and `PresenterLink` with the login at `${LIGHT_RUNNER_DATA ?? <repo>/data}/planning-login.json`: `planning-service.ts --login | --list | SERVICE_URL [--json]` and `planning-live.ts [--once] [--json]` (same output as today's scripts). The old scripts' login file in `data/` has the same shape: say in the file's header comment to rename it, and in the commit message.
+A thin CLI over `PlanningClient` with the login at `${LIGHT_RUNNER_DATA ?? <repo>/data}/planning-login.json`: `planning-service.ts --login | --list | SERVICE_URL [--json]` (`--login` reads the cookie from the keyboard, never the command line; `--list` prints the coming services of the first type; a URL prints the service's items as today's script does). The old scripts' login file in `data/` has the same shape: say in the header comment that it can be copied to `planning-login.json`.
 
-- [ ] **Step 1:** Implement. **Step 2:** `npm run typecheck`; `node tools/planning-service.ts` prints usage; `--list` without a login prints "Not logged in…". **Step 3:** Commit `"Planning: the command-line tools use the server's planning code"`.
+- [ ] **Step 1:** Implement. **Step 2:** `npm run typecheck`; `node tools/planning-service.ts` prints usage; `--list` with an empty `LIGHT_RUNNER_DATA` prints "Not logged in…". **Step 3:** Commit `"Planning: a command-line tool for the planning service"`.
 
 ---
 
-### Task 14: Fixture test, docs and the last checks
+### Task 14: Docs and the last checks
 
 **Files:**
-- Test: `server/test/planning-link.test.ts` (Task 1's fixture, when it exists)
-- Modify: `docs/STATUS.md`, `docs/DECISIONS.md`, `docs/design-system.md`, `.claude/skills/light-runner-service/SKILL.md`, `CLAUDE.md` (Layout table: `server/src/planning/`, `tools/planning-*.ts`)
+- Modify: `docs/STATUS.md`, `docs/DECISIONS.md`, `docs/design-system.md`, `.claude/skills/light-runner-service/SKILL.md`, `CLAUDE.md` (Layout table: `server/src/planning/`, `tools/planning-service.ts`)
 
-- [ ] **Step 1:** If `server/test/fixtures/planning-live.jsonl` exists: test `the recorded live messages give the live item` (each `client-event` → `liveItemOf` non-null with the field the owner noted); adjust `liveItemOf` if it fails. Otherwise add a "Known issues" line in STATUS: "Following hasn't seen a real presentation computer yet".
-- [ ] **Step 2:** STATUS: a "Planning" row in Built (what works, in the spec's words, no platform name), Known issues (login lifetime unknown; not tried at the church). DECISIONS: one dated row each for: changes triggered by the presentation operator count as a person's (spec non-goal), Basic lights protected from loads, verses never and blanks only through their part, the default look is a copy remembered at load, controllers count only looks, catching up, the login outside the show. design-system.md: the part row, muted rows, the folded verses row and the follow pill. The skill: one line on Load service before a service and on the follow pill.
-- [ ] **Step 3:** `npm test`, `npm run typecheck`, `npm run jump-check` all pass; output pasted in the final report.
-- [ ] **Step 4:** Commit `"Planning: docs, and the recorded live messages under test"`.
+- [ ] **Step 1:** STATUS: a "Planning" row in Built (what works, in the spec's words, no platform name); in Not built yet, "Following the presentation app" (designed in the spec, deferred by the owner on 26 Oct); Known issues (login lifetime unknown; not tried at the church). DECISIONS: one dated row each for: Basic lights protected from loads, a load never changes the lights, verses and blanks never get a look of their own, the default look is a copy remembered at load, controllers count only looks, the login outside the show, following deferred. design-system.md: the part row, muted rows and the folded verses row. The skill: one line on Load service before a service.
+- [ ] **Step 2:** `npm test`, `npm run typecheck`, `npm run jump-check` all pass; output pasted in the final report.
+- [ ] **Step 3:** Commit `"Planning: docs"`.
