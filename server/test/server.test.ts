@@ -11,7 +11,7 @@ import { artDmx, ArtNetOutput } from '../src/output/artnet.ts';
 import { enttecPacket } from '../src/output/enttec.ts';
 import { isLocalAddress } from '../src/net.ts';
 import { Store, BACKUPS_KEPT } from '../src/store.ts';
-import { parseShow } from '../../packages/shared/src/index.ts';
+import { loadService, parseShow } from '../../packages/shared/src/index.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const seedPath = join(root, 'server/seed/demo-show.json');
@@ -204,6 +204,45 @@ test('a show imported without a running order gets one in the layout', async () 
     assert.ok(layout.runningOrder.length > 1);
     const saved = parseShow(JSON.parse(readFileSync(join(dir, 'show.json'), 'utf8')));
     assert.ok(saved.operator.runningOrder.length > 1);
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the layout carries the running-order rows and the loaded service', async () => {
+  const dir = tempDir();
+  const app = makeApp(dir);
+  try {
+    await app.start();
+    // No service: one look row per running-order look, and no service name.
+    const { body: plain } = await api(app, 'GET', '/api/layout');
+    assert.deepEqual(plain.rows, plain.runningOrder.map((l: any) => ({ kind: 'look', look: l.id, header: false })));
+    assert.equal(plain.service, undefined);
+
+    const show = parseShow((await api(app, 'GET', '/api/show')).body);
+    const loaded = loadService(show, {
+      id: 'svc1', title: 'Sunday', start: '2026-10-25T08:00:00',
+      items: [
+        { key: 'h1', kind: 'header', name: 'Ievads' },
+        { key: 's1', kind: 'song', name: 'Klints', songId: 'song-1' },
+        { key: 'v1', kind: 'verse', name: 'Psalmi 23:1' },
+        { key: 'v2', kind: 'verse', name: 'Psalmi 23:2' },
+      ],
+    });
+    assert.equal((await api(app, 'PUT', '/api/show', loaded)).status, 200);
+    const { body: layout } = await api(app, 'GET', '/api/layout');
+    assert.deepEqual(layout.service, { title: 'Sunday', start: '2026-10-25T08:00:00' });
+    assert.deepEqual(layout.rows.map((r: any) => r.kind), ['look', 'header', 'look', 'verses']);
+    assert.deepEqual(layout.rows[0], { kind: 'look', look: layout.basicLights, header: false });
+    assert.deepEqual(layout.rows[3].keys, ['v1', 'v2']);
+    assert.deepEqual(layout.rows.filter((r: any) => r.kind === 'look').map((r: any) => r.look), layout.runningOrder.map((l: any) => l.id));
+
+    // WebSocket clients get the same rows in the layout they are sent.
+    const t = await tablet(app);
+    const sent = await waitFor(t.layout);
+    assert.deepEqual(sent.rows, layout.rows);
+    assert.deepEqual(sent.service, layout.service);
   } finally {
     await app.stop();
     rmSync(dir, { recursive: true, force: true });

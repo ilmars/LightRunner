@@ -3,6 +3,7 @@
 // so nothing here touches the network.
 
 import { z } from 'zod';
+import type { Show } from './schema.ts';
 
 const id = z.string().regex(/^[a-z0-9][a-z0-9-]*$/, 'ids are lowercase letters, digits and dashes');
 
@@ -102,4 +103,98 @@ export function rememberKey(item: ServiceItem): string | null {
     default:
       return null;
   }
+}
+
+// ---- The rows the running order shows ----
+// planning.ts only imports the Show type (erased at run time), so it still loads before schema.ts.
+
+/** One row of the running order as the operator page draws it. */
+export type ServiceRow =
+  /** A running-order look; `header` when its service item is a header. */
+  | { kind: 'look'; look: string; header: boolean }
+  /** A header that has no look in the order. */
+  | { kind: 'header'; key: string; name: string }
+  /** An item with no look in the order, or a repeated song (`look` set). */
+  | { kind: 'item'; key: string; name: string; itemKind: ItemKind; look?: string }
+  /** A run of one or more consecutive verses. */
+  | { kind: 'verses'; keys: string[]; names: string[] };
+
+/**
+ * Where each service item sits in the order. An item "owns" its look's row when it is the first item with a
+ * look that is in the running order; every other item follows the nearest owner above it (Basic lights when
+ * none). A repeat of a song never owns, so what follows it stays with the song's first place.
+ */
+function placeItems(show: Show): { owner: boolean[]; anchor: string[] } {
+  const items = show.operator.service?.items ?? [];
+  const order = new Set(show.operator.runningOrder);
+  const basic = show.operator.safeLook ?? show.operator.runningOrder[0] ?? '';
+  const seen = new Set<string>();
+  const owner: boolean[] = [];
+  const anchor: string[] = [];
+  let current = basic;
+  for (const item of items) {
+    anchor.push(current);
+    const owns = item.look !== undefined && order.has(item.look) && !seen.has(item.look);
+    owner.push(owns);
+    if (owns) {
+      seen.add(item.look!);
+      current = item.look!;
+    }
+  }
+  return { owner, anchor };
+}
+
+/**
+ * The look id of the running-order row a service item (by its key) sits after: the nearest service item above
+ * it whose look is in the running order, else Basic lights.
+ */
+export function anchorOf(show: Show, key: string): string {
+  const at = (show.operator.service?.items ?? []).findIndex((i) => i.key === key);
+  return at < 0 ? show.operator.safeLook ?? show.operator.runningOrder[0] ?? '' : placeItems(show).anchor[at]!;
+}
+
+/**
+ * The running order as rows: every look once, in running-order order, and after each look the service items
+ * that have no look of their own (headers, verses folded into runs, slides, a repeated song, ...), in service order.
+ * Without a loaded service, one look row per running-order look.
+ */
+export function serviceRows(show: Show): ServiceRow[] {
+  const order = show.operator.runningOrder;
+  const items = show.operator.service?.items ?? [];
+  const { owner, anchor } = placeItems(show);
+  const ownerOf = new Map<string, ServiceItem>();
+  items.forEach((item, n) => { if (owner[n]) ownerOf.set(item.look!, item); });
+
+  const muted = new Map<string, ServiceRow[]>();
+  const put = (at: string, row: ServiceRow) => muted.set(at, [...(muted.get(at) ?? []), row]);
+  let verses: Extract<ServiceRow, { kind: 'verses' }> | undefined;
+  items.forEach((item, n) => {
+    if (owner[n]) {
+      verses = undefined;
+    } else if (item.kind === 'verse') {
+      if (verses) {
+        verses.keys.push(item.key);
+        verses.names.push(item.name);
+      } else {
+        verses = { kind: 'verses', keys: [item.key], names: [item.name] };
+        put(anchor[n]!, verses);
+      }
+    } else {
+      verses = undefined;
+      const inOrder = item.look !== undefined && order.includes(item.look);
+      put(anchor[n]!, item.kind === 'header' && !inOrder
+        ? { kind: 'header', key: item.key, name: item.name }
+        : { kind: 'item', key: item.key, name: item.name, itemKind: item.kind, ...(inOrder ? { look: item.look } : {}) });
+    }
+  });
+
+  const rows: ServiceRow[] = [];
+  for (const look of order) {
+    rows.push({ kind: 'look', look, header: ownerOf.get(look)?.kind === 'header' });
+    rows.push(...(muted.get(look) ?? []));
+    muted.delete(look);
+  }
+  // Nothing in the order to follow (a show without Basic lights): keep the items rather than lose them.
+  for (const rest of muted.values()) rows.push(...rest);
+  return rows;
 }

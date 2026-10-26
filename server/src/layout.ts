@@ -1,7 +1,7 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupSegments, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect } from '../../packages/shared/src/index.ts';
-import type { ChannelRole, FixtureShape, GroupKind, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupSegments, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, serviceRows } from '../../packages/shared/src/index.ts';
+import type { ChannelRole, FixtureShape, GroupKind, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, ServiceRow, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 import { keyLabel, keyPlace, keyShort } from './keynames.ts';
 
@@ -103,6 +103,13 @@ export interface OperatorLayout {
   looks: OperatorLook[];
   /** The looks of the service, in order. The first is usually Basic lights. */
   runningOrder: OperatorLook[];
+  /**
+   * The running order as the page draws it: each look once, in order, with the loaded service's headers, verses and
+   * other items without a look between them. Look rows name a look of `runningOrder` by id.
+   */
+  rows: ServiceRow[];
+  /** The loaded planning service's name and first start time (as the planner writes it), when one is loaded. */
+  service?: { title: string; start: string };
   /** Looks kept close at hand for the Quick looks tabs: with the tab, and the ids of the (light) groups each one sets. */
   quickLooks: (OperatorLook & { tab: QuickTab; groups: string[] })[];
   /** Id of the safe look (Basic lights), or null when the show has none. */
@@ -180,6 +187,8 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
     show: show.name,
     looks: lookIds.flatMap(describe),
     runningOrder: show.operator.runningOrder.flatMap(describe),
+    rows: serviceRows(show),
+    ...(show.operator.service ? { service: { title: show.operator.service.title, start: show.operator.service.start } } : {}),
     quickLooks: show.operator.quickLooks.flatMap((q) => describe(q.look).map((l) => ({
       ...l, tab: q.tab, groups: groupIds.filter((gid, k) => !smoke.has(gid) && l.entries[k] !== null),
     }))),

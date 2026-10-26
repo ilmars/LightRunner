@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  checkReferences, deleteItem, ensureBasicLights, ensurePlanning, ensureRunningOrder, itemKind, loadService, newSongLookOf, parseShow, rememberKey,
-  toPlannedService, type PlannedService, type ServiceItem, type Show,
+  anchorOf, checkReferences, deleteItem, ensureBasicLights, ensurePlanning, ensureRunningOrder, itemKind, loadService, moveItem, newSongLookOf, parseShow, rememberKey,
+  serviceRows, toPlannedService, type PlannedService, type ServiceItem, type Show,
 } from '../src/index.ts';
 
 const SONG = '4eb2c1d0-1111-4222-8333-944455566677';
@@ -321,4 +321,106 @@ test('loading never changes the show it was given', () => {
   const copy = structuredClone(show);
   loadService(show, planned([song('a', 'A')]));
   assert.deepEqual(show, copy);
+});
+
+// ---- The rows the running order shows ----
+
+const label = (r: ReturnType<typeof serviceRows>[number]) => (r.kind === 'look' ? r.look : r.kind);
+
+/** A service like 18 Oct: two headers (Slavēšana has a look of its own), songs, a blank and 18 verses. */
+function october(): { show: Show; a: string; b: string; slav: string } {
+  const rigged = rig();
+  rigged.operator.remembered = { 'header:Slavēšana': rigged.operator.quickLooks[0]!.look };
+  const verses = Array.from({ length: 18 }, (_, n) => verse(`Psalmi ${n + 1}`));
+  const show = loadService(rigged, planned([header('Ievads'), header('Slavēšana'), song('a', 'A'), blank(), song('b', 'B'), ...verses, header('Vārds')]));
+  const [, slav, a, b] = show.operator.runningOrder;
+  return { show, slav: slav!, a: a!, b: b! };
+}
+
+test('without a service the rows are the running order', () => {
+  const show = rig();
+  assert.equal(show.operator.service, undefined);
+  assert.deepEqual(serviceRows(show), show.operator.runningOrder.map((look) => ({ kind: 'look', look, header: false })));
+});
+
+test('the 18 Oct service gives labels, songs, muted items and one folded verse row', () => {
+  const { show, slav, a, b } = october();
+  const rows = serviceRows(show);
+  assert.deepEqual(rows.map(label), [safeOf(show), 'header', slav, a, 'item', b, 'verses', 'header']);
+  assert.deepEqual(rows[0], { kind: 'look', look: safeOf(show), header: false });
+  assert.deepEqual(rows[1], { kind: 'header', key: 'cue-h-Ievads', name: 'Ievads' });
+  assert.deepEqual(rows[2], { kind: 'look', look: slav, header: true });
+  assert.deepEqual(rows[3], { kind: 'look', look: a, header: false });
+  assert.deepEqual(rows[4], { kind: 'item', key: 'cue-b', name: '[blank]', itemKind: 'blank' });
+  const verses = rows[6]!;
+  assert.equal(verses.kind === 'verses' && verses.keys.length, 18);
+  assert.equal(verses.kind === 'verses' && verses.names.length, 18);
+  assert.equal(verses.kind === 'verses' && verses.names[0], 'Psalmi 1');
+  assert.deepEqual(rows[7], { kind: 'header', key: 'cue-h-Vārds', name: 'Vārds' });
+});
+
+test('verses split by another item make separate runs', () => {
+  const show = loadService(rig(), planned([verse('V1'), verse('V2'), blank(), verse('V3')]));
+  const rows = serviceRows(show);
+  assert.deepEqual(rows.map(label), [safeOf(show), 'verses', 'item', 'verses']);
+  assert.deepEqual(rows[1], { kind: 'verses', keys: ['cue-v-V1', 'cue-v-V2'], names: ['V1', 'V2'] });
+});
+
+test('rows keep every look once and in running-order order after Edit list moves', () => {
+  const { show, slav, a, b } = october();
+  const moved = moveItem(show, b, 1);
+  assert.deepEqual(moved.operator.runningOrder, [safeOf(show), b, slav, a]);
+  const rows = serviceRows(moved);
+  assert.deepEqual(rows.filter((r) => r.kind === 'look').map(label), moved.operator.runningOrder);
+  // The verses and Vārds follow B, the blank follows A, Ievads stays after Basic lights.
+  assert.deepEqual(rows.map(label), [safeOf(show), 'header', b, 'verses', 'header', slav, a, 'item']);
+});
+
+test('a deleted anchor moves its muted items up to the next look above', () => {
+  const { show, slav, a, b } = october();
+  const out = deleteItem(show, a);
+  const rows = serviceRows(out);
+  // A is gone: its song item has no look now, and it and the blank follow Slavēšana.
+  assert.deepEqual(rows.map(label), [safeOf(show), 'header', slav, 'item', 'item', b, 'verses', 'header']);
+  assert.deepEqual(rows[3], { kind: 'item', key: 'cue-a-A', name: 'A', itemKind: 'song' });
+  assert.equal(anchorOf(out, 'cue-b'), slav);
+});
+
+test('a repeated song is an item row with its look', () => {
+  const again: ServiceItem = { key: 'cue-again', kind: 'song', name: 'A', songId: 'song-a' };
+  const show = loadService(rig(), planned([song('a', 'A'), header('Vārds'), again]));
+  const a = show.operator.runningOrder[1]!;
+  const rows = serviceRows(show);
+  assert.deepEqual(rows.map(label), [safeOf(show), a, 'header', 'item']);
+  assert.deepEqual(rows[3], { kind: 'item', key: 'cue-again', name: 'A', itemKind: 'song', look: a });
+  // The look keeps its one row.
+  assert.equal(rows.filter((r) => r.kind === 'look').length, 2);
+});
+
+test('looks added by hand stay where the running order has them', () => {
+  const { show, slav } = october();
+  const quick = show.operator.quickLooks.find((q) => q.look !== slav)!.look;
+  show.operator.runningOrder.splice(3, 0, quick);
+  const rows = serviceRows(show);
+  assert.deepEqual(rows.filter((r) => r.kind === 'look').map(label), show.operator.runningOrder);
+  assert.deepEqual(rows.find((r) => r.kind === 'look' && r.look === quick), { kind: 'look', look: quick, header: false });
+});
+
+test('anchorOf gives the nearest look above in the order, else Basic lights', () => {
+  const { show, slav, a, b } = october();
+  assert.equal(anchorOf(show, 'cue-h-Ievads'), safeOf(show));
+  assert.equal(anchorOf(show, 'cue-b'), a);
+  assert.equal(anchorOf(show, 'cue-v-Psalmi 18'), b);
+  assert.equal(anchorOf(show, 'cue-h-Vārds'), b);
+  // A key the service does not have sits after Basic lights.
+  assert.equal(anchorOf(show, 'nope'), safeOf(show));
+  // With A out of the order, the blank follows Slavēšana; with Slavēšana out too, Basic lights.
+  const noA = structuredClone(show);
+  noA.operator.runningOrder = noA.operator.runningOrder.filter((x) => x !== a);
+  assert.equal(anchorOf(noA, 'cue-b'), slav);
+  const noSlav = structuredClone(noA);
+  noSlav.operator.runningOrder = noSlav.operator.runningOrder.filter((x) => x !== slav);
+  assert.equal(anchorOf(noSlav, 'cue-b'), safeOf(show));
+  // Without a service everything sits after Basic lights.
+  assert.equal(anchorOf(rig(), 'cue-b'), safeOf(show));
 });
