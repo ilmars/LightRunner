@@ -1,0 +1,131 @@
+/* Timeline: the page's own parts, on the shared design system (/shared/theme.css) and the programmer pages'
+   frame (/shared/programmer.css). Panels one above the other: the list of timelines, the top bar of the open one
+   (Live / Prepare, the play position, Start and Stop), the recording and its layers, the markers, the stage view. */
+:root { --page-max: 1600px; --label-w: 150px; --row-h: 54px; }
+
+/* ---- The list of timelines ---- */
+.tl-list { display: flex; flex-wrap: wrap; gap: var(--ds-gap-tight); }
+.tl-list:empty { display: none; }
+.tl-item {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px;
+  min-height: 52px; min-width: 150px; max-width: 280px; padding: 6px 14px; border: 0; border-radius: var(--ds-r-tile);
+  background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low); color: var(--ds-text); font: inherit; text-align: left; cursor: pointer;
+}
+.tl-item b { font-size: 15px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-item small { color: var(--ds-muted); font-size: 12px; }
+.tl-item[aria-current="true"] { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.tl-item .running { color: var(--ds-text); }
+.open-tools { align-items: flex-end; }
+.open-tools .grow { flex: 1; }
+.name-field { flex: 1 1 260px; max-width: 420px; }
+.save-note { color: var(--ds-muted); font-size: 13px; min-width: 0; }
+.save-note.bad { color: var(--ds-warn-text); }
+.empty { text-align: center; padding: 24px 0; }
+
+/* ---- The open timeline's top bar ---- */
+.transport { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px 10px 16px; }
+.transport .grow { flex: 1; }
+.tname { display: flex; flex-direction: column; gap: 2px; min-width: 0; max-width: 260px; }
+.tname b { font-size: 18px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec-box { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.rec-chip {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border-radius: var(--ds-r-tile);
+  background: var(--ds-surface-hi); box-shadow: var(--ds-shadow-low); font-size: 13px; color: var(--ds-muted-on); max-width: 340px;
+}
+.rec-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec-chip svg { flex: none; color: var(--ds-muted); }
+.rec-chip.missing { color: var(--ds-warn-text); box-shadow: inset 0 0 0 1px var(--ds-warn-edge); background: var(--ds-warn-tint); }
+.rec-busy { color: var(--ds-muted); font-size: 13px; }
+/* Live / Prepare, as on the operator page: Live on is blue, Prepare on is violet. */
+.mode-seg { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 12px; background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge); }
+.mode-seg button { min-height: 44px; min-width: 64px; padding: 0 12px; border: 0; border-radius: 9px; background: transparent; color: var(--ds-muted); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.mode-seg button.prep { min-width: 84px; }
+.mode-seg button[aria-pressed="true"] { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.mode-seg button.prep[aria-pressed="true"] { background: var(--ds-violet-tint); box-shadow: inset 0 0 0 1px var(--ds-violet-edge); }
+.time { flex: none; font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 600; min-width: 128px; text-align: right; }
+.time small { color: var(--ds-muted); font-weight: 400; font-size: 14px; }
+.start-btn, .stop-btn { min-width: 96px; }
+/* Prepare: Start is violet, so it is clear the real lights won't move. */
+body.prepare .start-btn { background: var(--ds-violet-tint); box-shadow: inset 0 0 0 1px var(--ds-violet-edge); }
+.start-btn[aria-pressed="true"] { background: var(--ds-selected); box-shadow: inset 0 0 0 1px var(--ds-edge-held); }
+/* Playing: Start stays lit (not faded like a button that can't be used). */
+.start-btn[aria-pressed="true"]:disabled { opacity: 1; }
+body.prepare .start-btn[aria-pressed="true"] { background: rgba(161, 147, 242, 0.22); }
+
+/* ---- Recording and layers ---- */
+.lanes-card { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.lanes-card .bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lanes-card .bar .grow { flex: 1; }
+.run-note { color: var(--ds-muted); font-size: 13px; }
+.run-note.prep { color: var(--ds-violet); }
+.zoom { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--ds-r-tile); background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge); color: var(--ds-muted); font-size: 13px; }
+.zoom button { width: 44px; min-height: 44px; border: 0; border-radius: 9px; background: transparent; color: var(--ds-muted); font: inherit; font-size: 20px; cursor: pointer; }
+.zoom button:hover { color: var(--ds-text); }
+.zoom button:active { background: var(--ds-elevated); }
+.zoom button:disabled { opacity: 0.35; cursor: default; }
+.zoom span { padding: 0 4px; }
+
+.tl { display: grid; grid-template-columns: var(--label-w) minmax(0, 1fr); }
+.labels { display: flex; flex-direction: column; min-width: 0; }
+.labels .spacer { height: 24px; flex: none; }
+.lane-label { height: var(--row-h); flex: none; display: flex; flex-direction: column; justify-content: center; gap: 1px; padding-right: 10px; border-top: 1px solid var(--ds-edge); min-width: 0; }
+.lane-label b { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lane-label small { color: var(--ds-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lane-label.rec { height: 70px; border-top: 0; }
+.lane-label.missing b { color: var(--ds-warn-text); }
+
+/* The lanes scroll sideways (a finger or a trackpad); the ruler and the waveform stay put and are drawn for what is in view. */
+.lanes { position: relative; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: rgba(148, 163, 184, 0.25) transparent; }
+.track { position: relative; min-width: 100%; }
+.ruler, .wave { position: sticky; left: 0; display: block; }
+.ruler { height: 24px; cursor: pointer; touch-action: none; }
+.wave { height: 70px; cursor: pointer; }
+.rows { position: relative; }
+.row-lane { position: relative; height: var(--row-h); border-top: 1px solid var(--ds-edge); }
+.block {
+  position: absolute; top: 7px; height: 40px; min-width: 4px; padding: 4px 8px; border-radius: var(--ds-r-small); overflow: hidden;
+  font-size: 12px; line-height: 1.2; white-space: nowrap; color: var(--ds-text); background: rgba(148, 163, 184, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10);
+}
+.block small { display: block; color: rgba(227, 232, 240, 0.7); font-size: 11px; }
+.block .label { position: relative; }
+.block.missing { color: var(--ds-warn-text); box-shadow: inset 0 0 0 1px var(--ds-warn-edge); background: var(--ds-warn-tint); }
+/* The rise: a dark fade at the front of the block. */
+.block .ramp { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, rgba(9, 15, 28, 0.85), transparent); }
+.marker-lines { position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none; }
+.marker-line { position: absolute; top: 0; bottom: 0; border-left: 1px dashed rgba(227, 166, 70, 0.55); }
+.marker-line button {
+  position: absolute; left: 0; top: 26px; max-width: 180px; min-height: 22px; padding: 2px 6px 2px 4px; border: 0; border-radius: 6px;
+  background: rgba(9, 15, 28, 0.72); color: var(--ds-warn-text); font: inherit; font-size: 11px; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: auto; cursor: pointer;
+}
+.playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: var(--ds-accent); pointer-events: none; will-change: transform; }
+.playhead::before { content: ""; position: absolute; top: -2px; left: -5px; border: 6px solid transparent; border-top-color: var(--ds-accent); }
+body.prepare .playhead { background: var(--ds-violet); }
+body.prepare .playhead::before { border-top-color: var(--ds-violet); }
+.legend { color: var(--ds-muted); font-size: 12px; line-height: 1.45; margin: 4px 0 0; }
+
+/* ---- Markers ---- */
+.marker-list { display: flex; flex-direction: column; gap: 6px; }
+.marker-list:empty { display: none; }
+.marker-row { display: flex; align-items: center; gap: 8px; }
+.marker-row .when { flex: none; min-width: 88px; font-variant-numeric: tabular-nums; color: var(--ds-warn-text); }
+.marker-row .ds-field { flex: 1; min-width: 0; font-size: 15px; }
+.marker-row .ds-btn { flex: none; }
+
+/* ---- The stage view ---- */
+.stage-card { display: flex; align-items: center; gap: 14px; padding: 8px 14px 8px 8px; }
+.stage { flex: none; width: 300px; height: 124px; background: #04070D; border-radius: 12px; display: block; }
+.stage-card .legend { margin: 0; max-width: 640px; font-size: 13px; }
+
+/* ---- An iPad, and narrower ---- */
+@media (max-width: 1100px) {
+  :root { --label-w: 120px; }
+  .tname { max-width: 180px; }
+  .rec-chip { max-width: 240px; }
+}
+@media (max-width: 760px) {
+  .stage-card { flex-direction: column; align-items: stretch; }
+  .stage { width: 100%; }
+  .time { min-width: 0; }
+}

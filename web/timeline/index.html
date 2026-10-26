@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="theme-color" content="#090F1C">
+  <title>Light Runner Timeline</title>
+  <link rel="icon" href="/shared/icon-16.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/shared/icon-180.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/shared/theme.css">
+  <link rel="stylesheet" href="/shared/programmer.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="appbar-wrap">
+    <header class="appbar">
+      <h1 class="appbar-title"><img src="/shared/icon.svg" alt="" width="26" height="26"><span class="appbar-name"><span class="ds-caps">Light Runner</span><b>Timeline</b></span></h1>
+      <span class="grow"></span>
+      <!-- Only while something is wrong with the lights. -->
+      <span id="status" class="ds-pill ds-pill--warn" role="status" hidden>● <span class="long"></span><span class="short"></span></span>
+      <!-- While the server doesn't answer: the page keeps trying by itself. -->
+      <span id="offline" class="ds-pill offline" role="status" title="Light Runner isn't answering. The page keeps trying and carries on by itself." hidden>● Not connected</span>
+      <nav class="applinks" aria-label="Pages"><a href="/operator/">Operator</a><a href="/patch/">Patch</a><a href="/settings/">Settings</a><a href="/timeline/" aria-current="page">Timeline</a></nav>
+      <span id="clock" class="clock"></span>
+      <button id="logout" class="ds-btn ds-btn--quiet" type="button" hidden>Log out</button>
+    </header>
+  </div>
+
+  <!-- PIN entry when a PIN is set -->
+  <section id="login" class="login ds-panel" hidden>
+    <h2 class="ds-caps">Programmer PIN</h2>
+    <p class="card-desc">A timeline runs the lights by itself, so timelines are behind the PIN.</p>
+    <form id="loginForm">
+      <input id="pin" class="ds-field" type="password" inputmode="numeric" autocomplete="current-password" pattern="\d{4,6}" maxlength="6" placeholder="••••" required>
+      <button class="ds-btn ds-btn--primary">Unlock</button>
+    </form>
+    <p id="loginError" class="error"></p>
+  </section>
+
+  <main id="main" class="page timeline" hidden>
+    <!-- The show's timelines: choose one, add one, rename or delete the one that is open. -->
+    <section class="card ds-panel list-card">
+      <div class="card-head">
+        <div class="card-title">
+          <h2 class="ds-caps">Timelines</h2>
+          <p class="card-desc">A recording with the lights laid out along it. Press Start and the lights follow the sound.</p>
+        </div>
+        <button id="newBtn" class="ds-add" type="button">＋ New timeline</button>
+      </div>
+      <div id="list" class="tl-list" role="list"></div>
+      <div id="openTools" class="row wrap open-tools" hidden>
+        <label class="field name-field"><span class="label">Name</span><input id="nameField" class="ds-field" type="text" maxlength="80" autocomplete="off" spellcheck="false"></label>
+        <span class="grow"></span>
+        <span id="saveNote" class="save-note" role="status"></span>
+        <button id="deleteBtn" class="ds-btn ds-btn--danger" type="button">Delete timeline</button>
+      </div>
+    </section>
+
+    <p id="empty" class="hint empty" hidden>No timelines yet. Press ＋ New timeline to make one.</p>
+
+    <!-- The open timeline: its name, the recording, Live / Prepare, the play position, Start and Stop. -->
+    <section id="transport" class="ds-panel transport" hidden>
+      <div class="tname"><span class="ds-caps">Timeline</span><b id="tName"></b></div>
+      <div id="recBox" class="rec-box">
+        <span id="recChip" class="rec-chip" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          <span id="recName"></span>
+        </span>
+        <button id="addRec" class="ds-btn" type="button">Add the recording</button>
+        <span id="recBusy" class="rec-busy" role="status" hidden></span>
+      </div>
+      <span class="grow"></span>
+      <!-- Live / Prepare: in Prepare the timeline plays on the stage view and the sound only; the real lights stay. -->
+      <div id="modeSwitch" class="mode-seg" role="group" aria-label="Live or Prepare">
+        <button id="liveBtn" type="button" aria-pressed="true" title="The lights follow the timeline">Live</button>
+        <button id="prepBtn" type="button" aria-pressed="false" class="prep" title="Play it on the stage view only; the real lights stay as they are">Prepare</button>
+      </div>
+      <span class="time" aria-label="Play position"><span id="pos">0:00.0</span> <small id="len">/ 0:00</small></span>
+      <button id="startBtn" class="ds-btn ds-btn--primary start-btn" type="button">▶ Start</button>
+      <button id="stopBtn" class="ds-btn stop-btn" type="button">■ Stop</button>
+    </section>
+
+    <!-- The recording's waveform under a time ruler, the layers below, the markers across them. -->
+    <section id="lanesCard" class="ds-panel lanes-card" hidden>
+      <div class="bar">
+        <span class="ds-caps">Recording and layers</span>
+        <span id="runNote" class="run-note" role="status"></span>
+        <span class="grow"></span>
+        <button id="markBtn" class="ds-btn ds-btn--quiet" type="button" title="Drop a marker at the play position">◆ Mark here</button>
+        <div class="zoom" role="group" aria-label="Zoom">
+          <button id="zoomOut" type="button" aria-label="Zoom out">−</button>
+          <span aria-hidden="true">Zoom</span>
+          <button id="zoomIn" type="button" aria-label="Zoom in">+</button>
+        </div>
+      </div>
+      <div class="tl">
+        <div id="labels" class="labels"></div>
+        <div id="lanes" class="lanes">
+          <div id="track" class="track">
+            <canvas id="ruler" class="ruler" title="Tap or drag to move the play position"></canvas>
+            <canvas id="wave" class="wave" title="Tap to move the play position"></canvas>
+            <div id="rows" class="rows"></div>
+            <div id="markerLines" class="marker-lines"></div>
+            <div id="playhead" class="playhead" aria-hidden="true"></div>
+          </div>
+        </div>
+      </div>
+      <p class="legend">Tap the ruler or the waveform to move the play position. ◆ Mark here drops a marker at the play position while you listen; markers are notes and do nothing to the lights.</p>
+    </section>
+
+    <section id="markersCard" class="card ds-panel markers-card" hidden>
+      <div class="card-head">
+        <div class="card-title">
+          <h2 class="ds-caps">Markers</h2>
+          <p class="card-desc">Tap a time to go there. The text is only a note for you.</p>
+        </div>
+      </div>
+      <div id="markerList" class="marker-list"></div>
+      <p id="noMarkers" class="hint">No markers yet.</p>
+    </section>
+
+    <!-- The stage view, as on the operator page: the draft while in Prepare. -->
+    <section id="stageCard" class="ds-panel stage-card" hidden>
+      <canvas id="stage" class="stage" aria-label="Stage view"></canvas>
+      <p class="legend">The stage view. In <b>Prepare</b> the timeline plays here and on the sound only; the real lights stay as they are. In <b>Live</b>, Start plays the recording in this browser and the lights follow it. Blackout and Basic lights (on the operator page) stop a timeline at any time.</p>
+    </section>
+  </main>
+
+  <input id="recFile" type="file" accept=".mp3,.m4a,.aac,.wav,audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/x-wav" hidden>
+  <audio id="audio" preload="auto"></audio>
+  <div id="toast" class="ds-toast" role="status" hidden></div>
+  <script type="module" src="timeline.js"></script>
+</body>
+</html>
