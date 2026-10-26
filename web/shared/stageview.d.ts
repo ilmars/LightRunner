@@ -18,6 +18,7 @@ export interface ViewFixture {
 export const HANGS: Hangs[];
 export function ledLayout(segments: number, leds?: number | null): number[];
 export function isPanel(f: ViewFixture): boolean;
+export function isStrip(f: ViewFixture): boolean;
 export function panelGrid(leds: number): { cols: number; rows: number };
 export function ledPoints(f: ViewFixture): (Point & { segment: number })[];
 export function hangsOf(f: ViewFixture): Hangs;
@@ -35,3 +36,8 @@ export interface FrontPlacement {
   pole?: { from: number; to: number };
 }
 export function frontPlacement(f: ViewFixture, hangs: string, w: number, h: number): FrontPlacement;
+
+export function stageViewFrom(stored: string | null | undefined): 'above' | 'front';
+export function stageSizeFrom(stored: string | null | undefined, page: string): { w: number | null; h: number | null };
+export function stageSizeWith(stored: string | null | undefined, page: string, size: { w?: number | null; h?: number | null } | null): string;
+export function fitStageLength(want: number, min: number, max: number): number;

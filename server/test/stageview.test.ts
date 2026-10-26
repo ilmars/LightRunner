@@ -10,7 +10,9 @@ import { parseShow } from '../../packages/shared/src/index.ts';
 import { operatorLayout } from '../src/layout.ts';
 import { copyOf } from '../../web/patch/types.js';
 import { PLAN_ASPECT, barEnds } from '../../web/shared/stage.js';
-import { frontPlacement, frontScene, hangsOf, isPanel, ledLayout, ledPoints, panelGrid, poolOf } from '../../web/shared/stageview.js';
+import {
+  fitStageLength, frontPlacement, frontScene, hangsOf, isPanel, isStrip, ledLayout, ledPoints, panelGrid, poolOf, stageSizeFrom, stageSizeWith, stageViewFrom,
+} from '../../web/shared/stageview.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const readJson = (path: string) => JSON.parse(readFileSync(join(root, path), 'utf8'));
@@ -225,9 +227,10 @@ test('where the pool falls follows where the light hangs', () => {
   assert.ok(wall.r < poolOf({ ...wallBar, segments: 3 }, 'truss', 'above').r, 'a wall pool is tighter than a truss one');
 
   const strip = poolOf({ x: 0.84, y: 0.1, w: 0.2, h: 0, segments: 1 }, 'riser', 'above');
-  assert.equal(strip.spots.length, 1);
-  near(strip.spots[0].x, 0.84);
-  assert.ok(Math.abs(strip.spots[0].y - 0.1) < 0.06, 'glows round itself');
+  // A long strip with one segment glows along itself: a few pools in its one colour, centred on it.
+  assert.ok(strip.spots.length >= 1 && strip.spots.every((s: any) => s.segment === 0));
+  near(strip.spots.reduce((sum: number, s: any) => sum + s.x, 0) / strip.spots.length, 0.84);
+  assert.ok(strip.spots.every((s: any) => Math.abs(s.y - 0.1) < 0.06 && s.x > 0.84 - 0.1 && s.x < 0.84 + 0.1), 'glows round itself');
 
   const side = { x: 0.69, y: 0.73, w: 0.0125, h: 0.38, segments: 4 };
   const beside = poolOf(side, 'side', 'above');
@@ -235,6 +238,23 @@ test('where the pool falls follows where the light hangs', () => {
   assert.ok(beside.spots.every((s: any) => s.x < side.x), 'beside the bar, towards the middle of the stage');
   const ys = beside.spots.map((s: any) => s.y);
   assert.deepEqual([...ys].sort((p, q) => p - q), ys, 'one under another down the bar');
+});
+
+test('a long bar with few segments throws several pools near it, not one huge one', () => {
+  const long = { x: 0.5, y: 0.2, w: 0.3, h: 0.04, segments: 1 };
+  const pool = poolOf(long, 'wall', 'above');
+  assert.ok(pool.spots.length > 1, 'more than one pool');
+  assert.ok(pool.spots.every((s: any) => s.segment === 0));
+  assert.ok(pool.r < 0.1, `a pool stays small (${pool.r})`);
+  // Two segments over many pools: the first half in the first segment's colour, the rest in the second's.
+  const two = poolOf({ ...long, segments: 2 }, 'wall', 'above');
+  const segs = two.spots.map((s: any) => s.segment);
+  assert.deepEqual([...segs].sort(), segs, 'in order along the bar');
+  assert.equal(segs[0], 0);
+  assert.equal(segs.at(-1), 1);
+  // The church's bars keep one pool per segment.
+  assert.equal(poolOf({ x: 0.6, y: 0.39, w: 0.221, h: 0.04, segments: 8 }, 'wall', 'above').spots.length, 8);
+  assert.equal(poolOf({ x: 0.39, y: 0.24, w: 0.093, h: 0.04, segments: 3 }, 'truss', 'above').spots.length, 3);
 });
 
 test('a beam keeps its own angle and reach: its pool is at the tip of the cone', () => {
@@ -345,4 +365,47 @@ test('from the audience at the operator\'s small size and at 1600 px: bodies sta
       for (const l of p.leds) assert.ok(l.x >= 0 && l.x <= w && l.y >= 0 && l.y <= h);
     }
   }
+});
+
+// ---- Strips ----
+
+test('a bar with no thickness and no LED count is a strip (a line), anything else is not', () => {
+  assert.equal(isStrip({ x: 0.844, y: 0.1, w: 0.215, h: 0, segments: 1 }), true, 'the drum cage strip');
+  assert.equal(isStrip({ x: 0.5, y: 0.5, w: 0.2, h: null, segments: 3 }), true);
+  assert.equal(isStrip({ x: 0.5, y: 0.5, w: 0.2, h: 0, segments: 3, leds: 30 }), false, 'a LED count: its LEDs are drawn');
+  assert.equal(isStrip({ x: 0.5, y: 0.5, w: 0.221, h: 0.04, segments: 8 }), false, 'a bar with a body');
+  assert.equal(isStrip({ x: 0.5, y: 0.5, segments: 1 }), false, 'a lamp');
+  assert.equal(isStrip({ x: 0.5, y: 0.5, w: 0.2, h: 0, shape: 'outline', segments: 1 }), false, 'an outline is drawn as one');
+});
+
+// ---- The view and size each browser keeps ----
+
+test('the view kept is from above unless it says from the audience', () => {
+  assert.equal(stageViewFrom('front'), 'front');
+  for (const v of ['above', null, undefined, '', 'sideways', '{"x":1}']) assert.equal(stageViewFrom(v as any), 'above');
+});
+
+test('the stage view size is kept per page, and anything unreadable is nothing kept', () => {
+  assert.deepEqual(stageSizeFrom(null, 'operator'), { w: null, h: null });
+  assert.deepEqual(stageSizeFrom('not json', 'operator'), { w: null, h: null });
+  assert.deepEqual(stageSizeFrom('[1,2]', 'operator'), { w: null, h: null });
+  assert.deepEqual(stageSizeFrom('{"operator":{"h":-4,"w":"x"}}', 'operator'), { w: null, h: null });
+  let kept = stageSizeWith(null, 'operator', { h: 200.4 });
+  assert.deepEqual(stageSizeFrom(kept, 'operator'), { w: null, h: 200 });
+  kept = stageSizeWith(kept, 'timeline', { w: 900, h: 320 });
+  assert.deepEqual(stageSizeFrom(kept, 'timeline'), { w: 900, h: 320 });
+  assert.deepEqual(stageSizeFrom(kept, 'operator'), { w: null, h: 200 }, 'the other page keeps its own');
+  kept = stageSizeWith(kept, 'operator', null);
+  assert.deepEqual(stageSizeFrom(kept, 'operator'), { w: null, h: null }, 'reset: forgotten');
+  assert.deepEqual(stageSizeFrom(kept, 'timeline'), { w: 900, h: 320 });
+  assert.deepEqual(JSON.parse(stageSizeWith('garbage', 'operator', { h: 150 })), { operator: { h: 150 } });
+});
+
+test('a wanted stage view length stays within its limits, the minimum winning when there is no room', () => {
+  assert.equal(fitStageLength(200, 124, 300), 200);
+  assert.equal(fitStageLength(50, 124, 300), 124);
+  assert.equal(fitStageLength(900, 124, 300), 300);
+  assert.equal(fitStageLength(200, 124, 80), 124, 'less room than the minimum');
+  assert.equal(fitStageLength(NaN, 124, 300), 124);
+  assert.equal(fitStageLength(500, 124, NaN), 500, 'no maximum known');
 });

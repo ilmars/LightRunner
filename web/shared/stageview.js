@@ -42,6 +42,15 @@ export function isPanel(f) {
   return segmentsOf(f) === 1 && Number.isFinite(f.leds) && f.leds >= 16 && shape === 'dot';
 }
 
+/**
+ * A bar with no thickness on the plan and no LED count is a strip (an LED tape): drawn as a glowing line in its
+ * segments' colours, not as a row of lamps.
+ */
+export function isStrip(f) {
+  if (shapeOf(f) !== 'bar' || (Number.isFinite(f.leds) && f.leds >= 1)) return false;
+  return barAxis(f).thickness < 0.01;
+}
+
 /** The grid of a panel's LED texture: `cols` across and `rows` down, about 3 to 2, holding at least `leds`. */
 export function panelGrid(leds) {
   const n = Math.max(1, Math.floor(Number(leds) || 1));
@@ -107,7 +116,7 @@ const POOL_SQUASH = 0.75;
 
 /**
  * The light a fixture throws on the floor, seen from above: where each pool is (`spots`, plan fractions, with the
- * segment whose colour it takes), its radius `r` (a fraction of the plan's width), `squash` (its height over its
+ * segment whose colour it takes; a bar has one per segment, or more along a long bar with few segments), its radius `r` (a fraction of the plan's width), `squash` (its height over its
  * width), and `alpha` (how strongly it is drawn, 0..1; before the colour's own brightness). A beam keeps its own
  * angle and reach: its pool is at the end of its cone. `view` is only 'above' for now.
  */
@@ -125,13 +134,16 @@ export function poolOf(f, hangs, view = 'above') {
   const move = (pt, segment) => ({ x: pt.x + dx, y: pt.y + dy, segment });
   if (shape === 'bar') {
     const [a, b] = barEnds(f);
-    const n = segmentsOf(f);
-    const spots = Array.from({ length: n }, (_, k) => {
-      const t = (k + 0.5) / n;
-      return move({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, k);
+    const n = segmentsOf(f), length = barAxis(f).length;
+    // A pool per segment; a long bar with few segments gets more of them (each in its segment's colour), so its light
+    // stays near it instead of one huge pool.
+    const m = Math.max(n, Math.ceil(length / (p.r * 1.2)));
+    const spots = Array.from({ length: m }, (_, k) => {
+      const t = (k + 0.5) / m;
+      return move({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, Math.min(n - 1, Math.floor((k * n) / m)));
     });
     // Neighbouring pools overlap, so a long bar washes in one piece.
-    return { spots, r: Math.max(p.r, barAxis(f).length / n), squash: POOL_SQUASH, alpha: p.alpha };
+    return { spots, r: Math.max(p.r, length / m), squash: POOL_SQUASH, alpha: p.alpha };
   }
   const r = shape === 'outline' ? Math.max(p.r, (f.w ?? 0) / 2) : p.r;
   return { spots: [move({ x: f.x, y: f.y }, 0)], r, squash: POOL_SQUASH, alpha: p.alpha };
@@ -194,4 +206,51 @@ export function frontPlacement(f, hangs, w, h) {
   const layout = ledLayout(n, f.leds);
   place.leds = layout.map((segment, k) => ({ ...at((k + 0.5) / layout.length), segment }));
   return place;
+}
+
+// ---- The view each browser shows, and the size of its stage view ----
+
+/** The stored choice of view ('above' or 'front'): from above unless it says from the audience. */
+export function stageViewFrom(stored) {
+  return stored === 'front' ? 'front' : 'above';
+}
+
+/**
+ * The stage view's size kept for `page` in the stored text (`{"operator": {"h": 200}, "timeline": {"w": 900, "h": 300}}`):
+ * `{ w, h }`, each a number or null when not kept. Anything unreadable is nothing kept.
+ */
+export function stageSizeFrom(stored, page) {
+  let all = null;
+  try {
+    all = JSON.parse(stored ?? 'null');
+  } catch {
+    all = null;
+  }
+  const mine = all && typeof all === 'object' ? all[page] : null;
+  const num = (v) => (Number.isFinite(v) && v > 0 ? v : null);
+  return { w: num(mine?.w), h: num(mine?.h) };
+}
+
+/** The stored text with `page`'s size set to `size` ({ w?, h? }, rounded), or taken out when `size` is null. */
+export function stageSizeWith(stored, page, size) {
+  let all = {};
+  try {
+    const was = JSON.parse(stored ?? '{}');
+    if (was && typeof was === 'object' && !Array.isArray(was)) all = was;
+  } catch {
+    all = {};
+  }
+  if (!size) delete all[page];
+  else {
+    const kept = {};
+    for (const k of ['w', 'h']) if (Number.isFinite(size[k]) && size[k] > 0) kept[k] = Math.round(size[k]);
+    all[page] = kept;
+  }
+  return JSON.stringify(all);
+}
+
+/** `want` (a length in px) kept between `min` and `max`; the minimum wins when there is less room than it. */
+export function fitStageLength(want, min, max) {
+  const v = Number.isFinite(want) ? want : min;
+  return Math.max(min, Math.min(Number.isFinite(max) ? max : v, v));
 }
