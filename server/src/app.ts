@@ -35,6 +35,7 @@ import { isLocalAddress, isThisComputer } from './net.ts';
 import { AlreadyRunning, liveMarker, removeMarker, writeMarker } from './marker.ts';
 import { RuntimeSaver, Store } from './store.ts';
 import { TICK_MS, TimelineRunner } from './timeline.ts';
+import { RecordingError, Recordings } from './recordings.ts';
 
 export interface AppOptions {
   port: number;
@@ -81,6 +82,8 @@ export interface AppOptions {
   onStopRequest?: () => void;
   /** This Light Runner's version, sent as the `x-light-runner` header of `GET /api/state`. */
   version?: string;
+  /** The most a timeline's recording may be (bytes); 100 MB. Tests make it small. */
+  recordingLimit?: number;
 }
 
 export type Role = 'operator' | 'programmer';
@@ -96,6 +99,10 @@ const MIME: Record<string, string> = {
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.wav': 'audio/wav',
 };
 
 /** Steps the Undo list keeps, as the engine does. */
@@ -217,6 +224,7 @@ export class App {
   private otherDeskOnly = false;
   private readonly identifyTimers = new Map<string, NodeJS.Timeout>();
   private ofl!: OflClient;
+  private recordings!: Recordings;
   /** Files waiting for someone to pick what to take from them. */
   private readonly imports = new Map<string, { show: Show; scope: Scope; at: number }>();
   private readonly nodeWatch = new NodeWatch((problem, otherDesk) => {
@@ -232,6 +240,7 @@ export class App {
     this.store = new Store(opts.dataDir, opts.seedPath);
     this.saver = new RuntimeSaver(this.store);
     this.ofl = new OflClient(join(opts.dataDir, 'ofl'), opts.fetch);
+    this.recordings = new Recordings(opts.dataDir, opts.recordingLimit);
   }
 
   get state(): LiveState | null {
@@ -254,6 +263,7 @@ export class App {
       const other = await liveMarker(this.opts.dataDir);
       if (other) throw new AlreadyRunning(other.port);
     }
+    this.recordings.tidy();
     const loaded = this.store.loadShow();
     if (loaded.problem) this.log(`WARNING: ${loaded.problem}`);
     this.log(`Loaded show "${loaded.show.name}" from ${loaded.source}`);
@@ -1477,7 +1487,7 @@ export class App {
       }
       await this.serveStatic(url.pathname, res);
     } catch (err) {
-      const status = err instanceof HttpError ? err.status : 500;
+      const status = err instanceof HttpError || err instanceof RecordingError ? err.status : 500;
       if (status === 500) this.log(`HTTP error: ${(err as Error).stack}`);
       json(res, status, { error: (err as Error).message });
     }
@@ -1576,6 +1586,7 @@ export class App {
       'GET /api/ofl/db', 'POST /api/ofl/db/download', 'POST /api/ofl/db/install', 'POST /api/ofl/db/discard',
       'GET /api/ofl/manufacturers', 'GET /api/ofl/manufacturer',
       'PUT /api/controller', 'POST /api/keys/reset',
+      'GET /api/recordings', 'POST /api/recordings', 'GET /api/recordings/file', 'DELETE /api/recordings',
     ];
     if (!routes.includes(route)) return false;
     if (!open && !this.isProgrammer(req)) throw new HttpError(401, 'enter the programmer PIN');
@@ -1739,6 +1750,22 @@ export class App {
         this.imports.delete(token!);
         this.log(`Imported ${picks.length} changes from "${pending.show.name}"`);
         json(res, 200, this.settingsView());
+        return true;
+      }
+      case 'GET /api/recordings':
+        json(res, 200, this.recordings.list());
+        return true;
+      case 'POST /api/recordings':
+        json(res, 200, await this.recordings.add(req, url.searchParams.get('name') ?? ''));
+        return true;
+      case 'GET /api/recordings/file':
+        await this.recordings.send(req, res, url.searchParams.get('id') ?? '');
+        return true;
+      case 'DELETE /api/recordings': {
+        const id = url.searchParams.get('id') ?? '';
+        this.recordings.remove(id, (rec) => this.show.timelines.some((t) => t.recording?.id === rec));
+        this.log('A recording was removed');
+        json(res, 200, { ok: true });
         return true;
       }
       case 'GET /api/ofl/db':
