@@ -137,6 +137,8 @@ export class App {
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
   private stopping = false;
+  /** The engine worker stopped and is being started again. */
+  private workerRestarted = false;
   /** The token in this server's server.json (claimData), the key to the launcher's stop. */
   private markerToken: string | null = null;
   /** Pages open on other computers (iPads, phones): the launcher's note about the firewall goes once one has come. */
@@ -550,6 +552,7 @@ export class App {
       this.pending.clear();
       // The new engine starts with no Undo steps of its own; the show's are kept.
       this.undoLog = this.undoLog.filter((step) => step !== 'stage');
+      this.workerRestarted = true;
       setTimeout(() => this.startWorker(), 200);
     });
     this.post({ type: 'init', show: this.engineShow(), runtime: this.latestRuntime, artnetRedirect: this.opts.artnetRedirect });
@@ -562,6 +565,11 @@ export class App {
   private onWorker(msg: FromWorker, markReady: () => void): void {
     switch (msg.type) {
       case 'ready':
+        // After a restart the engine may have missed the live timeline's changes: it gets the whole state again.
+        if (this.workerRestarted) {
+          this.workerRestarted = false;
+          this.liveTimeline?.runner.resync();
+        }
         this.refreshLayout(msg.fixtures);
         this.midi?.update(this.layout, this.latestState);
         // Ready once commands work: the layout and the engine's first state (it may come just before or after).
@@ -650,9 +658,9 @@ export class App {
       }
       return { error: null, recorded: true };
     }
-    // A song, Basic lights or Blackout from anyone (a tablet, a device) stops a live timeline; the timeline's own changes
-    // never come this way (they go straight to stageCommand, quiet), and Prepare's taps came back above.
-    if (cmd.type === 'look' || cmd.type === 'safe' || cmd.type === 'blackout') this.stopLiveTimeline();
+    // A song, Basic lights, Blackout or Back to saved from anyone (a tablet, a device) stops a live timeline; the
+    // timeline's own changes never come this way (they go straight to stageCommand, quiet), and Prepare's taps came back above.
+    if (cmd.type === 'look' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') this.stopLiveTimeline();
     return this.stageCommand(cmd);
   }
 
@@ -804,8 +812,8 @@ export class App {
         return done(null);
       case 'draft': {
         if (!session) return done(BLIND_OFF);
-        // A song or Basic lights in Prepare stops that page's Prepare timeline, as they stop the live one.
-        if (cmd.cmd.type === 'look' || cmd.cmd.type === 'safe') this.prepareTimelines.get(tablet)?.stop();
+        // A song, Basic lights or Blackout in Prepare stops that page's Prepare timeline, as they stop the live one.
+        if (cmd.cmd.type === 'look' || cmd.cmd.type === 'safe' || cmd.cmd.type === 'blackout') this.prepareTimelines.get(tablet)?.stop();
         let error: string | null;
         try {
           error = session.apply(cmd.cmd, performance.now() / 1000, (g) => this.isSmokeGroup(g));
@@ -823,6 +831,8 @@ export class App {
         } catch (err) {
           return done(this.draftProblem(tablet, err));
         }
+        // Go is a deliberate change of the whole stage, like a song: it stops a live timeline.
+        this.stopLiveTimeline();
         // The live engine fades with its own Fade setting (each look's own when it is Auto), as for looks.
         const reply = await this.stageCommand({ type: 'applyStage', stage });
         if (!reply.error && this.blind.get(tablet) === session) this.dropDraft(tablet);
@@ -1068,8 +1078,12 @@ export class App {
     return msg.prepare ? this.startPrepareTimeline(ws, timeline, msg.at) : this.startLiveTimeline(ws, timeline, msg.at);
   }
 
-  /** A page's position report: it moves the timeline that page started (the live one, or its Prepare one). */
-  private timelinePosition(input: unknown, ws: WebSocket): void {
+  /**
+   * A page's position report: it moves the timeline that page started (the live one, or its Prepare one). A live
+   * timeline whose page has gone is taken up by the programmer's page that reports for it (the same page, back after a
+   * Wi-Fi blip on a new connection).
+   */
+  private timelinePosition(input: unknown, role: Role, ws: WebSocket): void {
     const parsed = TimelineMessage.safeParse(input);
     if (!parsed.success || parsed.data.type !== 'timelinePosition') return;
     const { id, pos, playing } = parsed.data;
@@ -1079,7 +1093,14 @@ export class App {
       return;
     }
     const prepare = this.prepareTimelines.get(ws);
-    if (prepare?.id === id) prepare.report(pos, playing);
+    if (prepare?.id === id) {
+      prepare.report(pos, playing);
+      return;
+    }
+    if (live && live.owner === null && role === 'programmer' && live.runner.id === id && ws.readyState === ws.OPEN) {
+      live.owner = ws;
+      live.runner.report(pos, playing);
+    }
   }
 
   /** The live timeline; a live one running already stops first. */
@@ -1093,7 +1114,7 @@ export class App {
       // Without it, such a group is left as it is.
     }
     // Another Start, a Stop, Blackout, Basic lights or a song came meanwhile.
-    if (turn !== this.timelineTurn || this.stopping) return null;
+    if (turn !== this.timelineTurn || this.stopping) return 'The timeline did not start: something else changed the stage at the same moment. Press Start again.';
     const fresh = this.show.timelines.find((t) => t.id === timeline.id);
     if (!fresh) return `There is no timeline "${timeline.id}" in the show.`;
     this.stopLiveTimeline();
@@ -1110,8 +1131,6 @@ export class App {
       },
       follow: (group, value) => this.followLevel(group, value),
       now: () => performance.now() / 1000,
-      // The page is gone when its WebSocket goes (leaveLiveTimeline), never because its reports slowed down.
-      staleAfter: null,
       log: this.log,
       onStop: (why) => {
         if (this.liveTimeline === entry) this.liveTimeline = null;
@@ -1130,9 +1149,9 @@ export class App {
 
   /** A timeline in this page's own Prepare draft (made for it when the page has none); it never touches the lights. */
   private async startPrepareTimeline(ws: WebSocket, timeline: Timeline, at: number): Promise<string | null> {
-    // One recording per page: a live timeline this page played goes on by itself.
-    this.leaveLiveTimeline(ws);
+    // A Start that can't happen changes nothing: checked before the page's draft is made or its live timeline let go.
     if (!this.blind.has(ws)) {
+      if (this.blind.size >= MAX_DRAFTS) return TOO_MANY_DRAFTS;
       const made = await this.blindCommand({ type: 'blindStart' }, ws);
       if (made.error) return made.error;
     }
@@ -1140,6 +1159,8 @@ export class App {
     if (!session) return BLIND_OFF;
     const fresh = this.show.timelines.find((t) => t.id === timeline.id);
     if (!fresh) return `There is no timeline "${timeline.id}" in the show.`;
+    // One recording per page: a live timeline this page played goes on by itself.
+    this.leaveLiveTimeline(ws);
     this.prepareTimelines.get(ws)?.stop();
     const now = () => performance.now() / 1000;
     const runner: TimelineRunner = new TimelineRunner({
@@ -1157,8 +1178,6 @@ export class App {
         if (this.blind.get(ws) === session) session.followLevel(group, value, now());
       },
       now,
-      // Its draft goes with the page.
-      staleAfter: null,
       log: this.log,
       onStop: () => {
         if (this.prepareTimelines.get(ws) === runner) this.prepareTimelines.delete(ws);
@@ -1242,7 +1261,7 @@ export class App {
       if (!msg || typeof msg !== 'object') return;
       if (msg.type === 'timelinePosition') {
         // Several times a second: no answer.
-        this.timelinePosition(msg, ws);
+        this.timelinePosition(msg, role, ws);
         return;
       }
       if (msg.type === 'timelineStart' || msg.type === 'timelineStop') {

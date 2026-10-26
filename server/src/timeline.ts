@@ -3,8 +3,9 @@
 // and sends what changed as the ordinary commands, quiet (no Undo steps), through a callback the App gives it. The
 // App's Stop hook never sees these: they don't go through App.run().
 //
-// The clock: the page's position reports are the truth while they come (eased in with mergeClock); without them the
-// runner goes on by itself, to the end, and stops there. Only this thread's clock is used; nothing here is sent to the
+// The clock: the page's position reports are the truth while they come (a page ahead is eased in with mergeClock, a page
+// slightly behind is waited for, a large difference is a seek); without them the runner goes on by itself (playing, or
+// held where the page paused), and stops at the end. Only this thread's clock is used; nothing here is sent to the
 // worker but commands and follow values.
 
 import {
@@ -18,8 +19,10 @@ export const TICK_MS = 25;
 export const SEEK_FADE = 1;
 /** The end of a Follow the voice block fades back to the timeline's level over this long (seconds). */
 export const FOLLOW_END_FADE = 1;
-/** Without a position report for this long (seconds) the page is taken to be gone: the runner plays on by itself (see staleAfter). */
-export const REPORTS_STALE = 2;
+/** Every change the timeline sends fades over at least this long (seconds): a rise of 0 never snaps. */
+export const MIN_FADE = 0.5;
+/** A report that the sound has stopped this close to its end (seconds) means the recording has played out. */
+export const END_SLACK = 0.5;
 
 /** Why a runner stopped: its end, Stop (or Blackout, Basic lights, a song), its timeline deleted, or a problem. */
 export type StopReason = 'end' | 'stopped' | 'gone' | 'problem';
@@ -35,12 +38,6 @@ export interface TimelineRunnerOptions {
   now: () => number;
   /** Called once when it stops, for whatever reason. */
   onStop?: (why: StopReason) => void;
-  /**
-   * Seconds without a report after which the page is taken to be gone (a paused one too: it then plays on);
-   * REPORTS_STALE when left out. Null: never; the owner calls release() when the page goes (the App does, when its
-   * WebSocket closes or misses its heartbeat), so a paused page in a background tab, whose reports a browser slows down, stays paused.
-   */
-  staleAfter?: number | null;
   log?: (msg: string) => void;
 }
 
@@ -51,8 +48,8 @@ export function timelineLength(timeline: Timeline): number {
   return end;
 }
 
-/** The time a block's rise asks for; no rise leaves it to the command's own fade (a look's, a colour's, the slider's smoothing). */
-const fadeOf = (seconds: number): { fade?: number } => (seconds > 0 ? { fade: Math.min(600, seconds) } : {});
+/** The fade a change is sent with: its own, but never under MIN_FADE (so nothing the timeline does snaps). */
+const fadeOf = (seconds: number): { fade: number } => ({ fade: Math.min(600, Math.max(MIN_FADE, seconds)) });
 
 export class TimelineRunner {
   private readonly opts: TimelineRunnerOptions;
@@ -65,8 +62,12 @@ export class TimelineRunner {
   private basePos = 0;
   private baseAt = 0;
   private playing = false;
-  /** When the last position report came, or null while the runner goes by itself. */
-  private reportedAt: number | null = null;
+  /** The position never goes below this until a jump: a page slightly behind is waited for, never stepped back to. */
+  private floor = 0;
+  /** The page said its recording played out: the runner goes on by itself to the end (the lights may run later). */
+  private soundEnded = false;
+  /** Where the sound ends (the recording's length, else the timeline's), as of the last tick. */
+  private soundEnd = 0;
   /** What each group was last given, and the timeline time (the lights', with the offset) of that tick. */
   private prev = new Map<string, GroupTarget>();
   private lastT = -Infinity;
@@ -107,29 +108,63 @@ export class TimelineRunner {
     this.basePos = Math.max(0, at);
     this.baseAt = now;
     this.playing = true;
-    this.reportedAt = null;
+    this.floor = 0;
+    this.soundEnded = false;
+    this.soundEnd = timeline.recording?.duration ?? this.duration;
     this.prev = new Map();
     this.jumped = at > 0;
     this.lastT = -Infinity;
     this.tick();
   }
 
-  /** Where the page's recording is, and whether it plays. Small differences are eased in; a large one is a seek. */
+  /**
+   * Where the page's recording is, and whether it plays. A page ahead is eased in; a page up to 0.3 s behind is waited
+   * for (the lights hold, never step back); more than that either way is a seek. A stop at the recording's end (within
+   * END_SLACK) means it played out: the runner goes on by itself to the timeline's end.
+   */
   report(pos: number, playing: boolean): void {
     if (!this.timelineId || !Number.isFinite(pos)) return;
+    pos = Math.max(0, pos);
+    const atEnd = !playing && pos >= this.soundEnd - END_SLACK;
+    // The page keeps saying it stopped at the end: nothing new.
+    if (atEnd && this.soundEnded) return;
     const now = this.opts.now();
-    const merged = mergeClock(this.position(now), Math.max(0, pos));
-    this.basePos = merged.pos;
+    const server = this.position(now);
+    const merged = mergeClock(server, pos);
+    if (merged.jumped) {
+      this.jumped = true;
+      this.floor = 0;
+      this.basePos = pos;
+    } else if (pos < server) {
+      // Slightly behind: follow the page from where it is, but hold the lights until it has caught up.
+      this.floor = server;
+      this.basePos = pos;
+    } else {
+      this.basePos = merged.pos;
+    }
     this.baseAt = now;
-    if (merged.jumped) this.jumped = true;
-    this.playing = playing;
-    this.reportedAt = now;
+    this.soundEnded = atEnd;
+    // A recording that played out: the lights go on by themselves (the last blocks may come later, with offsetMs).
+    this.playing = playing || atEnd;
   }
 
-  /** The page that reported has gone: the runner plays on by itself, from where it is. */
+  /** The page that reported has gone: the runner goes on by itself from where it is, playing if the page played, held if it was paused. */
   release(): void {
-    if (!this.timelineId || this.reportedAt === null) return;
-    this.goOnAlone(this.opts.now());
+    if (!this.timelineId) return;
+    const now = this.opts.now();
+    this.basePos = this.position(now);
+    this.baseAt = now;
+    this.floor = 0;
+  }
+
+  /**
+   * The engine started again (its worker restarted): send the whole state again, over 1 s, as after a seek.
+   * The follow values go again on every tick anyway.
+   */
+  resync(): void {
+    if (!this.timelineId) return;
+    this.prev = new Map();
+    this.jumped = true;
   }
 
   /** Stop where it is: every follow is let go; the stage stays as it is. */
@@ -150,21 +185,11 @@ export class TimelineRunner {
   }
 
   private position(now: number): number {
-    return this.playing ? this.basePos + (now - this.baseAt) : this.basePos;
-  }
-
-  private goOnAlone(now: number): void {
-    this.basePos = this.position(now);
-    this.baseAt = now;
-    this.reportedAt = null;
-    // A page that paused and went away: play on, so it never stays half way for ever.
-    this.playing = true;
+    return Math.max(this.floor, this.playing ? this.basePos + (now - this.baseAt) : this.basePos);
   }
 
   private step(): void {
     const now = this.opts.now();
-    const stale = this.opts.staleAfter === undefined ? REPORTS_STALE : this.opts.staleAfter;
-    if (stale !== null && this.reportedAt !== null && now - this.reportedAt > stale) this.goOnAlone(now);
     const show = this.opts.show();
     const timeline = show.timelines.find((t) => t.id === this.timelineId);
     if (!timeline) {
@@ -173,6 +198,7 @@ export class TimelineRunner {
     }
     this.name = timeline.name;
     this.duration = timelineLength(timeline);
+    this.soundEnd = timeline.recording?.duration ?? this.duration;
     const pos = this.position(now);
     // The lights run offsetMs later than the sound (earlier when negative): a block at b comes when the sound is at b + offset.
     const t = Math.max(0, pos - timeline.offsetMs / 1000);

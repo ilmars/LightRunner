@@ -128,23 +128,36 @@ test('a page that stops reporting: the runner carries on by itself to the end an
   assert.ok(r.cmds('groupLevel').some((s) => (s.cmd as any).value === 1 && (s.cmd as any).fade === 4));
 });
 
-test('a page that paused and then went away: after a while the runner plays on to the end', () => {
+test('a page that goes away: a playing one plays on by itself, a paused one stays paused', () => {
   const t = christmas();
-  const r = rig(showWith(t));
-  r.start(t);
-  r.run(1);
-  for (let i = 0; i < 8; i++) {
-    r.runner.report(1, false);
-    r.run(0.25);
-  }
-  assert.equal(r.runner.state!.playing, false);
-  assert.equal(r.runner.state!.pos, 1);
-  r.run(30);
-  assert.equal(r.runner.state, null);
-  assert.deepEqual(r.stops, ['end']);
+  const paused = rig(showWith(t));
+  paused.start(t);
+  paused.run(1);
+  paused.runner.report(1, false);
+  paused.run(0.5);
+  paused.runner.release();
+  paused.run(30);
+  assert.equal(paused.runner.state!.playing, false);
+  assert.equal(paused.runner.state!.pos, 1);
+  assert.deepEqual(paused.stops, []);
+  // The page comes back (or another takes it up) and plays: on it goes, to the end.
+  paused.runner.report(1, true);
+  paused.run(10);
+  assert.deepEqual(paused.stops, ['end']);
+
+  const playing = rig(showWith(t));
+  playing.start(t);
+  playing.run(1);
+  playing.runner.report(1, true);
+  playing.runner.release();
+  playing.run(5);
+  assert.equal(playing.runner.state!.playing, true);
+  assert.ok(Math.abs(playing.runner.state!.pos - 6) < 0.01);
+  playing.run(5);
+  assert.deepEqual(playing.stops, ['end']);
 });
 
-test('reports keep the runner on the sound: pause holds it, small differences are eased, a seek jumps', () => {
+test('reports keep the runner on the sound: pause holds it, a page behind is waited for, a page ahead is eased in, a seek jumps', () => {
   const t = christmas();
   const r = rig(showWith(t));
   r.start(t);
@@ -153,12 +166,97 @@ test('reports keep the runner on the sound: pause holds it, small differences ar
   r.runner.report(1, false);
   r.run(1);
   assert.equal(r.runner.state!.pos, 1);
-  // Playing again, slightly behind: eased, not jumped.
-  r.runner.report(0.95, true);
-  assert.ok(r.runner.state!.pos > 0.95 && r.runner.state!.pos < 1);
-  // A seek far ahead: jumps.
+  // Playing again, slightly behind: the lights hold at 1 (never step back) until the page has caught up.
+  r.runner.report(0.8, true);
+  assert.equal(r.runner.state!.pos, 1);
+  r.run(0.1);
+  assert.equal(r.runner.state!.pos, 1);
+  r.run(0.15);
+  assert.ok(Math.abs(r.runner.state!.pos - 1.05) < 1e-6, `${r.runner.state!.pos}`);
+  // Slightly ahead: eased towards it.
+  const at = r.runner.state!.pos;
+  r.runner.report(at + 0.2, true);
+  assert.ok(r.runner.state!.pos > at && r.runner.state!.pos < at + 0.2);
+  // A seek far ahead jumps, and so does one far back.
   r.runner.report(6, true);
   assert.equal(r.runner.state!.pos, 6);
+  r.runner.report(2, true);
+  assert.equal(r.runner.state!.pos, 2);
+});
+
+test('a page a little behind never takes the lights back: time only goes forward, so the blocks keep their rise', () => {
+  const t = christmas();
+  const r = rig(showWith(t));
+  r.start(t);
+  // The page runs 0.2 s behind the server's clock all the way, reporting 4 times a second.
+  for (let i = 0; i < 16; i++) {
+    r.run(0.25);
+    r.runner.report(Math.max(0, r.time - 0.2), true);
+  }
+  // The front wash's block at 3 came with its rise, not the 1 s of a jump.
+  assert.deepEqual(r.cmds('groupPreset', 'front-wash').map((s) => s.cmd), [{ type: 'groupPreset', group: 'front-wash', preset: 'front-warm', fade: 2 }]);
+  assert.ok(r.sent.every((s) => (s.cmd as any).fade !== 1), 'no jump fades');
+});
+
+test('the recording played out: the runner goes on by itself so the later lights still come, then stops', () => {
+  // The lights run 0.4 s later than the sound; the last block (everything full) is at 10, the recording 10 s long.
+  const t = christmas({ offsetMs: 400, recording: { id: 'r', name: 'r.wav', duration: 10, loudness: '', peaks: '' } });
+  const r = rig(showWith(t));
+  r.start(t);
+  for (let i = 0; i < 48 && r.runner.running; i++) {
+    r.run(0.25);
+    r.runner.report(Math.min(10, r.time), r.time < 10);
+  }
+  // The page stopped at 10 (its end) and keeps saying so; the lights went on to 10 + 0.4 and full came.
+  assert.deepEqual(r.stops, ['end']);
+  assert.ok(r.cmds('groupLevel').some((s) => (s.cmd as any).value === 1 && (s.cmd as any).fade === 4));
+
+  // An audio file a few milliseconds shorter than the recording's length: the same.
+  const short = christmas({ recording: { id: 'r', name: 'r.wav', duration: 10, loudness: '', peaks: '' } });
+  const s = rig(showWith(short));
+  s.start(short);
+  s.run(9.99);
+  s.runner.report(9.996, false);
+  s.run(0.05);
+  assert.deepEqual(s.stops, ['end']);
+
+  // A pause well before the end is a pause.
+  const p = rig(showWith(short));
+  p.start(short);
+  p.run(5);
+  p.runner.report(5, false);
+  p.run(10);
+  assert.deepEqual(p.stops, []);
+});
+
+test('every change fades over at least 0.5 s, even with no rise', () => {
+  const t = timeline('snap', [
+    { group: STAGE_LAYER, blocks: [{ id: 'dark', start: 0, what: { kind: 'dark' } }] },
+    { group: 'front-wash', blocks: [{ id: 'c', start: 1, rise: 0.1, what: { kind: 'colour', preset: 'front-warm', level: 1 } }] },
+  ]);
+  const r = rig(showWith(t));
+  r.start(t);
+  r.run(1.1);
+  assert.ok(r.sent.length >= 6);
+  for (const s of r.sent) assert.equal((s.cmd as any).fade, 0.5, JSON.stringify(s.cmd));
+});
+
+test('after the engine restarts, the runner sends the whole state again over 1 s', () => {
+  const t = christmas();
+  const r = rig(showWith(t));
+  r.start(t);
+  r.run(6);
+  const n = r.sent.length;
+  r.runner.resync();
+  r.run(0.025);
+  const again = r.sent.slice(n).map((s) => s.cmd);
+  assert.deepEqual(new Set(again.map((c) => (c as any).group)), new Set(LIGHT_GROUPS));
+  for (const c of again) assert.equal((c as any).fade, 1);
+  assert.ok(again.some((c) => c.type === 'groupPreset' && c.group === 'back-wall' && c.preset === 'back-amber'));
+  // Then nothing until the next block.
+  const m = r.sent.length;
+  r.run(1);
+  assert.equal(r.sent.length, m);
 });
 
 test('Start in the middle and every seek fade over 1 s; time passing uses the rise (RF 3)', () => {
@@ -313,11 +411,11 @@ test('a look on Whole stage is sent as the look itself; a group block at the sam
   ]);
 });
 
-test('a look with no rise fades with its own fade time', () => {
+test('a look with no rise fades over the shortest fade', () => {
   const t = timeline('song', [{ group: STAGE_LAYER, blocks: [{ id: 'w', start: 0, what: { kind: 'look', look: 'worship' } }] }]);
   const r = rig(showWith(t));
   r.start(t);
-  assert.deepEqual(r.sent.map((s) => s.cmd), [{ type: 'look', id: 'worship' }]);
+  assert.deepEqual(r.sent.map((s) => s.cmd), [{ type: 'look', id: 'worship', fade: 0.5 }]);
 });
 
 test('an effect is sent as the group\'s effect, with the block\'s own speed when it has one', () => {
@@ -539,23 +637,146 @@ test('server: the page that started it goes away; the server carries on to the e
   q.ws.close();
 }));
 
-test('server: a paused page stays paused while it is there; when it goes the timeline plays on to the end', () => withApp(async (app) => {
+test('server: a paused page that drops stays paused; the page back on a new connection takes it up again', () => withApp(async (app) => {
+  await withTimelines(app, long());
+  const p = await page(app);
+  const watcher = await page(app);
+  await waitFor(p.state);
+  assert.equal(await p.timeline({ type: 'timelineStart', id: 'long', at: 0 }), null);
+  p.report('long', 5, false);
+  await waitFor(() => watcher.state()?.timeline?.pos === 5 && watcher.state().timeline.playing === false, 2000, 'paused at 5');
+  // A Wi-Fi blip: the socket goes.
+  p.ws.terminate();
+  await sleep(400);
+  assert.equal(watcher.state().timeline.playing, false);
+  assert.equal(watcher.state().timeline.pos, 5);
+  // Back on a new connection, it reports again: its reports count.
+  const back = await page(app);
+  back.report('long', 5, true);
+  await waitFor(() => watcher.state()?.timeline?.playing === true, 2000, 'playing again');
+  back.report('long', 20, false);
+  await waitFor(() => watcher.state()?.timeline?.pos === 20, 2000, 'the new page moves it');
+  // While it is there, another page's reports don't.
+  const other = await page(app);
+  other.report('long', 40, true);
+  await sleep(200);
+  assert.equal(watcher.state().timeline.pos, 20);
+  for (const x of [back, other, watcher]) x.ws.close();
+}));
+
+test('server: a playing page that drops: the timeline plays on to the end', () => withApp(async (app) => {
   await withTimelines(app, shortA());
   const p = await page(app);
   const q = await page(app);
   await waitFor(p.state);
   assert.equal(await p.timeline({ type: 'timelineStart', id: 'a', at: 0 }), null);
-  p.report('a', 0.1, false);
-  await waitFor(() => q.state()?.timeline?.playing === false, 2000, 'paused');
-  const held = q.state().timeline.pos;
-  // Longer than the runner's own report timeout: the page is still there (its reports may be slowed in a background tab).
-  await sleep(2300);
-  assert.equal(q.state().timeline.playing, false);
-  assert.equal(q.state().timeline.pos, held);
+  p.report('a', 0.05, true);
   p.ws.close();
-  await waitFor(() => q.state()?.timeline?.playing === true, 2000, 'playing on by itself');
+  await sleep(200);
+  assert.equal(q.state().timeline?.playing, true);
   await waitFor(() => q.state()?.timeline === null, 3000, 'the end');
   q.ws.close();
+}));
+
+test('server: after the engine restarts, the live timeline sends its whole state again and its follows go on', () => withApp(async (app) => {
+  const loudness = Buffer.from(Array(25 * 60).fill(128)).toString('base64');
+  await withTimelines(app, timeline('w', [
+    { group: STAGE_LAYER, blocks: [{ id: 'd', start: 0, rise: 0.2, what: { kind: 'dark' } }] },
+    { group: 'back-wall', blocks: [{ id: 'b', start: 0.1, rise: 0.2, what: { kind: 'colour', preset: 'back-amber', level: 1 } }] },
+    { group: 'audience', blocks: [{ id: 'f', start: 0.1, what: { kind: 'follow', low: 0, high: 1 } }] },
+  ], { recording: { id: 'r', name: 'r.wav', duration: 60, loudness, peaks: '' } }));
+  const sent: StageCommand[] = [];
+  const follows: [string, number | null][] = [];
+  const realCommand = app.quietStageCommand.bind(app);
+  app.quietStageCommand = (cmd) => {
+    sent.push(cmd);
+    return realCommand(cmd);
+  };
+  const realFollow = app.followLevel.bind(app);
+  app.followLevel = (group, value) => {
+    follows.push([group, value]);
+    realFollow(group, value);
+  };
+  const p = await page(app);
+  await waitFor(p.state);
+  assert.equal(await p.timeline({ type: 'timelineStart', id: 'w', at: 0 }), null);
+  await waitFor(() => p.state()?.groups['back-wall'].preset === 'back-amber', 2000, 'amber');
+  await sleep(200);
+  const n = sent.length;
+  const old = (app as any).worker;
+  await old.terminate();
+  await waitFor(() => (app as any).worker !== old && sent.length >= n + 4, 3000, 'the whole state again');
+  const again = sent.slice(n);
+  for (const c of again) assert.equal((c as any).fade, 1, JSON.stringify(c));
+  assert.ok(again.some((c) => c.type === 'groupPreset' && c.group === 'back-wall' && c.preset === 'back-amber'));
+  const f = follows.length;
+  await sleep(200);
+  assert.ok(follows.slice(f).filter(([g, v]) => g === 'audience' && v !== null).length >= 4, 'follows go on');
+  assert.equal(p.state().timeline?.id, 'w');
+  p.ws.close();
+}));
+
+test('server: Go from Prepare and Back to saved stop the live timeline', () => withApp(async (app) => {
+  await withTimelines(app, long());
+  const p = await page(app);
+  const tab = await page(app);
+  await waitFor(p.state);
+  assert.equal(await p.timeline({ type: 'timelineStart', id: 'long', at: 0 }), null);
+  await waitFor(() => p.state()?.timeline, 2000, 'running');
+  assert.equal(await tab.send({ type: 'backToLook' }), null);
+  await waitFor(() => p.state()?.timeline === null, 2000, 'Back to saved stops it');
+  assert.equal(await p.timeline({ type: 'timelineStart', id: 'long', at: 0 }), null);
+  await waitFor(() => p.state()?.timeline, 2000, 'running again');
+  assert.equal(await tab.send({ type: 'blindStart' }), null);
+  await sleep(300);
+  assert.equal(p.state().timeline?.id, 'long', 'Prepare alone does not stop it');
+  assert.equal(await tab.send({ type: 'draft', cmd: { type: 'groupLevel', group: 'pulpit', value: 0.3 } }), null);
+  assert.equal(await tab.send({ type: 'blindGo' }), null);
+  await waitFor(() => p.state()?.timeline === null, 2000, 'Go stops it');
+  p.ws.close();
+  tab.ws.close();
+}));
+
+test('server: a Prepare Start that fails changes nothing; a live Start cut short says so', () => withApp(async (app) => {
+  await withTimelines(app, long());
+  const p = await page(app);
+  const watcher = await page(app);
+  await waitFor(p.state);
+  assert.equal(await p.timeline({ type: 'timelineStart', id: 'long', at: 0 }), null);
+  await waitFor(() => watcher.state()?.timeline, 2000, 'running');
+  // An unknown timeline in Prepare: no draft, and the live one still follows this page.
+  assert.match(await p.timeline({ type: 'timelineStart', id: 'nope', at: 0, prepare: true }) ?? '', /no timeline/i);
+  assert.equal(app.drafts, 0);
+  p.report('long', 30, false);
+  await waitFor(() => watcher.state()?.timeline?.pos === 30, 2000, 'still this page\'s');
+  // Every draft taken: refused, and the same.
+  const others = await Promise.all(Array.from({ length: 6 }, () => page(app)));
+  for (const o of others) assert.equal(await o.send({ type: 'blindStart' }), null);
+  assert.match(await p.timeline({ type: 'timelineStart', id: 'long', at: 0, prepare: true }) ?? '', /too many/i);
+  p.report('long', 31, false);
+  await waitFor(() => watcher.state()?.timeline?.pos === 31, 2000, 'still this page\'s after the refusal');
+  for (const o of others) o.ws.close();
+  // A Blackout that comes while a live Start is still on its way: the Start says it did not happen.
+  p.ws.send(JSON.stringify({ type: 'timelineStart', id: 'long', at: 0, ref: 'start' }));
+  assert.equal(await p.send({ type: 'blackout' }), null);
+  const reply = await waitFor(() => p.seen.find((m) => m.type === 'result' && m.ref === 'start'), 3000, 'the Start\'s reply');
+  assert.match(reply.error, /did not start/);
+  await sleep(100);
+  assert.equal(watcher.state().timeline, null);
+  p.ws.close();
+  watcher.ws.close();
+}));
+
+test('server: Blackout in Prepare stops that page\'s Prepare timeline', () => withApp(async (app) => {
+  await withTimelines(app, long());
+  const prep = await page(app);
+  await waitFor(prep.state);
+  assert.equal(await prep.timeline({ type: 'timelineStart', id: 'long', at: 0, prepare: true }), null);
+  await waitFor(() => prep.draft()?.timeline?.id === 'long', 2000, 'running in Prepare');
+  // The draft refuses Blackout itself (it is the real stage's), but the Prepare timeline stops.
+  assert.match(await prep.send({ type: 'draft', cmd: { type: 'blackout' } }) ?? '', /real stage/);
+  await waitFor(() => prep.draft()?.timeline === null, 2000, 'stopped');
+  prep.ws.close();
 }));
 
 test('server: Blackout, Basic lights and a song from another tablet stop it; its own Dark and a quick change do not', () => withApp(async (app) => {
