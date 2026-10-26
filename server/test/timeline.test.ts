@@ -804,6 +804,34 @@ test('server: Blackout, Basic lights and a song from another tablet stop it; its
   other.ws.close();
 }));
 
+test('server: a timeline started in Blackout takes the stage from there: no Blackout left, and a look block brings nothing back', () => withApp(async (app) => {
+  // The back wall amber at 0, Worship (no pulpit in it) at 1.5.
+  await withTimelines(app, timeline('bo', [
+    { group: STAGE_LAYER, blocks: [{ id: 'bo-look', start: 1.5, rise: 0.2, what: { kind: 'look', look: 'worship' } }] },
+    { group: 'back-wall', blocks: [{ id: 'bo-back', start: 0, rise: 0.2, what: { kind: 'colour', preset: 'back-amber', level: 1 } }] },
+    { group: 'audience', blocks: [{ id: 'bo-end', start: 60, what: { kind: 'full' } }] },
+  ]));
+  const p = await page(app);
+  await waitFor(p.state);
+  // The Sermon lights the pulpit; then Blackout.
+  assert.equal(await p.send({ type: 'look', id: 'word', fade: 0 }), null);
+  await waitFor(() => p.state()?.groups.pulpit.preset === 'pulpit-on', 2000, 'the pulpit on');
+  assert.equal(await p.send({ type: 'blackout' }), null);
+  await waitFor(() => p.state()?.look === 'blackout', 2000, 'Blackout');
+  const pulpit = p.state().groups.pulpit.preset;
+  assert.equal(await p.timeline({ type: 'timelineStart', id: 'bo', at: 0 }), null);
+  // At once the operator page no longer says Blackout, with no light moved but the timeline's own.
+  await waitFor(() => p.state()?.timeline?.id === 'bo' && p.state().look !== 'blackout', 1000, 'Blackout gone');
+  assert.equal(p.state().look, null);
+  assert.equal(p.state().groups.pulpit.preset, pulpit);
+  await waitFor(() => p.state()?.look === 'worship', 3000, 'the look block');
+  await sleep(100);
+  // Worship doesn't list the pulpit: it stays as Blackout left it, never back to the Sermon's.
+  assert.equal(p.state().groups.pulpit.preset, pulpit);
+  assert.equal(p.state().timeline?.id, 'bo');
+  p.ws.close();
+}));
+
 test('server: a device (HTTP) Blackout stops it too', () => withApp(async (app) => {
   await withTimelines(app, long());
   const p = await page(app);

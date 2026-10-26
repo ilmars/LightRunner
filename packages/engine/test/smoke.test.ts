@@ -116,6 +116,35 @@ test('the smoke slider is refused during Blackout', () => {
   assert.equal(e.apply({ type: 'groupLevel', group: 'haze', value: 0.8 }, 5), null, 'after Blackout it works again');
 });
 
+test('leaving Blackout quietly (a live timeline starts): no light moves, no Undo step, and a later look does not bring the old stage back', () => {
+  const e = new Engine(hazeShow());
+  e.apply({ type: 'look', id: 'word', fade: 0 }, 0);
+  e.frame(1);
+  assert.ok(lightOf(e, 'pulpit').i > 0.9, 'the Sermon lights the pulpit');
+  e.apply({ type: 'blackout' }, 1);
+  e.frame(4);
+  const dark = e.fixtureIds().map((f) => lightOf(e, f).i);
+  const undo = e.liveState(4, 'ok').canUndo;
+  assert.equal(e.leaveBlackout(4), true);
+  assert.equal(e.leaveBlackout(4), false, 'only once');
+  const state = e.liveState(4, 'ok');
+  assert.equal(state.look, null);
+  assert.equal(state.canUndo, undo, 'no Undo step');
+  for (const t of [4.1, 5, 8]) {
+    e.frame(t);
+    assert.deepEqual(e.fixtureIds().map((f) => lightOf(e, f).i), dark, `nothing moved at ${t}`);
+  }
+  assert.equal(e.runtime().beforeBlackout ?? null, null);
+  // The smoke slider works again.
+  assert.equal(e.apply({ type: 'groupLevel', group: 'haze', value: 0.8 }, 8), null);
+  // Worship doesn't list the pulpit: it stays dark (Blackout's memory is gone).
+  e.apply({ type: 'look', id: 'worship', fade: 0 }, 9);
+  assert.notEqual(e.liveState(12, 'ok').groups.pulpit!.preset, 'pulpit-on');
+  // Not in Blackout: nothing happens.
+  assert.equal(e.leaveBlackout(12), false);
+  assert.equal(e.liveState(12, 'ok').look, 'worship');
+});
+
 test('a Puff held longer than 15 s ends by itself', () => {
   const e = new Engine(hazeShow());
   e.apply({ type: 'look', id: 'worship' }, 0);

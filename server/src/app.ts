@@ -1196,6 +1196,9 @@ export class App {
     });
     this.liveTimeline = entry;
     this.log(`Timeline "${fresh.name}" started at ${at.toFixed(1)} s`);
+    // Started in Blackout, it takes the stage from there: Blackout ends without a light moving (before the timeline's
+    // first change), so a look block never brings back the stage from before Blackout and the pages stop showing it.
+    this.post({ type: 'leaveBlackout' });
     entry.runner.start(fresh, at, before, ++this.timelineRuns);
     this.timelineTimerFits();
     this.publishState();

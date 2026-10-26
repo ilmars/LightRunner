@@ -619,6 +619,19 @@ export class Engine {
   }
 
   /**
+   * Blackout ends without a light moving (a live timeline starts and takes the stage from there): there is no current
+   * look, and Blackout's memory of the stage before it is forgotten, so a later look doesn't bring those groups back;
+   * the groups stay dark until something sets them, and the smoke slider works again. No Undo step. Returns whether
+   * the stage was in Blackout.
+   */
+  leaveBlackout(_now: number): boolean {
+    if (this.look !== BLACKOUT) return false;
+    this.look = null;
+    this.beforeBlackout = null;
+    return true;
+  }
+
+  /**
    * Apply a command. Returns an error message, or null when it worked.
    * With `quiet` (the timeline's own changes) no Undo step is added.
    */

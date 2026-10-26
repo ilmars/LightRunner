@@ -139,6 +139,9 @@ port.on('message', (msg: ToWorker) => {
     case 'follow':
       engine?.setLevelFollow(msg.group, msg.value, clock() / 1000);
       break;
+    case 'leaveBlackout':
+      if (engine?.leaveBlackout(clock() / 1000)) stateDue = true;
+      break;
     case 'snapshot':
       if (engine) post({ type: 'snapshot', id: msg.id, runtime: engine.runtime(), clock: engine.stageClock() });
       break;

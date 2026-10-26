@@ -15,6 +15,8 @@ export type ToWorker =
   | { type: 'command'; id: number; cmd: StageCommand; quiet?: boolean }
   /** What a light group's level follows (a voice, 0–1), or null for nothing; the engine smooths it. */
   | { type: 'follow'; group: string; value: number | null }
+  /** A live timeline starts: Blackout (if on) ends without a light moving (Engine.leaveBlackout). */
+  | { type: 'leaveBlackout' }
   | { type: 'snapshot'; id: number }
   | { type: 'timing'; id: number; reset?: boolean }
   | { type: 'stop' };
