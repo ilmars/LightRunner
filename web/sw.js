@@ -4,7 +4,7 @@
 // (the page then shows its own "Connection lost" banner). Only page files are touched: never /api/, the WebSocket
 // or anything else the server answers live. Raise the number in CACHE when this file's rules change; the old
 // cache is deleted when the new worker takes over.
-const CACHE = 'light-runner-pages-v1';
+const CACHE = 'light-runner-pages-v2';
 const PAGE_FILES = ['.html', '.js', '.css', '.svg', '.png', '.woff2', '.webmanifest', '.txt'];
 // Kept from the first visit, so the installed app still opens its page (and says the connection is lost).
 const SHELL = [

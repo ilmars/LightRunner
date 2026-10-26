@@ -45,6 +45,9 @@
 .time { flex: none; font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 600; min-width: 128px; text-align: right; }
 .time small { color: var(--ds-muted); font-weight: 400; font-size: 14px; }
 .start-btn, .stop-btn { min-width: 96px; }
+/* The lights were taken over while the recording plays on: a quiet line under the bar, and the way back. */
+.taken-over { flex: 1 1 100%; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--ds-muted-on); font-size: 13px; }
+.taken-over span { flex: 1 1 320px; }
 /* Prepare: Start is violet, so it is clear the real lights won't move. */
 body.prepare .start-btn { background: var(--ds-violet-tint); box-shadow: inset 0 0 0 1px var(--ds-violet-edge); }
 .start-btn[aria-pressed="true"] { background: var(--ds-selected); box-shadow: inset 0 0 0 1px var(--ds-edge-held); }
@@ -115,6 +118,13 @@ body.prepare .playhead::before { border-top-color: var(--ds-violet); }
 
 /* ---- The stage view ---- */
 .stage-card { display: flex; align-items: center; gap: 14px; padding: 8px 14px 8px 8px; }
+/* In Prepare it stays in sight beside the waveform: a small glass panel kept at the bottom right while the page scrolls. */
+body.prepare .stage-card {
+  position: sticky; bottom: max(10px, env(safe-area-inset-bottom)); z-index: 6; align-self: flex-end; padding: 8px;
+  background: var(--ds-glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  box-shadow: inset 0 0 0 1px var(--ds-violet-edge), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
+}
+body.prepare .stage-card .legend { display: none; }
 .stage { flex: none; width: 300px; height: 124px; background: #04070D; border-radius: 12px; display: block; }
 .stage-card .legend { margin: 0; max-width: 640px; font-size: 13px; }
 

@@ -58,13 +58,23 @@ const prep = { on: false, startRef: null, state: null, visual: null };
 /**
  * What this page plays: the timeline it pressed Start on (`id`), in Prepare or Live. Only then does it report the
  * recording's position (an idle page never does: it would take over the live timeline). `confirmed` once the server
- * said yes; `audio` when the recording plays here (else the page counts the time itself from basePos at baseAt);
- * `ended` once the recording played out (the server goes on by itself to the timeline's end).
+ * said yes, with the Start's run `number` (a later Start anywhere has another); `audio` when the recording plays here
+ * (else the page counts the time itself from basePos at baseAt); `ended` once the recording played out (the server goes
+ * on by itself to the timeline's end); `detached` when Blackout, Basic lights, a song or a Stop elsewhere took the
+ * lights: the sound plays on (cutting the spoken word mid-service is worse) and Lights follow again starts them again.
+ * `following`: the Start of Lights follow again is on its way. `recDuration`: the recording's length.
  */
 let run = idleRun();
 function idleRun() {
-  return { id: null, prepare: false, startRef: null, confirmed: false, audio: false, ended: false, basePos: 0, baseAt: 0, length: 0 };
+  return {
+    id: null, prepare: false, startRef: null, confirmed: false, number: null, audio: false, ended: false, detached: false,
+    following: false, basePos: 0, baseAt: 0, length: 0, recDuration: 0,
+  };
 }
+/** A Stop pressed while the connection was down: sent when it is back (and the live timeline isn't shown as someone else's meanwhile). */
+let pendingStop = null;
+/** Where the recording was when it stalled for data (the lights hold there until it plays on), or null. */
+let stalledAt = null;
 
 /** The play position when no recording can be asked (none, or missing on this Mac). */
 let playPos = 0;
@@ -177,7 +187,14 @@ function connect() {
   ws.binaryType = 'arraybuffer';
   socket = ws;
   ws.onopen = () => {
-    if (socket === ws) setConnected(true);
+    if (socket !== ws) return;
+    setConnected(true);
+    // A Stop pressed while the connection was down goes now (only for that Start: a later one stays).
+    if (pendingStop) {
+      ws.send(JSON.stringify({ type: 'timelineStop', id: pendingStop.id, ...(pendingStop.run !== null ? { run: pendingStop.run } : {}), ref: ++ref }));
+      const sent = pendingStop;
+      setTimeout(() => { if (pendingStop === sent) pendingStop = null; }, 5000);
+    }
   };
   ws.onclose = () => {
     if (socket !== ws) return;
@@ -245,6 +262,13 @@ function setConnected(on) {
     showProblem($('status'), null);
     // The server dropped this page's draft with the connection, and its Prepare timeline with it.
     if (run.prepare) endRun('The connection was lost, so Prepare stopped. The real lights were not changed.');
+    // A Start that was never answered: not started (Start shows again).
+    else if (run.id && !run.confirmed && run.startRef !== null && !run.following) endRun('The connection was lost before the timeline started. Press Start again.');
+    else if (run.following) {
+      run.following = false;
+      run.startRef = null;
+      run.detached = true;
+    }
     if (prep.on) setPrepare(false, false);
   }
   // A live timeline this page plays goes on by itself meanwhile; back on, the reports take it up again.
@@ -273,10 +297,20 @@ function onResult(msg) {
   if (msg.ref !== null && msg.ref === run.startRef) {
     run.startRef = null;
     if (msg.error) {
-      endRun(msg.error);
+      if (run.following) {
+        // Lights follow again didn't work: the sound plays on, the lights stay where they are.
+        run.following = false;
+        run.detached = true;
+        renderTransport();
+        toast(msg.error, true);
+      } else {
+        endRun(msg.error);
+      }
       return;
     }
+    run.following = false;
     run.confirmed = true;
+    run.number = typeof msg.run === 'number' ? msg.run : null;
     report();
     renderTransport();
     return;
@@ -284,18 +318,55 @@ function onResult(msg) {
   if (msg.error) toast(msg.error, true);
 }
 
-/** The live state: a live timeline this page played that stopped (Blackout, a song, Stop elsewhere, its end) ends here too. */
+/** True when `tl` (a live or draft state's timeline) is this page's own run. */
+const isOurs = (tl) => Boolean(tl && tl.id === run.id && (run.number === null || tl.run === run.number));
+
+/**
+ * The live state. The live timeline this page plays isn't there any more: another Start (on any page) replaced it, so
+ * the sound stops here; or it came to its end; or Blackout, Basic lights, a song or a Stop elsewhere took the lights,
+ * and then the recording plays on and the page offers Lights follow again.
+ */
 function onLiveState() {
   const tl = liveState?.timeline ?? null;
-  if (run.id && !run.prepare && run.confirmed && tl?.id !== run.id) endRun(stoppedWords());
+  if (pendingStop && !(tl && tl.id === pendingStop.id && (pendingStop.run === null || tl.run === pendingStop.run))) pendingStop = null;
+  if (run.id && !run.prepare && run.confirmed && !run.detached && !isOurs(tl)) {
+    if (tl) endRun('Another page started a timeline, so this one stopped here.');
+    else if (run.ended || position() >= run.length - 0.5) endRun(null);
+    else if (run.audio) detach();
+    else endRun(stoppedWords());
+  } else if (run.id && !run.prepare && run.detached && tl) {
+    // Taken over, and then a timeline was started elsewhere: that one has the lights; the sound here stops.
+    endRun('Another page started a timeline, so this one stopped here.');
+  }
   renderList();
   renderTransport();
 }
 
-/** This page's draft: the same for its Prepare timeline. */
+/** The lights were taken over while the recording plays here: it plays on; no more reports until Lights follow again. */
+function detach() {
+  run.detached = true;
+  run.confirmed = false;
+  run.number = null;
+  renderTransport();
+}
+
+/** Lights follow again: the live timeline starts again where the recording is. */
+function followAgain() {
+  if (!run.id || !run.detached || run.following) return;
+  const r = send({ type: 'timelineStart', id: run.id, at: audio.currentTime || 0 });
+  if (r === null) return;
+  run.detached = false;
+  run.following = true;
+  run.startRef = r;
+  run.ended = false;
+  renderTransport();
+}
+$('followBtn').addEventListener('click', followAgain);
+
+/** This page's draft: the same for its Prepare timeline (it stops here, whatever stopped it). */
 function onDraftState() {
   const tl = prep.state?.timeline ?? null;
-  if (run.id && run.prepare && run.confirmed && tl?.id !== run.id) endRun(stoppedWords());
+  if (run.id && run.prepare && run.confirmed && !isOurs(tl)) endRun(stoppedWords());
 }
 
 /** What to say when the server stopped what this page played: nothing when it came to its end. */
@@ -354,7 +425,8 @@ async function start() {
   const withAudio = usableAudio(t);
   let at = position();
   if (at >= length - 0.05) at = 0;
-  run = { ...idleRun(), id: t.id, prepare: prep.on, audio: withAudio, length, basePos: at, baseAt: performance.now() / 1000 };
+  run = { ...idleRun(), id: t.id, prepare: prep.on, audio: withAudio, length, recDuration: t.recording?.duration ?? 0, basePos: at, baseAt: performance.now() / 1000 };
+  stalledAt = null;
   if (withAudio) {
     // Asked for at once, in the tap: Safari plays sound only when a tap starts it.
     audio.currentTime = at;
@@ -382,7 +454,13 @@ async function start() {
 function stop() {
   const t = current();
   if (run.id) {
-    if (connected) socket.send(JSON.stringify({ type: 'timelineStop', id: run.id, prepare: run.prepare, ref: ++ref }));
+    // Taken over (detached): the lights aren't this page's any more; only the sound stops.
+    if (!run.detached || run.following) {
+      const msg = { type: 'timelineStop', id: run.id, prepare: run.prepare, ...(run.number !== null ? { run: run.number } : {}) };
+      if (connected) socket.send(JSON.stringify({ ...msg, ref: ++ref }));
+      // Not lost while the connection is down: sent when it is back (a Prepare one went with the connection).
+      else if (!run.prepare) pendingStop = { id: run.id, run: run.number };
+    }
     endRun(null);
   } else if (t && liveState?.timeline?.id === t.id) {
     // Running live from another page: Stop works from here too.
@@ -402,18 +480,43 @@ function endRun(message) {
   if (message) toast(message, true);
 }
 
-/** Tells the server where the recording is: only while this page plays a recording it started. */
+/**
+ * Where the recording is, for the server. At its end, the later of the browser's length and the one worked out when it
+ * was added (an mp3's length can differ a little between browsers): the server must see it reached the end.
+ */
+const soundPos = () => (audio.ended ? Math.max(audio.duration || 0, run.recDuration) : audio.currentTime || 0);
+
+/** Tells the server where the recording is: only while this page plays a recording it started (and the lights are its). */
 function report() {
-  if (!run.id || !run.confirmed || !run.audio || run.ended || !connected) return;
-  socket.send(JSON.stringify({ type: 'timelinePosition', id: run.id, pos: audio.currentTime || 0, playing: !audio.paused }));
+  if (!run.id || !run.confirmed || !run.audio || run.ended || run.detached || !connected) return;
+  // Stalled for data: the lights hold until the sound plays on (they never run ahead and then step back).
+  if (stalledAt !== null && audio.currentTime > stalledAt + 0.25) stalledAt = null;
+  const playing = !audio.paused && stalledAt === null;
+  socket.send(JSON.stringify({ type: 'timelinePosition', id: run.id, pos: soundPos(), playing, ...(run.number !== null ? { run: run.number } : {}) }));
 }
 setInterval(report, REPORT_EVERY);
 for (const e of ['play', 'pause', 'seeked']) audio.addEventListener(e, report);
+for (const e of ['waiting', 'stalled']) {
+  audio.addEventListener(e, () => {
+    if (!run.id || audio.paused) return;
+    stalledAt = audio.currentTime;
+    report();
+  });
+}
+audio.addEventListener('playing', () => {
+  stalledAt = null;
+  report();
+});
 audio.addEventListener('ended', () => {
   if (!run.id || !run.audio) return;
+  // Taken over: nothing more to follow; the page is idle.
+  if (run.detached) {
+    endRun(null);
+    return;
+  }
   // Played out: the server goes on by itself to the timeline's end (later blocks, the lights' offset).
   if (run.confirmed && connected) {
-    socket.send(JSON.stringify({ type: 'timelinePosition', id: run.id, pos: audio.duration || run.length, playing: false }));
+    socket.send(JSON.stringify({ type: 'timelinePosition', id: run.id, pos: soundPos(), playing: false, ...(run.number !== null ? { run: run.number } : {}) }));
   }
   run.ended = true;
   renderTransport();
@@ -448,7 +551,7 @@ function seek(t) {
   if (run.id && !run.audio) {
     run.basePos = Math.min(t, run.length);
     run.baseAt = performance.now() / 1000;
-    if (run.confirmed && connected) socket.send(JSON.stringify({ type: 'timelinePosition', id: run.id, pos: run.basePos, playing: true }));
+    if (run.confirmed && connected) socket.send(JSON.stringify({ type: 'timelinePosition', id: run.id, pos: run.basePos, playing: true, ...(run.number !== null ? { run: run.number } : {}) }));
   }
   tick();
 }
@@ -633,13 +736,22 @@ function setSaveNote(text, bad = false) {
 window.addEventListener('beforeunload', (e) => {
   if (dirty.size || saving) e.preventDefault();
 });
-// Leaving the page (or the iPad putting it away): what is waiting is sent at once.
+// Leaving the page (or the iPad putting it away): what is waiting is sent at once. The browser lets a request outlive the
+// page (keepalive) only up to 64 KB in all; a bigger one goes as a plain request (it may not finish). Each stays waiting
+// until the server has it, in case the page comes back.
 window.addEventListener('pagehide', () => {
-  for (const id of dirty) {
+  let kept = 0;
+  for (const id of [...dirty]) {
     const t = timelines.find((x) => x.id === id);
-    if (t) fetch('/api/timeline', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(t), keepalive: true }).catch(() => {});
+    if (!t) continue;
+    const body = JSON.stringify(t);
+    const size = new TextEncoder().encode(body).length;
+    const keepalive = kept + size <= 60 * 1024;
+    if (keepalive) kept += size;
+    fetch('/api/timeline', { method: 'PUT', headers: { 'content-type': 'application/json' }, body, keepalive })
+      .then((res) => { if (res.ok) dirty.delete(id); })
+      .catch(() => {});
   }
-  dirty.clear();
 });
 
 // ---- The recording: decoded here, its loudness and waveform worked out once, the file kept on the Mac ----
@@ -730,21 +842,37 @@ async function addRecording(file) {
   toast('Recording added');
 }
 
-/** Decodes an audio file with Web Audio (the promise form, or the callbacks older Safari has). */
+/**
+ * Decodes an audio file with Web Audio, resampled to 8 kHz: plenty for the waveform and the loudness, and an iPad keeps a
+ * long recording in memory (a full-rate stereo decode of 15 minutes is over 300 MB). The length stays exact. A browser
+ * that won't make an 8 kHz context gets 22.05 kHz, then its own rate. The promise form, or the callbacks older Safari has.
+ */
 async function decodeFile(file) {
   const data = await file.arrayBuffer();
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  const ctx = new Ctx();
+  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  let ctx = null;
+  for (const rate of [8000, 22050]) {
+    try {
+      ctx = new Offline(1, 1, rate);
+      break;
+    } catch {
+      // this browser won't take that rate
+    }
+  }
+  const own = !ctx;
+  if (own) ctx = new (window.AudioContext || window.webkitAudioContext)();
   try {
     return await new Promise((resolve, reject) => {
       const p = ctx.decodeAudioData(data, resolve, reject);
       if (p && typeof p.then === 'function') p.then(resolve, reject);
     });
   } finally {
-    try {
-      await ctx.close();
-    } catch {
-      // already closed
+    if (own) {
+      try {
+        await ctx.close();
+      } catch {
+        // already closed
+      }
     }
   }
 }
@@ -802,10 +930,12 @@ function renderTransport() {
   $('addRec').disabled = adding;
   $('len').textContent = `/ ${formatLength(lengthOf(t))}`;
   const mine = run.id === t.id;
-  $('startBtn').setAttribute('aria-pressed', String(mine));
+  $('startBtn').setAttribute('aria-pressed', String(mine && !run.detached));
   $('startBtn').disabled = adding || mine || !connected;
   const liveHere = liveState?.timeline?.id === t.id;
   $('stopBtn').disabled = !mine && !liveHere;
+  $('takenOver').hidden = !(mine && (run.detached || run.following));
+  $('followBtn').disabled = run.following || !connected;
   renderRunNote();
 }
 
@@ -814,9 +944,10 @@ function renderRunNote() {
   const note = $('runNote');
   let text = '';
   const live = liveState?.timeline ?? null;
-  if (run.id && run.prepare) text = run.ended ? 'Prepare: the recording has played; the stage view runs on to the end.' : 'Prepare: playing on the stage view only. The real lights stay as they are.';
+  if (run.id && (run.detached || run.following)) text = '';
+  else if (run.id && run.prepare) text = run.ended ? 'Prepare: the recording has played; the stage view runs on to the end.' : 'Prepare: playing on the stage view only. The real lights stay as they are.';
   else if (run.id) text = run.ended ? 'Live: the recording has played; the lights run on to the end.' : run.audio ? 'Live: the lights follow this recording.' : 'Live: the lights run on Light Runner\'s clock.';
-  else if (live && t && live.id === t.id) text = `Running live from another page · ${formatTime(livePos())}`;
+  else if (live && t && live.id === t.id) text = pendingStop?.id === live.id ? 'Stopping…' : `Running live from another page · ${formatTime(livePos())}`;
   else if (live) text = `"${live.name}" is running live.`;
   else if (prep.on) text = 'Prepare: Start plays it on the stage view only.';
   if (note.textContent !== text) note.textContent = text;
