@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { changesBetween, followAt, mergeClock, parseShow, stateAt, type Show, type Timeline, type TimelineBlock } from '../src/index.ts';
+import { changesBetween, followAt, mergeClock, parseShow, stateAt, type Show, type Timeline, TimelineBlock } from '../src/index.ts';
 
 const rigJson = () => JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8'));
 const rig = (): Show => parseShow(rigJson());
@@ -196,8 +196,16 @@ test('stateAt: the state is the blocks laid on top of each other, so a seek give
   const at = (t: number) => stateAt(tl, show, t).get(FRONT)!;
   // A level changes only the level: the colour stays.
   assert.deepEqual(at(25), { block: tl.layers[1]!.blocks[1]!.id, preset: warm, level: 0.9, rise: 3, started: 20 });
-  // An effect replaces the colour, and keeps the level.
-  assert.deepEqual(at(35), { block: tl.layers[1]!.blocks[2]!.id, effect: { preset: 'front-lights-wave', speed: { seconds: 6 } }, level: 0.9, rise: 2, started: 30 });
+  // An effect replaces the colour, and sets the level: its own, else full (so an effect after a Dark is seen).
+  assert.deepEqual(at(35), { block: tl.layers[1]!.blocks[2]!.id, effect: { preset: 'front-lights-wave', speed: { seconds: 6 } }, level: 1, rise: 2, started: 30 });
+  const dim = timeline([
+    { group: '*', blocks: [block(0, { kind: 'dark' })] },
+    { group: FRONT, blocks: [block(8, { kind: 'effect', preset: 'front-lights-wave' }), block(20, { kind: 'effect', preset: 'front-lights-wave', level: 0.4 })] },
+  ]);
+  assert.equal(stateAt(dim, show, 10).get(FRONT)!.level, 1, 'after Whole stage Dark, an effect without a level is at full');
+  assert.equal(stateAt(dim, show, 25).get(FRONT)!.level, 0.4, 'an effect at its own level');
+  assert.ok(TimelineBlock.safeParse({ id: 'x', start: 0, what: { kind: 'effect', preset: 'a' } }).success, 'an effect block without a level (made before) is still valid');
+  assert.ok(!TimelineBlock.safeParse({ id: 'x', start: 0, what: { kind: 'effect', preset: 'a', level: 2 } }).success);
   // A colour replaces the effect.
   assert.deepEqual(at(45), { block: tl.layers[1]!.blocks[3]!.id, preset: cold, level: 0.3, rise: 0, started: 40 });
   // Full keeps the colour; it is the stage's block that is newest.

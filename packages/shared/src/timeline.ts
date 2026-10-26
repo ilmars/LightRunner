@@ -59,7 +59,7 @@ function stepFor(block: TimelineBlock, group: string, onStage: boolean, show: Sh
     }
     case 'colour': return onStage || !preset(what.preset) ? undefined : { colour: what.preset, level: what.level };
     case 'level': return onStage ? undefined : { level: what.level };
-    case 'effect': return onStage || !preset(what.preset) ? undefined : { effect: { preset: what.preset, ...(what.speed ? { speed: what.speed } : {}) } };
+    case 'effect': return onStage || !preset(what.preset) ? undefined : { effect: { preset: what.preset, ...(what.speed ? { speed: what.speed } : {}) }, level: what.level ?? 1 };
     case 'follow': {
       if (onStage || (what.preset !== undefined && !preset(what.preset))) return undefined;
       return { ...(what.preset !== undefined ? { colour: what.preset } : {}), follow: { low: Math.min(what.low, what.high), high: Math.max(what.low, what.high) } };
@@ -73,7 +73,8 @@ interface Laid { block: TimelineBlock; step: Step }
  * For every light group, the state at time t (seconds): the blocks on the group's own layer and on the Whole
  * stage layer that have started and not ended, laid on top of each other in the order they started (the group's
  * own layer after the stage's at the same moment):
- * - a colour sets the colour and level (and drops an effect), an effect sets the effect (and drops the colour);
+ * - a colour sets the colour and level (and drops an effect), an effect sets the effect and its level (full when it
+ *   has none) and drops the colour;
  * - a level, Dark (0) and Everything full (1) set the level and keep the colour;
  * - a look sets what it holds for the group (its colour or effect, and level);
  * - Follow the voice rides the level, and ends when its block ends or another block sets the level.

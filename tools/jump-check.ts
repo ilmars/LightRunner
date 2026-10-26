@@ -223,7 +223,8 @@ function randomTimeline(): Timeline {
       else if (r < 0.55) what = { kind: 'level', level: rand() };
       else if (r < 0.75 && effects.length) {
         const speed = rand() < 0.5 ? undefined : rand() < 0.5 ? { beats: pick([0.5, 1, 2, 4, 8]) } : { seconds: 1 + rand() * 20 };
-        what = { kind: 'effect', preset: pick(effects).id, ...(speed ? { speed } : {}) };
+        const level = rand() < 0.5 ? undefined : rand();
+        what = { kind: 'effect', preset: pick(effects).id, ...(speed ? { speed } : {}), ...(level !== undefined ? { level } : {}) };
       } else {
         const low = rand(), high = rand();
         what = { kind: 'follow', low, high, ...(rand() < 0.3 && colours.length ? { preset: pick(colours).id } : {}) };

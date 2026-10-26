@@ -371,8 +371,8 @@ export const BlockWhat = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('colour'), preset: id, level: unit }),
   /** A level, keeping the group's colour. */
   z.object({ kind: z.literal('level'), level: unit }),
-  /** An effect of the group, at its own speed when given. */
-  z.object({ kind: z.literal('effect'), preset: id, speed: EffectSpeed.optional() }),
+  /** An effect of the group, at its own speed when given, at a level (full when not given). */
+  z.object({ kind: z.literal('effect'), preset: id, speed: EffectSpeed.optional(), level: unit.optional() }),
   /** A song's own colours and levels (on the stage layer). */
   z.object({ kind: z.literal('look'), look: id }),
   /** Level 0, keeping the colour. */
