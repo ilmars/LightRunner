@@ -80,8 +80,15 @@ const sameItem = (kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show) 
  * What our fixture becomes when the file's one is taken. Its shape on the stage plan belongs to this
  * installation, like a group's smoke setting: a file whose fixture has no shape, angle or reach (every
  * Lightkey project) keeps ours, and an outline keeps its size too, since a size from Lightkey means a line.
+ * Where it hangs (Hangs on) is kept on its own the same way: a file that doesn't say keeps ours.
  */
 function takenFixture(ours: Fixture, theirs: Fixture): Fixture {
+  const out = takenShape(ours, theirs);
+  if (out.hangs === undefined && ours.hangs !== undefined) return { ...out, hangs: ours.hangs };
+  return out;
+}
+
+function takenShape(ours: Fixture, theirs: Fixture): Fixture {
   if (theirs.shape !== undefined || theirs.angle !== undefined || theirs.reach !== undefined) return theirs;
   const kept: Partial<Fixture> = { shape: ours.shape, angle: ours.angle, reach: ours.reach };
   if (ours.shape === 'outline') Object.assign(kept, { w: ours.w, h: ours.h });
@@ -91,6 +98,11 @@ function takenFixture(ours: Fixture, theirs: Fixture): Fixture {
     else Object.assign(out, { [k]: v });
   }
   return out;
+}
+
+/** What our fixture type becomes when the file's one is taken: the LEDs it has are kept when the file doesn't say (every Lightkey project). */
+function takenProfile(ours: Profile, theirs: Profile): Profile {
+  return theirs.leds === undefined && ours.leds !== undefined ? { ...theirs, leds: ours.leds } : theirs;
 }
 
 /** "colour 8 (Zils)": a shared colour, numbered from 1, with the names of the colours that point to it. */
@@ -113,6 +125,7 @@ function describe(kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show):
       const pa = a as Profile, pb = b as Profile;
       if (pa.channels.length !== pb.channels.length) out.push(`${pa.channels.length} → ${pb.channels.length} channels`);
       else if (!same(pa.channels, pb.channels)) out.push('channel layout changed');
+      if (pa.leds !== pb.leds) out.push(`LEDs ${pa.leds ?? 'none'} → ${pb.leds ?? 'none'}`);
       break;
     }
     case 'fixture': {
@@ -121,6 +134,7 @@ function describe(kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show):
       if (fa.universe !== fb.universe || fa.address !== fb.address) out.push(`address ${fa.universe}/${fa.address} → ${fb.universe}/${fb.address}`);
       if (fa.x !== fb.x || fa.y !== fb.y || fa.w !== fb.w || fa.h !== fb.h) out.push('moved on the stage plan');
       if (fa.shape !== fb.shape || fa.angle !== fb.angle || fa.reach !== fb.reach) out.push('changed on the stage plan');
+      if (fa.hangs !== fb.hangs) out.push(`hangs on ${fa.hangs ?? 'guessed'} → ${fb.hangs ?? 'guessed'}`);
       if (fa.gamma !== fb.gamma) out.push('dimming curve changed');
       if (!!fa.reversed !== !!fb.reversed) out.push(fb.reversed ? 'reversed on' : 'reversed off');
       break;
@@ -195,8 +209,9 @@ export function diffShows(current: Show, incoming: Show, scope: Scope = 'all'): 
     };
     for (const [id, file] of next) {
       const a = now.get(id);
-      // What taking it would give: for a fixture, the file's one with our shape where the file has none.
-      const b = a && kind === 'fixture' ? takenFixture(a as Fixture, file as Fixture) : file;
+      // What taking it would give: for a fixture, the file's one with our shape and Hangs on where the file has none;
+      // for a type, with our LEDs where the file has none.
+      const b = !a ? file : kind === 'fixture' ? takenFixture(a as Fixture, file as Fixture) : kind === 'profile' ? takenProfile(a as Profile, file as Profile) : file;
       if (!a) items.push({ kind, id, change: 'added', name: label(b, incoming), details: [] });
       else if (!sameItem(kind, a, b, current, incoming)) items.push({ kind, id, change: 'changed', name: label(b, incoming), details: describe(kind, a, b, current, incoming) });
     }
@@ -230,7 +245,10 @@ export function applyPicks(current: Show, incoming: Show, picks: Pick[]): Show {
     if (!item) throw new Error(`the file has no ${p.kind} "${p.id}"`);
     const k = items.findIndex((x) => x.id === p.id);
     if (k >= 0) {
-      const taken = structuredClone(p.kind === 'fixture' ? takenFixture(items[k] as Fixture, item as Fixture) : item);
+      const taken = structuredClone(
+        p.kind === 'fixture' ? takenFixture(items[k] as Fixture, item as Fixture)
+          : p.kind === 'profile' ? takenProfile(items[k] as Profile, item as Profile) : item,
+      );
       // A smoke group stays a smoke group (and a light group a light group), whatever the file says.
       if (p.kind === 'group') (taken as Group).kind = (items[k] as Group).kind;
       items[k] = taken;

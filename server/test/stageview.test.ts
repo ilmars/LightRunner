@@ -3,10 +3,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { parseShow } from '../../packages/shared/src/index.ts';
+import { App } from '../src/app.ts';
 import { operatorLayout } from '../src/layout.ts';
 import { copyOf } from '../../web/patch/types.js';
 import { PLAN_ASPECT, barEnds } from '../../web/shared/stage.js';
@@ -463,4 +465,57 @@ test('a lit pool among dark ones keeps its own strength; dimmer neighbours share
   // The answer goes into `out` when one is given.
   const out = new Array(pools.length);
   assert.equal(sharedStrengths(pools, overlaps, lit, out), out);
+});
+
+test('a show saved with Hangs on and LEDs reads back whole, in the show and in the layout', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'light-runner-stageview-'));
+  const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'server/seed/demo-show.json'), webDir: join(root, 'web'), log: () => {} });
+  const call = async (method: string, path: string, body?: unknown) => {
+    const res = await fetch(`http://127.0.0.1:${app.port}${path}`, {
+      method,
+      headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    return { status: res.status, body: (await res.json()) as any };
+  };
+  try {
+    await app.start();
+    await call('PUT', '/api/settings', { output: { kind: 'none' } });
+    // The church show, which has both on its lights and bars.
+    assert.equal((await call('PUT', '/api/show', readJson('shows/stage-l1.json'))).status, 200);
+    const show = (await call('GET', '/api/show')).body;
+    const user = show.fixtures.find((f: any) => f.id === 'b1');
+    assert.equal(user.hangs, 'truss');
+    const own = show.profiles.find((p: any) => p.id === user.profile);
+    assert.equal(own.leds, 6);
+    const edited = {
+      ...show,
+      profiles: show.profiles.map((p: any) => (p.id === own.id ? { ...p, leds: 12 } : p)),
+      fixtures: show.fixtures.map((f: any) => (f.id === user.id ? { ...f, hangs: 'stand' } : f)),
+    };
+    assert.equal((await call('PUT', '/api/show?source=patch', edited)).status, 200);
+    const back = (await call('GET', '/api/show')).body;
+    assert.equal(back.profiles.find((p: any) => p.id === own.id).leds, 12);
+    assert.equal(back.fixtures.find((f: any) => f.id === user.id).hangs, 'stand');
+    assert.equal(back.fixtures.find((f: any) => f.id === 'b2').hangs, 'truss', 'the others are as they were');
+    const layout = (await call('GET', '/api/layout')).body;
+    const seen = layout.fixtures.find((f: any) => f.id === user.id);
+    assert.equal(seen.hangs, 'stand');
+    assert.equal(seen.leds, 12);
+    // Taking either away again leaves a show without the fields, and the layout says null.
+    const bare = {
+      ...back,
+      profiles: back.profiles.map(({ leds: _l, ...p }: any) => p),
+      fixtures: back.fixtures.map(({ hangs: _h, ...f }: any) => f),
+    };
+    assert.equal((await call('PUT', '/api/show?source=patch', bare)).status, 200);
+    const gone = (await call('GET', '/api/layout')).body.fixtures.find((f: any) => f.id === user.id);
+    assert.deepEqual([gone.hangs, gone.leds], [null, null]);
+    // A number that is not a whole 1 to 512 is refused.
+    const bad = { ...bare, profiles: bare.profiles.map((p: any) => (p.id === own.id ? { ...p, leds: 513 } : p)) };
+    assert.notEqual((await call('PUT', '/api/show?source=patch', bad)).status, 200);
+  } finally {
+    await app.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

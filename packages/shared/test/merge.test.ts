@@ -309,3 +309,50 @@ test('timelines are compared and taken like the other items, and removing what t
   const after = applyPicks(withTl, gone, picks);
   assert.deepEqual(after.timelines, withTl.timelines);
 });
+
+test('Hangs on and LEDs set up here are kept when the file has none (a Lightkey project): nothing is listed, nothing is lost', () => {
+  const current = rig();
+  assert.ok(current.fixtures.every((f) => f.hangs), 'the church show says where every light hangs');
+  assert.ok(current.profiles.some((p) => p.leds), 'and how many LEDs its bars have');
+  // What Lightkey gives: the same rig without either.
+  const incoming = rig();
+  for (const f of incoming.fixtures) delete f.hangs;
+  for (const p of incoming.profiles) delete p.leds;
+  assert.deepEqual(diffShows(current, incoming), [], 'no fixture and no type is listed as changed');
+  // A real change to a light still takes its Hangs on and LEDs along with it unchanged.
+  incoming.fixtures.find((f) => f.id === 'b3')!.address = 300;
+  incoming.profiles.find((p) => p.id === current.fixtures.find((f) => f.id === 'b3')!.profile)!.channels.pop();
+  const items = diffShows(current, incoming);
+  assert.deepEqual(items.find((i) => i.id === 'b3')?.details, ['address 1/48 → 1/300']);
+  const typeId = current.fixtures.find((f) => f.id === 'b3')!.profile;
+  const type = items.find((i) => i.kind === 'profile' && i.id === typeId);
+  assert.ok(type && type.details.every((d) => !d.includes('LEDs')), 'the type differs in its channels only');
+  const out = applyPicks(current, incoming, [
+    { kind: 'fixture', id: 'b3', change: 'changed' },
+    { kind: 'profile', id: typeId, change: 'changed' },
+  ]);
+  assert.equal(out.fixtures.find((f) => f.id === 'b3')!.hangs, current.fixtures.find((f) => f.id === 'b3')!.hangs);
+  assert.equal(out.profiles.find((p) => p.id === typeId)!.leds, current.profiles.find((p) => p.id === typeId)!.leds);
+});
+
+test('a file that says where a light hangs or how many LEDs it has is compared, described and taken', () => {
+  const current = rig();
+  const sixbar = current.fixtures.find((f) => f.id === 'b1')!;
+  assert.equal(sixbar.hangs, 'truss');
+  const incoming = rig();
+  incoming.fixtures.find((f) => f.id === 'b1')!.hangs = 'stand';
+  incoming.profiles.find((p) => p.id === sixbar.profile)!.leds = 8;
+  const items = diffShows(current, incoming);
+  assert.deepEqual(items.find((i) => i.kind === 'fixture' && i.id === 'b1')?.details, ['hangs on truss → stand']);
+  assert.deepEqual(items.find((i) => i.kind === 'profile' && i.id === sixbar.profile)?.details, ['LEDs 6 → 8']);
+  const out = applyPicks(current, incoming, [
+    { kind: 'fixture', id: 'b1', change: 'changed' },
+    { kind: 'profile', id: sixbar.profile, change: 'changed' },
+  ]);
+  assert.equal(out.fixtures.find((f) => f.id === 'b1')!.hangs, 'stand');
+  assert.equal(out.profiles.find((p) => p.id === sixbar.profile)!.leds, 8);
+  // Both ways: a file that has them where this show has none is a change too.
+  const bare = rig();
+  delete bare.fixtures.find((f) => f.id === 'b1')!.hangs;
+  assert.deepEqual(diffShows(bare, incoming).find((i) => i.id === 'b1')?.details, ['hangs on guessed → stand']);
+});
