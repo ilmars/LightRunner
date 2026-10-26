@@ -59,7 +59,7 @@ body.prepare .start-btn[aria-pressed="true"] { background: rgba(161, 147, 242, 0
 .lanes-card { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
 .lanes-card .bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .lanes-card .bar .grow { flex: 1; }
-.run-note { color: var(--ds-muted); font-size: 13px; }
+.run-note { color: var(--ds-muted); font-size: 13px; flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-note.prep { color: var(--ds-violet); }
 .zoom { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--ds-r-tile); background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge); color: var(--ds-muted); font-size: 13px; }
 .zoom button { width: 44px; min-height: 44px; border: 0; border-radius: 9px; background: transparent; color: var(--ds-muted); font: inherit; font-size: 20px; cursor: pointer; }
@@ -76,6 +76,12 @@ body.prepare .start-btn[aria-pressed="true"] { background: rgba(161, 147, 242, 0
 .lane-label small { color: var(--ds-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lane-label.rec { height: 70px; border-top: 0; }
 .lane-label.missing b { color: var(--ds-warn-text); }
+/* A layer's name chooses the layer (＋ Block, Remove layer). */
+button.lane-label {
+  width: 100%; margin: 0; padding-left: 8px; border: 0; border-top: 1px solid var(--ds-edge); border-radius: 0; background: transparent;
+  color: var(--ds-text); font: inherit; text-align: left; cursor: pointer;
+}
+button.lane-label.sel { background: var(--ds-tile-fill-on); box-shadow: inset 2px 0 0 var(--ds-accent); }
 
 /* The lanes scroll sideways (a finger or a trackpad); the ruler and the waveform stay put and are drawn for what is in view. */
 .lanes { position: relative; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: rgba(148, 163, 184, 0.25) transparent; }
@@ -84,15 +90,25 @@ body.prepare .start-btn[aria-pressed="true"] { background: rgba(161, 147, 242, 0
 .ruler { height: 24px; cursor: pointer; touch-action: none; }
 .wave { height: 70px; cursor: pointer; }
 .rows { position: relative; }
-.row-lane { position: relative; height: var(--row-h); border-top: 1px solid var(--ds-edge); }
+/* A finger scrolls the layers sideways; a tap chooses or adds; only the chosen block (and its grips) can be dragged. */
+.row-lane { position: relative; height: var(--row-h); border-top: 1px solid var(--ds-edge); touch-action: manipulation; }
+.row-lane.sel { background: rgba(67, 137, 232, 0.05); }
 .block {
   position: absolute; top: 7px; height: 40px; min-width: 4px; padding: 4px 8px; border-radius: var(--ds-r-small); overflow: hidden;
   font-size: 12px; line-height: 1.2; white-space: nowrap; color: var(--ds-text); background: rgba(148, 163, 184, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10); user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 .block small { display: block; color: rgba(227, 232, 240, 0.7); font-size: 11px; }
 .block .label { position: relative; }
+.block .name { display: flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; }
+.block .dot { flex: none; width: 9px; height: 9px; border-radius: 50%; opacity: 0.85; }
+.block.sel { box-shadow: inset 0 0 0 2px var(--ds-accent); touch-action: none; z-index: 2; cursor: grab; }
 .block.missing { color: var(--ds-warn-text); box-shadow: inset 0 0 0 1px var(--ds-warn-edge); background: var(--ds-warn-tint); }
+.block.missing.sel { box-shadow: inset 0 0 0 2px var(--ds-warn); }
+/* The chosen block's edges: a 44 px handle each, drawn as a small grip. */
+.grip { position: absolute; top: 7px; width: 44px; height: 40px; margin-left: -22px; z-index: 3; touch-action: none; cursor: ew-resize; }
+.grip::after { content: ""; position: absolute; left: 19px; top: 11px; width: 6px; height: 18px; border-radius: 3px; background: var(--ds-muted-on); opacity: 0.85; box-shadow: 0 0 0 1px rgba(9, 15, 28, 0.7); }
+body.dragging, body.dragging .block, body.dragging .row-lane { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
 /* The rise: a dark fade at the front of the block. */
 .block .ramp { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, rgba(9, 15, 28, 0.85), transparent); }
 .marker-lines { position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none; }
@@ -107,6 +123,33 @@ body.prepare .start-btn[aria-pressed="true"] { background: rgba(161, 147, 242, 0
 body.prepare .playhead { background: var(--ds-violet); }
 body.prepare .playhead::before { border-top-color: var(--ds-violet); }
 .legend { color: var(--ds-muted); font-size: 12px; line-height: 1.45; margin: 4px 0 0; }
+
+/* ＋ Layer is a menu that looks like the quiet buttons beside it. */
+select.add-layer { appearance: none; -webkit-appearance: none; padding: 0 14px; text-align: center; }
+select.add-layer:disabled { opacity: 0.4; }
+
+/* ---- The chosen block ---- */
+.block-card { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+.block-card .bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 44px; }
+.block-card .bar .grow { flex: 1; }
+.insp { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 14px; align-items: start; }
+.insp .f { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.insp .f.wide { grid-column: span 2; }
+.insp .f-label { font-size: 12px; color: var(--ds-muted); }
+.insp .f-hint { font-size: 11px; color: var(--ds-muted); line-height: 1.3; }
+.insp .ds-field { font-size: 15px; width: 100%; min-width: 0; }
+.insp .what { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.insp .what select { flex: 1 1 0; min-width: 0; }
+.insp .what select:first-child:not(:only-child) { flex: 0 1 auto; max-width: 48%; }
+.insp .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; opacity: 0.85; }
+.insp .dot.none { box-shadow: inset 0 0 0 1px var(--ds-edge); }
+.insp .num { display: flex; align-items: center; gap: 6px; }
+.unit { color: var(--ds-muted); font-size: 14px; flex: none; }
+.hint.warn { color: var(--ds-warn-text); }
+
+/* Lights earlier / later, beside the name. */
+.offset-field { flex: 0 0 auto; }
+.offset-field .ds-field { width: 110px; flex: none; }
 
 /* ---- Markers ---- */
 .marker-list { display: flex; flex-direction: column; gap: 6px; }
@@ -127,6 +170,11 @@ body.prepare .stage-card {
 body.prepare .stage-card .legend { display: none; }
 .stage { flex: none; width: 300px; height: 124px; background: #04070D; border-radius: 12px; display: block; }
 .stage-card .legend { margin: 0; max-width: 640px; font-size: 13px; }
+/* Hide / Show: folded away, only the button stays (in Prepare a small one at the bottom right). */
+.stage-toggle { order: 3; flex: none; align-self: flex-start; }
+body.stage-hidden .stage, body.stage-hidden .stage-card .legend { display: none; }
+body.stage-hidden .stage-card { padding: 2px; }
+body.stage-hidden:not(.prepare) .stage-card { align-self: flex-start; }
 
 /* ---- An iPad, and narrower ---- */
 @media (max-width: 1100px) {

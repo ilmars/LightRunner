@@ -5,10 +5,11 @@
 
 import { NOT_ANSWERING, request, showProblem, startClock } from '/shared/appbar.js';
 import { LOUDNESS_RATE, decodeBytes, encodeBytes, loudnessTrack, peaksTrack } from '/shared/loudness.js';
-import { drawStagePicture } from '/shared/stagedraw.js';
+import { drawStagePicture, shown } from '/shared/stagedraw.js';
 import {
-  MAX_ZOOM, barsFor, blockSpans, fitZoom, followScroll, formatLength, formatTime, markerRows, mixToMono, newTimeline,
-  nextMarkerText, normalisePeaks, rulerTicks, timeToX, viewLength, xToTime, zoomed,
+  MAX_ZOOM, MIN_RISE, barsFor, blockMissing, blockSpans, clampEnd, dragBlock, fitZoom, followScroll, formatLength, formatRise,
+  formatTime, hitTest, lookFade, markerRows, mixToMono, moveBlock, newBlockId, newBlockStart, newTimeline, nextMarkerText,
+  normalisePeaks, parseTime, riseAfterLookChange, rulerTicks, shownRise, timeToX, viewLength, withGroupLayers, xToTime, zoomed,
 } from './model.js';
 
 const $ = (id) => document.getElementById(id);
@@ -155,13 +156,18 @@ $('logout').addEventListener('click', async () => {
 
 async function load() {
   const [full, list] = await Promise.all([call('GET', '/api/show'), call('GET', '/api/recordings')]);
-  show = { groups: full.groups ?? [], looks: full.looks ?? [], presets: full.presets ?? [] };
+  show = showParts(full);
   timelines = full.timelines ?? [];
   onMac = new Set(list.map((r) => r.id));
   $('main').hidden = false;
   const wanted = decodeURIComponent(location.hash.slice(1));
   open(timelines.some((t) => t.id === wanted) ? wanted : timelines[0]?.id ?? null);
   if (!socket) connect();
+}
+
+/** What the page needs of the show: its groups, looks and colours (the timelines are kept apart, as edited here). */
+function showParts(full) {
+  return { groups: full.groups ?? [], looks: full.looks ?? [], presets: full.presets ?? [] };
 }
 
 /** The show's groups, looks and colours again (Patch or an operator changed them); the timelines here stay as edited. */
@@ -171,8 +177,9 @@ function refreshShow() {
   refreshTimer = setTimeout(async () => {
     try {
       const full = await call('GET', '/api/show');
-      show = { groups: full.groups ?? [], looks: full.looks ?? [], presets: full.presets ?? [] };
+      show = showParts(full);
       renderLanes();
+      renderDetails();
     } catch {
       // the next change tries again
     }
@@ -593,8 +600,12 @@ function open(id) {
   openId = id;
   const t = current();
   if (t) history.replaceState(null, '', `#${encodeURIComponent(t.id)}`);
-  for (const part of ['transport', 'lanesCard', 'markersCard', 'stageCard', 'openTools']) $(part).hidden = !t;
+  // A timeline made before layers could be removed gets a layer for each light group (saved with the next edit).
+  if (t) withGroupLayers(t, lightGroups().map((g) => g.id));
+  sel = { group: null, block: null };
+  for (const part of ['transport', 'lanesCard', 'blockCard', 'markersCard', 'stageCard', 'openTools']) $(part).hidden = !t;
   $('nameField').value = t?.name ?? '';
+  $('offsetField').value = String(t?.offsetMs ?? 0);
   // Its recording: the waveform and loudness kept with it, the sound from the Mac.
   peaks = t?.recording?.peaks ? decodeBytes(t.recording.peaks) : null;
   loudness = t?.recording?.loudness ? decodeBytes(t.recording.loudness) : null;
@@ -612,6 +623,7 @@ function open(id) {
   renderList();
   renderTransport();
   renderLanes();
+  renderDetails();
   renderMarkers();
   drawStage();
 }
@@ -620,7 +632,7 @@ $('newBtn').addEventListener('click', async () => {
   const names = new Set(timelines.map((t) => t.name));
   let n = timelines.length + 1;
   while (names.has(`Timeline ${n}`)) n++;
-  const t = newTimeline(`Timeline ${n}`, timelines.map((x) => x.id));
+  const t = newTimeline(`Timeline ${n}`, timelines.map((x) => x.id), lightGroups().map((g) => g.id));
   try {
     await waitForSaves();
     await call('PUT', '/api/timeline', t);
@@ -653,6 +665,16 @@ $('nameField').addEventListener('change', () => {
   }
 });
 
+// Lights earlier / later: in milliseconds, −500 to 500 (positive: the lights wait for sound that reaches the room late).
+$('offsetField').addEventListener('change', () => {
+  const t = current();
+  if (!t) return;
+  const v = Number($('offsetField').value);
+  const ms = Number.isFinite(v) && $('offsetField').value.trim() !== '' ? Math.round(Math.min(500, Math.max(-500, v))) : t.offsetMs ?? 0;
+  $('offsetField').value = String(ms);
+  if (ms !== t.offsetMs) edit(null, (tl) => { tl.offsetMs = ms; });
+});
+
 $('deleteBtn').addEventListener('click', async () => {
   const t = current();
   if (!t) return;
@@ -669,6 +691,7 @@ $('deleteBtn').addEventListener('click', async () => {
   }
   const at = timelines.indexOf(t);
   timelines = timelines.filter((x) => x !== t);
+  undoStack = undoStack.filter((s) => s.id !== t.id);
   if (also) await removeRecording(t.recording.id);
   open(timelines[Math.min(at, timelines.length - 1)]?.id ?? null);
   toast('Timeline deleted');
@@ -950,7 +973,10 @@ function renderRunNote() {
   else if (live && t && live.id === t.id) text = pendingStop?.id === live.id ? 'Stopping…' : `Running live from another page · ${formatTime(livePos())}`;
   else if (live) text = `"${live.name}" is running live.`;
   else if (prep.on) text = 'Prepare: Start plays it on the stage view only.';
-  if (note.textContent !== text) note.textContent = text;
+  if (note.textContent !== text) {
+    note.textContent = text;
+    note.title = text;
+  }
   note.classList.toggle('prep', Boolean(run.id && run.prepare) || (!run.id && prep.on));
 }
 
@@ -969,12 +995,24 @@ const ruler = $('ruler');
 const wave = $('wave');
 const playhead = $('playhead');
 
-/** The layers shown: Whole stage, then one per group in the show's order, then any layer whose group is gone. */
+/** The light groups, in the show's order. Smoke groups have no layer yet (Puff blocks come later). */
+const lightGroups = () => show.groups.filter((g) => g.kind !== 'smoke');
+const layerOf = (t, group) => t?.layers.find((l) => l.group === group) ?? null;
+const groupName = (group) => (group === STAGE ? 'Whole stage' : show.groups.find((g) => g.id === group)?.name ?? group);
+const groupGone = (group) => group !== STAGE && !show.groups.some((g) => g.id === group);
+
+/**
+ * The layers shown: Whole stage, then each light group that has a layer, in the show's order, then any layer whose group
+ * is gone (its blocks are skipped; they can be deleted, or the layer removed).
+ */
 function layerRows(t) {
   const rows = [{ group: STAGE, name: 'Whole stage', note: 'every group' }];
-  for (const g of show.groups) rows.push({ group: g.id, name: g.name, note: g.kind === 'smoke' ? 'smoke' : `${g.fixtures.length} ${g.fixtures.length === 1 ? 'light' : 'lights'}` });
+  for (const g of lightGroups()) {
+    if (!layerOf(t, g.id)) continue;
+    rows.push({ group: g.id, name: g.name, note: `${g.fixtures.length} ${g.fixtures.length === 1 ? 'light' : 'lights'}` });
+  }
   for (const layer of t.layers) {
-    if (layer.group !== STAGE && !show.groups.some((g) => g.id === layer.group)) rows.push({ group: layer.group, name: layer.group, note: 'group missing', missing: true });
+    if (groupGone(layer.group)) rows.push({ group: layer.group, name: layer.group, note: 'group missing', missing: true });
   }
   return rows;
 }
@@ -986,78 +1024,746 @@ function renderLanes() {
   const width = lanes.clientWidth || 600;
   if (fitted) view = { pxPerSec: fitZoom(length, width), scroll: 0 };
   track.style.width = `${Math.max(width, length * view.pxPerSec)}px`;
-
-  const labels = [el('div', 'spacer')];
-  const recLabel = el('div', 'lane-label rec');
-  recLabel.append(el('b', null, 'Recording'), el('small', null, t.recording ? t.recording.name : 'none yet'));
-  labels.push(recLabel);
-  const rows = [];
-  for (const row of layerRows(t)) {
-    const label = el('div', `lane-label${row.missing ? ' missing' : ''}`);
-    label.append(el('b', null, row.name), el('small', null, row.note));
-    labels.push(label);
-    const lane = el('div', 'row-lane');
-    const layer = t.layers.find((l) => l.group === row.group);
-    for (const span of blockSpans(layer?.blocks ?? [], length)) lane.append(blockEl(row, span));
-    rows.push(lane);
-  }
-  $('labels').replaceChildren(...labels);
-  $('rows').replaceChildren(...rows);
+  renderRows();
   renderMarkerLines();
   lanes.scrollLeft = view.scroll;
   view.scroll = lanes.scrollLeft;
   drawCanvases();
   updateZoomButtons();
+  renderLayerMenu();
   tick();
 }
 
-/** A block, drawn (Task 6 makes them editable): its words, its colour mixed down, its rise as a dark fade at the front. */
+/** The layer labels and the layers with their blocks (again after every edit, and while a block is dragged). */
+function renderRows() {
+  const t = current();
+  if (!t) return;
+  const length = viewLength(t);
+  const recLabel = el('div', 'lane-label rec');
+  recLabel.append(el('b', null, 'Recording'), el('small', null, t.recording ? t.recording.name : 'none yet'));
+  const labels = [el('div', 'spacer'), recLabel];
+  const rows = [];
+  for (const row of layerRows(t)) {
+    const isSel = sel.group === row.group;
+    const label = el('button', `lane-label${row.missing ? ' missing' : ''}${isSel ? ' sel' : ''}`);
+    label.type = 'button';
+    label.title = `Choose the ${row.name} layer`;
+    label.append(el('b', null, row.name), el('small', null, row.note));
+    label.addEventListener('click', () => select(row.group, null));
+    labels.push(label);
+    const lane = el('div', `row-lane${isSel && !sel.block ? ' sel' : ''}`);
+    lane.dataset.group = row.group;
+    const spans = blockSpans(layerOf(t, row.group)?.blocks ?? [], length);
+    spans.forEach((span, k) => {
+      lane.append(blockEl(row, span));
+      // The chosen block's edges: handles a finger can hold (44 px), drawn as small grips.
+      if (span.block.id === sel.block) {
+        lane.append(gripEl(span.start, 'start'));
+        if (span.block.end !== undefined || k === spans.length - 1) lane.append(gripEl(span.end, 'end'));
+      }
+    });
+    rows.push(lane);
+  }
+  $('labels').replaceChildren(...labels);
+  $('rows').replaceChildren(...rows);
+}
+
+function gripEl(t, part) {
+  const g = el('div', `grip grip-${part}`);
+  // Kept inside the track, so a block that runs to the end doesn't make the layers scroll.
+  const right = parseFloat(track.style.width) || Infinity;
+  g.style.left = `${Math.min(t * view.pxPerSec, right - 22)}px`;
+  g.setAttribute('aria-hidden', 'true');
+  return g;
+}
+
+/** A block: its words, its colour mixed down (darker for a lower level), its rise as a dark fade at the front. */
 function blockEl(row, span) {
   const { block } = span;
   const d = describeBlock(row.group, block);
-  const b = el('div', `block${d.missing ? ' missing' : ''}`);
+  const b = el('div', `block${d.missing ? ' missing' : ''}${block.id === sel.block ? ' sel' : ''}`);
+  b.dataset.id = block.id;
   b.style.left = `${span.start * view.pxPerSec}px`;
   b.style.width = `${Math.max(4, (span.end - span.start) * view.pxPerSec)}px`;
-  if (d.colour && !d.missing) b.style.background = `color-mix(in srgb, ${d.colour} 26%, #141D30)`;
-  if (block.rise > 0) {
-    const ramp = el('div', 'ramp');
-    ramp.style.width = `${Math.min(100, (block.rise / Math.max(0.1, span.end - span.start)) * 100)}%`;
-    b.append(ramp);
+  if (d.fill && !d.missing) b.style.background = d.fill;
+  const ramp = el('div', 'ramp');
+  ramp.style.width = `${Math.min(100, (shownRise(block.rise) / Math.max(0.1, span.end - span.start)) * 100)}%`;
+  b.append(ramp);
+  const label = el('div', 'label');
+  const name = el('span', 'name');
+  if (d.dot && !d.missing) {
+    const dot = el('span', 'dot');
+    dot.style.background = shown(d.dot);
+    name.append(dot);
   }
-  const label = el('div', 'label', d.text);
-  label.append(el('small', null, `${formatTime(block.start)}${block.rise ? ` · rise ${block.rise} s` : ''}`));
+  name.append(d.text);
+  label.append(name, el('small', null, `${formatTime(block.start)} · rise ${formatRise(block.rise)}`));
   b.append(label);
-  b.title = d.text;
+  b.title = `${d.text}, from ${formatTime(block.start)}`;
   return b;
 }
 
+/**
+ * A colour on a block: a third of it greyed (so a saturated blue or red is quiet), then mixed into the panel's navy at
+ * 8 % to 26 % by level, so no block is bright and a lower level looks darker.
+ */
+const fillOf = (hex, level = 1) => `color-mix(in srgb, color-mix(in srgb, ${shown(hex)} 66%, #8a93a6) ${Math.round(8 + 18 * Math.min(1, Math.max(0, level)))}%, #141D30)`;
+const NEUTRAL = '#cfd6e3';
+const VOICE = '#B0A6F5';
+
+const isEffect = (p) => p.layers?.some((l) => l.kind === 'effect');
+/** A group's colours and effects, as its lists on the operator page have them. */
+const coloursOf = (group) => show.presets.filter((p) => p.group === group && !p.custom && !isEffect(p));
+const effectsOf = (group) => show.presets.filter((p) => p.group === group && !p.custom && isEffect(p));
+const presetOf = (id) => show.presets.find((p) => p.id === id) ?? null;
+const lookOf = (id) => show.looks.find((l) => l.id === id) ?? null;
+
+/** The swatch of a colour or effect: as the operator page shows it (an effect by its first colour). */
+function swatchOf(id) {
+  for (const g of layout?.groups ?? []) {
+    const p = g.presets?.find((x) => x.id === id) ?? g.hidden?.find((x) => x.id === id);
+    if (p) return p.swatch ?? p.effect?.colours?.[0]?.hex ?? null;
+  }
+  const p = presetOf(id);
+  const first = p?.layers?.[0];
+  return p?.swatch ?? first?.colour?.hex ?? first?.colours?.[0]?.hex ?? null;
+}
+
+/** A look's swatch, else the colour of its first group. */
+function lookSwatch(look) {
+  if (look.swatch) return look.swatch;
+  for (const e of look.groups) {
+    const s = swatchOf(e.preset);
+    if (s) return s;
+  }
+  return null;
+}
+
+const pct = (v) => `${Math.round(v * 100)} %`;
+function speedText(speed) {
+  if (!speed) return '';
+  return 'beats' in speed ? `${speed.beats} ${speed.beats === 1 ? 'beat' : 'beats'} a round` : `${speed.seconds} s a round`;
+}
+
+/** How a block is drawn and named: its words, the colour of its dot and its fill, and whether something it needs is gone. */
 function describeBlock(group, block) {
   const what = block.what;
-  const pct = (v) => `${Math.round(v * 100)} %`;
-  const preset = (id) => show.presets.find((p) => p.id === id);
-  const swatch = (id) => {
-    const g = layout?.groups?.find((x) => x.id === group);
-    const p = g?.presets?.find((x) => x.id === id) ?? g?.hidden?.find((x) => x.id === id);
-    return p?.swatch ?? preset(id)?.swatch ?? null;
-  };
+  const missing = blockMissing(group, what, show);
+  const gone = (text) => ({ text, missing: true });
+  if (missing && groupGone(group)) return gone('Group missing');
   switch (what.kind) {
-    case 'dark': return { text: 'Dark', colour: '#05080f' };
-    case 'full': return { text: 'Everything full', colour: '#E3A646' };
-    case 'level': return { text: `Level ${pct(what.level)}` };
+    case 'dark': return { text: 'Dark', fill: '#0b0f18' };
+    case 'full': return { text: 'Everything full', fill: fillOf('#ffd9a8', 1) };
+    case 'level': return missing ? gone('Not for Whole stage') : { text: `Level ${pct(what.level)}`, fill: fillOf(NEUTRAL, what.level) };
     case 'look': {
-      const look = show.looks.find((l) => l.id === what.look);
-      return look ? { text: look.name, colour: look.swatch ?? null } : { text: 'Look missing', missing: true };
+      if (missing) return gone(group === STAGE ? 'Look missing' : 'Look: only on Whole stage');
+      const look = lookOf(what.look);
+      const sw = lookSwatch(look);
+      return { text: look.name, dot: sw, fill: fillOf(sw ?? NEUTRAL, 0.8) };
     }
     case 'colour': {
-      const p = preset(what.preset);
-      return p ? { text: `${p.name} · ${pct(what.level)}`, colour: swatch(what.preset) } : { text: 'Colour missing', missing: true };
+      if (missing) return gone(group === STAGE ? 'Not for Whole stage' : 'Colour missing');
+      const sw = swatchOf(what.preset);
+      return { text: `${presetOf(what.preset).name} · ${pct(what.level)}`, dot: sw, fill: fillOf(sw ?? NEUTRAL, what.level) };
     }
     case 'effect': {
-      const p = preset(what.preset);
-      return p ? { text: `${p.name} (effect)`, colour: swatch(what.preset) } : { text: 'Effect missing', missing: true };
+      if (missing) return gone(group === STAGE ? 'Not for Whole stage' : 'Effect missing');
+      const sw = swatchOf(what.preset);
+      return { text: `${presetOf(what.preset).name} (effect)`, dot: sw, fill: fillOf(sw ?? NEUTRAL, 0.7) };
     }
-    case 'follow': return { text: `Follow the voice · ${pct(what.low)}–${pct(what.high)}`, colour: '#B0A6F5' };
-    default: return { text: 'Block' };
+    case 'follow': {
+      if (missing) return gone(group === STAGE ? 'Not for Whole stage' : 'Follow the voice: colour missing');
+      const sw = what.preset ? swatchOf(what.preset) : null;
+      const colour = what.preset ? ` · ${presetOf(what.preset).name}` : '';
+      return { text: `Follow the voice${colour} · ${Math.round(what.low * 100)}–${pct(what.high)}`, dot: sw ?? VOICE, fill: fillOf(sw ?? VOICE, 0.45) };
+    }
+    default: return gone('Unknown block');
+  }
+}
+
+// ---- Choosing, changing and Undo ----
+
+/** What is chosen: a layer (`group`), and maybe one of its blocks (`block`, an id). */
+let sel = { group: null, block: null };
+
+/** The chosen block and its layer, or null. */
+function chosen(t = current()) {
+  const layer = layerOf(t, sel.group);
+  const block = layer?.blocks.find((b) => b.id === sel.block);
+  return block ? { layer, block } : null;
+}
+
+function select(group, block) {
+  sel = { group, block };
+  renderRows();
+  renderDetails();
+  updateBlockButtons();
+}
+
+/** Changes to the layers and blocks (and Lights earlier / later), newest last; Undo puts the one before back. */
+let undoStack = [];
+let undoKey = null;
+let undoAt = 0;
+
+/** Keeps the open timeline as it is now, for Undo. Edits with the same `key` within 2 s are one step (typing a number). */
+function remember(key) {
+  const t = current();
+  if (!t) return;
+  const now = performance.now();
+  if (key && key === undoKey && now - undoAt < 2000) {
+    undoAt = now;
+    return;
+  }
+  undoKey = key;
+  undoAt = now;
+  undoStack.push({ id: t.id, layers: structuredClone(t.layers), offsetMs: t.offsetMs ?? 0, sel: { ...sel } });
+  if (undoStack.length > 100) undoStack.shift();
+  updateBlockButtons();
+}
+
+/** One edit of the open timeline: remembered for Undo, saved after a pause, drawn again. */
+function edit(key, change) {
+  const t = current();
+  if (!t) return;
+  remember(key);
+  change(t);
+  for (const layer of t.layers) layer.blocks.sort((a, b) => a.start - b.start);
+  scheduleSave(t.id);
+  renderLanes();
+  renderDetails();
+  renderTransport();
+}
+
+function undo() {
+  const t = current();
+  if (!t) return;
+  let k = undoStack.length - 1;
+  while (k >= 0 && undoStack[k].id !== t.id) k--;
+  if (k < 0) return;
+  const [step] = undoStack.splice(k, 1);
+  undoKey = null;
+  t.layers = step.layers;
+  t.offsetMs = step.offsetMs;
+  $('offsetField').value = String(t.offsetMs);
+  sel = step.sel;
+  if (!layerOf(t, sel.group)) sel = { group: null, block: null };
+  else if (sel.block && !chosen(t)) sel.block = null;
+  scheduleSave(t.id);
+  renderLanes();
+  renderDetails();
+  renderTransport();
+}
+$('undoBtn').addEventListener('click', undo);
+
+function updateBlockButtons() {
+  const t = current();
+  $('undoBtn').disabled = !t || !undoStack.some((s) => s.id === t.id);
+  $('addBlockBtn').disabled = !t || !sel.group || groupGone(sel.group);
+}
+
+/** ＋ Layer: a light group whose layer was removed gets it back. */
+function renderLayerMenu() {
+  const t = current();
+  const menu = $('addLayer');
+  if (!t) return;
+  const free = lightGroups().filter((g) => !layerOf(t, g.id));
+  const first = el('option', null, '＋ Layer');
+  first.value = '';
+  menu.replaceChildren(first, ...free.map((g) => {
+    const o = el('option', null, g.name);
+    o.value = g.id;
+    return o;
+  }));
+  menu.value = '';
+  menu.disabled = !free.length;
+  menu.title = free.length ? 'Add back a group\'s layer' : 'Every group has its layer';
+  updateBlockButtons();
+}
+$('addLayer').addEventListener('change', () => {
+  const group = $('addLayer').value;
+  if (!group) return;
+  edit(null, (t) => {
+    t.layers.push({ group, blocks: [] });
+    sel = { group, block: null };
+  });
+});
+
+/** What a new block on a layer is: Everything full on Whole stage; the group's first colour at full on a group. */
+function newWhat(group) {
+  if (group === STAGE) return { kind: 'full' };
+  const colour = coloursOf(group)[0];
+  return colour ? { kind: 'colour', preset: colour.id, level: 1 } : { kind: 'level', level: 1 };
+}
+
+/** The rise a block starts with: a look's or a colour's own fade (what the operator page would use), else 3 s. */
+function riseFor(what) {
+  if (what.kind === 'look') return lookFade(lookOf(what.look), show.presets);
+  if (what.kind === 'colour' || what.kind === 'effect') return Math.max(MIN_RISE, presetOf(what.preset)?.fade ?? 3);
+  if (what.kind === 'follow') return MIN_RISE;
+  return 3;
+}
+
+/** Adds a block at `at` seconds on a layer (snapped to `targets` or a tenth); a block that starts there is chosen instead. */
+function addBlockAt(group, at, targets = []) {
+  const t = current();
+  if (!t || groupGone(group)) return;
+  const blocks = layerOf(t, group)?.blocks ?? [];
+  const start = newBlockStart(blocks, at, targets, view.pxPerSec);
+  if (start === null) {
+    const there = blocks.reduce((best, b) => (!best || Math.abs(b.start - at) < Math.abs(best.start - at) ? b : best), null);
+    if (there) select(group, there.id);
+    return;
+  }
+  const what = newWhat(group);
+  edit(null, (tl) => {
+    let layer = layerOf(tl, group);
+    if (!layer) {
+      layer = { group, blocks: [] };
+      tl.layers.push(layer);
+    }
+    const block = { id: newBlockId(tl), start, rise: riseFor(what), what };
+    layer.blocks.push(block);
+    sel = { group, block: block.id };
+  });
+}
+
+$('addBlockBtn').addEventListener('click', () => {
+  if (sel.group) addBlockAt(sel.group, position());
+});
+
+function deleteChosen() {
+  const c = chosen();
+  if (!c) return;
+  edit(null, () => {
+    c.layer.blocks.splice(c.layer.blocks.indexOf(c.block), 1);
+    sel = { group: sel.group, block: null };
+  });
+  toast('Block deleted. Undo brings it back.');
+}
+
+// ---- Dragging blocks and their edges; a tap chooses a block or adds one ----
+
+const rowsEl = $('rows');
+/** The press on the layers now: where it began, what it is on, and the drag once it is one. */
+let press = null;
+/** The last tap on a layer (a second one close by soon after adds a block there). */
+let lastTap = null;
+
+const trackX = (ev) => ev.clientX - track.getBoundingClientRect().left;
+const isFinger = (ev) => ev.pointerType === 'touch' || ev.pointerType === 'pen';
+
+/** The blocks of a layer as spans, for hit-testing: an end has a handle when it is the block's own, or the last block's. */
+function spansOf(t, group) {
+  const spans = blockSpans(layerOf(t, group)?.blocks ?? [], viewLength(t));
+  return spans.map((s, k) => ({ id: s.block.id, start: s.start, end: s.end, endEdge: s.block.end !== undefined || k === spans.length - 1 }));
+}
+
+/** Where a dragged time snaps to: markers, the play position, the recording's end, other blocks' starts and ends. */
+function snapTargets(t, except) {
+  const out = t.markers.map((m) => m.t);
+  out.push(position());
+  if (t.recording) out.push(t.recording.duration);
+  for (const layer of t.layers) {
+    for (const b of layer.blocks) {
+      if (b.id === except) continue;
+      out.push(b.start);
+      if (b.end !== undefined) out.push(b.end);
+    }
+  }
+  return out;
+}
+
+const hitOpts = (finger) => ({ selected: sel.block, handlePx: finger ? 0 : 12, selectedHandlePx: 44 });
+
+rowsEl.addEventListener('pointerdown', (ev) => {
+  const t = current();
+  const lane = ev.target instanceof Element ? ev.target.closest('.row-lane') : null;
+  if (!t || !lane || (ev.pointerType === 'mouse' && ev.button !== 0) || press) return;
+  // A number or time being typed is taken first (as leaving the field would).
+  if ($('blockBody').contains(document.activeElement)) document.activeElement.blur();
+  const group = lane.dataset.group;
+  const finger = isFinger(ev);
+  const x = trackX(ev);
+  const hit = hitTest(spansOf(t, group), x, view.pxPerSec, hitOpts(finger));
+  // A finger drags only the chosen block (elsewhere it scrolls the layers); a mouse drags any block.
+  const canDrag = Boolean(hit) && !groupGone(group) && (!finger || hit.id === sel.block);
+  press = { id: ev.pointerId, group, x0: ev.clientX, y0: ev.clientY, x, hit, canDrag, finger, moved: false, dragging: false };
+  if (canDrag) {
+    try {
+      rowsEl.setPointerCapture(ev.pointerId);
+    } catch {
+      // a pointer the browser no longer has: the drag still follows it over the layers
+    }
+    if (!finger) ev.preventDefault();
+  }
+});
+
+rowsEl.addEventListener('pointermove', (ev) => {
+  if (!press) {
+    if (ev.pointerType === 'mouse') hoverCursor(ev);
+    return;
+  }
+  if (ev.pointerId !== press.id) return;
+  const dx = ev.clientX - press.x0;
+  if (!press.dragging) {
+    if (Math.hypot(dx, ev.clientY - press.y0) > (press.finger ? 10 : 5)) press.moved = true;
+    if (!press.canDrag || Math.abs(dx) < (press.finger ? 10 : 5)) return;
+    startDrag();
+  }
+  dragTo(dx);
+});
+
+rowsEl.addEventListener('pointerup', (ev) => {
+  if (!press || ev.pointerId !== press.id) return;
+  const p = press;
+  press = null;
+  if (p.dragging) return endDrag();
+  if (!p.moved) tap(p);
+});
+
+rowsEl.addEventListener('pointercancel', (ev) => {
+  if (!press || ev.pointerId !== press.id) return;
+  const p = press;
+  press = null;
+  if (p.dragging) endDrag();
+});
+
+function startDrag() {
+  const t = current();
+  const block = layerOf(t, press.group)?.blocks.find((b) => b.id === press.hit.id);
+  if (!block) {
+    press.canDrag = false;
+    return;
+  }
+  remember(null);
+  press.dragging = true;
+  press.orig = { start: block.start, end: block.end };
+  press.length = viewLength(t);
+  press.targets = snapTargets(t, block.id);
+  sel = { group: press.group, block: block.id };
+  document.body.classList.add('dragging');
+}
+
+function dragTo(dx) {
+  const t = current();
+  const layer = layerOf(t, press.group);
+  const block = layer?.blocks.find((b) => b.id === press.hit.id);
+  if (!block) return;
+  // Worked out from where the block was when the drag began, so snapping never creeps.
+  const blocks = layer.blocks.map((b) => (b === block ? { ...b, start: press.orig.start, end: press.orig.end } : b));
+  const times = dragBlock(blocks, block.id, press.hit.part, dx / view.pxPerSec, { targets: press.targets, pxPerSec: view.pxPerSec, length: press.length });
+  block.start = times.start;
+  if (times.end === undefined) delete block.end;
+  else block.end = times.end;
+  renderRows();
+  renderDetails();
+}
+
+function endDrag() {
+  document.body.classList.remove('dragging');
+  const t = current();
+  if (!t) return;
+  for (const layer of t.layers) layer.blocks.sort((a, b) => a.start - b.start);
+  scheduleSave(t.id);
+  renderLanes();
+  renderDetails();
+  renderTransport();
+}
+
+/** A tap: on a block, chooses it; on empty space, adds a block there; a second tap close by soon after adds one there too. */
+function tap(p) {
+  const t = current();
+  if (!t) return;
+  const at = Math.min(viewLength(t), Math.max(0, p.x / view.pxPerSec));
+  const now = performance.now();
+  const again = lastTap && lastTap.group === p.group && now - lastTap.at < 400 && Math.abs(lastTap.x - p.x) < 24;
+  lastTap = again ? null : { group: p.group, x: p.x, at: now };
+  if (again || !p.hit) return addBlockAt(p.group, at, again ? [] : snapTargets(t, null));
+  if (sel.block !== p.hit.id) select(p.group, p.hit.id);
+}
+
+/** With a mouse: the pointer shows what a press would do (move, an edge, add). */
+function hoverCursor(ev) {
+  const t = current();
+  const lane = ev.target instanceof Element ? ev.target.closest('.row-lane') : null;
+  if (!t || !lane) return;
+  const hit = hitTest(spansOf(t, lane.dataset.group), trackX(ev), view.pxPerSec, hitOpts(false));
+  lane.style.cursor = !hit ? 'copy' : hit.part === 'move' ? 'grab' : 'ew-resize';
+}
+
+// ---- The chosen block's details ----
+
+const KINDS_GROUP = [['colour', 'Colour'], ['level', 'Level'], ['effect', 'Effect'], ['follow', 'Follow the voice']];
+const KINDS_STAGE = [['look', 'Look'], ['dark', 'Dark'], ['full', 'Everything full']];
+const SPEEDS = [{ beats: 1 }, { beats: 2 }, { beats: 4 }, { beats: 8 }, { beats: 16 }, { beats: 32 }, { seconds: 4 }, { seconds: 8 }, { seconds: 15 }, { seconds: 30 }, { seconds: 60 }];
+const speedKey = (s) => (s ? ('beats' in s ? `b${s.beats}` : `s${s.seconds}`) : '');
+
+/** A labelled part of the details: a label over a control, and a hint under it. */
+function part(labelText, control, hint, cls = '') {
+  const f = el('label', `f ${cls}`.trim());
+  f.append(el('span', 'f-label', labelText), control);
+  if (hint) f.append(el('small', 'f-hint', hint));
+  return f;
+}
+
+function option(value, text, selected = false, disabled = false) {
+  const o = el('option', null, text);
+  o.value = value;
+  o.selected = selected;
+  o.disabled = disabled;
+  return o;
+}
+
+function selectEl(options, onChange, label) {
+  const s = el('select', 'ds-field');
+  s.append(...options);
+  s.setAttribute('aria-label', label);
+  s.addEventListener('change', () => onChange(s.value));
+  return s;
+}
+
+/** A number field (a level in %, a rise in seconds) applied when it is left or Enter is pressed. */
+function numberEl(value, { min, max, step, unit, label }, onChange) {
+  const wrap = el('span', 'num');
+  const input = el('input', 'ds-field');
+  input.type = 'number';
+  input.inputMode = 'decimal';
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.value = String(value);
+  input.setAttribute('aria-label', label);
+  input.addEventListener('change', () => {
+    const v = Number(input.value);
+    if (input.value.trim() === '' || !Number.isFinite(v)) {
+      input.value = String(value);
+      return;
+    }
+    const next = Math.min(max, Math.max(min, v));
+    if (next === value) {
+      input.value = String(value);
+      return;
+    }
+    onChange(next);
+  });
+  wrap.append(input, el('span', 'unit', unit));
+  return wrap;
+}
+
+/** A time field (m:ss.t); empty means `emptyMeans` (null when it can't be empty). */
+function timeEl(value, placeholder, label, onChange) {
+  const input = el('input', 'ds-field');
+  input.type = 'text';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.value = value === undefined ? '' : formatTime(value);
+  input.placeholder = placeholder;
+  input.setAttribute('aria-label', label);
+  input.addEventListener('change', () => {
+    const text = input.value.trim();
+    const v = text === '' ? undefined : parseTime(text);
+    if (v === null) {
+      input.value = value === undefined ? '' : formatTime(value);
+      toast('Type a time as m:ss.t, like 1:05.5, or seconds.', true);
+      return;
+    }
+    onChange(v);
+  });
+  return input;
+}
+
+function headButton(text, onClick, cls = 'ds-btn ds-btn--quiet') {
+  const b = el('button', cls, text);
+  b.type = 'button';
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function renderDetails() {
+  const t = current();
+  const head = $('blockHead');
+  const body = $('blockBody');
+  if (!t) return;
+  // Something chosen that is gone (Undo, an edit elsewhere): nothing chosen.
+  if (sel.group && !layerOf(t, sel.group)) sel = { group: null, block: null };
+  if (sel.block && !chosen(t)) sel.block = null;
+  updateBlockButtons();
+  // Built again after every change: the field that had the focus (Enter in it) gets it back.
+  const focused = body.contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
+  buildDetails(t, head, body);
+  if (focused) body.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
+}
+
+function buildDetails(t, head, body) {
+  const c = chosen(t);
+  if (!sel.group) {
+    head.replaceChildren(el('span', 'ds-caps', 'Block'));
+    body.replaceChildren(el('p', 'hint', 'Tap a block to change it. Tap empty space on a layer, or double-tap anywhere on it, to add a block there; or choose a layer by its name and press ＋ Block to add one at the play position.'));
+    return;
+  }
+  const name = groupName(sel.group);
+  if (!c) {
+    const layer = layerOf(t, sel.group);
+    const gone = groupGone(sel.group);
+    const empty = !layer.blocks.length;
+    const remove = headButton('Remove layer', () => {
+      edit(null, (tl) => {
+        tl.layers = tl.layers.filter((l) => l.group !== sel.group);
+        sel = { group: null, block: null };
+      });
+    });
+    remove.disabled = sel.group === STAGE || (!empty && !gone);
+    const add = headButton('＋ Block at play position', () => addBlockAt(sel.group, position()));
+    add.disabled = gone;
+    head.replaceChildren(el('span', 'ds-caps', `Layer · ${name}`), el('span', 'grow'), add, remove);
+    const words = gone
+      ? 'This group was deleted from the show, so its blocks are skipped. Delete them, or remove the layer.'
+      : sel.group === STAGE
+        ? 'Whole stage blocks set every group at once: a look, Dark or Everything full. A later block on a group\'s own layer wins for that group.'
+        : empty ? 'No blocks on this layer. Remove layer takes it away (＋ Layer brings it back).' : 'To remove this layer, delete its blocks first.';
+    body.replaceChildren(el('p', 'hint', words));
+    return;
+  }
+
+  const { layer, block } = c;
+  const what = block.what;
+  const group = layer.group;
+  const onStage = group === STAGE;
+  const gone = groupGone(group);
+  const missing = blockMissing(group, what, show);
+
+  const toPlay = headButton('Start at play position', () => edit(null, () => Object.assign(block, moveBlock(layer.blocks, block.id, position()))));
+  toPlay.disabled = gone;
+  head.replaceChildren(el('span', 'ds-caps', `Block · ${name}`), el('span', 'grow'), toPlay, headButton('Delete', deleteChosen));
+
+  const parts = [];
+  const set = (key, change) => edit(key, () => change(block));
+
+  if (gone) {
+    body.replaceChildren(el('p', 'hint warn', 'This block\'s group was deleted from the show, so it is skipped. Delete it, or remove the layer.'));
+    return;
+  }
+
+  // What: the kind, then which colour, effect or look.
+  const kinds = onStage ? KINDS_STAGE : KINDS_GROUP;
+  const kindOptions = kinds.map(([k, text]) => {
+    const unusable = (k === 'colour' && !coloursOf(group).length) || (k === 'effect' && !effectsOf(group).length) || (k === 'look' && !show.looks.length);
+    return option(k, text + (unusable ? (k === 'look' ? ' (the show has none)' : ' (this group has none)') : ''), what.kind === k, unusable);
+  });
+  if (!kinds.some(([k]) => k === what.kind)) kindOptions.unshift(option(what.kind, `${what.kind} (not for this layer)`, true, true));
+  const kindSel = selectEl(kindOptions, (k) => set(null, (b) => {
+    const next = whatFor(k, group, b.what);
+    if (!next) return;
+    if (next.kind === 'look') b.rise = lookFade(lookOf(next.look), show.presets);
+    b.what = next;
+  }), 'What the block does');
+  const whatBox = el('span', 'what');
+  whatBox.append(kindSel);
+
+  const pick = (list, current, lost, onPick, label) => {
+    const opts = list.map((p) => option(p.id, p.name, p.id === current));
+    if (current && !list.some((p) => p.id === current)) opts.unshift(option(current, lost, true, true));
+    return selectEl(opts, onPick, label);
+  };
+  if (what.kind === 'colour') {
+    whatBox.append(dotBox(swatchOf(what.preset)), pick(coloursOf(group), what.preset, 'Deleted colour', (id) => set(null, (b) => { b.what = { ...b.what, preset: id }; }), 'Colour'));
+  } else if (what.kind === 'effect') {
+    whatBox.append(dotBox(swatchOf(what.preset)), pick(effectsOf(group), what.preset, 'Deleted effect', (id) => set(null, (b) => { b.what = { kind: 'effect', preset: id, ...(b.what.speed ? { speed: b.what.speed } : {}) }; }), 'Effect'));
+  } else if (what.kind === 'look') {
+    const look = lookOf(what.look);
+    whatBox.append(dotBox(look ? lookSwatch(look) : null), pick(show.looks, what.look, 'Deleted look', (id) => set(null, (b) => {
+      const before = lookFade(lookOf(b.what.look), show.presets);
+      b.rise = riseAfterLookChange(b.rise, before, lookFade(lookOf(id), show.presets));
+      b.what = { kind: 'look', look: id };
+    }), 'Look'));
+  }
+  parts.push(part('What', whatBox, null, 'wide'));
+
+  if (what.kind === 'colour' || what.kind === 'level') {
+    parts.push(part('Level', numberEl(Math.round(what.level * 100), { min: 0, max: 100, step: 1, unit: '%', label: 'Level' }, (v) => set(null, (b) => { b.what = { ...b.what, level: v / 100 }; }))));
+  }
+  if (what.kind === 'effect') {
+    const own = presetOf(what.preset)?.layers?.find((l) => l.kind === 'effect')?.speed;
+    const opts = [option('', `Its own speed${own ? ` (${speedText(own)})` : ''}`, !what.speed)];
+    const list = what.speed && !SPEEDS.some((s) => speedKey(s) === speedKey(what.speed)) ? [what.speed, ...SPEEDS] : SPEEDS;
+    for (const s of list) opts.push(option(speedKey(s), speedText(s), speedKey(s) === speedKey(what.speed)));
+    parts.push(part('Speed', selectEl(opts, (key) => set(null, (b) => {
+      const s = list.find((x) => speedKey(x) === key);
+      b.what = { kind: 'effect', preset: b.what.preset, ...(s ? { speed: s } : {}) };
+    }), 'Speed')));
+  }
+  if (what.kind === 'follow') {
+    parts.push(part('Low', numberEl(Math.round(what.low * 100), { min: 0, max: 100, step: 1, unit: '%', label: 'Low level' }, (v) => set(null, (b) => { b.what = { ...b.what, low: v / 100 }; })), 'When it is quiet'));
+    parts.push(part('High', numberEl(Math.round(what.high * 100), { min: 0, max: 100, step: 1, unit: '%', label: 'High level' }, (v) => set(null, (b) => { b.what = { ...b.what, high: v / 100 }; })), 'When it is loud'));
+    const opts = [option('', 'Its colour at the time', what.preset === undefined), ...coloursOf(group).map((p) => option(p.id, p.name, p.id === what.preset))];
+    if (what.preset !== undefined && !coloursOf(group).some((p) => p.id === what.preset)) opts.splice(1, 0, option(what.preset, 'Deleted colour', true, true));
+    parts.push(part('Colour', selectEl(opts, (id) => set(null, (b) => {
+      const { preset: _drop, ...rest } = b.what;
+      b.what = id ? { ...rest, preset: id } : rest;
+    }), 'Colour while it follows the voice')));
+  }
+
+  parts.push(part('Starts at', timeEl(block.start, '0:00.0', 'Starts at', (v) => {
+    if (v === undefined) return renderDetails();
+    edit(null, () => Object.assign(block, moveBlock(layer.blocks, block.id, v)));
+  })));
+  parts.push(part('Rise', numberEl(tenthOf(shownRise(block.rise)), { min: MIN_RISE, max: 600, step: 0.5, unit: 's', label: 'Rise' }, (v) => set(null, (b) => { b.rise = tenthOf(v); })), 'At least 1.5 s: the lights never change faster'));
+  const spans = blockSpans(layer.blocks, viewLength(t));
+  const span = spans.find((s) => s.block === block);
+  const isLast = spans.at(-1)?.block === block;
+  const untilWords = isLast ? `the end (${formatTime(span.end)})` : `the next block (${formatTime(span.end)})`;
+  const until = timeEl(block.end, untilWords, 'Until', (v) => edit(null, () => {
+    const end = v === undefined ? undefined : clampEnd(layer.blocks, block.id, v);
+    if (end === undefined) delete block.end;
+    else block.end = end;
+  }));
+  parts.push(part('Until', until, block.end === undefined ? (isLast ? 'Empty: until the end' : 'Empty: until the next block') : 'Clear it for "until the next block"'));
+
+  const grid = el('div', 'insp');
+  grid.append(...parts);
+  const nodes = [grid];
+  if (missing) nodes.unshift(el('p', 'hint warn', missingWords(what)));
+  body.replaceChildren(...nodes);
+}
+
+const tenthOf = (v) => Math.round(v * 10) / 10;
+
+function dotBox(hex) {
+  const d = el('span', 'dot');
+  if (hex) d.style.background = shown(hex);
+  else d.classList.add('none');
+  return d;
+}
+
+function missingWords(what) {
+  const thing = { colour: 'colour', effect: 'effect', look: 'look', follow: 'colour' }[what.kind] ?? 'kind of block';
+  return `This block's ${thing} is not in the show any more (deleted, or not for this layer), so the block is skipped. Choose another, or delete the block.`;
+}
+
+/** The block's what when its kind is changed to `kind`: keeping its level and colour where they fit; null when it can't. */
+function whatFor(kind, group, old) {
+  const level = old.level ?? (old.kind === 'follow' ? old.high : 1);
+  const colours = coloursOf(group);
+  const keep = old.preset && colours.some((p) => p.id === old.preset) ? old.preset : undefined;
+  switch (kind) {
+    case 'colour': {
+      const id = keep ?? colours[0]?.id;
+      return id ? { kind, preset: id, level } : null;
+    }
+    case 'level': return { kind, level };
+    case 'effect': {
+      const fx = effectsOf(group);
+      const id = old.kind === 'effect' && fx.some((p) => p.id === old.preset) ? old.preset : fx[0]?.id;
+      return id ? { kind, preset: id } : null;
+    }
+    case 'follow': return { kind, low: 0.1, high: 1, ...(keep ? { preset: keep } : {}) };
+    case 'look': {
+      const look = old.kind === 'look' && lookOf(old.look) ? old.look : show.looks[0]?.id;
+      return look ? { kind, look } : null;
+    }
+    case 'dark':
+    case 'full': return { kind };
+    default: return null;
   }
 }
 
@@ -1309,8 +2015,30 @@ const stageCtx = stageCanvas.getContext('2d');
 const NO_VISUAL = new Uint8Array(0);
 let stageLabel = null;
 
+// Hide / Show: the stage view folds away to a small button (in Prepare it floats over the layers' right ends).
+let stageHidden = false;
+try {
+  stageHidden = localStorage.getItem('lr-timeline-stage') === 'hidden';
+} catch {
+  // no storage here: shown
+}
+function showStageView(on) {
+  stageHidden = !on;
+  document.body.classList.toggle('stage-hidden', stageHidden);
+  $('stageToggle').textContent = on ? 'Hide' : 'Show the stage view';
+  $('stageToggle').setAttribute('aria-expanded', String(on));
+  try {
+    localStorage.setItem('lr-timeline-stage', on ? 'shown' : 'hidden');
+  } catch {
+    // not kept: fine
+  }
+  drawStage();
+}
+$('stageToggle').addEventListener('click', () => showStageView(stageHidden));
+showStageView(!stageHidden);
+
 function drawStage() {
-  if (!layout || $('stageCard').hidden) return;
+  if (!layout || $('stageCard').hidden || stageHidden) return;
   const dpr = window.devicePixelRatio || 1;
   const w = stageCanvas.clientWidth, h = stageCanvas.clientHeight;
   if (!w || !h) return;
@@ -1369,8 +2097,26 @@ requestAnimationFrame(frame);
 
 document.addEventListener('keydown', (ev) => {
   const target = ev.target;
-  if (ev.ctrlKey || ev.metaKey || ev.altKey || !current() || $('main').hidden) return;
-  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLButtonElement || target instanceof HTMLSelectElement) return;
+  if (!current() || $('main').hidden) return;
+  const typing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+  // Ctrl/⌘ Z: Undo of the layers and blocks (in a field, the field's own).
+  if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && !ev.altKey && (ev.key === 'z' || ev.key === 'Z') && !typing) {
+    ev.preventDefault();
+    undo();
+    return;
+  }
+  if (ev.ctrlKey || ev.metaKey || ev.altKey || typing) return;
+  // Delete or Backspace deletes the chosen block; Escape chooses nothing.
+  if ((ev.key === 'Delete' || ev.key === 'Backspace') && chosen()) {
+    ev.preventDefault();
+    deleteChosen();
+    return;
+  }
+  if (ev.key === 'Escape' && sel.group) {
+    select(null, null);
+    return;
+  }
+  if (target instanceof HTMLButtonElement) return;
   if (ev.key === ' ') {
     ev.preventDefault();
     if (run.id) stop();
