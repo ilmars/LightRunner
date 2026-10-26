@@ -74,6 +74,21 @@ Songs, colours, quick looks and effects are made on the operator page; the fixtu
 - **Blackout**: hold for 1 second. A song, Basic lights or Next brings the lights back.
 - **Preparing the next moment without touching the lights**: tap **Prepare** in the top bar (it turns violet). Now taps only change a draft, shown in the stage view. **Go ▸** sends the draft to the lights in one smooth change; **Live** throws it away. **Save to <song>** (hold) keeps the draft in that song.
 - **Tempo** for effects: tap **Tap** in time with the music, or type the number in the Tempo menu.
+- **A timeline** (a recording with the lights laid out along it, such as the Christmas intro): see "A timeline at a service" below. While one runs, the top bar of the operator page has a second line, "Timeline · <name> 1:23 / 4:12" (or "paused"), with a quiet **Stop**.
+
+### A timeline at a service
+
+A timeline is made in [setting-up-a-show.md](setting-up-a-show.md) (step 10). The lighting lead starts it, not the volunteers.
+
+1. **At rehearsal**, open the **Timeline** page (`http://192.168.0.195:8080/timeline/`, with the programmer PIN) on the computer that is plugged into the mixer. Choose the timeline, switch **Prepare** on and press **▶ Start**. It plays on the stage view and the speakers only; the real lights stay as they are. Check the sound level and, with sound that reaches the room late, **Lights earlier / later**. Then play it once **Live** with the lights in the room.
+2. **On the day, before people arrive:** open the same page on the same computer, choose the timeline, check that the recording is there (its name and length show above the waveform, and the button says **Change**, not **Add the recording**), and that **Live** is on. Leave the page open.
+3. **When it is time, press ▶ Start** on that computer. The recording plays there, into the mixer, and the lights follow it. The operator page on the iPads shows "Timeline · …" with its position; nobody needs to do anything.
+4. **To end it early:** press **■ Stop** on the Timeline page, or **Stop** on the operator page (the lights stay as they are; the recording keeps playing on the mixer computer, so press **■ Stop** there too if it should go quiet).
+5. **After it ends,** the stage stays as the timeline left it. Tap a song or Basic lights to carry on.
+
+What a volunteer's tap does while a timeline runs: **Blackout**, **Basic lights**, **Next ▸** or a song takes the lights from the timeline (the stage does what the button says), but the recording keeps playing, so the speaker is never cut off. The Timeline page says "The lights were taken over…"; if that was a mistake, press **Lights follow again** and the lights join the recording where it is. Flash, Master and Individual lights work on top of the timeline and don't stop it.
+
+If the page on the mixer computer is closed or loses Wi-Fi, the lights carry on by themselves to the end, without sound.
 
 ### When something is wrong
 
@@ -84,6 +99,7 @@ Songs, colours, quick looks and effects are made on the operator page; the fixtu
 | Amber **Another desk is sending** | Lightkey or another desk is sending too | Stop the other desk's output |
 | A red banner **Connection lost. Lights keep running. Reconnecting…** | The iPad can't reach the Mac (the lights keep their last look) | Check the iPad's Wi-Fi, and that Light Runner is running on the Mac (its icon is in the menu bar; open it and look for **Running**). It reconnects by itself |
 | A light flickers or jumps | Not normal | Tap Basic lights, then tell the lighting lead what you did just before |
+| The recording plays but the lights stopped following | Someone tapped Blackout, Basic lights, a song or Stop | On the Timeline page, press **Lights follow again** |
 
 If nothing helps, call the person in **Who to call** (the problem pill shows them).
 

@@ -129,6 +129,10 @@ The **stage plan** says where each light hangs, and the operator page draws the 
   </tr>
 </table>
 
+### Timeline
+
+The Timeline page (`/timeline/`) lays the lights out along a recording, for a piece such as a spoken Christmas intro. Add a recording (mp3, m4a, aac or wav), then add blocks on a **Whole stage** layer and on a layer for each light group: a colour, a level, an effect, a look, Dark or Everything full, each with a rise of at least 1.5 seconds. A **Follow the voice** block makes a group's brightness ride the loudness of the recording, so some lights breathe with the speaker. **◆ Mark here** drops notes while you listen. Try it in **Prepare** (the stage view and the sound only), then run it **Live**: **▶ Start** plays the recording on the computer where it is pressed (for example the one plugged into the mixer) and the lights follow it. The operator page shows a running timeline in its top bar, with a quiet **Stop**; a volunteer's Blackout, Basic lights or song takes the lights, but the recording plays on. Recordings are kept on the computer running Light Runner, not in the exported show file. [docs/setting-up-a-show.md](docs/setting-up-a-show.md) (step 10) has the steps, and [docs/running-a-service.md](docs/running-a-service.md) has running one at a service.
+
 ## Remote control
 
 Everything goes through the same server, so every device and every page always agree on what is on stage. [docs/companion.md](docs/companion.md) has the details and what to check on real hardware.
@@ -167,8 +171,9 @@ Open http://localhost:8080/. The first start loads a small demo rig. At the venu
 | `/operator/` | Volunteers (no login) | The iPad page, and the phone remote on a phone |
 | `/patch/` | Programmer (PIN) | DMX map, fixture library and types, groups, stage plan |
 | `/settings/` | Programmer (PIN) | Outputs, Send DMX, Who to call, controller keys, backups and more |
+| `/timeline/` | Programmer (PIN) | Recordings with the lights laid out along them; Start, Stop, Prepare and Live |
 
-Patch and Settings ask for the programmer PIN once one is set (Settings > Programmer PIN). On the iPad, open `/operator/`, add it to the home screen (it has its own icon and opens full screen; on Android use the top bar's **Full screen** button), and set Auto-Lock to Never so the screen stays on during the service. The Inter font and the icon are served by Light Runner itself, so the pages work with no internet.
+Patch, Settings and Timeline ask for the programmer PIN once one is set (Settings > Programmer PIN). On the iPad, open `/operator/`, add it to the home screen (it has its own icon and opens full screen; on Android use the top bar's **Full screen** button), and set Auto-Lock to Never so the screen stays on during the service. The Inter font and the icon are served by Light Runner itself, so the pages work with no internet.
 
 | Setting | Default | What |
 | --- | --- | --- |
