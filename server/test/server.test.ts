@@ -1137,6 +1137,10 @@ test('the app manifest and the service worker are served, and every page links t
   assert.ok(source.includes('caches.open(CACHE)'));
   assert.ok(source.includes("startsWith('/api/')"), 'the worker leaves the API alone');
   assert.equal((await get('/shared/pwa.js')).status, 200);
+  // Every file the worker keeps for the installed app is there (a page module missing from it breaks the app offline).
+  const shell = /const SHELL = \[([^\]]*)\]/.exec(source)?.[1].match(/'[^']+'/g)?.map((s) => s.slice(1, -1)) ?? [];
+  assert.ok(shell.includes('/shared/pagetabs.js'), 'the page tabs, which the operator page loads');
+  for (const file of shell) assert.equal((await get(file)).status, 200, file);
 
   for (const page of ['/operator/', '/patch/', '/settings/']) {
     const html = await (await get(page)).text();

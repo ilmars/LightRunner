@@ -225,6 +225,29 @@
   box-shadow: inset 0 0 0 1px var(--ds-edge-on);
 }
 
+/* Page tabs (web/shared/pagetabs.js): the same four icons at the right of every page's top bar, on the segmented
+   track; the open page is tinted. Its width is set here so the bar doesn't move while the script fills it. */
+.ds-pagetabs {
+  flex: none; display: flex; gap: 2px; padding: 2px; width: calc(4 * 44px + 3 * 2px + 4px); min-height: calc(var(--ds-target) + 4px);
+  border-radius: var(--ds-r-tile); background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge);
+}
+.ds-pagetabs > a {
+  display: inline-flex; align-items: center; justify-content: center; width: 44px; height: var(--ds-target); border-radius: 9px;
+  color: var(--ds-muted); text-decoration: none;
+}
+.ds-pagetabs > a:hover { color: var(--ds-text); }
+.ds-pagetabs > a:focus-visible { outline: 1px solid var(--ds-accent); outline-offset: -1px; }
+.ds-pagetabs > a[aria-current="page"] { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.ds-pagetabs svg { display: block; }
+
+/* Icon button (Full screen): a quiet 44 px square holding a 20 px line icon. */
+.ds-iconbtn {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0;
+  border: 0; border-radius: 10px; background: transparent; color: var(--ds-muted); cursor: pointer;
+}
+.ds-iconbtn:hover { color: var(--ds-text); background: var(--ds-elevated); }
+.ds-iconbtn[hidden] { display: none; }
+
 /* Field: a flat text box on a faint track. */
 .ds-field {
   min-height: var(--ds-target); padding: 0 14px; border: 0;

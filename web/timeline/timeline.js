@@ -4,6 +4,8 @@
 // The page edits its copy of the show's timelines and saves one timeline at a time (PUT /api/timeline) after a pause.
 
 import { NOT_ANSWERING, request, showProblem, startClock } from '/shared/appbar.js';
+import { setupFullscreen } from '/shared/fullscreen.js';
+import { setupPageTabs } from '/shared/pagetabs.js';
 import { LOUDNESS_RATE, decodeBytes, encodeBytes, loudnessTrack, peaksTrack } from '/shared/loudness.js';
 import { drawStagePicture, shown } from '/shared/stagedraw.js';
 import { keepStageSize, stageGrip, stageViewSwitch, storedStageSize } from '/shared/stagecard.js';
@@ -2348,4 +2350,6 @@ function toast(text, bad = false) {
 }
 
 startClock($('clock'));
+setupFullscreen($('fsBtn'));
+setupPageTabs(document.querySelector('.ds-pagetabs'));
 startPage().catch((err) => toast(err.message, true));

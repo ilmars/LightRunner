@@ -1,7 +1,7 @@
 /* Timeline: the page's own parts, on the shared design system (/shared/theme.css) and the programmer pages'
    frame (/shared/programmer.css). Panels one above the other: the list of timelines, the top bar of the open one
    (Live / Prepare, the play position, Start and Stop), the recording and its layers, the markers, the stage view. */
-:root { --page-max: 1600px; --label-w: 176px; --row-h: 54px; }
+:root { --label-w: 176px; --row-h: 54px; }
 
 /* ---- The list of timelines ---- */
 .tl-list { display: flex; flex-wrap: wrap; gap: var(--ds-gap-tight); }

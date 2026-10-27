@@ -3,6 +3,7 @@
 
 import { FlashPresses, isSideways } from '/shared/press.js';
 import { setupFullscreen } from '/shared/fullscreen.js';
+import { setupPageTabs } from '/shared/pagetabs.js';
 import { drawStagePicture, shown, shownRgb } from '/shared/stagedraw.js';
 import { keepStageSize, stageGrip, stageViewSwitch, storedStageSize } from '/shared/stagecard.js';
 import { fitStageLength } from '/shared/stageview.js';
@@ -5587,6 +5588,7 @@ blackout.addEventListener('click', (ev) => ev.preventDefault());
 
 // The top bar's button, shown only where the browser can do it and the page is not already an app.
 setupFullscreen($('fsBtn'));
+setupPageTabs($('pageTabs'));
 
 // ---- Clock, toast, wake lock ----
 

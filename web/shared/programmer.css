@@ -1,6 +1,7 @@
-/* The programmer pages (Patch and Settings): the page frame they share, in the operator page's look.
+/* The programmer pages (Patch, Settings and Timeline): the page frame they share, in the operator page's look.
    Loaded after theme.css and before the page's own stylesheet; the operator page doesn't load it.
-   A 60 px top bar (the icon and the page name, the problem pill, links to the other pages, the clock),
+   A 60 px top bar like the operator page's (the icon and the page name, the problem pill, the clock, Full screen and
+   the page tabs, ds-pagetabs), the whole width of the window as the operator page is,
    glass panels 10 px apart, each with a small-capitals label and a one-line description, and a save bar
    along the bottom while there are unsaved changes. See docs/design-system.md. */
 
@@ -24,8 +25,7 @@ a { color: #8fb8f2; }
   padding-top: max(10px, env(safe-area-inset-top)); background: var(--ds-bg);
 }
 .appbar {
-  display: flex; align-items: center; gap: 8px; min-height: 60px; padding: 0 8px 0 14px;
-  max-width: var(--page-max, 1600px); margin: 0 auto;
+  display: flex; align-items: center; gap: 8px; min-height: 60px; padding: 0 6px 0 18px;
   background: var(--ds-surface); border-radius: var(--ds-r-bar); box-shadow: var(--ds-shadow-raise);
 }
 .appbar-title { display: flex; align-items: center; gap: 12px; min-width: 0; margin: 0; flex: 0 1 auto; }
@@ -36,21 +36,10 @@ a { color: #8fb8f2; }
 .appbar .grow { flex: 1; min-width: 0; }
 /* The problem pill: only while something is wrong with the lights; the phone shows the short words. */
 .appbar .ds-pill .short { display: none; }
-/* Links to the other pages: a quiet segmented row, the page you are on tinted. */
-.applinks {
-  flex: none; display: flex; gap: 2px; padding: 2px; border-radius: var(--ds-r-tile);
-  background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge);
-}
-.applinks a {
-  display: flex; align-items: center; min-height: var(--ds-target); padding: 0 14px; border-radius: 9px;
-  color: var(--ds-muted); text-decoration: none; font-size: 13px; white-space: nowrap;
-}
-.applinks a:hover { color: var(--ds-text); }
-.applinks a[aria-current="page"] { color: var(--ds-text); background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
 .appbar .clock { flex: none; color: var(--ds-muted); font-size: 13px; font-variant-numeric: tabular-nums; padding: 0 6px; }
 
 /* ---- Panels ---- */
-.page { max-width: var(--page-max, 1600px); margin: var(--ds-gap) auto 0; display: flex; flex-direction: column; gap: var(--ds-gap); }
+.page { margin: var(--ds-gap) 0 0; display: flex; flex-direction: column; gap: var(--ds-gap); }
 .card { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; min-height: 44px; }
 .card-title { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 260px; }
@@ -86,7 +75,6 @@ a { color: #8fb8f2; }
 /* ---- Save bar: a panel along the bottom while there are unsaved changes, like the operator page's bottom bar ---- */
 .savebar {
   position: fixed; left: max(10px, env(safe-area-inset-left)); right: max(10px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); z-index: 12;
-  max-width: var(--page-max, 1600px); margin: 0 auto;
   display: flex; align-items: center; gap: 8px; min-height: 64px; padding: 10px 10px 10px 18px;
   background: var(--ds-surface); border-radius: var(--ds-r-bar);
   box-shadow: var(--ds-shadow-raise), 0 -12px 32px -16px rgba(0, 0, 0, 0.8);
@@ -101,16 +89,15 @@ a { color: #8fb8f2; }
 .login .ds-field { flex: 1; font-size: 24px; letter-spacing: 0.4em; text-align: center; }
 .login .ds-btn { min-width: 96px; }
 
-/* ---- Narrow screens (a phone): the links take their own line ---- */
+/* ---- Narrow screens (a phone): the name and the page tabs on the first line, the rest under them ---- */
 @media (max-width: 640px) {
-  /* Two lines high, so it scrolls away with the page instead of covering it. */
+  /* It can be two lines high, so it scrolls away with the page instead of covering it. */
   .appbar-wrap { position: static; }
-  .appbar { flex-wrap: wrap; padding: 8px 8px 8px 12px; row-gap: 8px; }
+  .appbar { flex-wrap: wrap; padding: 8px 6px 8px 12px; row-gap: 8px; }
   .appbar-name b { font-size: 18px; }
-  /* The links start the second line (they can't fit beside the name); Log out, when there, goes beside them. */
-  .applinks { order: 10; flex: 1 1 auto; min-width: 70%; }
-  #logout { order: 11; }
-  .applinks a { flex: 1; justify-content: center; }
+  .appbar .clock { display: none; }
+  /* The pill, Log out and Full screen, when shown, start the second line; the tabs stay beside the name. */
+  .appbar .ds-pill, #logout, #fsBtn { order: 10; }
   .appbar .ds-pill .long { display: none; }
   .appbar .ds-pill .short { display: inline; }
   .card { padding: 14px 14px 16px; }

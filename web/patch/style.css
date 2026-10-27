@@ -1,7 +1,6 @@
 /* Patch page: the page's own parts, on the shared design system (/shared/theme.css) and the programmer
    pages' frame (/shared/programmer.css). Fixture blocks in the DMX map keep their own per-type colours,
    and overlaps their red striping. 44 px targets wherever a finger is used. */
-:root { --page-max: 1600px; }
 .patch-page .card-head .warn { flex: none; }
 
 /* ---- Graphical patch: 512 channels as a grid, fixtures as blocks ---- */

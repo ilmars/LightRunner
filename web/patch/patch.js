@@ -11,6 +11,8 @@ import {
 } from './types.js';
 import { PLAN_ASPECT, barAxis, beamCone } from '../shared/stage.js';
 import { request, startClock, watchState } from '../shared/appbar.js';
+import { setupFullscreen } from '../shared/fullscreen.js';
+import { setupPageTabs } from '../shared/pagetabs.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -1784,6 +1786,8 @@ function toast(text, bad = false) {
 
 // The top bar: the clock, and the pill while something is wrong with the lights.
 startClock($('clock'));
+setupFullscreen($('fsBtn'));
+setupPageTabs(document.querySelector('.ds-pagetabs'));
 watchState({
   pill: $('status'),
   offline: $('offline'),

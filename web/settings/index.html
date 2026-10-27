@@ -19,14 +19,17 @@
   <div class="appbar-wrap">
     <header class="appbar">
       <h1 class="appbar-title"><img src="/shared/icon.svg" alt="" width="26" height="26"><span class="appbar-name"><span class="ds-caps">Light Runner</span><b>Settings</b></span></h1>
-      <span class="grow"></span>
       <!-- Only while something is wrong with the lights. -->
       <span id="status" class="ds-pill ds-pill--warn" role="status" hidden>● <span class="long"></span><span class="short"></span></span>
       <!-- While the server doesn't answer: the page keeps trying by itself. -->
       <span id="offline" class="ds-pill offline" role="status" title="Light Runner isn't answering. The page keeps trying and carries on by itself." hidden>● Not connected</span>
-      <nav class="applinks" aria-label="Pages"><a href="/operator/">Operator</a><a href="/patch/">Patch</a><a href="/settings/" aria-current="page">Settings</a><a href="/timeline/">Timeline</a></nav>
-      <span id="clock" class="clock"></span>
+      <span class="grow"></span>
       <button id="logout" class="ds-btn ds-btn--quiet" type="button" hidden>Log out</button>
+      <span id="clock" class="clock"></span>
+      <!-- Full screen: only where the browser can do it and the page is not already an app (see /shared/fullscreen.js). -->
+      <button id="fsBtn" class="ds-iconbtn" type="button" aria-label="Full screen" title="Full screen" aria-pressed="false" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg></button>
+      <!-- The four pages, the same icons on every page (/shared/pagetabs.js). -->
+      <nav class="ds-pagetabs" data-page="settings" aria-label="Pages"></nav>
     </header>
   </div>
 

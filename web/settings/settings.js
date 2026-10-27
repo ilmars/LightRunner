@@ -2,6 +2,8 @@
 // routes; nothing here changes the stage except the Send DMX switch.
 
 import { NOT_ANSWERING, getJson, request, showProblem, startClock, watchState } from '../shared/appbar.js';
+import { setupFullscreen } from '../shared/fullscreen.js';
+import { setupPageTabs } from '../shared/pagetabs.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -950,5 +952,7 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 startClock($('clock'));
+setupFullscreen($('fsBtn'));
+setupPageTabs(document.querySelector('.ds-pagetabs'));
 watch();
 start().catch((err) => toast(err.message, true));
