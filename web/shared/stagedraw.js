@@ -11,7 +11,7 @@
 // drawn by stretching small pre-made gradients (one per colour channel, added together), never by shadows or new
 // gradients per frame, into a small canvas that is then stretched over the picture.
 
-import { barAxis, barEnds, beamCone, outlineCells } from './stage.js';
+import { barAxis, barEnds, beamCone, beamHalfWidth, outlineCells } from './stage.js';
 import {
   frontPlacement, frontScene, hangsOf, isStrip, ledLayout, ledPoints, panelGrid, poolOf, sharedStrengths, softLightOverlaps,
 } from './stageview.js';
@@ -610,10 +610,11 @@ function buildFront(bg, fg, w, h, layout) {
       } else {
         box(fg, place.left, place.top, place.length, place.height, 2.5 * u);
       }
-      const bw = Math.max(spacing * 0.9, 22 * u);
+      // A beam opens as wide as its cone on the plan (its reach); a bar's segments each light their own stretch.
+      const bw = shape === 'beam' ? Math.max(beamHalfWidth(f) * w, 6 * u) : Math.max(spacing * 0.9, 22 * u);
       for (const seg of place.segments) {
         item.over.push({ sprite: 'beam', x: seg.x - bw, y: from, w: 2 * bw, h: floorY - from, seg: seg.segment, a: BEAM });
-        const px = bw * 1.5, py = px * 0.22;
+        const px = bw * (shape === 'beam' ? 1.1 : 1.5), py = px * 0.22;
         item.under.push({ sprite: 'round', x: seg.x - px, y: floorY + 2 * u - py, w: 2 * px, h: 2 * py, seg: seg.segment, a: FLOOR_POOL });
       }
     } else if (hangs === 'wall') {

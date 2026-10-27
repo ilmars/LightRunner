@@ -42,6 +42,11 @@ export function beamCone(f) {
   return { lamp: { x: f.x, y: f.y }, left: at(side(-1)), right: at(side(1)), tip: at(tip) };
 }
 
+/** Half the width of a beam's cone where it reaches, as a fraction of the plan's width (the spread and its reach). */
+export function beamHalfWidth(f) {
+  return (f.reach ?? BEAM_REACH) * Math.tan(rad(BEAM_HALF_SPREAD));
+}
+
 /**
  * The cells of an outline, clockwise round its edge from the top-left corner (anticlockwise when reversed),
  * each as a list of points in pixels. `box` is the outline's left, top, width and height in pixels.

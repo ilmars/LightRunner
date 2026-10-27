@@ -7,7 +7,7 @@ import {
   BAR_LENGTH, BAR_THICKNESS, HANGS_CHOICES, MIN_THICKNESS, aimBeam, alignFixtures, boundsOf, guessHangs, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness,
   setBarAngle, setHangs, setShape, shapeOf, spaceEvenly, touches, turnBar,
 } from '../../web/patch/plan.js';
-import { BEAM_REACH, barAxis, barEnds, beamCone, outlineCells } from '../../web/shared/stage.js';
+import { BEAM_REACH, barAxis, barEnds, beamCone, beamHalfWidth, outlineCells } from '../../web/shared/stage.js';
 
 const near = (a: number, b: number, what = '') => assert.ok(Math.abs(a - b) < 0.002, `${what} ${a} is not ${b}`);
 const nearPoint = (p: { x: number; y: number }, x: number, y: number) => { near(p.x, x, 'x'); near(p.y, y, 'y'); };
@@ -149,6 +149,15 @@ test('a beam is aimed and sized from its tip', () => {
   const cone = beamCone(f);
   nearPoint(cone.tip, 0.7, 0.9);
   assert.ok(cone.left.y < cone.tip.y && cone.right.y > cone.tip.y, 'the cone opens both sides of where it points');
+});
+
+test("a beam's width is its cone's, from the plan's spread and its reach", () => {
+  const down: any = { x: 0.5, y: 0.2, shape: 'beam', angle: 90, reach: 0.2 };
+  const cone = beamCone(down);
+  // Pointing down the plan, the cone's far corners are its full width apart across the plan.
+  near(beamHalfWidth(down), Math.abs(cone.right.x - cone.left.x) / 2);
+  near(beamHalfWidth({ ...down, reach: 0.4 }), 2 * beamHalfWidth(down), 'twice the reach, twice the width');
+  near(beamHalfWidth({ x: 0.5, y: 0.5, shape: 'beam' } as any), BEAM_REACH * Math.tan((20 * Math.PI) / 180), 'a new beam');
 });
 
 test('an outline is sized from its corner, evenly about the middle', () => {
