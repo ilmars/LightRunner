@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BAR_LENGTH, BAR_THICKNESS, HANGS_CHOICES, MIN_THICKNESS, aimBeam, alignFixtures, boundsOf, guessHangs, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness,
+  BAR_LENGTH, BAR_THICKNESS, HANGS_CHOICES, MIN_THICKNESS, aimBeam, alignFixtures, boundsOf, changeTogether, guessHangs, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness,
   setBarAngle, setHangs, setShape, shapeOf, spaceEvenly, touches, turnBar,
 } from '../../web/patch/plan.js';
 import { BEAM_REACH, barAxis, barEnds, beamCone, beamHalfWidth, outlineCells } from '../../web/shared/stage.js';
@@ -294,4 +294,54 @@ test('Hangs on: what Patch offers, the guess it names, and taking a choice back'
   setHangs(f, 'riser');
   setHangs(f, 'nonsense');
   assert.equal('hangs' in f, false);
+});
+
+// ---- Several selected: one handle changes them all the same way ----
+
+/** Drags the `how` handle on `lead` with `move`, then gives `others` the same change, as the plan does. */
+function dragTogether(lead: any, others: any[], how: any, move: (f: any) => void) {
+  const leadStart = { ...lead }, starts = others.map((f) => ({ ...f }));
+  move(lead);
+  changeTogether(lead, how, leadStart, others, starts);
+}
+
+test('several bars get longer at the same end, each from where it was', () => {
+  const lead: any = { x: 0.2, y: 0.2, shape: 'bar', w: 0.1, h: 0.03, angle: 0 };
+  const other: any = { x: 0.6, y: 0.5, shape: 'bar', w: 0.2, h: 0.03, angle: 0 };
+  const [, otherEnd] = barEnds(other);
+  const [otherStart] = barEnds(other);
+  dragTogether(lead, [other], 'end', (f) => resizeEnd(f, 'end', { x: 0.3, y: 0.2 }));
+  near(lead.w, 0.15);
+  near(other.w, 0.25, 'the same 0.05 longer');
+  nearPoint(barEnds(other)[0], otherStart!.x, otherStart!.y);
+  near(barEnds(other)[1].x, otherEnd!.x + 0.05);
+});
+
+test('several bars get thicker and turn by the same amount', () => {
+  const lead: any = { x: 0.3, y: 0.3, shape: 'bar', w: 0.2, h: 0.03, angle: 0 };
+  const other: any = { x: 0.6, y: 0.6, shape: 'bar', w: 0.2, h: 0.05, angle: 90 };
+  dragTogether(lead, [other], 'thick', (f) => { f.h = 0.06; });
+  near(other.h, 0.08);
+  dragTogether(lead, [other], 'turn', (f) => setBarAngle(f, 30));
+  assert.equal(lead.angle, 30);
+  assert.equal(other.angle, 120);
+});
+
+test('several beams are aimed and reach further by the same amount, within their limits', () => {
+  const lead: any = { x: 0.2, y: 0.8, shape: 'beam', angle: -90, reach: 0.14 };
+  const same: any = { x: 0.6, y: 0.8, shape: 'beam', angle: -90, reach: 0.14 };
+  const facing: any = { x: 0.5, y: 0.2, shape: 'beam', angle: 90, reach: 0.95 };
+  dragTogether(lead, [same, facing], 'tip', (f) => { f.reach = 0.2; f.angle = -75; });
+  near(same.reach, 0.2);
+  assert.equal(same.angle, -75);
+  assert.equal(facing.angle, 105, 'turned the same way from its own aim');
+  assert.equal(facing.reach, 1, 'no further than a beam can reach');
+});
+
+test('several outlines grow by the same size', () => {
+  const lead: any = { x: 0.3, y: 0.5, shape: 'outline', w: 0.1, h: 0.2 };
+  const other: any = { x: 0.7, y: 0.5, shape: 'outline', w: 0.2, h: 0.1 };
+  dragTogether(lead, [other], 'corner', (f) => resizeOutline(f, { x: 0.4, y: 0.65 }));
+  near(other.w, 0.3);
+  near(other.h, 0.2);
 });

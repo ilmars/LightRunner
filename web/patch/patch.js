@@ -2,7 +2,7 @@
 // and saves it whole; the server checks it and keeps a backup of the old one.
 
 import {
-  HANGS_CHOICES, aimBeam, alignFixtures, guessHangs, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setHangs, setShape, shapeOf,
+  HANGS_CHOICES, aimBeam, alignFixtures, changeTogether, guessHangs, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setHangs, setShape, shapeOf,
   spaceEvenly, touches, turnBar,
 } from './plan.js';
 import {
@@ -1435,16 +1435,23 @@ function followPointer(ev, target, move, done) {
   target.addEventListener('pointercancel', onUp);
 }
 
-/** A handle that follows the pointer; `move` changes the fixture, then the fixture is drawn again where it is. */
-function handle(cls, title, cursor, f, move) {
+/**
+ * A handle that follows the pointer; `move` changes the fixture, then the fixture is drawn again where it is. `how`
+ * names the handle (see changeTogether): with several selected, the others of the same shape change the same way.
+ */
+function handle(cls, how, title, cursor, f, move) {
   const h = el('div', `plan-handle ${cls}`);
   h.title = title;
   if (cursor) h.style.cursor = cursor;
   h.addEventListener('pointerdown', (ev) => {
     if (ev.button !== 0) return;
+    const shape = shapeOf(f, inSmokeGroup(f));
+    const others = chosenFixtures().filter((x) => x !== f && shapeOf(x, inSmokeGroup(x)) === shape);
+    const start = { ...f }, starts = others.map((x) => ({ ...x }));
     followPointer(ev, h, (p, e) => {
       move(p, e);
-      placeFixture(f);
+      changeTogether(f, how, start, others, starts);
+      for (const x of [f, ...others]) placeFixture(x);
     }, (moved) => { if (moved) changed(); });
   });
   return h;
@@ -1500,8 +1507,6 @@ function renderStage() {
   cones.setAttribute('preserveAspectRatio', 'none');
   root.append(cones);
   planSelection = new Set(chosenFixtures().map((f) => f.id));
-  // Handles only when one fixture is selected.
-  const one = planSelection.size === 1;
   for (const f of show.fixtures) {
     const shape = shapeOf(f, inSmokeGroup(f));
     const selected = planSelection.has(f.id);
@@ -1546,21 +1551,22 @@ function renderStage() {
         if (moved) changed();
       });
     });
-    if (one && selected && shape === 'bar') {
+    // Every selected fixture has its handles; with several, one handle changes them all (see handle).
+    if (selected && shape === 'bar') {
       // One handle at each end for the length, one on a long side for the thickness, and one past the end to turn it.
       const angle = barAxis(f).angle;
       body.append(
-        handle('start', 'Drag to make it longer or shorter', resizeCursor(angle), f, (p) => resizeEnd(f, 'start', p)),
-        handle('end', 'Drag to make it longer or shorter', resizeCursor(angle), f, (p) => resizeEnd(f, 'end', p)),
-        handle('thick', 'Drag to make it thicker or thinner', resizeCursor(angle + 90), f, (p) => resizeThickness(f, p)),
-        handle('turn', 'Drag to turn it (hold Shift to turn freely)', 'grab', f, (p, e) => turnBar(f, p, e.shiftKey)),
+        handle('start', 'start', 'Drag to make it longer or shorter', resizeCursor(angle), f, (p) => resizeEnd(f, 'start', p)),
+        handle('end', 'end', 'Drag to make it longer or shorter', resizeCursor(angle), f, (p) => resizeEnd(f, 'end', p)),
+        handle('thick', 'thick', 'Drag to make it thicker or thinner', resizeCursor(angle + 90), f, (p) => resizeThickness(f, p)),
+        handle('turn', 'turn', 'Drag to turn it (hold Shift to turn freely)', 'grab', f, (p, e) => turnBar(f, p, e.shiftKey)),
       );
     }
-    if (one && selected && shape === 'outline') {
-      body.append(handle('corner', 'Drag to change its size', 'nwse-resize', f, (p) => resizeOutline(f, p)));
+    if (selected && shape === 'outline') {
+      body.append(handle('corner', 'corner', 'Drag to change its size', 'nwse-resize', f, (p) => resizeOutline(f, p)));
     }
-    if (one && selected && shape === 'beam') {
-      parts.tip = handle('tip', 'Drag to aim it and set how far it reaches (hold Shift to aim freely)', 'grab', f, (p, e) => aimBeam(f, p, e.shiftKey));
+    if (selected && shape === 'beam') {
+      parts.tip = handle('tip', 'tip', 'Drag to aim it and set how far it reaches (hold Shift to aim freely)', 'grab', f, (p, e) => aimBeam(f, p, e.shiftKey));
       root.append(parts.tip);
     }
     root.append(body, tag);
@@ -1632,7 +1638,8 @@ function renderPlanTools() {
   const angles = new Set(shape === 'bar' ? chosen.map((f) => Math.round(barAxis(f).angle)) : []);
   $('planTurn').hidden = shape !== 'bar';
   $('planAngle').textContent = angles.size === 1 ? `${[...angles][0]}°` : '';
-  $('planToolsHint').textContent = chosen.length === 1 ? SHAPE_HINTS[shape] : '';
+  const together = shape === 'bar' || shape === 'beam' || shape === 'outline' ? 'Drag a handle on any of them to change them all the same way.' : '';
+  $('planToolsHint').textContent = chosen.length === 1 ? SHAPE_HINTS[shape] : together;
   renderHangs(chosen);
   for (const b of $('planSpace').children) {
     b.disabled = chosen.length < 3;

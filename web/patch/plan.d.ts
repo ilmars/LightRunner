@@ -29,4 +29,5 @@ export function boundsOf(f: PlanFixture, inSmoke?: boolean): Bounds;
 export function alignFixtures(list: PlanFixture[], how: 'left' | 'centre' | 'right' | 'top' | 'middle' | 'bottom', inSmoke?: (f: PlanFixture) => boolean): void;
 export function spaceEvenly(list: PlanFixture[], axis: 'x' | 'y'): void;
 export function moveTogether(list: PlanFixture[], starts: Point[], dx: number, dy: number): void;
+export function changeTogether(lead: PlanFixture, how: 'start' | 'end' | 'thick' | 'turn' | 'tip' | 'corner', leadStart: PlanFixture, others: PlanFixture[], starts: PlanFixture[]): void;
 export function touches(f: PlanFixture, box: Bounds, inSmoke?: boolean): boolean;
