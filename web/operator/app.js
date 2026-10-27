@@ -7,6 +7,7 @@ import { setupPageTabs } from '/shared/pagetabs.js';
 import { drawStagePicture, shown, shownRgb } from '/shared/stagedraw.js';
 import { keepStageSize, stageGrip, stageViewSwitch, storedStageSize } from '/shared/stagecard.js';
 import { fitStageLength } from '/shared/stageview.js';
+import { colourWord, effectSuggestion, lookSuggestion, uniqueName } from '/shared/names.js';
 import { barAxis, barEnds, beamCone, outlineCells } from '/shared/stage.js';
 import { HUE_STOPS, WHITE_STOPS, hexRgb, parseChannel, parseHex, rgbHex, stripColour, stripMix, stripPick } from '/shared/colour.js';
 
@@ -3410,6 +3411,7 @@ function drawEffectEditor() {
   const one = ONE_COLOUR.has(effect.effect);
   const kindName = EFFECT_NAMES.find(([k]) => k === effect.effect)?.[1] ?? 'This effect';
   $('feColLab').textContent = one ? 'Colour' : 'Colours';
+  suggestEffectName(kindName);
 
   // Colours: the chosen ones in the order they play, numbered (hold one and drag it onto another), then ＋ Colour.
   const choiceOf = (c) => choices.find((x) => x.key === colourKey(c)) ?? { name: 'Own', swatch: c.hex };
@@ -3998,8 +4000,36 @@ $('feMoreWrap').addEventListener('keydown', (ev) => {
 $('feName').addEventListener('keydown', (ev) => {
   ev.stopPropagation();
   if (ev.key === 'Enter') $('feName').blur();
+  takeSuggestion(ev, $('feName'), effectEdit?.suggestion);
 });
 $('feName').addEventListener('input', disarmDelete);
+
+/**
+ * The name the effect would get from its colours and what it does ("Purple chase"), in grey in the empty Name box:
+ * Save with the box empty keeps it. Not one another effect of the group already has.
+ */
+function suggestEffectName(kindName) {
+  const { effect, choices } = effectEdit;
+  const names = effect.colours.map((c) => {
+    const choice = choices.find((x) => x.key === colourKey(c));
+    if (choice?.key === OFF_KEY) return null;
+    return choice && !choice.own ? choice.name : colourWord(c.hex);
+  });
+  const taken = (pickerRow()?.group.presets ?? []).filter((p) => p.id !== effectEdit.id).map((p) => p.name);
+  effectEdit.suggestion = uniqueName(effectSuggestion(names, kindName), taken);
+  $('feName').placeholder = effectEdit.suggestion || 'Name this effect';
+}
+
+/** The name in the box, or the grey suggestion when the box is left empty. */
+const nameOrSuggestion = (input, suggestion) => (input.value.trim() ? input.value : suggestion ?? '');
+
+/** Tab in an empty Name box (a keyboard) fills the grey suggestion in, to change part of it. */
+function takeSuggestion(ev, input, suggestion) {
+  if (ev.key !== 'Tab' || ev.shiftKey || input.value.trim() || !suggestion) return;
+  ev.preventDefault();
+  input.value = suggestion;
+  input.dispatchEvent(new Event('input'));
+}
 
 /** Sends the editor's one command; `doneText` is the toast when the server says yes. */
 function sendEffectEdit(cmd, doneText) {
@@ -4011,7 +4041,7 @@ function sendEffectEdit(cmd, doneText) {
 // A plain tap. Only what changed is sent, in one command; the editor closes when the server says yes.
 $('feSave').addEventListener('click', () => {
   if (!effectEdit || pendingEdit !== null) return;
-  const name = $('feName').value;
+  const name = nameOrSuggestion($('feName'), effectEdit.suggestion);
   const effect = liveLayer(effectEdit.effect);
   if (effectEdit.id === null) {
     sendEffectEdit({ type: 'addEffect', group: picker.group, name, effect }, 'Effect added');
@@ -4032,7 +4062,7 @@ $('feSave').addEventListener('click', () => {
 // Save as a copy: a new effect with these settings; the original stays as it was. Under the same name it becomes "… copy".
 $('feCopy').addEventListener('click', () => {
   if (!effectEdit || effectEdit.id === null || pendingEdit !== null) return;
-  let name = $('feName').value.trim();
+  let name = nameOrSuggestion($('feName'), effectEdit.suggestion).trim();
   if (name === effectEdit.name) name = `${name} copy`;
   showEffectMenu(false);
   sendEffectEdit({ type: 'addEffect', group: picker.group, name, effect: liveLayer(effectEdit.effect) }, 'Saved as a copy');
@@ -5042,8 +5072,8 @@ const quickMover = holdToMove({
 
 // `look`: the id of the quick look being edited, or null for a new one. `orig`: what it was when the sheet opened.
 // `stage`: the Update from the stage switch; `stageAuto`: the page turned it on (for a new group), not the user.
-// `armed`: the Delete button was tapped once.
-const qs = { open: false, tab: 'plain', left: new Set(), saved: 'plain', look: null, orig: null, stage: false, stageAuto: false, armed: 0 };
+// `armed`: the Delete button was tapped once. `suggestion`: the name it would get from its colours (in grey in the Name box).
+const qs = { open: false, tab: 'plain', left: new Set(), saved: 'plain', look: null, orig: null, stage: false, stageAuto: false, armed: 0, suggestion: '' };
 
 /** The layout's quick look being edited, or null. */
 const editedQuick = () => (qs.look ? layout?.quickLooks.find((q) => q.id === qs.look) ?? null : null);
@@ -5175,6 +5205,7 @@ function renderSheet() {
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
+  const labels = [];
   for (const b of $('qsGroups').children) {
     const k = layout.groups.findIndex((g) => g.id === b.dataset.group);
     const group = layout.groups[k];
@@ -5195,7 +5226,12 @@ function renderSheet() {
     b.querySelector('i').style.background = swatchFill(info);
     b.querySelector('.gs span').textContent = left ? 'left out' : info.name;
     b.querySelector('.gl').textContent = left ? '' : `${Math.round(level * 100)}%`;
+    if (!left) labels.push(lookLabel(info));
   }
+  // The name it would get from its colours, in grey in the empty Name box (Save with the box empty keeps it).
+  const taken = layout.quickLooks.filter((q) => q.id !== qs.look).map((q) => q.name);
+  qs.suggestion = uniqueName(lookSuggestion(labels), taken);
+  $('qsName').placeholder = qs.suggestion || 'e.g. Blue and warm';
   if (qs.orig) {
     $('qsStage').checked = qs.stage;
     const added = quickGroupsNew();
@@ -5229,7 +5265,22 @@ $('qsCancel').addEventListener('click', closeSheet);
 $('qsName').addEventListener('keydown', (ev) => {
   ev.stopPropagation();
   if (ev.key === 'Enter') $('qsName').blur();
+  takeSuggestion(ev, $('qsName'), qs.suggestion);
 });
+
+/**
+ * What a group adds to a quick look's suggested name: its colour's or effect's name, a plain word for a colour picked
+ * freely ("yellow"), or null when it adds no colour (Off, a plain On).
+ */
+function lookLabel(info) {
+  if (/^(off|on)$/i.test(info.name)) return null;
+  if (info.name === 'Custom') return colourWord(info.colour);
+  if (info.name === 'Custom effect' && info.effect) {
+    const kind = EFFECT_NAMES.find(([k]) => k === info.effect.effect)?.[1] ?? 'effect';
+    return effectSuggestion(info.effect.colours.map((c) => colourWord(c.hex)), kind);
+  }
+  return info.name;
+}
 $('qsName').addEventListener('input', disarmQuickDelete);
 
 /** The Delete button says "Delete" again. */
@@ -5273,7 +5324,7 @@ $('qsSave').addEventListener('click', () => {
   if (qs.look) {
     const orig = qs.orig;
     const cmd = { type: 'editQuickLook', look: qs.look };
-    const name = $('qsName').value;
+    const name = nameOrSuggestion($('qsName'), qs.suggestion);
     if (name.trim() !== orig.name) cmd.name = name;
     if (qs.tab !== orig.tab) cmd.tab = qs.tab;
     if (groups.length !== orig.groups.length || groups.some((id) => !orig.groups.includes(id))) cmd.groups = groups;
@@ -5289,7 +5340,7 @@ $('qsSave').addEventListener('click', () => {
     }
     pendingSave = send(cmd);
   } else {
-    pendingSave = send({ type: 'saveQuickLook', name: $('qsName').value, tab: qs.tab, groups });
+    pendingSave = send({ type: 'saveQuickLook', name: nameOrSuggestion($('qsName'), qs.suggestion), tab: qs.tab, groups });
   }
   renderSheet();
 });

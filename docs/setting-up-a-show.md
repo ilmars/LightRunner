@@ -126,7 +126,7 @@ A song is one saved picture of the stage: every group's colour, level and effect
 A quick look changes only some groups (say the back wall to turquoise) and leaves the others alone. They sit at the top right, on the **Plain**, **Colours** and **Effects** tabs. The tab only decides where the button is shown.
 
 1. Set the stage as you want it, then tap **＋ Save stage as a look** (the last tile).
-2. In **New quick look from the stage**, type a **Name**, choose the **Tab**, and tap any group you don't want it to set (it becomes "left out" and keeps whatever it has). Press **Save**.
+2. In **New quick look from the stage**, the **Name** box shows a name made from the colours in grey (for example "Warm, purple and yellow"): leave it empty to keep that name, type your own, or press Tab on a keyboard to fill the grey name in and change part of it. Choose the **Tab**, and tap any group you don't want it to set (it becomes "left out" and keeps whatever it has). Press **Save**.
 3. To change one, press **Edit looks**, then tap the quick look. **Edit quick look** lets you rename it, move it to another tab, add or leave out groups, switch on **Update from the stage** to replace what it gives with the stage as it is now, or **Delete** (tap twice). Press **Done**. In edit mode you can hold a quick look and drag it onto another to give it that place.
 4. Smoke groups are never offered.
 
@@ -137,7 +137,7 @@ Effects are moving looks for a line of lights: colour fade, wave, chase and so o
 1. Tap a group's colour button, then the **Effects** tab. A group of one light says "Effects need a line of lights" and names the groups that can run them.
 2. **Tap** an effect to run it on that group. While it runs, a card shows its **Speed** and **All settings ›**. **Hold** an effect, or tap **＋ New effect**, to open the effect editor. A strip at the top shows the effect moving along the group; the stage doesn't change until you press **Save**.
 3. In the editor, from the top:
-   - **Name**, and **Effect**: **Colour fade**, **Wave**, **Chase**, **Sparkle**, **Breathe**, **Meteor**, **Fill** or **Yo-yo**.
+   - **Name** (for a new effect it shows a name made from its colours and what it does in grey, for example "Purple chase"; leave it empty to keep that name), and **Effect**: **Colour fade**, **Wave**, **Chase**, **Sparkle**, **Breathe**, **Meteor**, **Fill** or **Yo-yo**.
    - **Colours**: 1 to 6, numbered in the order they play. Hold one and drag it onto another to reorder. **＋ Colour** adds or removes colours from the group's list, and **＋ Own colour** makes a new one. Meteor and Yo-yo use one colour.
    - **Base**: **None**, **Colour** or **Own colour**, with its brightness. It is a colour under the effect, where the effect is dark.
    - **Speed** and **Direction** (**Left → right**, **Right → left**, **Centre out**, **Outside in**).
