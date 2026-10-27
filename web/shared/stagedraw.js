@@ -214,7 +214,15 @@ function paint(ctx, scene, layout, visual, smokeLevel) {
     for (const item of list) {
       for (const p of item[pass]) {
         const a = pass === 'under' ? strengths[p.i] : p.a;
+        if (!p.skew) {
+          any = addLight(lg, sp[p.sprite], p.x, p.y, p.w, p.h, colourOf(item, p.seg), a) || any;
+          continue;
+        }
+        // Leaning: each row moves across by `skew` per pixel down from its top, so it stays as wide all the way.
+        lg.save();
+        lg.transform(1, 0, p.skew, 1, -p.skew * p.y, 0);
         any = addLight(lg, sp[p.sprite], p.x, p.y, p.w, p.h, colourOf(item, p.seg), a) || any;
+        lg.restore();
       }
     }
     lg.globalAlpha = 1;
@@ -612,10 +620,12 @@ function buildFront(bg, fg, w, h, layout) {
       }
       // A beam opens as wide as its cone on the plan (its reach); a bar's segments each light their own stretch.
       const bw = shape === 'beam' ? Math.max(beamHalfWidth(f) * w, 6 * u) : Math.max(spacing * 0.9, 22 * u);
+      // A beam aimed sideways on the plan leans over to where its cone ends (its top stays under the light).
+      const lean = (place.beamTo ?? place.x) - place.x;
       for (const seg of place.segments) {
-        item.over.push({ sprite: 'beam', x: seg.x - bw, y: from, w: 2 * bw, h: floorY - from, seg: seg.segment, a: BEAM });
+        item.over.push({ sprite: 'beam', x: seg.x - bw, y: from, w: 2 * bw, h: floorY - from, seg: seg.segment, a: BEAM, skew: lean / (floorY - from) });
         const px = bw * (shape === 'beam' ? 1.1 : 1.5), py = px * 0.22;
-        item.under.push({ sprite: 'round', x: seg.x - px, y: floorY + 2 * u - py, w: 2 * px, h: 2 * py, seg: seg.segment, a: FLOOR_POOL });
+        item.under.push({ sprite: 'round', x: seg.x + lean - px, y: floorY + 2 * u - py, w: 2 * px, h: 2 * py, seg: seg.segment, a: FLOOR_POOL });
       }
     } else if (hangs === 'wall') {
       // At the foot of the back wall, washing it upwards: a soft arch per segment, wide enough that they join.

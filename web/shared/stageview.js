@@ -172,8 +172,8 @@ function lengthOf(f, w) {
  * Where a light is drawn from the audience in a box of `w` by `h` pixels, by where it hangs: `x` (its middle, from
  * the plan's x), the body (`left`, `top`, `width`, `height`, with `length` its long side and `vertical` when it
  * stands upright), its `leds` (x, y and segment of each, in the housing), the `segments` (the middle of each, for
- * the beam or wash under it), `beamFrom` (a truss light's beam starts there) and `pole` (a stand's pole), where
- * they apply. Nothing is clamped to the box: whoever draws clips it.
+ * the beam or wash under it), `beamFrom` (a truss light's beam starts there), `beamTo` (a beam's x where it lands:
+ * under the end of its cone on the plan, so one aimed sideways leans) and `pole` (a stand's pole), where they apply. Nothing is clamped to the box: whoever draws clips it.
  */
 export function frontPlacement(f, hangs, w, h) {
   const { trussY, wallTop, floorY, s } = frontScene(w, h);
@@ -188,7 +188,10 @@ export function frontPlacement(f, hangs, w, h) {
     along = { x1: x, y1: place.top, x2: x, y2: place.top + length };
   } else {
     let height, top, min = 16 * s;
-    if (hangs === 'truss') { height = 7 * s; top = trussY + 6 * s; place.beamFrom = top + height; }
+    if (hangs === 'truss') {
+      height = 7 * s; top = trussY + 6 * s; place.beamFrom = top + height;
+      if (shapeOf(f) === 'beam') place.beamTo = beamCone(f).tip.x * w;
+    }
     else if (hangs === 'wall') { height = 7 * s; top = floorY - height; }
     else if (hangs === 'riser') { height = 12 * s; top = floorY - height; }
     else { // on a stand at the front

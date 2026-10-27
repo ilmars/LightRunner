@@ -10,6 +10,9 @@ import {
   ledsAreValid, setJob, setKelvin, setSixteenBit, setValue, summary, validateType,
 } from './types.js';
 import { PLAN_ASPECT, barAxis, beamCone } from '../shared/stage.js';
+import { drawStagePicture } from '../shared/stagedraw.js';
+import { keepStageSize, stageGrip, storedStageSize } from '../shared/stagecard.js';
+import { fitStageLength, frontPlacement, frontScene, hangsOf } from '../shared/stageview.js';
 import { request, startClock, watchState } from '../shared/appbar.js';
 import { setupFullscreen } from '../shared/fullscreen.js';
 import { setupPageTabs } from '../shared/pagetabs.js';
@@ -24,7 +27,7 @@ const el = (tag, cls, text) => {
 
 let show = null; // working copy
 let savedJson = ''; // the show as last saved
-let profiles = []; // [{ id, name, channels (a count), segments, roles, defs (the channels), readOnly }]
+let profiles = []; // [{ id, name, channels (a count), segments, roles, defs (the channels), leds, readOnly }]
 const profileById = new Map();
 let builtInIds = new Set(); // the built-in types' ids: read-only, like the Open Fixture Library's
 
@@ -1491,6 +1494,7 @@ function placeFixture(f) {
       tip.style.top = pct(c.tip.y);
     }
   }
+  queueFront();
 }
 
 /** A small cloud, for a smoke or haze machine. */
@@ -1582,6 +1586,7 @@ function renderStage() {
     root.append(add);
   }
   renderPlanTools();
+  queueFront();
 }
 
 // A click on an empty spot clears the selection and offers to add a fixture there;
@@ -1755,6 +1760,115 @@ $('planAdd').addEventListener('submit', (ev) => {
     renderStage();
   }
 });
+
+// ---- The stage from the audience, under the plan ----
+
+const front = $('front');
+const frontCtx = front.getContext('2d');
+/** Every light a soft warm white, the selected ones in the plan's blue: each beam can be found on the plan. */
+const FRONT_LIT = [200, 186, 168], FRONT_SELECTED = [67, 137, 232];
+/** Its height by the grip: from 124 px up to most of the window, never taller than 60 % of its width. */
+const FRONT_MIN_H = 124;
+let frontQueued = false;
+
+/** The plan being edited (saved or not) as the stage view takes it: what the server's layout gives the operator page. */
+function frontLayout() {
+  return {
+    fixtures: show.fixtures.map((f) => ({
+      id: f.id, name: f.name, x: f.x, y: f.y, w: f.w ?? null, h: f.h ?? null, segments: segmentsOf(f), reversed: f.reversed ?? false,
+      shape: shapeOf(f, inSmokeGroup(f)), angle: f.angle ?? null, reach: f.reach ?? null,
+      leds: (show.profiles.find((p) => p.id === f.profile) ?? profileById.get(f.profile))?.leds ?? null, hangs: f.hangs ?? null,
+    })),
+    groups: show.groups.map((g) => ({ id: g.id, kind: g.kind })),
+    members: Object.fromEntries(show.groups.map((g) => [g.id, g.fixtures])),
+  };
+}
+
+/** Drawn once on the next frame, however many changes come before it (a drag moves a fixture every pointer move). */
+function queueFront() {
+  if (frontQueued) return;
+  frontQueued = true;
+  requestAnimationFrame(drawFront);
+}
+
+function drawFront() {
+  frontQueued = false;
+  if (!show) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = front.clientWidth, h = front.clientHeight;
+  if (!w || !h) return;
+  if (front.width !== Math.round(w * dpr) || front.height !== Math.round(h * dpr)) {
+    front.width = Math.round(w * dpr);
+    front.height = Math.round(h * dpr);
+  }
+  frontCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  frontCtx.clearRect(0, 0, w, h);
+  const layout = frontLayout();
+  const visual = new Uint8Array(layout.fixtures.reduce((n, f) => n + f.segments, 0) * 3);
+  let at = 0;
+  for (const f of layout.fixtures) {
+    const colour = planSelection.has(f.id) ? FRONT_SELECTED : FRONT_LIT;
+    for (let k = 0; k < f.segments; k++, at += 3) visual.set(colour, at);
+  }
+  drawStagePicture(frontCtx, w, h, layout, visual, () => 0, { view: 'front', resizing: $('frontGrip').classList.contains('dragging') });
+}
+
+/** The light drawn nearest a point of the picture (its body, or anywhere down a beam), within 24 px; else null. */
+function frontFixtureAt(px, py) {
+  const w = front.clientWidth, h = front.clientHeight;
+  let best = null, bestD = 24;
+  for (const f of frontLayout().fixtures) {
+    const p = frontPlacement(f, hangsOf(f), w, h);
+    const half = p.vertical ? p.width / 2 : p.length / 2;
+    let x = p.x, bottom = p.top + p.height;
+    if (p.beamTo != null) {
+      // Down the beam to the floor, leaning with it.
+      bottom = frontScene(w, h).floorY;
+      x = p.x + (p.beamTo - p.x) * Math.min(1, Math.max(0, (py - p.top) / (bottom - p.top)));
+    }
+    const d = Math.hypot(Math.max(0, Math.abs(px - x) - half), Math.max(0, p.top - py, py - bottom));
+    if (d < bestD) [best, bestD] = [f, d];
+  }
+  return best && show.fixtures.find((f) => f.id === best.id);
+}
+
+// A click on a light selects it on the plan too (Shift-click adds it or takes it out); on nothing, lets go.
+front.addEventListener('click', (ev) => {
+  const r = front.getBoundingClientRect();
+  const f = frontFixtureAt(ev.clientX - r.left, ev.clientY - r.top);
+  if (ev.shiftKey && f) {
+    const next = new Set(planSelection);
+    if (next.has(f.id)) next.delete(f.id);
+    else next.add(f.id);
+    selectFixture(next.has(f.id) ? f.id : [...next].at(-1) ?? null, false, next);
+    return;
+  }
+  selectFixture(f?.id ?? null, false);
+});
+
+function setFrontHeight(want) {
+  if (want == null) front.style.removeProperty('--front-h');
+  else {
+    const tallest = Math.max(FRONT_MIN_H, Math.min(window.innerHeight - 120, front.clientWidth * 0.6));
+    front.style.setProperty('--front-h', `${Math.round(fitStageLength(want, FRONT_MIN_H, tallest))}px`);
+  }
+}
+stageGrip($('frontGrip'), {
+  axes: 'y',
+  start: () => ({ w: front.clientWidth, h: front.clientHeight }),
+  apply: ({ h }) => setFrontHeight(h),
+  done: () => {
+    keepStageSize('patch', front.style.getPropertyValue('--front-h') ? { h: front.clientHeight } : null);
+    // Drawn properly at the final size (while dragging, the last picture was stretched).
+    queueFront();
+  },
+  reset: () => {
+    setFrontHeight(null);
+    keepStageSize('patch', null);
+  },
+});
+setFrontHeight(storedStageSize('patch').h);
+new ResizeObserver(queueFront).observe(front);
 
 // ---- Save ----
 

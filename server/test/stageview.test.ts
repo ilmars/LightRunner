@@ -344,6 +344,21 @@ test('from the audience: left to right from the plan, each place by where the li
   near(side.leds[0].x, side.x);
 });
 
+test('from the audience: a beam lands where its cone ends on the plan, leaning when it is aimed sideways', () => {
+  const w = 640, h = 300;
+  const up = frontPlacement({ x: 0.3, y: 0.72, shape: 'beam', angle: -90, reach: 0.2, segments: 1 }, 'truss', w, h);
+  near(up.beamTo!, 0.3 * w, 'aimed to the back: straight down');
+  const down = frontPlacement({ x: 0.5, y: 0.28, shape: 'beam', angle: 90, reach: 0.3, segments: 1 }, 'truss', w, h);
+  near(down.beamTo!, 0.5 * w, 'aimed at the audience: straight down');
+  const across = frontPlacement({ x: 0.3, y: 0.5, shape: 'beam', angle: 0, reach: 0.2, segments: 1 }, 'truss', w, h);
+  near(across.beamTo!, 0.5 * w, 'aimed to the right: lands its reach to the right');
+  const slant = frontPlacement({ x: 0.6, y: 0.5, shape: 'beam', angle: -135, reach: 0.2, segments: 1 }, 'truss', w, h);
+  near(slant.beamTo!, (0.6 - 0.2 * Math.SQRT1_2) * w, 'aimed back and to the left: a little to the left');
+  const old = frontPlacement({ x: 0.3, y: 0.72, shape: 'beam', segments: 1 }, 'truss', w, h);
+  near(old.beamTo!, 0.3 * w, 'no angle of its own: to the back, straight down');
+  assert.equal(frontPlacement({ x: 0.3, y: 0.5, w: 0.1, h: 0.04, segments: 3 }, 'truss', w, h).beamTo, undefined, 'a bar shines straight down');
+});
+
 test('from the audience: a light without a length is a lamp, and a LED count of none is one per segment', () => {
   const lamp = frontPlacement({ x: 0.5, y: 0.5, segments: 1 }, 'truss', 640, 300);
   assert.ok(lamp.length > 0, 'a lamp has a body');

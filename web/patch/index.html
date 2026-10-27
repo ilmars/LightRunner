@@ -196,7 +196,7 @@
       <div class="card-head">
         <div class="card-title">
           <h2 class="ds-caps">Stage plan</h2>
-          <p class="card-desc">Where each light hangs, as the operator page draws it. The back of the stage is at the top.</p>
+          <p class="card-desc">Where each light hangs, as the operator page draws it. The back of the stage is at the top; under the plan, the same stage from the audience.</p>
         </div>
       </div>
       <div class="plan-frame">
@@ -224,7 +224,7 @@
         </span>
         <span id="planToolsHint" class="hint"></span>
       </div>
-      <p id="planHangsHint" class="hint plan-hangs-hint" hidden>Where the light is in the stage view from the audience. Guess works it out from its place on the plan.</p>
+      <p id="planHangsHint" class="hint plan-hangs-hint" hidden>Where the light is in the view from the audience, under the plan. Guess works it out from its place on the plan.</p>
       <div id="planArrange" class="plan-tools" hidden>
         <span class="ds-caps plan-label">Align</span>
         <div id="planAlign" class="ds-seg" role="group" aria-label="Align">
@@ -256,6 +256,12 @@
           <button class="ds-btn ds-btn--primary">Add</button>
         </div>
       </form>
+      <!-- The same stage from the audience, drawn from the plan as it is now (saved or not); selected lights in blue. -->
+      <div id="frontBox" class="plan-front">
+        <canvas id="front" class="front" aria-label="The stage from the audience"></canvas>
+        <span class="plan-back ds-caps" aria-hidden="true">From the audience</span>
+        <button id="frontGrip" class="ds-stage-grip front-grip" type="button" aria-label="Make the view from the audience taller or shorter (double-tap: back to its size)" title="Drag to make the view from the audience taller or shorter; double-tap to put it back"></button>
+      </div>
     </section>
   </main>
 

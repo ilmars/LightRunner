@@ -33,6 +33,7 @@ export interface FrontPlacement {
   segments: (Point & { segment: number })[];
   leds: (Point & { segment: number })[];
   beamFrom?: number;
+  beamTo?: number;
   pole?: { from: number; to: number };
 }
 export function frontPlacement(f: ViewFixture, hangs: string, w: number, h: number): FrontPlacement;
