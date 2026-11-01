@@ -485,12 +485,15 @@ test('a lit pool among dark ones keeps its own strength; dimmer neighbours share
 test('a show saved with Hangs on and LEDs reads back whole, in the show and in the layout', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'light-runner-stageview-'));
   const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'server/seed/demo-show.json'), webDir: join(root, 'web'), log: () => {} });
+  // A Patch save sends the revision of the show last fetched, as the page does.
+  let revision = '';
   const call = async (method: string, path: string, body?: unknown) => {
     const res = await fetch(`http://127.0.0.1:${app.port}${path}`, {
       method,
-      headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+      headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(path.includes('source=patch') ? { 'x-show-revision': revision } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
+    revision = res.headers.get('x-show-revision') ?? revision;
     return { status: res.status, body: (await res.json()) as any };
   };
   try {
