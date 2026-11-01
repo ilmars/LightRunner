@@ -705,11 +705,8 @@ test('a show edit only works out the safe rate of new or changed effects', () =>
   const e = new Engine(show, 0);
   assert.equal(rateChecks.count - start, 200, 'each effect is measured once');
   // The same show again (any show edit that leaves the effects alone) measures none.
-  const t0 = performance.now();
   e.setShow(structuredClone(show), 1);
-  const took = performance.now() - t0;
   assert.equal(rateChecks.count - start, 200);
-  assert.ok(took < 20, `setShow took ${took.toFixed(1)} ms`);
   // A changed effect is measured; one that only runs at another speed isn't (the rate doesn't depend on it).
   const edited = structuredClone(show);
   edited.presets.find((p) => p.id === 'bg-wave-3')!.layers = [EffectLayer.parse({ kind: 'effect', effect: 'wave', colours, size: 0.9, speed: { beats: 4 } })];
@@ -721,6 +718,23 @@ test('a show edit only works out the safe rate of new or changed effects', () =>
   const before = rateChecks.count;
   e.setShow(show, 4);
   assert.equal(rateChecks.count - before, 200);
+  // The same show again is much quicker than an edit that measures them all (about 10 times on a
+  // laptop). Timed against each other, not in milliseconds, so a slow machine doesn't fail it; the
+  // quickest of a few runs, so one pause for garbage collection doesn't either.
+  const timed = (edit: () => void) => {
+    const t0 = performance.now();
+    edit();
+    return performance.now() - t0;
+  };
+  const counted = rateChecks.count;
+  let same = Infinity, measured = Infinity;
+  for (let run = 0; run < 3; run++) {
+    same = Math.min(same, timed(() => e.setShow(structuredClone(show), 5 + run)));
+    const other = new Engine(stage(), 0);
+    measured = Math.min(measured, timed(() => other.setShow(structuredClone(show), 1)));
+  }
+  assert.equal(rateChecks.count - counted, 600, 'only the fresh engines measured them');
+  assert.ok(same < measured / 4, `the same show again took ${same.toFixed(1)} ms; measuring every effect took ${measured.toFixed(1)} ms`);
 });
 
 test('a new base colour or base brightness never measures an effect again: only having a base can change its safe rate', () => {
