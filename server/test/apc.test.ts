@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { App } from '../src/app.ts';
 import {
-  Pickup, apcAllOff, apcIntro, apcLeds, apcModel, buttonIntent, faderAction, ledChanges, parseApc, pickApcPort, rgbSysex,
+  Pickup, apcAllOff, apcIntro, apcLeds, apcModel, buttonIntent, faderAction, ledChanges, paletteColour, padNote, parseApc, pickApcPort,
   type ApcLayout, type ApcState,
 } from '../src/apc.ts';
 import { MidiDriver } from '../src/controllers.ts';
@@ -273,30 +273,41 @@ test('LEDs of the older model: songs on stage green, next yellow; colours runnin
   for (const n of [64, 65, 66, 71, 83, 84, 85, 86, 87, 88, 89]) assert.deepEqual(leds.get(n), [0x90, n, 0], `button ${n}`);
 });
 
-test('LEDs of the mk2: each pad in its own colour by RGB SysEx, dimmed unless on stage or running', () => {
+test('LEDs of the mk2: each pad in its nearest palette colour, dimmed by channel unless on stage or running', () => {
   const leds = apcLeds('mk2', LAYOUT, STATE);
   assert.equal(leds.size, 80);
-  // Song 1 on stage: its red at full. Bytes per Akai: F0 47 7F 4F 24, length 00 08, start and end pad, R G B as MSB LSB, F7.
-  assert.deepEqual(leds.get(57), [0xf0, 0x47, 0x7f, 0x4f, 0x24, 0x00, 0x08, 57, 57, 0x01, 0x7f, 0, 0, 0, 0, 0xf7]);
-  assert.deepEqual(leds.get(57), rgbSysex(57, 255, 0, 0));
-  // Song 2 next: its blue, dim (40 %).
-  assert.deepEqual(leds.get(58), rgbSysex(58, 0, 0, 102));
-  // Group 1's blue runs: full; its red does not: dimmed (15 %).
-  assert.deepEqual(leds.get(32), rgbSysex(32, 0, 0, 255));
-  assert.deepEqual(leds.get(40), rgbSysex(40, 38, 0, 0));
+  // Song 1 on stage: red (velocity 5) at full, channel 7.
+  assert.deepEqual(leds.get(57), [0x96, 57, 5]);
+  assert.deepEqual(leds.get(57), padNote(57, 5, 1));
+  // Song 2 next: blue (velocity 45) at 50 %, the step nearest 40 %.
+  assert.deepEqual(leds.get(58), [0x92, 58, 45]);
+  // Group 1's blue runs: full; its red does not: dimmed to 10 %.
+  assert.deepEqual(leds.get(32), [0x96, 32, 45]);
+  assert.deepEqual(leds.get(40), [0x90, 40, 5]);
   // Nothing there: off.
-  assert.deepEqual(leds.get(24), rgbSysex(24, 0, 0, 0));
-  assert.deepEqual(leds.get(60), rgbSysex(60, 0, 0, 0));
+  assert.deepEqual(leds.get(24), [0x90, 24, 0]);
+  assert.deepEqual(leds.get(60), [0x90, 60, 0]);
+  // No RGB SysEx: the church's mk2 left most pads sent that way dark.
+  for (const msg of leds.values()) assert.notEqual(msg[0], 0xf0);
   // Buttons are single LEDs: 0 off, 1 on, 2 blink, on channel 1.
   assert.deepEqual(leds.get(112), [0x90, 112, 1]);
   assert.deepEqual(leds.get(117), [0x90, 117, 0]);
   assert.deepEqual(leds.get(100), [0x90, 100, 0]);
 });
 
-test('the mk2 shows pale colours as the iPad does (mixed towards cream)', () => {
+test('the mk2 palette: the nearest bright colour, whatever the brightness', () => {
+  assert.equal(paletteColour([255, 0, 0]), 5);
+  assert.equal(paletteColour([25, 0, 0]), 5);
+  assert.equal(paletteColour([255, 138, 0]), 9); // Lightkey orange
+  assert.equal(paletteColour([0, 150, 255]), 37); // Lightkey blue
+  assert.equal(paletteColour([194, 0, 255]), 53); // Lightkey violet: nearest is the palette's magenta
+  assert.equal(paletteColour([0, 223, 255]), 37); // turquoise
+  assert.equal(paletteColour([0, 0, 0]), 0);
+});
+
+test('the mk2 shows pale colours as the iPad does (mixed towards cream), as palette white', () => {
   const leds = apcLeds('mk2', { ...LAYOUT, runningOrder: [{ id: 's1', swatch: '#ffffff' }] }, STATE);
-  // White on stage: shown as cream, like the iPad's swatches.
-  assert.deepEqual(leds.get(56), rgbSysex(56, 247, 244, 239));
+  assert.deepEqual(leds.get(56), [0x96, 56, 3]);
 });
 
 test('button LEDs: Flash while flashing, Blackout blinks, Back to while changed, Basic lights while on stage', () => {
@@ -443,7 +454,7 @@ test('the APC is found when plugged in, gets the full LED set, and its pads run 
   port.receive([0x80, 57, 0]);
   await waitFor(() => app.state?.look === order[1], 2000, 'song 2 on stage');
   // Only what changed is sent: never the whole set again.
-  await waitFor(() => port.sent.some((m) => m[7] === 57), 1000, 'the song 2 pad to light');
+  await waitFor(() => port.sent.some((m) => m[1] === 57), 1000, 'the song 2 pad to light');
   await sleep(50);
   assert.ok(port.sent.length > 0 && port.sent.length < 20, `sent ${port.sent.length} messages`);
 
@@ -603,7 +614,7 @@ test('every few polls the whole LED set is sent again, for a device that was rep
   for (let round = 0; round < 2; round++) {
     port.sent.length = 0;
     await waitFor(() => port.sent.length >= 80, 1000, 'the LED set again');
-    assert.ok(port.sent.every((m) => m[0] === 0x90 || m[0] === 0xf0), 'only LED messages');
+    assert.ok(port.sent.every((m) => (m[0]! & 0xf0) === 0x90), 'only LED messages');
   }
   assert.equal(midi.opened.length, 1);
 }, { resendPolls: 3 }));

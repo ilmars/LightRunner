@@ -80,9 +80,9 @@ test('pads assigned to songs light like the running order; quick looks when the 
   assert.deepEqual(l.get(11), [0x90, 11, 1]);
   // mk2: the song's own colour, full on stage, dim otherwise.
   l = apcLeds('mk2', leds, ledState('two'), { keys });
-  assert.deepEqual(l.get(10)!.slice(9, 15), [0, 0, 0, 0, 1, 127]);
+  assert.deepEqual(l.get(10), [0x96, 10, 45]); // palette blue, channel 7 = full
   l = apcLeds('mk2', leds, ledState('basic'), { keys });
-  assert.ok(Math.max(...l.get(10)!.slice(9, 15)) < 40, 'dim while it is not on stage or next');
+  assert.deepEqual(l.get(10), [0x90, 10, 45], 'dim (10 %) while it is not on stage or next');
 });
 
 test('without the standard layout, pads that are not assigned stay dark', () => {
@@ -236,7 +236,7 @@ test('an explicit key on the APC mini wins over the standard layout for that key
   port.sent.length = 0;
   tap(port, 57);
   await waitFor(() => app.state?.look === order[4], 2000, 'song 4 again');
-  await waitFor(() => port.sent.some((m) => m[0] === 0xf0 && m[7] === 57), 1000, 'the pad of song 4 to light');
+  await waitFor(() => port.sent.some((m) => (m[0]! & 0xf0) === 0x90 && m[1] === 57 && m[2]! > 0), 1000, 'the pad of song 4 to light');
   // Standard layout off: the other pads do nothing; the assigned one still works.
   assert.equal((await call(rig.url, 'PUT', '/api/controller', { apcLayout: false })).status, 200);
   tap(port, 56);
