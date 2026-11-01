@@ -330,6 +330,11 @@ export function paletteColour([r, g, b]: [number, number, number]): number {
   return best[0];
 }
 
+/** Each saturated palette colour's paler partner (red 5 → 4, orange 9 → 8, …): what is on stage shows lighter. */
+const PALER: Record<number, number> = {
+  5: 4, 9: 8, 13: 12, 17: 16, 21: 20, 25: 24, 29: 28, 33: 32, 37: 36, 41: 40, 45: 44, 49: 48, 53: 52, 57: 56, 60: 4,
+};
+
 /** The mk2's brightness steps, by channel 1-7. */
 const STEPS = [0.1, 0.25, 0.5, 0.65, 0.75, 0.9, 1];
 
@@ -350,7 +355,9 @@ export function apcLeds(model: ApcModel, layout: ApcLayout, state: ApcState, opt
   const pad = (n: number, lit: { swatch: string | null; level: number; mk1: number } | null) => {
     if (model === 'mk1') return leds.set(n, note(n, lit?.mk1 ?? OFF));
     if (!lit) return leds.set(n, padNote(n, 0));
-    return leds.set(n, padNote(n, paletteColour(shownRgb(lit.swatch)), lit.level));
+    const colour = paletteColour(shownRgb(lit.swatch));
+    // On stage (or running): full, in the colour's paler tint, so it stands out from the dim pads around it.
+    return leds.set(n, padNote(n, lit.level >= STAGE ? (PALER[colour] ?? colour) : colour, lit.level));
   };
 
   // A running-order item: bright on stage, dim when next, low otherwise.

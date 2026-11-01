@@ -80,7 +80,7 @@ test('pads assigned to songs light like the running order; quick looks when the 
   assert.deepEqual(l.get(11), [0x90, 11, 1]);
   // mk2: the song's own colour, full on stage, dim otherwise.
   l = apcLeds('mk2', leds, ledState('two'), { keys });
-  assert.deepEqual(l.get(10), [0x96, 10, 45]); // palette blue, channel 7 = full
+  assert.deepEqual(l.get(10), [0x96, 10, 44]); // on stage: the palette's paler blue, channel 7 = full
   l = apcLeds('mk2', leds, ledState('basic'), { keys });
   assert.deepEqual(l.get(10), [0x90, 10, 45], 'dim (10 %) while it is not on stage or next');
 });

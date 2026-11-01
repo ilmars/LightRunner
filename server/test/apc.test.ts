@@ -276,13 +276,13 @@ test('LEDs of the older model: songs on stage green, next yellow; colours runnin
 test('LEDs of the mk2: each pad in its nearest palette colour, dimmed by channel unless on stage or running', () => {
   const leds = apcLeds('mk2', LAYOUT, STATE);
   assert.equal(leds.size, 80);
-  // Song 1 on stage: red (velocity 5) at full, channel 7.
-  assert.deepEqual(leds.get(57), [0x96, 57, 5]);
-  assert.deepEqual(leds.get(57), padNote(57, 5, 1));
+  // Song 1 on stage: red at full (channel 7), in the palette's paler red (4) so it stands out.
+  assert.deepEqual(leds.get(57), [0x96, 57, 4]);
+  assert.deepEqual(leds.get(57), padNote(57, 4, 1));
   // Song 2 next: blue (velocity 45) at 50 %, the step nearest 40 %.
   assert.deepEqual(leds.get(58), [0x92, 58, 45]);
-  // Group 1's blue runs: full; its red does not: dimmed to 10 %.
-  assert.deepEqual(leds.get(32), [0x96, 32, 45]);
+  // Group 1's blue runs: full and paler (44); its red does not: dimmed to 10 %.
+  assert.deepEqual(leds.get(32), [0x96, 32, 44]);
   assert.deepEqual(leds.get(40), [0x90, 40, 5]);
   // Nothing there: off.
   assert.deepEqual(leds.get(24), [0x90, 24, 0]);
