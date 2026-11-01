@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 1 Nov 2026 (a Patch page left open can no longer save over newer changes). Update this file whenever a feature lands or a priority changes, so whoever picks the project up next (on any computer) knows where things stand.
+Last updated: 1 Nov 2026 (the APC mini mk2's pads light in palette colours; a Patch page left open can no longer save over newer changes). Update this file whenever a feature lands or a priority changes, so whoever picks the project up next (on any computer) knows where things stand.
 
 ## Built
 
@@ -46,7 +46,7 @@ Tests: 883 (`npm test`): 880 pass, 1 is skipped (the Lightkey project test, need
 - The Mac app is untried on a real Mac: check that after Open Anyway the bundled Node and the MIDI and USB DMX add-ons open without a second warning, and that Light Runner doesn't hold up a restart or system update.
 - No automatic updates: the launcher window only says "Version X is available"; updating is installing the new version over the old one (on the Pi, running the install command again).
 - Controller keys have only met simulated controllers (`LIGHT_RUNNER_FAKE_MIDI=1` runs the server with a simulated APC mini mk2 and nanoKONTROL2, test only). Not checked: other controllers' real port names (a controller whose name changes on a re-plug would lose its keys) and how the Listen switch behaves on a Mac where another program has the same port open. With Key chips showing, running-order Edit's name fields are about 120 px at 1080 px wide: a long name ends in "…" until it is tapped, and while it is typed the chip makes way (about 165 px). After Reset to the APC mini layout, an Undo of an operator edit made before it can bring back that edit's song keys on the APC mini.
-- APC mini and Companion not yet tried on real hardware. For the APC: the older model's MIDI numbers come from community mappings, and the mk2's colour message follows Akai's protocol document but hasn't been tried on a real mk2. What to look for is in [companion.md](companion.md). OSC has only been tried against a simulated sender.
+- The APC mini mk2 has been used at the church (1 Nov): keys, faders and pad colours work. Its pads are lit with palette notes (velocity = colour, channel = brightness); the RGB SysEx left most pads dark on that unit. The older model's MIDI numbers still come from community mappings and haven't met a real one. Companion not yet tried on real hardware. What to look for is in [companion.md](companion.md). OSC has only been tried against a simulated sender.
 - Jump check: with another seed (`node tools/jump-check.ts --show shows/stage-l1.json --seed 4`) it finds a 5.52 % step in one frame on b8 segment 1: Blackout comes while a light is held, then Release all 0.3 s into Blackout's fade, so Blackout's 1 s fade and the hold's 1 s release run together (with any colour; it was there before White, Amber and UV were added to the check; the default seeds pass). Not fixed yet.
 - Frame timing: about one frame in a few minutes is up to 3.4 ms late (spec: ±3 ms). Not visible, but the spec's 1-hour timing test would fail on it.
 - The stage view on the operator page keeps showing the last frame while the tablet is offline (the red banner does show).
