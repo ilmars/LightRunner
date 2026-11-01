@@ -78,6 +78,20 @@ export class Store {
       .reverse();
   }
 
+  /** The recordings the backups' timelines use, read loosely (a backup that can't be read is passed over). */
+  backupRecordings(): Set<string> {
+    const ids = new Set<string>();
+    for (const file of this.backups()) {
+      try {
+        const raw = JSON.parse(readFileSync(join(this.dir, 'backups', file), 'utf8'));
+        for (const t of Array.isArray(raw?.timelines) ? raw.timelines : []) if (typeof t?.recording?.id === 'string') ids.add(t.recording.id);
+      } catch {
+        // the next one
+      }
+    }
+    return ids;
+  }
+
   loadRuntime(): RuntimeState | null {
     try {
       const rt = JSON.parse(readFileSync(this.runtimePath, 'utf8')) as RuntimeState;

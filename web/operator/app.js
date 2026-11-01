@@ -1,9 +1,14 @@
 // Operator page. The server is the single source of truth: this page only
 // sends commands and shows the live state it is given.
 
-import { barAxis, barEnds, beamCone, outlineCells } from '/shared/stage.js';
 import { FlashPresses, isSideways } from '/shared/press.js';
 import { setupFullscreen } from '/shared/fullscreen.js';
+import { setupPageTabs } from '/shared/pagetabs.js';
+import { drawStagePicture, shown, shownRgb } from '/shared/stagedraw.js';
+import { keepStageSize, stageGrip, stageViewSwitch, storedStageSize } from '/shared/stagecard.js';
+import { fitStageLength } from '/shared/stageview.js';
+import { colourWord, effectSuggestion, lookSuggestion, uniqueName } from '/shared/names.js';
+import { barAxis, barEnds, beamCone, outlineCells } from '/shared/stage.js';
 import { HUE_STOPS, WHITE_STOPS, hexRgb, parseChannel, parseHex, rgbHex, stripColour, stripMix, stripPick } from '/shared/colour.js';
 
 const $ = (id) => document.getElementById(id);
@@ -14,29 +19,6 @@ const el = (tag, cls, text) => {
   return e;
 };
 
-/**
- * How a light's colour is drawn on screen. Whites (light colours with little
- * colour in them: warm white #ffb46b, cool white #dcebff, the safe light) are
- * drawn as soft whites instead of their raw values, which look orange or blue
- * on a screen. Saturated colours are left as they are. Only the drawing
- * changes; what is sent to the lights doesn't.
- */
-const CREAM = [241, 236, 228];
-function shownRgb(r, g, b) {
-  const max = Math.max(r, g, b);
-  if (max <= 0) return [r, g, b];
-  const chroma = (max - Math.min(r, g, b)) / max;
-  if (chroma >= 0.65) return [r, g, b];
-  // Mix the colour (at full brightness) 60 % towards cream, then put its brightness back.
-  const k = max / 255;
-  return [r, g, b].map((v, i) => Math.round(((v / k) * 0.4 + CREAM[i] * 0.6) * k));
-}
-function shown(hex) {
-  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return hex;
-  const n = parseInt(hex.slice(1), 16);
-  const [r, g, b] = shownRgb((n >> 16) & 255, (n >> 8) & 255, n & 255);
-  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
-}
 
 let layout = null;
 let state = null;
@@ -176,6 +158,29 @@ function setConnected(on) {
   }
 }
 
+/** A timeline running on the stage (started on the Timeline page): a quiet line in the top bar, and Stop. */
+function renderTimelineNote() {
+  const tl = state.timeline ?? null;
+  $('tlNote').hidden = !tl;
+  document.body.classList.toggle('tl-on', !!tl);
+  if (!tl) return;
+  const clock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+  $('tlName').textContent = tl.name;
+  $('tlPos').textContent = `${clock(tl.pos)} / ${clock(tl.duration)}${tl.playing ? '' : ' · paused'}`;
+}
+
+/** Stop of the timeline on the stage: anyone may; it is the one named, whichever page started it. The lights stay as they are. */
+function stopTimeline() {
+  const tl = state?.timeline;
+  if (!tl) return;
+  if (!connected) {
+    toast('Not connected. Lights keep running; try again in a moment.');
+    return;
+  }
+  socket.send(JSON.stringify({ type: 'timelineStop', id: tl.id, ref: ++ref }));
+}
+$('tlStop').addEventListener('click', stopTimeline);
+
 /** Sends a command; returns its ref (to match the server's answer), or null when not connected. */
 function send(cmd) {
   if (!connected) {
@@ -279,6 +284,8 @@ function buildOrder() {
     const node = editing ? editRows.find((r) => r.id === added[0])?.el : orderRows.find((r) => r.item.id === added[0])?.button;
     if (node) reveal(node);
   }
+  // The rows changed (a song added or removed, Edit list): the stage view's kept height, again within what leaves three.
+  queueStageFit();
 }
 
 function replaceRows(nodes) {
@@ -1154,6 +1161,8 @@ function render() {
     $('contactBox').hidden = !who;
     $('contactText').textContent = who;
   }
+
+  renderTimelineNote();
 
   $('fading').hidden = !fading;
   if (fading) {
@@ -3402,6 +3411,7 @@ function drawEffectEditor() {
   const one = ONE_COLOUR.has(effect.effect);
   const kindName = EFFECT_NAMES.find(([k]) => k === effect.effect)?.[1] ?? 'This effect';
   $('feColLab').textContent = one ? 'Colour' : 'Colours';
+  suggestEffectName(kindName);
 
   // Colours: the chosen ones in the order they play, numbered (hold one and drag it onto another), then ＋ Colour.
   const choiceOf = (c) => choices.find((x) => x.key === colourKey(c)) ?? { name: 'Own', swatch: c.hex };
@@ -3990,8 +4000,36 @@ $('feMoreWrap').addEventListener('keydown', (ev) => {
 $('feName').addEventListener('keydown', (ev) => {
   ev.stopPropagation();
   if (ev.key === 'Enter') $('feName').blur();
+  takeSuggestion(ev, $('feName'), effectEdit?.suggestion);
 });
 $('feName').addEventListener('input', disarmDelete);
+
+/**
+ * The name the effect would get from its colours and what it does ("Purple chase"), in grey in the empty Name box:
+ * Save with the box empty keeps it. Not one another effect of the group already has.
+ */
+function suggestEffectName(kindName) {
+  const { effect, choices } = effectEdit;
+  const names = effect.colours.map((c) => {
+    const choice = choices.find((x) => x.key === colourKey(c));
+    if (choice?.key === OFF_KEY) return null;
+    return choice && !choice.own ? choice.name : colourWord(c.hex);
+  });
+  const taken = (pickerRow()?.group.presets ?? []).filter((p) => p.id !== effectEdit.id).map((p) => p.name);
+  effectEdit.suggestion = uniqueName(effectSuggestion(names, kindName), taken);
+  $('feName').placeholder = effectEdit.suggestion || 'Name this effect';
+}
+
+/** The name in the box, or the grey suggestion when the box is left empty. */
+const nameOrSuggestion = (input, suggestion) => (input.value.trim() ? input.value : suggestion ?? '');
+
+/** Tab in an empty Name box (a keyboard) fills the grey suggestion in, to change part of it. */
+function takeSuggestion(ev, input, suggestion) {
+  if (ev.key !== 'Tab' || ev.shiftKey || input.value.trim() || !suggestion) return;
+  ev.preventDefault();
+  input.value = suggestion;
+  input.dispatchEvent(new Event('input'));
+}
 
 /** Sends the editor's one command; `doneText` is the toast when the server says yes. */
 function sendEffectEdit(cmd, doneText) {
@@ -4003,7 +4041,7 @@ function sendEffectEdit(cmd, doneText) {
 // A plain tap. Only what changed is sent, in one command; the editor closes when the server says yes.
 $('feSave').addEventListener('click', () => {
   if (!effectEdit || pendingEdit !== null) return;
-  const name = $('feName').value;
+  const name = nameOrSuggestion($('feName'), effectEdit.suggestion);
   const effect = liveLayer(effectEdit.effect);
   if (effectEdit.id === null) {
     sendEffectEdit({ type: 'addEffect', group: picker.group, name, effect }, 'Effect added');
@@ -4024,7 +4062,7 @@ $('feSave').addEventListener('click', () => {
 // Save as a copy: a new effect with these settings; the original stays as it was. Under the same name it becomes "… copy".
 $('feCopy').addEventListener('click', () => {
   if (!effectEdit || effectEdit.id === null || pendingEdit !== null) return;
-  let name = $('feName').value.trim();
+  let name = nameOrSuggestion($('feName'), effectEdit.suggestion).trim();
   if (name === effectEdit.name) name = `${name} copy`;
   showEffectMenu(false);
   sendEffectEdit({ type: 'addEffect', group: picker.group, name, effect: liveLayer(effectEdit.effect) }, 'Saved as a copy');
@@ -5034,8 +5072,8 @@ const quickMover = holdToMove({
 
 // `look`: the id of the quick look being edited, or null for a new one. `orig`: what it was when the sheet opened.
 // `stage`: the Update from the stage switch; `stageAuto`: the page turned it on (for a new group), not the user.
-// `armed`: the Delete button was tapped once.
-const qs = { open: false, tab: 'plain', left: new Set(), saved: 'plain', look: null, orig: null, stage: false, stageAuto: false, armed: 0 };
+// `armed`: the Delete button was tapped once. `suggestion`: the name it would get from its colours (in grey in the Name box).
+const qs = { open: false, tab: 'plain', left: new Set(), saved: 'plain', look: null, orig: null, stage: false, stageAuto: false, armed: 0, suggestion: '' };
 
 /** The layout's quick look being edited, or null. */
 const editedQuick = () => (qs.look ? layout?.quickLooks.find((q) => q.id === qs.look) ?? null : null);
@@ -5167,6 +5205,7 @@ function renderSheet() {
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
+  const labels = [];
   for (const b of $('qsGroups').children) {
     const k = layout.groups.findIndex((g) => g.id === b.dataset.group);
     const group = layout.groups[k];
@@ -5187,7 +5226,12 @@ function renderSheet() {
     b.querySelector('i').style.background = swatchFill(info);
     b.querySelector('.gs span').textContent = left ? 'left out' : info.name;
     b.querySelector('.gl').textContent = left ? '' : `${Math.round(level * 100)}%`;
+    if (!left) labels.push(lookLabel(info));
   }
+  // The name it would get from its colours, in grey in the empty Name box (Save with the box empty keeps it).
+  const taken = layout.quickLooks.filter((q) => q.id !== qs.look).map((q) => q.name);
+  qs.suggestion = uniqueName(lookSuggestion(labels), taken);
+  $('qsName').placeholder = qs.suggestion || 'e.g. Blue and warm';
   if (qs.orig) {
     $('qsStage').checked = qs.stage;
     const added = quickGroupsNew();
@@ -5221,7 +5265,22 @@ $('qsCancel').addEventListener('click', closeSheet);
 $('qsName').addEventListener('keydown', (ev) => {
   ev.stopPropagation();
   if (ev.key === 'Enter') $('qsName').blur();
+  takeSuggestion(ev, $('qsName'), qs.suggestion);
 });
+
+/**
+ * What a group adds to a quick look's suggested name: its colour's or effect's name, a plain word for a colour picked
+ * freely ("yellow"), or null when it adds no colour (Off, a plain On).
+ */
+function lookLabel(info) {
+  if (/^(off|on)$/i.test(info.name)) return null;
+  if (info.name === 'Custom') return colourWord(info.colour);
+  if (info.name === 'Custom effect' && info.effect) {
+    const kind = EFFECT_NAMES.find(([k]) => k === info.effect.effect)?.[1] ?? 'effect';
+    return effectSuggestion(info.effect.colours.map((c) => colourWord(c.hex)), kind);
+  }
+  return info.name;
+}
 $('qsName').addEventListener('input', disarmQuickDelete);
 
 /** The Delete button says "Delete" again. */
@@ -5265,7 +5324,7 @@ $('qsSave').addEventListener('click', () => {
   if (qs.look) {
     const orig = qs.orig;
     const cmd = { type: 'editQuickLook', look: qs.look };
-    const name = $('qsName').value;
+    const name = nameOrSuggestion($('qsName'), qs.suggestion);
     if (name.trim() !== orig.name) cmd.name = name;
     if (qs.tab !== orig.tab) cmd.tab = qs.tab;
     if (groups.length !== orig.groups.length || groups.some((id) => !orig.groups.includes(id))) cmd.groups = groups;
@@ -5281,7 +5340,7 @@ $('qsSave').addEventListener('click', () => {
     }
     pendingSave = send(cmd);
   } else {
-    pendingSave = send({ type: 'saveQuickLook', name: $('qsName').value, tab: qs.tab, groups });
+    pendingSave = send({ type: 'saveQuickLook', name: nameOrSuggestion($('qsName'), qs.suggestion), tab: qs.tab, groups });
   }
   renderSheet();
 });
@@ -5459,6 +5518,72 @@ const canvas = $('stage');
 const ctx = canvas.getContext('2d');
 const NO_VISUAL = new Uint8Array(0);
 
+// From above or from the audience: one choice per browser, the switch on the picture itself.
+const stageView = stageViewSwitch($('stageWrap'), () => drawStage());
+
+// Taller or shorter by the grip under it: from its own 124 px up to what leaves the running order three rows.
+const STAGE_MIN_H = 124;
+const ORDER_ROWS_LEFT = 3;
+/**
+ * The tallest the picture may be now: the running order keeps at least three rows readable (with the line under
+ * Basic lights), and above the "N more ↓" cue when there are more rows than fit (the cue covers the list's foot).
+ */
+function stageMaxH() {
+  const list = $('runningOrder');
+  const rows = [...list.children].filter((n) => !n.classList.contains('sep'));
+  const third = rows[ORDER_ROWS_LEFT - 1];
+  // Where the third row ends, measured from the top of the list (44 px rows, 2 px apart, until the list is built).
+  let need = third && rows[0]
+    ? third.getBoundingClientRect().bottom - rows[0].getBoundingClientRect().top
+    : ORDER_ROWS_LEFT * 44 + (ORDER_ROWS_LEFT - 1) * 2;
+  // The cue shows once two rows or more are out of sight.
+  if (rows.length >= ORDER_ROWS_LEFT + 2) {
+    const cue = list.parentElement.querySelector('.more-cue');
+    need += (cue && parseFloat(getComputedStyle(cue).height)) || 42;
+  }
+  return canvas.clientHeight + list.clientHeight - need;
+}
+/** Sets the picture's height (kept within its limits); `null` puts it back to its own size. */
+function setStageHeight(want) {
+  if (want == null) canvas.style.removeProperty('--stage-h');
+  else canvas.style.setProperty('--stage-h', `${Math.round(fitStageLength(want, STAGE_MIN_H, stageMaxH()))}px`);
+}
+const stageBoxShown = () => $('stageBox').offsetParent !== null;
+stageGrip($('stageGrip'), {
+  axes: 'y',
+  start: () => ({ w: canvas.clientWidth, h: canvas.clientHeight }),
+  apply: ({ h }) => setStageHeight(h),
+  done: () => {
+    keepStageSize('operator', canvas.style.getPropertyValue('--stage-h') ? { h: canvas.clientHeight } : null);
+    // Drawn properly at the final size (while dragging, the last picture was stretched).
+    drawStage();
+  },
+  reset: () => {
+    setStageHeight(null);
+    keepStageSize('operator', null);
+  },
+});
+/** The kept height, again within today's limits (the window or the list may have changed). */
+function fitStageToWindow() {
+  if (!stageBoxShown()) return;
+  const kept = storedStageSize('operator').h;
+  if (kept) setStageHeight(kept);
+}
+window.addEventListener('resize', fitStageToWindow);
+requestAnimationFrame(fitStageToWindow);
+/** Fits it once the page has laid out what just changed (the running order's rows, Edit list's head and foot). */
+let stageFitQueued = false;
+function queueStageFit() {
+  if (stageFitQueued) return;
+  stageFitQueued = true;
+  requestAnimationFrame(() => {
+    stageFitQueued = false;
+    fitStageToWindow();
+  });
+}
+// Whatever changed its size (the grip, the window, the phone's layout): drawn again at the new size.
+new ResizeObserver(() => drawStage()).observe(canvas);
+
 function drawStage() {
   if (!layout) return;
   const dpr = window.devicePixelRatio || 1;
@@ -5471,157 +5596,7 @@ function drawStage() {
   ctx.clearRect(0, 0, w, h);
   // In Prepare it is the draft, moving like the stage would: dark until its first frame.
   const shownVisual = prep.on ? prep.visual ?? NO_VISUAL : visual;
-  const pad = 14, r = Math.max(5, Math.min(9, h / 16));
-  const iw = w - 2 * pad, ih = h - 2 * pad;
-  const toPx = (p) => [pad + p.x * iw, pad + p.y * ih];
-  // Where each fixture's segments start in the visual, counted in segments.
-  const starts = [];
-  let at = 0;
-  for (const f of layout.fixtures) {
-    starts.push(at);
-    at += Math.max(1, f.segments ?? 1);
-  }
-  const cellsOf = (k) => {
-    const f = layout.fixtures[k], first = starts[k];
-    return Array.from({ length: Math.max(1, f.segments ?? 1) }, (_, s) =>
-      shownRgb(shownVisual[(first + s) * 3] ?? 0, shownVisual[(first + s) * 3 + 1] ?? 0, shownVisual[(first + s) * 3 + 2] ?? 0));
-  };
-  const brightest = (cells) => cells.reduce((best, c) => (Math.max(...c) > Math.max(...best) ? c : best), cells[0]);
-  const shapeOf = (f) => f.shape ?? (f.w || f.h ? 'bar' : 'dot');
-  // Beams' cones and smoke go first, so they never cover a light.
-  layout.fixtures.forEach((f, k) => {
-    if (shapeOf(f) === 'beam') drawCone(f, cellsOf(k)[0]);
-    if (shapeOf(f) === 'smoke') drawSmoke(f);
-  });
-  layout.fixtures.forEach((f, k) => {
-    const shape = shapeOf(f);
-    if (shape === 'bar') drawBar(f, cellsOf(k));
-    else if (shape === 'outline') drawOutline(f, cellsOf(k));
-    else if (shape !== 'smoke') drawDot(f, cellsOf(k)[0]);
-  });
-
-  /** A faint cone in the light's colour, strongest at the lamp and gone at the tip; nothing when it is off. */
-  function drawCone(f, [R, G, B]) {
-    const lit = Math.max(R, G, B) / 255;
-    if (lit <= 0.02) return;
-    const cone = beamCone(f);
-    const [lx, ly] = toPx(cone.lamp), [tx, ty] = toPx(cone.tip);
-    const fade = ctx.createLinearGradient(lx, ly, tx, ty);
-    fade.addColorStop(0, `rgba(${R},${G},${B},${0.22 * lit})`);
-    fade.addColorStop(1, `rgba(${R},${G},${B},0)`);
-    ctx.beginPath();
-    ctx.moveTo(lx, ly);
-    ctx.lineTo(...toPx(cone.left));
-    ctx.lineTo(...toPx(cone.right));
-    ctx.closePath();
-    ctx.fillStyle = fade;
-    ctx.fill();
-  }
-
-  /** A small grey cloud, a little brighter while its smoke group's level is up. */
-  function drawSmoke(f) {
-    const groups = (layout.groups ?? []).filter((g) => isSmoke(g) && layout.members?.[g.id]?.includes(f.id));
-    const level = Math.max(0, ...groups.map((g) => state?.groups?.[g.id]?.level ?? 0));
-    const [x, y] = toPx(f);
-    ctx.fillStyle = `rgba(148,170,210,${0.16 + 0.24 * level})`;
-    for (const [dx, dy, s] of [[-0.55, 0.15, 0.7], [0, -0.2, 0.9], [0.6, 0.1, 0.75]]) {
-      ctx.beginPath();
-      ctx.arc(x + dx * r * 1.6, y + dy * r * 1.6, s * r * 1.1, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  /** A bar or strip at its real size and angle, one cell per segment from its start to its end. */
-  function drawBar(f, cells) {
-    const [a, b] = barEnds(f).map(toPx);
-    const len = Math.max(8, Math.hypot(b[0] - a[0], b[1] - a[1]));
-    const thick = Math.max(8, barAxis(f).thickness * ih);
-    const glow = brightest(cells);
-    const lit = Math.max(...glow) / 255;
-    ctx.save();
-    ctx.translate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
-    ctx.rotate(Math.atan2(b[1] - a[1], b[0] - a[0]));
-    const box = () => {
-      ctx.beginPath();
-      ctx.roundRect(-len / 2, -thick / 2, len, thick, 4);
-    };
-    ctx.save();
-    if (lit > 0.02) {
-      ctx.shadowColor = `rgba(${glow[0]},${glow[1]},${glow[2]},${0.8 * lit})`;
-      ctx.shadowBlur = 10;
-    }
-    box();
-    ctx.fillStyle = `rgb(${glow[0]},${glow[1]},${glow[2]})`;
-    ctx.fill();
-    ctx.restore();
-    ctx.save();
-    box();
-    ctx.clip();
-    const cell = len / cells.length;
-    cells.forEach(([R, G, B], s) => {
-      // Segment 0 is at the bar's start (left or top); at its end when the fixture hangs reversed.
-      const slot = f.reversed ? cells.length - 1 - s : s;
-      ctx.fillStyle = `rgb(${R},${G},${B})`;
-      ctx.fillRect(-len / 2 + slot * cell, -thick / 2, cell + 0.5, thick);
-    });
-    ctx.restore();
-    box();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = '#3a3f48';
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  /** A strip round something: its cells clockwise from the top left (anticlockwise when reversed). */
-  function drawOutline(f, cells) {
-    const box = { left: pad + (f.x - (f.w ?? 0) / 2) * iw, top: pad + (f.y - (f.h ?? 0) / 2) * ih, width: (f.w ?? 0) * iw, height: (f.h ?? 0) * ih };
-    const path = (points) => {
-      ctx.beginPath();
-      points.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-    };
-    ctx.save();
-    ctx.lineJoin = 'round';
-    // The strip itself, dark where it is off.
-    ctx.beginPath();
-    ctx.roundRect(box.left, box.top, box.width, box.height, 4);
-    ctx.lineWidth = 6;
-    ctx.strokeStyle = '#3a3f48';
-    ctx.stroke();
-    const glow = brightest(cells);
-    const lit = Math.max(...glow) / 255;
-    if (lit > 0.02) {
-      ctx.shadowColor = `rgba(${glow[0]},${glow[1]},${glow[2]},${0.8 * lit})`;
-      ctx.shadowBlur = 10;
-    }
-    ctx.lineWidth = 4;
-    outlineCells(box, cells.length, f.reversed).forEach((points, s) => {
-      const [R, G, B] = cells[s];
-      path(points);
-      ctx.strokeStyle = `rgb(${R},${G},${B})`;
-      ctx.stroke();
-    });
-    ctx.restore();
-  }
-
-  /** A lamp: a dot with a soft glow in its colour. */
-  function drawDot(f, [R, G, B]) {
-    const [x, y] = toPx(f);
-    const lit = Math.max(R, G, B) / 255;
-    if (lit > 0.02) {
-      const glow = ctx.createRadialGradient(x, y, 0, x, y, r * 3.2);
-      glow.addColorStop(0, `rgba(${R},${G},${B},${0.55 * lit})`);
-      glow.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = glow;
-      ctx.fillRect(x - r * 3.2, y - r * 3.2, r * 6.4, r * 6.4);
-    }
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = `rgb(${R},${G},${B})`;
-    ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = '#3a3f48';
-    ctx.stroke();
-  }
+  drawStagePicture(ctx, w, h, layout, shownVisual, (g) => state?.groups?.[g]?.level ?? 0, { view: stageView.view, resizing: $('stageGrip').classList.contains('dragging') });
   // A small label at the bottom right, so the picture can't be mistaken for something else: "Live", "Off" during
   // Blackout, or in violet "Draft · <name>" while preparing.
   if (!pictureLabel) readPictureLabel();
@@ -5664,6 +5639,7 @@ blackout.addEventListener('click', (ev) => ev.preventDefault());
 
 // The top bar's button, shown only where the browser can do it and the page is not already an app.
 setupFullscreen($('fsBtn'));
+setupPageTabs($('pageTabs'));
 
 // ---- Clock, toast, wake lock ----
 

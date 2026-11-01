@@ -120,7 +120,7 @@ Settings (`/settings/`) is for whoever sets the system up. It has:
 
 Patch (`/patch/`) is where the rig is set up, much like in Lightkey. The **DMX map** shows each universe's channels: drag a fixture to re-address it, drag a fixture type from the library onto free channels, and overlaps show at once in red. There is also a fixture table, groups, and Identify to flash a fixture so you can find it. Fixture types come from the [Open Fixture Library](https://open-fixture-library.org) (about 650 fixtures; download it once to use it without internet), from a Lightkey project, or you make your own: see a type's channels, compare two types side by side, and copy one and change it (a light whose real colour-temperature range differs from its substitute's, say).
 
-The **stage plan** says where each light hangs, and the operator page draws the stage from it. Each light gets a shape: a dot, a beam (a cone you aim), a bar (any length, thickness and angle), an outline (a strip round something) or a smoke cloud. Select several to align them or space them evenly.
+The **stage plan** says where each light hangs, and the operator page draws the stage from it. Each light gets a shape: a dot, a beam (a cone you aim), a bar (any length, thickness and angle), an outline (a strip round something) or a smoke cloud. Select several to align them or space them evenly. Each light also says what it **hangs on** (truss, back-wall floor, riser, stand or side), and a fixture type can say how many LEDs the light really has. The stage view then draws the stage two ways, **from above** and **from the audience**, with a small switch that each tablet remembers.
 
 <table>
   <tr>
@@ -128,6 +128,10 @@ The **stage plan** says where each light hangs, and the operator page draws the 
     <td width="50%"><img src="docs/screenshots/patch-stage-plan.png" alt="Patch: the stage plan with bars, dots and a strip, and one bar selected with its handles and shape choices"></td>
   </tr>
 </table>
+
+### Timeline
+
+The Timeline page (`/timeline/`) lays the lights out along a recording, for a piece such as a spoken Christmas intro. Add a recording (mp3, m4a, aac or wav), then add blocks on a **Whole stage** layer and on a layer for each light group: a colour, a level, an effect, a look, Dark or Everything full, each with a rise of at least 1.5 seconds. A **Follow the voice** block makes a group's brightness ride the loudness of the recording, so some lights breathe with the speaker. **◆ Mark here** drops notes while you listen. Try it in **Prepare** (the stage view and the sound only), then run it **Live**: **▶ Start** plays the recording on the computer where it is pressed (for example the one plugged into the mixer) and the lights follow it. The operator page shows a running timeline in its top bar, with a quiet **Stop**; a volunteer's Blackout, Basic lights or song takes the lights, but the recording plays on. Recordings are kept on the computer running Light Runner, not in the exported show file. [docs/setting-up-a-show.md](docs/setting-up-a-show.md) (step 10) has the steps, and [docs/running-a-service.md](docs/running-a-service.md) has running one at a service.
 
 ## Remote control
 
@@ -167,8 +171,9 @@ Open http://localhost:8080/. The first start loads a small demo rig. At the venu
 | `/operator/` | Volunteers (no login) | The iPad page, and the phone remote on a phone |
 | `/patch/` | Programmer (PIN) | DMX map, fixture library and types, groups, stage plan |
 | `/settings/` | Programmer (PIN) | Outputs, Send DMX, Who to call, controller keys, backups and more |
+| `/timeline/` | Programmer (PIN) | Recordings with the lights laid out along them; Start, Stop, Prepare and Live |
 
-Patch and Settings ask for the programmer PIN once one is set (Settings > Programmer PIN). On the iPad, open `/operator/`, add it to the home screen (it has its own icon and opens full screen; on Android use the top bar's **Full screen** button), and set Auto-Lock to Never so the screen stays on during the service. The Inter font and the icon are served by Light Runner itself, so the pages work with no internet.
+Patch, Settings and Timeline ask for the programmer PIN once one is set (Settings > Programmer PIN). On the iPad, open `/operator/`, add it to the home screen (it has its own icon and opens full screen; on Android use the top bar's **Full screen** button), and set Auto-Lock to Never so the screen stays on during the service. The Inter font and the icon are served by Light Runner itself, so the pages work with no internet.
 
 | Setting | Default | What |
 | --- | --- | --- |

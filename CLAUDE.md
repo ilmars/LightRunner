@@ -17,7 +17,7 @@ npm run jump-check                    # hours of random look changes; no fixture
 npm run timing-probe                  # frame timing on this machine (target ±3 ms of 25 ms)
 ```
 
-Pages: `/operator/` (volunteers, no login), `/patch/` and `/settings/` (programmer, PIN when one is set). The live show, state and backups are in `data/` (git-ignored); `shows/` holds show files kept in git.
+Pages: `/operator/` (volunteers, no login), `/patch/`, `/settings/` and `/timeline/` (programmer, PIN when one is set). The live show, state and backups are in `data/` (git-ignored); `shows/` holds show files kept in git.
 
 ## Layout
 
@@ -26,7 +26,7 @@ Pages: `/operator/` (volunteers, no login), `/patch/` and `/settings/` (programm
 | `packages/shared/src` | Show schema (zod), commands and live state (`protocol.ts`), built-in profiles, OFL converter (`ofl.ts`), show compare/merge (`merge.ts`) |
 | `packages/engine/src` | The engine. Pure: takes `now` in seconds, returns DMX buffers; no timers or I/O. `fade.ts` (Crossfade, Ramp, ease), `light.ts` (colour + intensity mixing), `layers.ts`, `output.ts` (channel mapping, gamma, CCT), `engine.ts` |
 | `server/src` | `app.ts` (HTTP API, WebSocket, command bus, programmer routes), `worker.ts` (frame clock + engine + DMX output on a worker thread), `output/` (Art-Net, sACN, ENTTEC), `store.ts` (atomic saves, 20 backups), `nodewatch.ts`, `discovery.ts`, `ofl.ts` + `ofldb.ts` (fixture database), `auth.ts` |
-| `web/` | Plain HTML + JS pages, no framework or build: `operator/`, `patch/`, `settings/` |
+| `web/` | Plain HTML + JS pages, no framework or build: `operator/`, `patch/`, `settings/`, `timeline/` |
 | `tools/` | `import-lightkey.py` (Lightkey project → show), `import-stage-l1.sh`, `install-show.ts`, `jump-check.ts`, `timing-probe.ts` |
 
 ## Conventions

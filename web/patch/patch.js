@@ -4,15 +4,21 @@
 // show again and does its own changes again on top (rebase.js).
 
 import {
-  aimBeam, alignFixtures, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setShape, shapeOf, spaceEvenly, touches, turnBar,
+  HANGS_CHOICES, aimBeam, alignFixtures, changeTogether, guessHangs, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness, setBarAngle, setHangs, setShape, shapeOf,
+  spaceEvenly, touches, turnBar,
 } from './plan.js';
 import {
   JOBS, addChannel, channelRows, compareRows, copyOf, isReadOnly, moveRow, newTypeId, removeRow, repeatLastSegment, segmentCount,
-  setJob, setKelvin, setSixteenBit, setValue, summary, validateType,
+  ledsAreValid, setJob, setKelvin, setSixteenBit, setValue, summary, validateType,
 } from './types.js';
 import { rebasePatch } from './rebase.js';
 import { PLAN_ASPECT, barAxis, beamCone } from '../shared/stage.js';
+import { drawStagePicture } from '../shared/stagedraw.js';
+import { keepStageSize, stageGrip, storedStageSize } from '../shared/stagecard.js';
+import { fitStageLength, frontPlacement, frontScene, hangsOf } from '../shared/stageview.js';
 import { request, startClock, watchState } from '../shared/appbar.js';
+import { setupFullscreen } from '../shared/fullscreen.js';
+import { setupPageTabs } from '../shared/pagetabs.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -25,7 +31,7 @@ const el = (tag, cls, text) => {
 let show = null; // working copy
 let savedJson = ''; // the show as last saved
 let revision = ''; // which version of the show that is (the server refuses a save from an older one)
-let profiles = []; // [{ id, name, channels (a count), segments, roles, defs (the channels), readOnly }]
+let profiles = []; // [{ id, name, channels (a count), segments, roles, defs (the channels), leds, readOnly }]
 const profileById = new Map();
 let builtInIds = new Set(); // the built-in types' ids: read-only, like the Open Fixture Library's
 
@@ -724,7 +730,9 @@ function renderTypeSheet() {
 function refreshTypeSheet() {
   const p = typeView && profileById.get(typeView.id);
   if (!p) return;
-  $('typeSummary').textContent = summary(p.defs);
+  // The LEDs number is the show's own copy of the type (a library or built-in type has none unless the show says).
+  const leds = show.profiles.find((x) => x.id === p.id)?.leds;
+  $('typeSummary').textContent = leds ? `${summary(p.defs)} · ${leds} ${leds === 1 ? 'LED' : 'LEDs'}` : summary(p.defs);
   $('typeEdit').hidden = p.readOnly; // library and built-in types: Copy and edit only
   const users = show.fixtures.filter((f) => f.profile === p.id).length;
   const note = [users ? `Used by ${users} ${users === 1 ? 'fixture' : 'fixtures'}.` : 'No fixture uses this type.'];
@@ -817,7 +825,8 @@ const TAKES_LEVEL = new Set(['dimmer', ...COLOUR_ROLES, 'cct']);
 /**
  * The type being made or changed, as a working copy; nothing reaches the show before Save type, and the lights
  * before Save patch. Null while the editor is closed.
- * { id: null for a new type, else the type's id (fixed), name, channels, extra: what else the type has (gamma...),
+ * { id: null for a new type, else the type's id (fixed), name, channels, leds: the LEDs field (a number, what was typed
+ *   if it is not one, or undefined for empty), extra: what else the type has (gamma...),
  *   from: the type a copy came from, ticks: ids of the fixtures ticked to use it, armed: Delete type's timer }
  */
 let editor = null;
@@ -840,6 +849,7 @@ function openEditor(draft) {
     ? 'A change here changes every fixture that uses this type.'
     : source ? `Starts as a copy of ${source.name}. The original stays as it is.` : "Name it, then add its channels in the order the light's manual lists them.";
   $('teName').value = editor.name;
+  $('teLeds').value = shownNumber(editor.leds);
   renderEditorRows();
   renderTicks();
   refreshEditor();
@@ -855,7 +865,7 @@ function openEditor(draft) {
 }
 
 /** What the editor holds, to tell whether anything was changed since it opened. */
-const editorKey = () => JSON.stringify([editor.name, editor.channels, [...editor.ticks].sort()]);
+const editorKey = () => JSON.stringify([editor.name, editor.channels, editor.leds ?? null, [...editor.ticks].sort()]);
 /** An open editor with changes in it. */
 const editorChanged = () => Boolean(editor) && editorKey() !== editor.start;
 /** Before something takes the editor's place: false when the person wants to keep working in it. */
@@ -985,6 +995,8 @@ function renderEditorRows(focus = []) {
   }
 }
 
+const LEDS_HINT = $('teLedsHint').textContent;
+
 /** Everything in the editor that follows the working copy, except the rows and the ticks (so typing keeps its focus). */
 function refreshEditor() {
   if (!editor) return;
@@ -1002,7 +1014,12 @@ function refreshEditor() {
   const canDelete = editor.id !== null && users === 0;
   $('teDelete').hidden = !canDelete;
   if (!canDelete) disarmDelete();
-  const problem = validateType(editor.name, channels);
+  const leds = editor.leds;
+  const spread = typeof leds === 'number' && ledsAreValid(leds) && segments > 1
+    ? (leds < segments ? ` That is fewer than the ${segments} segments, so one per segment is drawn.` : ` ${leds} LEDs over ${segments} segments.`)
+    : '';
+  $('teLedsHint').textContent = LEDS_HINT + spread;
+  const problem = validateType(editor.name, channels, leds);
   $('teMessage').textContent = problem ?? '';
   $('teSave').disabled = problem !== null;
 }
@@ -1043,12 +1060,15 @@ function renderTicks() {
 
 /** Save type: the type goes in the working show, the ticked fixtures switch to it, and the page follows. */
 function saveEditorType() {
-  if (!editor || validateType(editor.name, editor.channels) !== null) return;
+  if (!editor || validateType(editor.name, editor.channels, editor.leds) !== null) return;
   const name = editor.name.trim();
   const id = editor.id ?? newTypeId(name, takenTypeIds()); // fixed from here on; a rename changes only the name
   const wasNew = editor.id === null;
   // An edit keeps the type as stored (its key order too), so saving with no change leaves the patch as it was.
-  putProfile(editor.base ? { ...editor.base, name, channels: structuredClone(editor.channels) } : { id, name, channels: structuredClone(editor.channels), ...editor.extra });
+  const type = editor.base ? { ...editor.base, name, channels: structuredClone(editor.channels) } : { id, name, channels: structuredClone(editor.channels), ...editor.extra };
+  if (editor.leds === undefined) delete type.leds; // empty: one LED per segment is drawn
+  else type.leds = editor.leds;
+  putProfile(type);
   for (const f of show.fixtures) if (editor.ticks.has(f.id)) f.profile = id;
   fillAddForm(false);
   if (wasNew) $('addProfile').value = id;
@@ -1096,8 +1116,8 @@ function deleteEditorType() {
 function copyDraft(p) {
   const own = show.profiles.find((x) => x.id === p.id); // the whole type (gamma...) when the show has it
   const copy = copyOf(own ?? { id: p.id, name: p.name, channels: p.defs }, takenTypeIds());
-  const { id: _id, name, channels, ...extra } = copy;
-  return { id: null, name, channels, extra, from: p.id };
+  const { id: _id, name, channels, leds, ...extra } = copy;
+  return { id: null, name, channels, leds, extra, from: p.id };
 }
 
 $('libNew').addEventListener('click', () => openEditor({ id: null, name: '', channels: [] }));
@@ -1110,12 +1130,17 @@ $('typeEdit').addEventListener('click', () => {
   const own = p && !p.readOnly && show.profiles.find((x) => x.id === p.id);
   if (!own) return;
   const base = structuredClone(own);
-  openEditor({ id: base.id, name: base.name, channels: structuredClone(base.channels), base });
+  openEditor({ id: base.id, name: base.name, channels: structuredClone(base.channels), leds: base.leds, base });
 });
 
 $('teName').addEventListener('input', () => {
   if (!editor) return;
   editor.name = $('teName').value;
+  refreshEditor();
+});
+$('teLeds').addEventListener('input', () => {
+  if (!editor) return;
+  editor.leds = typedNumber($('teLeds').value);
   refreshEditor();
 });
 $('teAdd').replaceChildren(new Option('＋ Add channel…', ''), ...JOBS.map((j) => new Option(j.label, j.job)));
@@ -1431,16 +1456,23 @@ function followPointer(ev, target, move, done) {
   target.addEventListener('pointercancel', onUp);
 }
 
-/** A handle that follows the pointer; `move` changes the fixture, then the fixture is drawn again where it is. */
-function handle(cls, title, cursor, f, move) {
+/**
+ * A handle that follows the pointer; `move` changes the fixture, then the fixture is drawn again where it is. `how`
+ * names the handle (see changeTogether): with several selected, the others of the same shape change the same way.
+ */
+function handle(cls, how, title, cursor, f, move) {
   const h = el('div', `plan-handle ${cls}`);
   h.title = title;
   if (cursor) h.style.cursor = cursor;
   h.addEventListener('pointerdown', (ev) => {
     if (ev.button !== 0) return;
+    const shape = shapeOf(f, inSmokeGroup(f));
+    const others = chosenFixtures().filter((x) => x !== f && shapeOf(x, inSmokeGroup(x)) === shape);
+    const start = { ...f }, starts = others.map((x) => ({ ...x }));
     followPointer(ev, h, (p, e) => {
       move(p, e);
-      placeFixture(f);
+      changeTogether(f, how, start, others, starts);
+      for (const x of [f, ...others]) placeFixture(x);
     }, (moved) => { if (moved) changed(); });
   });
   return h;
@@ -1480,6 +1512,7 @@ function placeFixture(f) {
       tip.style.top = pct(c.tip.y);
     }
   }
+  queueFront();
 }
 
 /** A small cloud, for a smoke or haze machine. */
@@ -1496,8 +1529,6 @@ function renderStage() {
   cones.setAttribute('preserveAspectRatio', 'none');
   root.append(cones);
   planSelection = new Set(chosenFixtures().map((f) => f.id));
-  // Handles only when one fixture is selected.
-  const one = planSelection.size === 1;
   for (const f of show.fixtures) {
     const shape = shapeOf(f, inSmokeGroup(f));
     const selected = planSelection.has(f.id);
@@ -1542,21 +1573,22 @@ function renderStage() {
         if (moved) changed();
       });
     });
-    if (one && selected && shape === 'bar') {
+    // Every selected fixture has its handles; with several, one handle changes them all (see handle).
+    if (selected && shape === 'bar') {
       // One handle at each end for the length, one on a long side for the thickness, and one past the end to turn it.
       const angle = barAxis(f).angle;
       body.append(
-        handle('start', 'Drag to make it longer or shorter', resizeCursor(angle), f, (p) => resizeEnd(f, 'start', p)),
-        handle('end', 'Drag to make it longer or shorter', resizeCursor(angle), f, (p) => resizeEnd(f, 'end', p)),
-        handle('thick', 'Drag to make it thicker or thinner', resizeCursor(angle + 90), f, (p) => resizeThickness(f, p)),
-        handle('turn', 'Drag to turn it (hold Shift to turn freely)', 'grab', f, (p, e) => turnBar(f, p, e.shiftKey)),
+        handle('start', 'start', 'Drag to make it longer or shorter', resizeCursor(angle), f, (p) => resizeEnd(f, 'start', p)),
+        handle('end', 'end', 'Drag to make it longer or shorter', resizeCursor(angle), f, (p) => resizeEnd(f, 'end', p)),
+        handle('thick', 'thick', 'Drag to make it thicker or thinner', resizeCursor(angle + 90), f, (p) => resizeThickness(f, p)),
+        handle('turn', 'turn', 'Drag to turn it (hold Shift to turn freely)', 'grab', f, (p, e) => turnBar(f, p, e.shiftKey)),
       );
     }
-    if (one && selected && shape === 'outline') {
-      body.append(handle('corner', 'Drag to change its size', 'nwse-resize', f, (p) => resizeOutline(f, p)));
+    if (selected && shape === 'outline') {
+      body.append(handle('corner', 'corner', 'Drag to change its size', 'nwse-resize', f, (p) => resizeOutline(f, p)));
     }
-    if (one && selected && shape === 'beam') {
-      parts.tip = handle('tip', 'Drag to aim it and set how far it reaches (hold Shift to aim freely)', 'grab', f, (p, e) => aimBeam(f, p, e.shiftKey));
+    if (selected && shape === 'beam') {
+      parts.tip = handle('tip', 'tip', 'Drag to aim it and set how far it reaches (hold Shift to aim freely)', 'grab', f, (p, e) => aimBeam(f, p, e.shiftKey));
       root.append(parts.tip);
     }
     root.append(body, tag);
@@ -1572,6 +1604,7 @@ function renderStage() {
     root.append(add);
   }
   renderPlanTools();
+  queueFront();
 }
 
 // A click on an empty spot clears the selection and offers to add a fixture there;
@@ -1616,6 +1649,7 @@ const SHAPE_HINTS = {
 function renderPlanTools() {
   const chosen = chosenFixtures();
   $('planTools').hidden = !chosen.length;
+  $('planHangsHint').hidden = !chosen.length;
   $('planHelp').hidden = chosen.length > 0;
   $('planArrange').hidden = chosen.length < 2;
   if (!chosen.length) return;
@@ -1627,12 +1661,40 @@ function renderPlanTools() {
   const angles = new Set(shape === 'bar' ? chosen.map((f) => Math.round(barAxis(f).angle)) : []);
   $('planTurn').hidden = shape !== 'bar';
   $('planAngle').textContent = angles.size === 1 ? `${[...angles][0]}°` : '';
-  $('planToolsHint').textContent = chosen.length === 1 ? SHAPE_HINTS[shape] : '';
+  const together = shape === 'bar' || shape === 'beam' || shape === 'outline' ? 'Drag a handle on any of them to change them all the same way.' : '';
+  $('planToolsHint').textContent = chosen.length === 1 ? SHAPE_HINTS[shape] : together;
+  renderHangs(chosen);
   for (const b of $('planSpace').children) {
     b.disabled = chosen.length < 3;
     b.title = b.disabled ? 'Select three or more to space them evenly' : '';
   }
 }
+
+const MIXED = 'different';
+
+/** Hangs on: what the selected lights say, or the guess (named when it is the same for all of them). */
+function renderHangs(chosen) {
+  const select = $('planHangs');
+  const says = new Set(chosen.map((f) => f.hangs ?? ''));
+  const guesses = new Set(chosen.map((f) => guessHangs(f, inSmokeGroup(f))));
+  const label = (value) => HANGS_CHOICES.find((c) => c.value === value)?.label ?? '';
+  const options = [new Option(guesses.size === 1 ? `Guess: ${label([...guesses][0])}` : 'Guess from the plan', '')];
+  for (const c of HANGS_CHOICES) options.push(new Option(c.label, c.value));
+  if (says.size > 1) {
+    const mixed = new Option('Different', MIXED);
+    mixed.disabled = true;
+    options.unshift(mixed);
+  }
+  select.replaceChildren(...options);
+  select.value = says.size > 1 ? MIXED : [...says][0];
+}
+
+$('planHangs').addEventListener('change', (ev) => {
+  const chosen = chosenFixtures();
+  if (!chosen.length || ev.target.value === MIXED) return;
+  for (const f of chosen) setHangs(f, ev.target.value);
+  changed();
+});
 
 $('planShape').addEventListener('click', (ev) => {
   const b = ev.target.closest('button[data-shape]');
@@ -1717,6 +1779,115 @@ $('planAdd').addEventListener('submit', (ev) => {
   }
 });
 
+// ---- The stage from the audience, under the plan ----
+
+const front = $('front');
+const frontCtx = front.getContext('2d');
+/** Every light a soft warm white, the selected ones in the plan's blue: each beam can be found on the plan. */
+const FRONT_LIT = [200, 186, 168], FRONT_SELECTED = [67, 137, 232];
+/** Its height by the grip: from 124 px up to most of the window, never taller than 60 % of its width. */
+const FRONT_MIN_H = 124;
+let frontQueued = false;
+
+/** The plan being edited (saved or not) as the stage view takes it: what the server's layout gives the operator page. */
+function frontLayout() {
+  return {
+    fixtures: show.fixtures.map((f) => ({
+      id: f.id, name: f.name, x: f.x, y: f.y, w: f.w ?? null, h: f.h ?? null, segments: segmentsOf(f), reversed: f.reversed ?? false,
+      shape: shapeOf(f, inSmokeGroup(f)), angle: f.angle ?? null, reach: f.reach ?? null,
+      leds: (show.profiles.find((p) => p.id === f.profile) ?? profileById.get(f.profile))?.leds ?? null, hangs: f.hangs ?? null,
+    })),
+    groups: show.groups.map((g) => ({ id: g.id, kind: g.kind })),
+    members: Object.fromEntries(show.groups.map((g) => [g.id, g.fixtures])),
+  };
+}
+
+/** Drawn once on the next frame, however many changes come before it (a drag moves a fixture every pointer move). */
+function queueFront() {
+  if (frontQueued) return;
+  frontQueued = true;
+  requestAnimationFrame(drawFront);
+}
+
+function drawFront() {
+  frontQueued = false;
+  if (!show) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = front.clientWidth, h = front.clientHeight;
+  if (!w || !h) return;
+  if (front.width !== Math.round(w * dpr) || front.height !== Math.round(h * dpr)) {
+    front.width = Math.round(w * dpr);
+    front.height = Math.round(h * dpr);
+  }
+  frontCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  frontCtx.clearRect(0, 0, w, h);
+  const layout = frontLayout();
+  const visual = new Uint8Array(layout.fixtures.reduce((n, f) => n + f.segments, 0) * 3);
+  let at = 0;
+  for (const f of layout.fixtures) {
+    const colour = planSelection.has(f.id) ? FRONT_SELECTED : FRONT_LIT;
+    for (let k = 0; k < f.segments; k++, at += 3) visual.set(colour, at);
+  }
+  drawStagePicture(frontCtx, w, h, layout, visual, () => 0, { view: 'front', resizing: $('frontGrip').classList.contains('dragging') });
+}
+
+/** The light drawn nearest a point of the picture (its body, or anywhere down a beam), within 24 px; else null. */
+function frontFixtureAt(px, py) {
+  const w = front.clientWidth, h = front.clientHeight;
+  let best = null, bestD = 24;
+  for (const f of frontLayout().fixtures) {
+    const p = frontPlacement(f, hangsOf(f), w, h);
+    const half = p.vertical ? p.width / 2 : p.length / 2;
+    let x = p.x, bottom = p.top + p.height;
+    if (p.beamTo != null) {
+      // Down the beam to the floor, leaning with it.
+      bottom = frontScene(w, h).floorY;
+      x = p.x + (p.beamTo - p.x) * Math.min(1, Math.max(0, (py - p.top) / (bottom - p.top)));
+    }
+    const d = Math.hypot(Math.max(0, Math.abs(px - x) - half), Math.max(0, p.top - py, py - bottom));
+    if (d < bestD) [best, bestD] = [f, d];
+  }
+  return best && show.fixtures.find((f) => f.id === best.id);
+}
+
+// A click on a light selects it on the plan too (Shift-click adds it or takes it out); on nothing, lets go.
+front.addEventListener('click', (ev) => {
+  const r = front.getBoundingClientRect();
+  const f = frontFixtureAt(ev.clientX - r.left, ev.clientY - r.top);
+  if (ev.shiftKey && f) {
+    const next = new Set(planSelection);
+    if (next.has(f.id)) next.delete(f.id);
+    else next.add(f.id);
+    selectFixture(next.has(f.id) ? f.id : [...next].at(-1) ?? null, false, next);
+    return;
+  }
+  selectFixture(f?.id ?? null, false);
+});
+
+function setFrontHeight(want) {
+  if (want == null) front.style.removeProperty('--front-h');
+  else {
+    const tallest = Math.max(FRONT_MIN_H, Math.min(window.innerHeight - 120, front.clientWidth * 0.6));
+    front.style.setProperty('--front-h', `${Math.round(fitStageLength(want, FRONT_MIN_H, tallest))}px`);
+  }
+}
+stageGrip($('frontGrip'), {
+  axes: 'y',
+  start: () => ({ w: front.clientWidth, h: front.clientHeight }),
+  apply: ({ h }) => setFrontHeight(h),
+  done: () => {
+    keepStageSize('patch', front.style.getPropertyValue('--front-h') ? { h: front.clientHeight } : null);
+    // Drawn properly at the final size (while dragging, the last picture was stretched).
+    queueFront();
+  },
+  reset: () => {
+    setFrontHeight(null);
+    keepStageSize('patch', null);
+  },
+});
+setFrontHeight(storedStageSize('patch').h);
+new ResizeObserver(queueFront).observe(front);
+
 // ---- Save ----
 
 // Reload from the server, so fixture types added since the last save go too.
@@ -1782,6 +1953,8 @@ function toast(text, bad = false) {
 
 // The top bar: the clock, and the pill while something is wrong with the lights.
 startClock($('clock'));
+setupFullscreen($('fsBtn'));
+setupPageTabs(document.querySelector('.ds-pagetabs'));
 watchState({
   pill: $('status'),
   offline: $('offline'),

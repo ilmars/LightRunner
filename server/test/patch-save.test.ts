@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { App } from '../src/app.ts';
-import { parseShow, type Show } from '../../packages/shared/src/index.ts';
+import { STAGE_LAYER, parseShow, type Show } from '../../packages/shared/src/index.ts';
 import { rebasePatch } from '../../web/patch/rebase.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -90,11 +90,13 @@ test('a Patch save with no revision (a page from an older version) is refused', 
   });
 });
 
-test('Settings and controller changes leave the revision as it is: Patch keeps the live ones anyway', async () => {
+test('Settings, controller and timeline changes leave the revision as it is: Patch keeps the live ones anyway', async () => {
   await withApp(async (call) => {
     const opened = await call('GET', '/api/show');
     assert.equal((await call('PUT', '/api/settings', { contact: { name: 'Jānis', phone: '' } })).status, 200);
     assert.equal((await call('PUT', '/api/controller', { apcLayout: false })).status, 200);
+    const timeline = { id: 'intro', name: 'Intro', layers: [{ group: STAGE_LAYER, blocks: [{ id: 'b1', start: 0, rise: 0, what: { kind: 'dark' } }] }], markers: [] };
+    assert.equal((await call('PUT', '/api/timeline', timeline)).status, 200);
     assert.equal((await call('GET', '/api/show')).revision, opened.revision);
     // A look edited elsewhere does change it.
     await importLook(call);

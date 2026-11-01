@@ -4,7 +4,7 @@ export type Job = 'dimmer' | 'red' | 'green' | 'blue' | 'white' | 'amber' | 'uv'
 export interface Kelvin { min: number; max: number }
 /** A channel as the show stores it (the schema's ProfileChannel). */
 export interface Channel { role: Job; fine?: boolean; default?: number; kelvin?: Kelvin; name?: string }
-export interface TypeLike { id: string; name: string; channels: Channel[]; gamma?: number; source?: { ofl: string; mode?: string } }
+export interface TypeLike { id: string; name: string; channels: Channel[]; gamma?: number; leds?: number; source?: { ofl: string; mode?: string } }
 
 export interface Row {
   /** Position in the channel list of the row's coarse byte; not the rowIndex the edit functions take. */
@@ -30,7 +30,8 @@ export function segmentCount(channels: Channel[]): number;
 export function channelText(ch: Channel): string;
 export function summary(channels: Channel[]): string;
 export function compareRows(a: Channel[], b: Channel[]): CompareRow[];
-export function validateType(name: string, channels: Channel[]): string | null;
+export function ledsAreValid(leds: unknown): boolean;
+export function validateType(name: string, channels: Channel[], leds?: number | string): string | null;
 
 // Edits return a new list. rowIndex: the row's position in channelRows(), from 0 (a 16-bit channel is one row).
 export function addChannel(channels: Channel[], job: Job): Channel[];
@@ -43,5 +44,5 @@ export function removeRow(channels: Channel[], rowIndex: number): Channel[];
 export function repeatLastSegment(channels: Channel[]): Channel[];
 
 export function newTypeId(name: string, takenIds: Set<string>): string;
-export function copyOf(profile: TypeLike, takenIds: Set<string>): { id: string; name: string; channels: Channel[]; gamma?: number };
+export function copyOf(profile: TypeLike, takenIds: Set<string>): { id: string; name: string; channels: Channel[]; gamma?: number; leds?: number };
 export function isReadOnly(profile: TypeLike, builtInIds: Set<string>): boolean;

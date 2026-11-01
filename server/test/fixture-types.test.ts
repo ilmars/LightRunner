@@ -10,7 +10,7 @@ import { WebSocket } from 'ws';
 import { App } from '../src/app.ts';
 import {
   JOBS, addChannel, channelRows, channelText, compareRows, copyOf, isReadOnly, moveRow, newTypeId, removeRow, repeatLastSegment,
-  segmentCount, setJob, setKelvin, setSixteenBit, setValue, summary, validateType,
+  ledsAreValid, segmentCount, setJob, setKelvin, setSixteenBit, setValue, summary, validateType,
 } from '../../web/patch/types.js';
 import type { Channel } from '../../web/patch/types.js';
 import { BUILT_IN_PROFILES } from '../../packages/shared/src/profiles.ts';
@@ -384,6 +384,23 @@ test('a copy keeps every channel and is a separate type', () => {
   const gamma = copyOf({ ...withFine, gamma: 2.2 }, new Set());
   assert.equal(gamma.gamma, 2.2);
   assert.equal('gamma' in copyOf(withFine, new Set()), false);
+});
+
+test('LEDs: empty or a whole number from 1 to 512; anything else says so in plain words', () => {
+  const ok: Channel[] = [{ role: 'dimmer' }];
+  const message = 'LEDs: type a whole number from 1 to 512, or leave it empty.';
+  for (const good of [undefined, 1, 24, 512]) assert.equal(validateType('X', ok, good), null, String(good));
+  for (const bad of [0, -3, 513, 2.5, NaN, 'abc', '12x', '']) assert.equal(validateType('X', ok, bad as never), message, String(bad));
+  assert.equal(ledsAreValid(undefined), true);
+  assert.equal(ledsAreValid(64), true);
+  assert.equal(ledsAreValid(0), false);
+  assert.equal(ledsAreValid('64'), false, 'text the editor kept as typed is not a number');
+  // The name and the channels are still checked first.
+  assert.equal(validateType('', ok, 0), 'Give the type a name.');
+  assert.equal(validateType('X', [], 0), 'Add at least one channel.');
+  // A copy carries the LEDs along (and a type without them gets none).
+  assert.equal(copyOf({ id: 'a', name: 'A', channels: ok, leds: 24 }, new Set()).leds, 24);
+  assert.equal('leds' in copyOf({ id: 'a', name: 'A', channels: ok }, new Set()), false);
 });
 
 test('ids are slugs, made unique', () => {

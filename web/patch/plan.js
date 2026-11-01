@@ -4,6 +4,7 @@
 // Lengths along an angle are measured in the plan's proportions, as a fraction of its width.
 
 import { BEAM_REACH, PLAN_ASPECT, barAxis } from '../shared/stage.js';
+import { HANGS, hangsOf } from '../shared/stageview.js';
 
 /** A new bar: a fifth of the plan wide, and thin. */
 export const BAR_LENGTH = 0.2;
@@ -206,8 +207,70 @@ export function moveTogether(list, starts, dx, dy) {
   });
 }
 
+/**
+ * After a handle changed `lead` (from `leadStart`, a copy taken when the drag began), give each of `others` the same
+ * change from where it started (`starts`, copies in the same order). `how` is the handle: 'start' or 'end' (a bar's
+ * length, that end moving and the other staying put), 'thick', 'turn', 'tip' (a beam's aim and reach) or 'corner' (an
+ * outline's size). Each stays within its own limits, as with its own handle.
+ */
+export function changeTogether(lead, how, leadStart, others, starts) {
+  if (how === 'tip') {
+    const turn = (lead.angle ?? -90) - (leadStart.angle ?? -90);
+    const reach = (lead.reach ?? BEAM_REACH) - (leadStart.reach ?? BEAM_REACH);
+    others.forEach((f, k) => {
+      f.angle = wrap((starts[k].angle ?? -90) + turn);
+      f.reach = round(clamp((starts[k].reach ?? BEAM_REACH) + reach, MIN_REACH, 1));
+    });
+    return;
+  }
+  if (how === 'corner') {
+    others.forEach((f, k) => {
+      f.w = round(clamp((starts[k].w ?? OUTLINE_W) + (lead.w - (leadStart.w ?? OUTLINE_W)), MIN_LENGTH, 1));
+      f.h = round(clamp((starts[k].h ?? OUTLINE_H) + (lead.h - (leadStart.h ?? OUTLINE_H)), MIN_LENGTH, 1));
+    });
+    return;
+  }
+  const was = barAxis(leadStart), now = barAxis(lead);
+  others.forEach((f, k) => {
+    Object.assign(f, starts[k]);
+    const axis = asTurned(f);
+    if (how === 'turn') setBarAngle(f, axis.angle + (now.angle - was.angle));
+    else if (how === 'thick') f.h = round(clamp(axis.thickness + (now.thickness - was.thickness), MIN_THICKNESS, Math.max(MIN_THICKNESS, (axis.length * PLAN_ASPECT) / 2)));
+    else {
+      // Its own end the same way out (or in) as the lead's: a point that far along its axis from the end that stays.
+      const r = (axis.angle * Math.PI) / 180, sign = how === 'end' ? 1 : -1;
+      const way = { x: sign * Math.cos(r), y: sign * Math.sin(r) };
+      const fixed = { x: f.x - (way.x * axis.length) / 2, y: f.y / PLAN_ASPECT - (way.y * axis.length) / 2 };
+      const next = axis.length + (now.length - was.length);
+      resizeEnd(f, how, { x: fixed.x + way.x * next, y: (fixed.y + way.y * next) * PLAN_ASPECT });
+    }
+  });
+}
+
 /** Whether a fixture is touched by a box drawn on the plan (left, top, right, bottom as fractions). */
 export function touches(f, box, inSmoke = false) {
   const b = boundsOf(f, inSmoke);
   return b.right >= box.left && b.left <= box.right && b.bottom >= box.top && b.top <= box.bottom;
+}
+
+// ---- Where a light hangs (the stage view from the audience) ----
+
+/** What Patch offers for Hangs on, in the order of the select. */
+export const HANGS_CHOICES = [
+  { value: 'truss', label: 'Truss' },
+  { value: 'wall', label: 'Back-wall floor' },
+  { value: 'riser', label: 'Riser' },
+  { value: 'stand', label: 'Stand' },
+  { value: 'side', label: 'Side' },
+];
+
+/** What the stage view would guess for a fixture with no Hangs on, from its place and shape on the plan. */
+export function guessHangs(f, inSmoke = false) {
+  return hangsOf({ ...f, shape: shapeOf(f, inSmoke), hangs: null });
+}
+
+/** Say where a fixture hangs; an empty value (or one that isn't a place) takes it back to the guess. */
+export function setHangs(f, value) {
+  if (HANGS.includes(value)) f.hangs = value;
+  else delete f.hangs;
 }

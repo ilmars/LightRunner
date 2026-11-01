@@ -9,4 +9,5 @@ export function barAxis(f: PlanFixture): { length: number; thickness: number; an
 export function along(length: number, angle: number): Point;
 export function barEnds(f: PlanFixture): [Point, Point];
 export function beamCone(f: PlanFixture): { lamp: Point; left: Point; right: Point; tip: Point };
+export function beamHalfWidth(f: PlanFixture): number;
 export function outlineCells(box: { left: number; top: number; width: number; height: number }, count: number, reversed?: boolean): [number, number][][];

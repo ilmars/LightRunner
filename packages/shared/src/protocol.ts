@@ -104,7 +104,8 @@ const STAGE_COMMANDS = [
   z.object({ type: z.literal('speed'), value: z.number().min(0.5).max(2) }),
   /** The stage tempo in beats per minute. Effects count their speed in beats. */
   z.object({ type: z.literal('tempo'), bpm }),
-  z.object({ type: z.literal('groupLevel'), group: id, value: unit }),
+  /** A group's level. `fade` (seconds) eases it over that long; without it the slider's 0.2 s smoothing. */
+  z.object({ type: z.literal('groupLevel'), group: id, value: unit, fade }),
   z.object({ type: z.literal('undo') }),
   /** Fade time for every look and preset change; null = each look's own fade. */
   z.object({ type: z.literal('fadeTime'), value: z.number().min(0).max(600).nullable() }),
@@ -248,6 +249,56 @@ export interface HeldLight {
   level: number;
 }
 
+// ---- Timelines: what the Timeline page sends over the WebSocket (not commands: the engine never sees them) ----
+
+const position = z.number().min(0).max(24 * 3600);
+
+/**
+ * Messages about a running timeline. Start and the position reports are the programmer's; Stop of the live one is
+ * anyone's (the operator page's Stop). `prepare`: the timeline runs in that page's own Prepare draft, never on the lights.
+ * A page that started a timeline reports where its recording is about 4 times a second, playing or paused, and at once
+ * on play, pause, a seek and the end; when its reports stop, the server carries on by itself to the end.
+ */
+export const TimelineMessage = z.discriminatedUnion('type', [
+  /** Start the timeline at `at` seconds (0 = the beginning). A live Start stops the live one that is running. */
+  z.object({ type: z.literal('timelineStart'), id, at: position, prepare: z.boolean().optional() }),
+  /** Where the page's recording is (seconds) and whether it plays; `run`: the Start it belongs to (ignored when that isn't the running one). */
+  z.object({ type: z.literal('timelinePosition'), id, pos: position, playing: z.boolean(), run: z.number().int().optional() }),
+  /** Stop the live timeline (only if it is `id`, and that `run`, when given), or with `prepare` this page's Prepare one. The stage stays as it is. */
+  z.object({ type: z.literal('timelineStop'), id: id.optional(), prepare: z.boolean().optional(), run: z.number().int().optional() }),
+]);
+export type TimelineMessage = z.infer<typeof TimelineMessage>;
+
+/** Why a live timeline ended: ■ Stop (on any page), something else took the lights, or it came to its end. */
+export type TimelineEndReason = 'stop' | 'taken' | 'end';
+
+/**
+ * Sent to the page that plays a live timeline's recording when that run ends, before the live state says so: on 'stop'
+ * the page stops its sound too; on 'taken' (Blackout, Basic lights, a song, Go, Back to saved, another page's Start)
+ * the sound plays on and the page offers Lights follow again; on 'end' nothing changes.
+ */
+export interface TimelineEnded {
+  type: 'timelineEnded';
+  run: number;
+  reason: TimelineEndReason;
+}
+
+/** A running timeline, as the pages are told of it. */
+export interface TimelineStatus {
+  id: string;
+  name: string;
+  /** Where the recording is, seconds. */
+  pos: number;
+  /** Seconds: the last block's start or end, or the recording's length, whichever is later. */
+  duration: number;
+  playing: boolean;
+  /**
+   * Which Start this is: every Start (on any page) gets a new number, and the page that pressed it is told it. A page
+   * whose number isn't the running one's has been taken over; its reports and Stop carry the number and are ignored then.
+   */
+  run: number;
+}
+
 export type OutputStatus = 'ok' | 'lost' | 'off';
 
 export interface LiveState {
@@ -284,6 +335,11 @@ export interface LiveState {
    * every problem is another desk sending; anything else lost is "not-answering".
    */
   outputProblemKind: 'other-desk' | 'not-answering' | null;
+  /**
+   * The live timeline running now, or null. The server always sets it (the engine leaves it out); a Prepare draft's
+   * state has that page's own Prepare timeline here instead.
+   */
+  timeline?: TimelineStatus | null;
 }
 
 /** What is saved to disk so a restart restores the stage as it was. */

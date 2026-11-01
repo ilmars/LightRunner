@@ -15,7 +15,7 @@ import { z, ZodError } from 'zod';
 import {
   BUILT_IN_PROFILES, Command, OscSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureRunningOrder, isManualCommand,
   applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,  type OflFixture, type Pick, type Scope,
-  BLACKOUT, LiveEffectLayer, commandFor, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand,
+  BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
   pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
 } from '../../packages/shared/src/index.ts';
@@ -34,6 +34,8 @@ import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from '
 import { isLocalAddress, isThisComputer } from './net.ts';
 import { AlreadyRunning, liveMarker, removeMarker, writeMarker } from './marker.ts';
 import { RuntimeSaver, Store } from './store.ts';
+import { TICK_MS, TimelineRunner } from './timeline.ts';
+import { RecordingError, Recordings, UploadAborted } from './recordings.ts';
 
 export interface AppOptions {
   port: number;
@@ -80,6 +82,12 @@ export interface AppOptions {
   onStopRequest?: () => void;
   /** This Light Runner's version, sent as the `x-light-runner` header of `GET /api/state`. */
   version?: string;
+  /** The most a timeline's recording may be (bytes); 100 MB. Tests make it small. */
+  recordingLimit?: number;
+  /** The most all recordings may take together (bytes); 1 GB. Tests make it small. */
+  recordingsTotal?: number;
+  /** Test only: where an uploaded recording is written (one that fails, for a full disk). */
+  recordingWriter?: (path: string) => import('node:stream').Writable;
 }
 
 export type Role = 'operator' | 'programmer';
@@ -95,6 +103,10 @@ const MIME: Record<string, string> = {
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.wav': 'audio/wav',
 };
 
 /** Steps the Undo list keeps, as the engine does. */
@@ -108,6 +120,12 @@ const TEMPO_RUN_MS = 3000;
 const DEVICE_MASTER_MS = 300;
 /** What an operator is told for a key only the programmer may change (Settings, behind the PIN). */
 const PROGRAMMER_KEYS = 'Only the programmer can change that key. Enter the PIN in Settings.';
+/** A timeline Start from a page without the programmer's session; the page is told to ask for the PIN (needsPin). */
+const NOT_PROGRAMMER = 'Only the programmer can start a timeline. Enter the PIN on the Timeline page.';
+/** A recording no timeline uses is deleted at start once it is this old (ms): a day. */
+const ORPHAN_RECORDING_MS = 24 * 3600_000;
+/** How long (ms) the server remembers why the last live run ended, for its page if that was offline then. */
+const ENDED_KEPT_MS = 10 * 60_000;
 /** The key of a device Flash's time limit. */
 const flashKey = (source: string, group: string) => JSON.stringify([source, group]);
 
@@ -136,6 +154,8 @@ export class App {
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
   private stopping = false;
+  /** The engine worker stopped and is being started again. */
+  private workerRestarted = false;
   /** The token in this server's server.json (claimData), the key to the launcher's stop. */
   private markerToken: string | null = null;
   /** Pages open on other computers (iPads, phones): the launcher's note about the firewall goes once one has come. */
@@ -195,14 +215,40 @@ export class App {
   private readonly blindTurn = new Map<WebSocket, number>();
   /** Frames the drafts and sends each its tablet's picture and state; runs while any tablet is in Blind. */
   private blindTimer: NodeJS.Timeout | null = null;
+  /** The one live timeline, and the page whose recording it follows (null once that page has gone). */
+  private liveTimeline: { runner: TimelineRunner; owner: WebSocket | null } | null = null;
+  /** A live Start, Stop, Blackout, Basic lights or song: a live Start still waiting for the stage makes no timeline now. */
+  private timelineTurn = 0;
+  /** A live Start is stopping the live timeline it replaces: no live state is sent for that. */
+  private replacingTimeline = false;
+  /**
+   * Why the live timeline is being stopped now, for the page that plays its recording ('stop': ■ Stop on any page;
+   * 'taken': something else took the lights), and a page not to tell (the one whose own Start replaces it).
+   */
+  private liveStopping: { reason: TimelineEndReason; quietFor: WebSocket | null } | null = null;
+  /** The last live run that ended, why, and when (performance.now()): told to its page when it reports for it again. */
+  private lastLiveEnd: { run: number; reason: TimelineEndReason; at: number } | null = null;
+  /** The ended run each page was last told of on its connection, so it is told once. */
+  private readonly toldEnded = new WeakMap<WebSocket, number>();
+  /** Numbers every Start (live and Prepare), so a page can tell its own run from a later one. */
+  private timelineRuns = 0;
+  /** Each page's Prepare timeline, running in its own draft. */
+  private readonly prepareTimelines = new Map<WebSocket, TimelineRunner>();
+  /** Ticks the timelines while any runs. */
+  private timelineTimer: NodeJS.Timeout | null = null;
+  /** When the live state last went out, and which timeline (and whether it played) it showed. */
+  private publishedAt = 0;
+  private publishedTimeline = '';
   private latestRuntime: RuntimeState | null = null;
   private ready!: Promise<void>;
-  private readonly sessions = new Sessions();
+  /** The programmer's sessions, kept in the data folder so a restart (the Mac's, mid-service) doesn't log the Timeline page out. */
+  private readonly sessions: Sessions;
   private outputProblem: string | null = null;
   /** Every node-watch problem is another desk sending (no node missing). */
   private otherDeskOnly = false;
   private readonly identifyTimers = new Map<string, NodeJS.Timeout>();
   private ofl!: OflClient;
+  private recordings!: Recordings;
   /** Files waiting for someone to pick what to take from them. */
   private readonly imports = new Map<string, { show: Show; scope: Scope; at: number }>();
   private readonly nodeWatch = new NodeWatch((problem, otherDesk) => {
@@ -218,6 +264,8 @@ export class App {
     this.store = new Store(opts.dataDir, opts.seedPath);
     this.saver = new RuntimeSaver(this.store);
     this.ofl = new OflClient(join(opts.dataDir, 'ofl'), opts.fetch);
+    this.recordings = new Recordings(opts.dataDir, { limit: opts.recordingLimit, total: opts.recordingsTotal, writer: opts.recordingWriter });
+    this.sessions = new Sessions({ file: join(opts.dataDir, 'sessions.json'), pin: () => this.show?.settings.pinHash });
   }
 
   get state(): LiveState | null {
@@ -240,6 +288,7 @@ export class App {
       const other = await liveMarker(this.opts.dataDir);
       if (other) throw new AlreadyRunning(other.port);
     }
+    this.recordings.tidy();
     const loaded = this.store.loadShow();
     if (loaded.problem) this.log(`WARNING: ${loaded.problem}`);
     this.log(`Loaded show "${loaded.show.name}" from ${loaded.source}`);
@@ -249,6 +298,13 @@ export class App {
       this.log('Gave the show a running order, ready-made effects and starter colours where they were missing');
     }
     this.show = migrated;
+    // A recording no timeline uses (taken off a timeline, or left by a page that went away while adding it) goes after
+    // a day; a newer one may still be on its way into a timeline. One a show backup's timeline uses stays: that
+    // backup may be loaded again.
+    const used = this.store.backupRecordings();
+    for (const t of this.show.timelines) if (t.recording) used.add(t.recording.id);
+    const swept = this.recordings.sweep(used, ORPHAN_RECORDING_MS);
+    if (swept) this.log(`Deleted ${swept} recording${swept === 1 ? '' : 's'} no timeline uses`);
     this.latestRuntime = this.store.loadRuntime();
     if (this.latestRuntime) this.log(`Restoring last state: look "${this.latestRuntime.look ?? 'none'}"`);
     this.startWorker();
@@ -302,6 +358,9 @@ export class App {
     clearTimeout(this.keysTimer);
     this.nodeWatch.stop();
     if (this.heartbeat) clearInterval(this.heartbeat);
+    this.stopLiveTimeline();
+    for (const runner of [...this.prepareTimelines.values()]) runner.stop();
+    this.timelineTimerFits();
     this.blind.clear();
     this.blindTurn.clear();
     this.blindTimerFits();
@@ -345,8 +404,11 @@ export class App {
     const output = problem && state.output === 'ok' ? 'lost' : state.output;
     // A worker problem (an output it can't send to) is never another desk.
     const kind = output !== 'lost' ? null : !state.outputProblem && this.outputProblem && this.otherDeskOnly ? 'other-desk' : 'not-answering';
-    const merged: LiveState = { ...state, canUndo, output, outputProblem: problem, outputProblemKind: kind };
+    const timeline = this.liveTimeline?.runner.state ?? null;
+    const merged: LiveState = { ...state, canUndo, output, outputProblem: problem, outputProblemKind: kind, timeline };
     this.latestState = merged;
+    this.publishedAt = performance.now();
+    this.publishedTimeline = timeline ? `${timeline.id}:${timeline.playing}` : '';
     this.broadcast(JSON.stringify({ type: 'state', state: merged }));
     this.midi?.update(this.layout, merged);
   }
@@ -532,6 +594,7 @@ export class App {
       this.pending.clear();
       // The new engine starts with no Undo steps of its own; the show's are kept.
       this.undoLog = this.undoLog.filter((step) => step !== 'stage');
+      this.workerRestarted = true;
       setTimeout(() => this.startWorker(), 200);
     });
     this.post({ type: 'init', show: this.engineShow(), runtime: this.latestRuntime, artnetRedirect: this.opts.artnetRedirect });
@@ -544,6 +607,11 @@ export class App {
   private onWorker(msg: FromWorker, markReady: () => void): void {
     switch (msg.type) {
       case 'ready':
+        // After a restart the engine may have missed the live timeline's changes: it gets the whole state again.
+        if (this.workerRestarted) {
+          this.workerRestarted = false;
+          this.liveTimeline?.runner.resync();
+        }
         this.refreshLayout(msg.fixtures);
         this.midi?.update(this.layout, this.latestState);
         // Ready once commands work: the layout and the engine's first state (it may come just before or after).
@@ -600,6 +668,18 @@ export class App {
     return (await this.run(input, role, tablet)).error;
   }
 
+  /** A stage command from the timeline runner: runs on the live stage and adds no Undo step. Returns an error message or null. */
+  async quietStageCommand(cmd: StageCommand): Promise<string | null> {
+    const parsed = Command.safeParse(cmd);
+    if (!parsed.success) throw new Error(`invalid command: ${parsed.error.issues.map((i) => i.message).join('; ')}`);
+    return (await this.stageCommand(cmd, { quiet: true })).error;
+  }
+
+  /** What a live light group's level follows (a voice, 0–1), or null for nothing; the engine smooths it. */
+  followLevel(group: string, value: number | null): void {
+    this.post({ type: 'follow', group, value });
+  }
+
   /** Like `command`, and also says whether the command added a step to the Undo list. */
   private async run(input: unknown, role: Role, tablet?: WebSocket): Promise<{ error: string | null; recorded: boolean }> {
     const parsed = Command.safeParse(input);
@@ -620,11 +700,14 @@ export class App {
       }
       return { error: null, recorded: true };
     }
+    // A song, Basic lights, Blackout or Back to saved from anyone (a tablet, a device) stops a live timeline; the
+    // timeline's own changes never come this way (they go straight to stageCommand, quiet), and Prepare's taps came back above.
+    if (cmd.type === 'look' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') this.stopLiveTimeline();
     return this.stageCommand(cmd);
   }
 
   /** Run a command on the live stage (Undo of a show edit puts the show back instead). */
-  private async stageCommand(cmd: StageCommand): Promise<{ error: string | null; recorded: boolean }> {
+  private async stageCommand(cmd: StageCommand, opts?: { quiet?: boolean }): Promise<{ error: string | null; recorded: boolean }> {
     if (cmd.type === 'undo') {
       const last = this.undoLog.at(-1);
       if (last && last !== 'stage') {
@@ -636,7 +719,8 @@ export class App {
           // Groups an edit in Prepare moved onto copies go back onto their own colours, which look the same again.
           const pins = this.undoKeep.get(last);
           // The programmer's keys and the controller switches aren't Undo steps: they stay as they are.
-          await this.operatorSave(keepControllerKeys(keepCustomPresets(last, this.show), this.show), pins && { pins });
+          // Nor are the timelines (saved by the Timeline page, no Undo steps): they stay as they are now.
+          await this.operatorSave({ ...keepControllerKeys(keepCustomPresets(last, this.show), this.show), timelines: this.show.timelines }, pins && { pins });
         } catch (err) {
           this.undoLog.push(last); // still there to try again
           return { error: (err as Error).message, recorded: false };
@@ -647,8 +731,11 @@ export class App {
       // A stage step (or an empty list, after a restart) is the engine's to undo.
       if (last) this.undoLog.pop();
     }
-    const reply = await this.request<{ error: string | null; recorded?: boolean }>((id) => ({ type: 'command', id, cmd }));
+    const reply = await this.request<{ error: string | null; recorded?: boolean }>((id) => ({ type: 'command', id, cmd, ...(opts?.quiet ? { quiet: true } : {}) }));
     if (reply.recorded) this.remember('stage');
+    // A stage Undo while a live timeline runs: it keeps running and sends its whole state again (over the seek fade),
+    // so the Undo can't leave the stage between what the timeline says and what was there before.
+    if (cmd.type === 'undo' && !reply.error) this.liveTimeline?.runner.resync();
     return { error: reply.error, recorded: !!reply.recorded };
   }
 
@@ -723,6 +810,19 @@ export class App {
     this.operatorBackedUp = true;
   }
 
+  /**
+   * The Timeline page's saves: only the show's timelines change, so the show is saved (no Undo step, the Undo list stays,
+   * a backup only for the first save after a programmer save, or with `backup`) without handing it to the engine, the
+   * drafts or the devices, and with no new layout for the pages: none of them use timelines. The runners read
+   * this.show's timelines on every tick.
+   */
+  private timelinesSave(timelines: Timeline[], backup = false): void {
+    const show: Show = { ...this.show, timelines };
+    this.store.saveShow(show, { backup: backup || !this.operatorBackedUp });
+    this.show = show;
+    this.operatorBackedUp = true;
+  }
+
   private remember(step: Show | 'stage'): void {
     this.undoLog.push(step);
     if (this.undoLog.length > UNDO_KEPT) this.undoLog.shift();
@@ -758,6 +858,8 @@ export class App {
         } catch (err) {
           return done(this.draftProblem(tablet, err));
         }
+        // A Prepare timeline ran in the draft this one replaces.
+        this.prepareTimelines.get(tablet)?.stop();
         this.blind.set(tablet, fresh);
         this.blindTimerFits();
         this.sendDraft(tablet);
@@ -769,6 +871,8 @@ export class App {
         return done(null);
       case 'draft': {
         if (!session) return done(BLIND_OFF);
+        // A song, Basic lights or Blackout in Prepare stops that page's Prepare timeline, as they stop the live one.
+        if (cmd.cmd.type === 'look' || cmd.cmd.type === 'safe' || cmd.cmd.type === 'blackout') this.prepareTimelines.get(tablet)?.stop();
         let error: string | null;
         try {
           error = session.apply(cmd.cmd, performance.now() / 1000, (g) => this.isSmokeGroup(g));
@@ -786,6 +890,8 @@ export class App {
         } catch (err) {
           return done(this.draftProblem(tablet, err));
         }
+        // Go is a deliberate change of the whole stage, like a song: it stops a live timeline.
+        this.stopLiveTimeline();
         // The live engine fades with its own Fade setting (each look's own when it is Auto), as for looks.
         const reply = await this.stageCommand({ type: 'applyStage', stage });
         if (!reply.error && this.blind.get(tablet) === session) this.dropDraft(tablet);
@@ -802,6 +908,8 @@ export class App {
   }
 
   private dropDraft(tablet: WebSocket): void {
+    // Its Prepare timeline goes with it.
+    this.prepareTimelines.get(tablet)?.stop();
     this.blind.delete(tablet);
     this.blindTimerFits();
   }
@@ -854,7 +962,7 @@ export class App {
   private sendDraft(tablet: WebSocket, now = performance.now() / 1000): void {
     let state: LiveState | null | undefined;
     try {
-      state = this.blind.get(tablet)?.state(now, this.latestState, (g) => this.isSmokeGroup(g));
+      state = this.blind.get(tablet)?.state(now, this.latestState, (g) => this.isSmokeGroup(g), this.prepareTimelines.get(tablet)?.state ?? null);
     } catch (err) {
       this.draftProblem(tablet, err);
       return;
@@ -1009,6 +1117,218 @@ export class App {
     this.midi?.update(this.layout, this.latestState);
   }
 
+  // ---- Timelines: one live, and one per page in Prepare ----
+
+  /** Start or Stop from a page. Returns an error in plain words, or null. */
+  private async timelineMessage(input: unknown, role: Role, ws: WebSocket): Promise<string | null> {
+    const parsed = TimelineMessage.safeParse(input);
+    if (!parsed.success) return `invalid message: ${parsed.error.issues.map((i) => i.message).join('; ')}`;
+    const msg = parsed.data;
+    if (msg.type === 'timelineStop') {
+      // Anyone may stop the live timeline (the operator page's Stop); a page stops its own Prepare one.
+      // A Stop for an older run (a page that was taken over, sending it late) leaves the running one alone.
+      const fits = (runner: TimelineRunner) => (msg.id === undefined || msg.id === runner.id) && (msg.run === undefined || msg.run === runner.run);
+      const prepare = this.prepareTimelines.get(ws);
+      if (msg.prepare) {
+        if (prepare && fits(prepare)) prepare.stop();
+      } else if (this.liveTimeline && fits(this.liveTimeline.runner)) {
+        this.stopLiveTimeline('stop');
+      }
+      return null;
+    }
+    if (msg.type !== 'timelineStart') return null;
+    if (role !== 'programmer') return NOT_PROGRAMMER;
+    const timeline = this.show.timelines.find((t) => t.id === msg.id);
+    if (!timeline) return `There is no timeline "${msg.id}" in the show.`;
+    return msg.prepare ? this.startPrepareTimeline(ws, timeline, msg.at) : this.startLiveTimeline(ws, timeline, msg.at);
+  }
+
+  /**
+   * A page's position report: it moves the timeline that page started (the live one, or its Prepare one). A live
+   * timeline whose page has gone is taken up by the programmer's page that reports for it (the same page, back after a
+   * Wi-Fi blip on a new connection).
+   */
+  private timelinePosition(input: unknown, role: Role, ws: WebSocket): void {
+    const parsed = TimelineMessage.safeParse(input);
+    if (!parsed.success || parsed.data.type !== 'timelinePosition') return;
+    const { id, pos, playing, run } = parsed.data;
+    // A report for an older Start (a page that was taken over) never moves the timeline.
+    const fits = (runner: TimelineRunner) => runner.id === id && (run === undefined || run === runner.run);
+    const live = this.liveTimeline;
+    if (live && live.owner === ws && fits(live.runner)) {
+      live.runner.report(pos, playing);
+      return;
+    }
+    const prepare = this.prepareTimelines.get(ws);
+    if (prepare && fits(prepare)) {
+      prepare.report(pos, playing);
+      return;
+    }
+    if (live && live.owner === null && role === 'programmer' && fits(live.runner) && ws.readyState === ws.OPEN) {
+      live.owner = ws;
+      live.runner.report(pos, playing);
+      return;
+    }
+    // The page that played a run which ended while it was offline (a Wi-Fi blip) reports for it again: it hears why,
+    // so a Stop stops its sound as if it had been there.
+    const ended = this.lastLiveEnd;
+    if (ended && run === ended.run && performance.now() - ended.at < ENDED_KEPT_MS && this.toldEnded.get(ws) !== run && ws.readyState === ws.OPEN) {
+      this.toldEnded.set(ws, run);
+      const msg: TimelineEnded = { type: 'timelineEnded', run, reason: ended.reason };
+      ws.send(JSON.stringify(msg));
+    }
+  }
+
+  /** The live timeline; a live one running already stops first. */
+  private async startLiveTimeline(ws: WebSocket, timeline: Timeline, at: number): Promise<string | null> {
+    const turn = ++this.timelineTurn;
+    // The stage as it is now: a group the timeline lets go of goes back to this.
+    let before: RuntimeState | null = null;
+    try {
+      before = await this.stage();
+    } catch {
+      // Without it, such a group is left as it is.
+    }
+    // Another Start, a Stop, Blackout, Basic lights or a song came meanwhile.
+    if (turn !== this.timelineTurn || this.stopping) return 'The timeline did not start: something else changed the stage at the same moment. Press Start again.';
+    const fresh = this.show.timelines.find((t) => t.id === timeline.id);
+    if (!fresh) return `There is no timeline "${timeline.id}" in the show.`;
+    // The pages hear of the new one at once, never of "none" in between (a page would take that for Blackout).
+    this.replacingTimeline = true;
+    try {
+      // Another page's run is taken (its sound plays on until it hears of the new one); this page knows.
+      this.stopLiveTimeline('taken', ws);
+    } finally {
+      this.replacingTimeline = false;
+    }
+    // One recording per page: a Prepare timeline this page ran stops.
+    this.prepareTimelines.get(ws)?.stop();
+    const entry: { runner: TimelineRunner; owner: WebSocket | null } = { runner: null!, owner: ws.readyState === ws.OPEN ? ws : null };
+    entry.runner = new TimelineRunner({
+      show: () => this.show,
+      apply: (cmd) => {
+        this.quietStageCommand(cmd).then(
+          (error) => { if (error) this.log(`Timeline "${fresh.name}": ${cmd.type} not done: ${error}`); },
+          (err) => this.log(`Timeline "${fresh.name}": ${(err as Error).message}`),
+        );
+      },
+      follow: (group, value) => this.followLevel(group, value),
+      now: () => performance.now() / 1000,
+      log: this.log,
+      onStop: (why) => {
+        if (this.liveTimeline === entry) this.liveTimeline = null;
+        if (why !== 'stopped') this.log(`Timeline "${fresh.name}" ${why === 'end' ? 'came to its end' : 'stopped'}`);
+        // The page that plays the recording hears why, before the live state says the timeline has gone: on 'stop' its
+        // sound stops too, on 'taken' it plays on (Lights follow again), on 'end' nothing changes.
+        const owner = entry.owner;
+        const stopping = this.liveStopping;
+        const reason: TimelineEndReason = why === 'end' || why === 'gone' ? 'end' : why === 'stopped' ? stopping?.reason ?? 'taken' : 'taken';
+        this.lastLiveEnd = { run: entry.runner.run, reason, at: performance.now() };
+        if (owner && owner !== stopping?.quietFor && owner.readyState === owner.OPEN && !this.stopping) {
+          const msg: TimelineEnded = { type: 'timelineEnded', run: entry.runner.run, reason };
+          owner.send(JSON.stringify(msg));
+        }
+        this.timelineTimerFits();
+        if (!this.replacingTimeline) this.publishState();
+      },
+    });
+    this.liveTimeline = entry;
+    this.log(`Timeline "${fresh.name}" started at ${at.toFixed(1)} s`);
+    // Started in Blackout, it takes the stage from there: Blackout ends without a light moving (before the timeline's
+    // first change), so a look block never brings back the stage from before Blackout and the pages stop showing it.
+    this.post({ type: 'leaveBlackout' });
+    entry.runner.start(fresh, at, before, ++this.timelineRuns);
+    this.timelineTimerFits();
+    this.publishState();
+    return null;
+  }
+
+  /** A timeline in this page's own Prepare draft (made for it when the page has none); it never touches the lights. */
+  private async startPrepareTimeline(ws: WebSocket, timeline: Timeline, at: number): Promise<string | null> {
+    // A Start that can't happen changes nothing: checked before the page's draft is made or its live timeline let go.
+    if (!this.blind.has(ws)) {
+      if (this.blind.size >= MAX_DRAFTS) return TOO_MANY_DRAFTS;
+      const made = await this.blindCommand({ type: 'blindStart' }, ws);
+      if (made.error) return made.error;
+    }
+    const session = this.blind.get(ws);
+    if (!session) return BLIND_OFF;
+    const fresh = this.show.timelines.find((t) => t.id === timeline.id);
+    if (!fresh) return `There is no timeline "${timeline.id}" in the show.`;
+    // One recording per page: a live timeline this page played goes on by itself.
+    this.leaveLiveTimeline(ws);
+    this.prepareTimelines.get(ws)?.stop();
+    const now = () => performance.now() / 1000;
+    const runner: TimelineRunner = new TimelineRunner({
+      show: () => this.show,
+      apply: (cmd, opts) => {
+        if (this.blind.get(ws) !== session) return;
+        try {
+          session.apply(cmd, now(), (g) => this.isSmokeGroup(g), opts);
+        } catch (err) {
+          // Only this draft ends (and its timeline with it), never the service.
+          this.draftProblem(ws, err);
+        }
+      },
+      follow: (group, value) => {
+        if (this.blind.get(ws) === session) session.followLevel(group, value, now());
+      },
+      now,
+      log: this.log,
+      onStop: () => {
+        if (this.prepareTimelines.get(ws) === runner) this.prepareTimelines.delete(ws);
+        this.timelineTimerFits();
+      },
+    });
+    this.prepareTimelines.set(ws, runner);
+    runner.start(fresh, at, session.engine.runtime(), ++this.timelineRuns);
+    this.timelineTimerFits();
+    this.sendDraft(ws);
+    return null;
+  }
+
+  /**
+   * Stop the live timeline where it is: 'stop' for ■ Stop, 'taken' for Blackout, Basic lights, a song, Go, Back to saved
+   * or another live Start (the page that plays its recording is told which; never `quietFor`).
+   */
+  private stopLiveTimeline(reason: TimelineEndReason = 'taken', quietFor: WebSocket | null = null): void {
+    this.timelineTurn++;
+    this.liveStopping = { reason, quietFor };
+    try {
+      this.liveTimeline?.runner.stop();
+    } finally {
+      this.liveStopping = null;
+    }
+  }
+
+  /** The page the live timeline follows has gone (or plays something else now): it goes on by itself. */
+  private leaveLiveTimeline(ws: WebSocket): void {
+    const live = this.liveTimeline;
+    if (!live || live.owner !== ws) return;
+    live.owner = null;
+    live.runner.release();
+  }
+
+  private tickTimelines(): void {
+    this.liveTimeline?.runner.tick();
+    for (const runner of [...this.prepareTimelines.values()]) runner.tick();
+    // The pages hear where the live one is twice a second, and at once when it pauses or plays.
+    const state = this.liveTimeline?.runner.state;
+    if (state && (`${state.id}:${state.playing}` !== this.publishedTimeline || performance.now() - this.publishedAt >= 500)) this.publishState();
+  }
+
+  /** The timeline timer runs while any timeline does. */
+  private timelineTimerFits(): void {
+    const any = !!this.liveTimeline || this.prepareTimelines.size > 0;
+    if (any && !this.timelineTimer && !this.stopping) {
+      this.timelineTimer = setInterval(() => this.tickTimelines(), TICK_MS);
+      this.timelineTimer.unref();
+    } else if (!any && this.timelineTimer) {
+      clearInterval(this.timelineTimer);
+      this.timelineTimer = null;
+    }
+  }
+
   // ---- WebSocket ----
 
   private onSocket(ws: WebSocket, role: Role): void {
@@ -1030,6 +1350,8 @@ export class App {
       // Its Blind draft goes with it; nothing reaches the stage.
       this.blindTurn.delete(ws);
       this.dropDraft(ws);
+      // A live timeline it played goes on by itself, to its end.
+      this.leaveLiveTimeline(ws);
     });
     ws.on('message', async (data, isBinary) => {
       if (isBinary) return;
@@ -1041,6 +1363,29 @@ export class App {
       }
       // Valid JSON that isn't an object ("null", a number) is ignored, never thrown on.
       if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'timelinePosition') {
+        // Several times a second: no answer.
+        this.timelinePosition(msg, role, ws);
+        return;
+      }
+      if (msg.type === 'timelineStart' || msg.type === 'timelineStop') {
+        let error: string | null;
+        try {
+          error = await this.timelineMessage(msg, role, ws);
+        } catch (err) {
+          this.log(`Timeline failed: ${(err as Error)?.stack ?? String(err)}`);
+          error = 'That did not work. The lights were not changed.';
+        }
+        // A Start is told its run number, so the page knows its own run from a later one.
+        let run: number | undefined;
+        if (!error && msg.type === 'timelineStart') {
+          const live = this.liveTimeline;
+          run = (msg as { prepare?: unknown }).prepare ? this.prepareTimelines.get(ws)?.run : live?.owner === ws ? live.runner.run : undefined;
+        }
+        const needsPin = error === NOT_PROGRAMMER ? { needsPin: true } : {};
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'result', ref: msg.ref ?? null, error, ...needsPin, ...(run !== undefined ? { run } : {}) }));
+        return;
+      }
       if (msg.type === 'command') {
         let error: string | null;
         try {
@@ -1243,7 +1588,14 @@ export class App {
       }
       await this.serveStatic(url.pathname, res);
     } catch (err) {
-      const status = err instanceof HttpError ? err.status : 500;
+      // The client went away in the middle of an upload: nobody to tell.
+      if (err instanceof UploadAborted) return;
+      const status = err instanceof HttpError || err instanceof RecordingError ? err.status : 500;
+      if (err instanceof RecordingError && err.close) {
+        // The rest of its body is not wanted: answer, then drop the connection.
+        res.setHeader('connection', 'close');
+        res.once('finish', () => req.destroy());
+      }
       if (status === 500) this.log(`HTTP error: ${(err as Error).stack}`);
       json(res, status, { error: (err as Error).message });
     }
@@ -1342,6 +1694,8 @@ export class App {
       'GET /api/ofl/db', 'POST /api/ofl/db/download', 'POST /api/ofl/db/install', 'POST /api/ofl/db/discard',
       'GET /api/ofl/manufacturers', 'GET /api/ofl/manufacturer',
       'PUT /api/controller', 'POST /api/keys/reset',
+      'GET /api/recordings', 'POST /api/recordings', 'GET /api/recordings/file', 'DELETE /api/recordings',
+      'PUT /api/timeline', 'DELETE /api/timeline',
     ];
     if (!routes.includes(route)) return false;
     if (!open && !this.isProgrammer(req)) throw new HttpError(401, 'enter the programmer PIN');
@@ -1455,9 +1809,10 @@ export class App {
         // Listen switches too (they name the controllers plugged in here); its keys and APC mini layout switch are taken.
         // It keeps this installation's Send DMX switch as well, so opening a file never starts sending to the lights by
         // itself; the file's output settings (the node's address and so on) are taken.
-        // Controller keys are assigned while Patch may be open, so its copy keeps the live ones too.
+        // Controller keys are assigned while Patch may be open, so its copy keeps the live ones too, and so do the timelines
+        // (they are made on the Timeline page).
         show = fromPatch
-          ? { ...show, operator: { ...show.operator, controller: this.show.operator.controller }, settings: this.show.settings }
+          ? { ...show, operator: { ...show.operator, controller: this.show.operator.controller }, settings: this.show.settings, timelines: this.show.timelines }
           : withIgnored({ ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash, outputEnabled: this.show.settings.outputEnabled } }, this.show.operator.controller?.ignored);
         await this.setShow(show);
         this.log(fromPatch ? 'Patch saved' : `Imported show "${show.name}"`);
@@ -1474,7 +1829,7 @@ export class App {
         const builtIn = new Set(BUILT_IN_PROFILES.map((p) => p.id));
         json(res, 200, all.map((p) => ({
           id: p.id, name: p.name, channels: p.channels.length, segments: profileSegments(p), roles: [...new Set(p.channels.map((c) => c.role))],
-          defs: p.channels, readOnly: Boolean(p.source?.ofl) || builtIn.has(p.id), builtIn: builtIn.has(p.id),
+          defs: p.channels, leds: p.leds ?? null, readOnly: Boolean(p.source?.ofl) || builtIn.has(p.id), builtIn: builtIn.has(p.id),
         })));
         return true;
       }
@@ -1514,6 +1869,48 @@ export class App {
         this.imports.delete(token!);
         this.log(`Imported ${picks.length} changes from "${pending.show.name}"`);
         json(res, 200, this.settingsView());
+        return true;
+      }
+      case 'GET /api/recordings':
+        json(res, 200, this.recordings.list());
+        return true;
+      case 'POST /api/recordings':
+        json(res, 200, await this.recordings.add(req, url.searchParams.get('name') ?? ''));
+        return true;
+      case 'GET /api/recordings/file':
+        await this.recordings.send(req, res, url.searchParams.get('id') ?? '');
+        return true;
+      case 'DELETE /api/recordings': {
+        const id = url.searchParams.get('id') ?? '';
+        this.recordings.remove(id, (rec) => this.show.timelines.some((t) => t.recording?.id === rec));
+        this.log('A recording was removed');
+        json(res, 200, { ok: true });
+        return true;
+      }
+      case 'PUT /api/timeline': {
+        // The Timeline page saves one timeline at a time (it never sends the whole show): replaced by id, or added.
+        const parsed = Timeline.safeParse(await readJson(req, 4 * 1024 * 1024));
+        if (!parsed.success) throw new HttpError(400, `That isn't a timeline: ${parsed.error.issues.map((i) => i.message).join('; ')}`);
+        const timeline = parsed.data;
+        const timelines = [...this.show.timelines];
+        const at = timelines.findIndex((t) => t.id === timeline.id);
+        if (at >= 0) timelines[at] = timeline;
+        else timelines.push(timeline);
+        // Saved like Settings' controller switches: no Undo step, the Undo list stays, and only the first save after a
+        // programmer save keeps a backup (the page saves after each pause in editing). A running timeline takes the edit
+        // on its next tick.
+        this.timelinesSave(timelines);
+        json(res, 200, timeline);
+        return true;
+      }
+      case 'DELETE /api/timeline': {
+        const id = url.searchParams.get('id') ?? '';
+        const gone = this.show.timelines.find((t) => t.id === id);
+        if (!gone) throw new HttpError(404, 'There is no such timeline.');
+        // A timeline running now stops on its next tick (it is gone from the show).
+        this.timelinesSave(this.show.timelines.filter((t) => t !== gone), true);
+        this.log(`Timeline "${gone.name}" deleted`);
+        json(res, 200, { ok: true });
         return true;
       }
       case 'GET /api/ofl/db':
@@ -1873,12 +2270,12 @@ function withIgnored(show: Show, ignored: string[] | undefined): Show {
 }
 
 /**
- * Which version of the show a page has (`x-show-revision`): a hash of everything but the settings and the controller
- * keys, which change while Patch is open and which a Patch save keeps from the live show anyway. The order of an
+ * Which version of the show a page has (`x-show-revision`): a hash of everything but the settings, the controller
+ * keys and the timelines, which change while Patch is open and which a Patch save keeps from the live show anyway. The order of an
  * object's fields is left out (a save can rebuild one in another order without changing it).
  */
 export function showRevision(show: Show): string {
-  const { settings: _settings, operator: { controller: _controller, ...operator }, ...rest } = show;
+  const { settings: _settings, timelines: _timelines, operator: { controller: _controller, ...operator }, ...rest } = show;
   const sorted = (_key: string, value: unknown) => (value && typeof value === 'object' && !Array.isArray(value)
     ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
     : value);
