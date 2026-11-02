@@ -176,6 +176,10 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('editEffect'), preset: id, effect: LiveEffectLayer, name: z.string().optional() }),
   /** Put a service of the planning service into the running order (the server fetches it). One Undo step; the lights are never touched. */
   z.object({ type: z.literal('loadService'), id: z.string().min(1).max(64) }),
+  /** Store the stage (or the tablet's draft) as the look of a loaded service's header, slides or picture, by the item's key; it goes in the running order after the look above it. */
+  z.object({ type: z.literal('saveServiceItem'), key: z.string().min(1).max(64) }),
+  /** Give a running-order item a copy of another look's groups (and tempo) without touching the stage: "pick another look". */
+  z.object({ type: z.literal('itemCopyLook'), item: id, from: id }),
   // Controller keys (the server's learn sends setKey once a key is pressed): one key, one job.
   /** Give `does` this key; a key that did something else moves to it. */
   z.object({ type: z.literal('setKey'), key: ControlKey, does: KeyTarget }),
@@ -196,7 +200,7 @@ export type Command = z.infer<typeof Command>;
 
 const SHOW_EDITS = [
   'saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemQuickLook',
-  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'loadService', 'setKey', 'clearKey', 'resetKeys',
+  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'loadService', 'saveServiceItem', 'itemCopyLook', 'setKey', 'clearKey', 'resetKeys',
 ] as const;
 /** Commands that change the show rather than the stage. */
 export type ShowEdit = Extract<Command, { type: (typeof SHOW_EDITS)[number] }>;

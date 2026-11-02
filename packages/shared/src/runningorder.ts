@@ -5,7 +5,7 @@
 import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, liveEffectId, livePresetId, parseLiveEffect, parseLivePreset } from './protocol.ts';
 import { effectKey, isEffectPreset, resolveColour } from './schema.ts';
 import { followQuickLook } from './keys.ts';
-import { rememberKey } from './planning.ts';
+import { anchorOf, rememberKey } from './planning.ts';
 import type { PlannedService } from './planning.ts';
 import type { EffectLayer, Layer, Look, LookEntry, Preset, QuickLook, QuickTab, Show } from './schema.ts';
 
@@ -330,6 +330,32 @@ export function saveItem(show: Show, lookId: string, stage: Stage): Show {
   return out;
 }
 
+/**
+ * Gives a loaded service's header, slides, picture or other item (by its key) a look made from the stage, as Save
+ * makes one. The look goes in the running order right after the look the item sits after now, and is remembered
+ * for the next load. Verses and blanks never have a look; an item that has one is saved with Save to it.
+ */
+export function saveServiceItem(show: Show, key: string, stage: Stage): Show {
+  const out = structuredClone(show);
+  const item = out.operator.service?.items.find((i) => i.key === key);
+  if (!item) throw new Error("That item isn't in the loaded service.");
+  if (item.kind === 'verse') throw new Error("Verses don't change the lights.");
+  if (item.kind === 'blank') throw new Error("Blanks use their part's look.");
+  if (item.look !== undefined) throw new Error(`${item.name} already has a look: use Save to ${item.name}.`);
+  // A song's look comes with the load; one that lost it (deleted in Edit list) is given again by loading the service.
+  if (item.kind === 'song') throw new Error(`Load the service again to give ${item.name} a look.`);
+  const after = anchorOf(out, key);
+  const id = addLook(out, planLookName(item.name, 'Look'), entriesFor(out, stage));
+  if (stage.tempo !== undefined) lookIn(out, id).tempo = stage.tempo;
+  const at = out.operator.runningOrder.indexOf(after);
+  if (at < 0) out.operator.runningOrder.push(id);
+  else out.operator.runningOrder.splice(at + 1, 0, id);
+  item.look = id;
+  const remember = rememberKey(item);
+  if (remember !== null) (out.operator.remembered ??= {})[remember] = id;
+  return out;
+}
+
 /** A new "Song N" holding the stage, placed right after `afterId` (or last). */
 export function addSong(show: Show, afterId: string, stage: Stage): { show: Show; id: string } {
   const out = structuredClone(show);
@@ -573,6 +599,21 @@ export function setItemTempo(show: Show, itemId: string, bpm: number): Show {
   if (!(bpm >= MIN_TEMPO && bpm <= MAX_TEMPO)) throw new Error(`the tempo is ${MIN_TEMPO} to ${MAX_TEMPO} beats per minute`);
   const out = structuredClone(show);
   itemLook(out, itemId).tempo = bpm;
+  return out;
+}
+
+/**
+ * Gives a running-order item a copy of another look's groups (and its tempo, when it has one): "pick another look
+ * from a menu". The item keeps its name, id and remembered key, and the look it copied is untouched.
+ * Basic lights is set by Save alone.
+ */
+export function copyLookToItem(show: Show, itemId: string, fromId: string): Show {
+  const out = structuredClone(show);
+  const target = itemLook(out, itemId);
+  if (itemId === out.operator.safeLook) throw new Error('Basic lights is set by Save.');
+  const from = lookIn(out, fromId);
+  target.groups = structuredClone(from.groups);
+  if (from.tempo !== undefined) target.tempo = from.tempo;
   return out;
 }
 

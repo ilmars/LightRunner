@@ -14,7 +14,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
   BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, rememberKey,
-  applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,  type OflFixture, type Pick, type PlannedService, type Scope,
+  applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,  type OflFixture, type Pick, type PlannedService, type Scope,
   BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
   pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
@@ -977,12 +977,12 @@ export class App {
 
   /**
    * Operator edits to the running order and quick looks. Throws with a plain message when refused.
-   * `draft`: the tablet is in Blind, so Save, Add song and Save as quick look (and a quick look's Update from the stage) store its draft instead of the stage.
+   * `draft`: the tablet is in Blind, so Save, Save to a service item, Add song and Save as quick look (and a quick look's Update from the stage) store its draft instead of the stage.
    */
   private async editShow(cmd: ShowEdit, draft?: BlindSession): Promise<void> {
     // The service is fetched before anything is read or replaced below, so no other edit can slip in while it is on its way.
     const service = cmd.type === 'loadService' ? await this.fetchService(cmd.id) : null;
-    const usesStage = cmd.type === 'saveItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook' || (cmd.type === 'editQuickLook' && !!cmd.fromStage);
+    const usesStage = cmd.type === 'saveItem' || cmd.type === 'saveServiceItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook' || (cmd.type === 'editQuickLook' && !!cmd.fromStage);
     // Deleting a colour only looks at the stage to keep a lit colour; it is fine during Blackout.
     const stage = usesStage && draft ? draft.engine.runtime() : usesStage || cmd.type === 'deleteColour' ? await this.stage() : null;
     // In Prepare an edit never changes the lights: what the stage shows now (each group, and Blackout's memory), taken
@@ -1006,6 +1006,8 @@ export class App {
         if (!before.operator.runningOrder.includes(cmd.id)) throw new Error('only running-order items can be saved');
         next = saveItem(before, cmd.id, stage!);
         break;
+      // Save to a header, slides or picture of the loaded service: its look is made from the stage (or the draft), like Save.
+      case 'saveServiceItem': next = saveServiceItem(before, cmd.key, stage!); break;
       case 'addSong': next = addSong(before, cmd.after, stage!).show; break;
       case 'renameItem': next = renameItem(before, cmd.id, cmd.name); break;
       case 'deleteItem': next = deleteItem(before, cmd.id); break;
@@ -1019,6 +1021,7 @@ export class App {
       case 'itemGroup': next = setItemGroup(before, cmd.item, cmd); break;
       case 'itemTempo': next = setItemTempo(before, cmd.item, cmd.bpm); break;
       case 'itemQuickLook': next = applyQuickLookToItem(before, cmd.item, cmd.look); break;
+      case 'itemCopyLook': next = copyLookToItem(before, cmd.item, cmd.from); break;
       // A colour doesn't depend on the stage, so it is fine during Blackout.
       case 'addColour': next = addColour(before, cmd).show; break;
       case 'editColour': next = editColour(before, cmd).show; break;

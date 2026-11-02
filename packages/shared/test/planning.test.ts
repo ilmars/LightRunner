@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  anchorOf, checkReferences, deleteItem, ensureBasicLights, ensurePlanning, ensureRunningOrder, itemKind, loadService, moveItem, newSongLookOf, parseShow, rememberKey,
+  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensurePlanning, ensureRunningOrder, itemKind, loadService, moveItem, newSongLookOf, parseShow, rememberKey,
   serviceRows, toPlannedService, type PlannedService, type ServiceItem, type Show,
 } from '../src/index.ts';
 
@@ -423,4 +423,102 @@ test('anchorOf gives the nearest look above in the order, else Basic lights', ()
   assert.equal(anchorOf(noSlav, 'cue-b'), safeOf(show));
   // Without a service everything sits after Basic lights.
   assert.equal(anchorOf(rig(), 'cue-b'), safeOf(show));
+});
+
+// ---- Saving to items that have no look, and another look for a song ----
+
+/** A stage showing a look's groups, as the engine would report it. */
+const stageOf = (show: Show, id: string, tempo?: number) => {
+  const groups = lookOf(show, id).groups;
+  return {
+    groups: Object.fromEntries(groups.map((e) => [e.group, e.preset])),
+    levels: Object.fromEntries(groups.map((e) => [e.group, e.level ?? 1])),
+    ...(tempo === undefined ? {} : { tempo }),
+  };
+};
+
+test('saveServiceItem gives slides a look after their anchor, remembered for the next load', () => {
+  const show = rig();
+  const slides: ServiceItem = { key: 's1', kind: 'slides', name: 'Welcome slides' };
+  const service = planned([header('Ievads'), song('a', 'A'), slides, song('b', 'B')]);
+  const loaded = loadService(show, service);
+  const [, a, b] = loaded.operator.runningOrder;
+  assert.equal(anchorOf(loaded, 's1'), a);
+  const quick = show.operator.quickLooks[1]!.look;
+  const copy = structuredClone(loaded);
+
+  const out = saveServiceItem(loaded, 's1', stageOf(loaded, quick, 120));
+  assert.deepEqual(loaded, copy, 'the show it was given is untouched');
+  const made = out.operator.service!.items[2]!.look!;
+  assert.ok(made);
+  assert.deepEqual(out.operator.runningOrder, [safeOf(out), a, made, b], 'right after its anchor');
+  assert.equal(lookOf(out, made).name, 'Welcome slides');
+  assert.equal(lookOf(out, made).tempo, 120);
+  assert.deepEqual(lookOf(out, made).groups, lookOf(loaded, quick).groups.map((e) => ({ ...e, level: e.level ?? 1 })));
+  assert.equal(out.operator.remembered!['item:Welcome slides'], made);
+  assert.deepEqual(checkReferences(out), []);
+  parseShow(out);
+  // The slides own their row now, and what follows them sits after it.
+  assert.deepEqual(serviceRows(out).filter((r) => r.kind === 'look').map(label), [safeOf(out), a, made, b]);
+
+  // Next Sunday's load gives the slides that look back; the other items are as before.
+  const next = loadService(out, planned([song('a', 'A'), slides], 'svc2'));
+  assert.equal(next.operator.service!.items[1]!.look, made);
+  assert.deepEqual(next.operator.runningOrder, [safeOf(next), a, made]);
+});
+
+test('saveServiceItem puts a header look after the look above it, Basic lights first of all', () => {
+  const loaded = loadService(rig(), planned([header('Ievads'), song('a', 'A'), header('Vārds')]));
+  const a = loaded.operator.runningOrder[1]!;
+  const quick = loaded.operator.quickLooks[0]!.look;
+  const first = saveServiceItem(loaded, 'cue-h-Ievads', stageOf(loaded, quick));
+  assert.deepEqual(first.operator.runningOrder, [safeOf(first), first.operator.service!.items[0]!.look, a]);
+  assert.equal(first.operator.remembered!['header:Ievads'], first.operator.service!.items[0]!.look);
+  const both = saveServiceItem(first, 'cue-h-Vārds', stageOf(first, quick));
+  assert.equal(both.operator.runningOrder.at(-1), both.operator.service!.items[2]!.look);
+  assert.equal(both.operator.runningOrder.length, 4);
+});
+
+test('saveServiceItem refuses verses, blanks and items that have a look', () => {
+  const loaded = loadService(rig(), planned([song('a', 'A'), header('Vārds'), verse('Psalmi 23:3'), blank()]));
+  const stage = stageOf(loaded, loaded.operator.quickLooks[0]!.look);
+  assert.throws(() => saveServiceItem(loaded, 'cue-v-Psalmi 23:3', stage), { message: "Verses don't change the lights." });
+  assert.throws(() => saveServiceItem(loaded, 'cue-b', stage), { message: "Blanks use their part's look." });
+  assert.throws(() => saveServiceItem(loaded, 'cue-a-A', stage), { message: 'A already has a look: use Save to A.' });
+  assert.throws(() => saveServiceItem(loaded, 'nope', stage), { message: "That item isn't in the loaded service." });
+  assert.throws(() => saveServiceItem(rig(), 'cue-b', stage), { message: "That item isn't in the loaded service." });
+  // A header that has its look is refused the same way.
+  const given = saveServiceItem(loaded, 'cue-h-Vārds', stage);
+  assert.throws(() => saveServiceItem(given, 'cue-h-Vārds', stage), { message: 'Vārds already has a look: use Save to Vārds.' });
+  // A bad stage is refused like Save refuses it.
+  assert.throws(() => saveServiceItem(loaded, 'cue-h-Vārds', { groups: { nowhere: 'x' }, levels: {} }), /no group/);
+});
+
+test('copyLookToItem gives an item another look\'s groups and tempo, and keeps its name, id and remembered key', () => {
+  const loaded = loadService(rig(), planned([song('a', 'A', 100), song('b', 'B')]));
+  const [, a, b] = loaded.operator.runningOrder as [string, string, string];
+  const quick = loaded.operator.quickLooks[1]!.look;
+  loaded.looks.find((l) => l.id === quick)!.tempo = 77;
+  const copy = structuredClone(loaded);
+
+  const out = copyLookToItem(loaded, a, quick);
+  assert.deepEqual(loaded, copy);
+  assert.deepEqual(lookOf(out, a).groups, lookOf(loaded, quick).groups);
+  assert.notEqual(lookOf(out, a).groups, lookOf(out, quick).groups, 'a copy, not shared');
+  assert.equal(lookOf(out, a).tempo, 77);
+  assert.equal(lookOf(out, a).name, 'A');
+  assert.equal(out.operator.remembered!['song:song-a'], a);
+  assert.equal(out.operator.service!.items[0]!.look, a);
+  // A look without a tempo leaves the item's own.
+  const keeps = copyLookToItem(loaded, a, b);
+  assert.equal(lookOf(keeps, a).tempo, 100);
+  parseShow(out);
+});
+
+test('copyLookToItem refuses Basic lights, an unknown look and an item outside the order', () => {
+  const loaded = loadService(rig(), planned([song('a', 'A')]));
+  const a = loaded.operator.runningOrder[1]!;
+  assert.throws(() => copyLookToItem(loaded, safeOf(loaded), a), { message: 'Basic lights is set by Save.' });
+  assert.throws(() => copyLookToItem(loaded, a, 'nope'), { message: '"nope" isn\'t in the show' });
+  assert.throws(() => copyLookToItem(loaded, loaded.operator.quickLooks[0]!.look, a), /only running-order items/);
 });

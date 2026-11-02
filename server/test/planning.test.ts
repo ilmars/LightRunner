@@ -461,3 +461,130 @@ test('a Patch save keeps the live service and the looks the planner remembers', 
   assert.equal((await layoutOf(rig)).service?.title, 'Sunday service');
   t.close();
 }));
+
+// ---- Saving to items that have no look, and another look for a song ----
+
+const showOf = async (rig: Rig) => (await rig.call('GET', '/api/show')).body;
+const lookIn = (show: any, id: string) => show.looks.find((l: any) => l.id === id);
+const entry = (look: any, group: string) => look.groups.find((e: any) => e.group === group);
+
+test('saveServiceItem gives a header or slides a look, as one Undo step', () => withPlanning(async (rig) => {
+  const { app, tablet } = rig;
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const loaded = await showOf(rig);
+  const song = (await orderOf(rig))[1]!;
+  assert.equal(await t.command({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.command({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 }), null);
+  await waitFor(() => app.state?.groups['back-wall']?.preset === 'back-amber', 'amber on stage');
+
+  assert.equal(await t.command({ type: 'saveServiceItem', key: 'c5' }), null);
+  const show = await showOf(rig);
+  const slides = show.operator.service.items.find((i: any) => i.key === 'c5');
+  assert.ok(slides.look);
+  assert.equal(entry(lookIn(show, slides.look), 'back-wall').preset, 'back-amber');
+  assert.equal(lookIn(show, slides.look).name, 'Welcome');
+  assert.equal(show.operator.remembered['item:Welcome'], slides.look);
+  assert.deepEqual(show.operator.runningOrder, [...loaded.operator.runningOrder, slides.look], 'after the last song, its anchor');
+  assert.deepEqual((await layoutOf(rig)).runningOrder.map((l: any) => l.name), ['Basic lights', 'Song One', 'Song Two', 'Welcome']);
+  // The stage is untouched by it.
+  assert.equal(app.state!.look, song);
+
+  // A header too; once it has its look, a second Save to it is refused.
+  assert.equal(await t.command({ type: 'saveServiceItem', key: 'c1' }), null);
+  assert.equal(await t.command({ type: 'saveServiceItem', key: 'c1' }), 'Ievads already has a look: use Save to Ievads.');
+  assert.ok((await showOf(rig)).operator.remembered['header:Ievads']);
+
+  // One Undo step each.
+  assert.equal(await t.command({ type: 'undo' }), null);
+  assert.equal((await showOf(rig)).operator.service.items[0].look, undefined);
+  assert.equal(await t.command({ type: 'undo' }), null);
+  assert.deepEqual((await showOf(rig)).operator, loaded.operator);
+  t.close();
+}));
+
+test('saveServiceItem refuses verses, items with a look, unknown items and Blackout, and changes nothing then', () => withPlanning(async (rig) => {
+  const { app, tablet } = rig;
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'saveServiceItem', key: 'c5' }), "That item isn't in the loaded service.", 'before a load');
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const before = await showOf(rig);
+  assert.equal(await t.command({ type: 'saveServiceItem', key: 'c3' }), "Verses don't change the lights.");
+  assert.equal(await t.command({ type: 'saveServiceItem', key: 'c2' }), 'Song One already has a look: use Save to Song One.');
+  assert.equal(await t.command({ type: 'saveServiceItem', key: 'nope' }), "That item isn't in the loaded service.");
+  assert.match((await t.command({ type: 'saveServiceItem', key: '' }))!, /^invalid command/);
+  assert.match((await t.command({ type: 'saveServiceItem', key: 'a'.repeat(65) }))!, /^invalid command/);
+  assert.equal(await t.command({ type: 'look', id: (await orderOf(rig))[1], fade: 0 }), null);
+  assert.equal(await t.command({ type: 'blackout' }), null);
+  await waitFor(() => app.state?.look === 'blackout', 'Blackout on stage');
+  assert.equal(await t.command({ type: 'saveServiceItem', key: 'c5' }), 'Blackout is on. Bring the lights back, then save.');
+  assert.deepEqual((await showOf(rig)).operator, before.operator);
+  t.close();
+}));
+
+test('saveServiceItem from a tablet in Prepare saves the draft, not the stage', () => withPlanning(async (rig) => {
+  const { app, tablet } = rig;
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const song = (await orderOf(rig))[1]!;
+  assert.equal(await t.command({ type: 'look', id: song, fade: 0 }), null);
+  await waitFor(() => app.state?.look === song, 'the song on stage');
+  await sleep(100);
+  const liveWall = app.state!.groups['back-wall']!.preset;
+  assert.notEqual(liveWall, 'back-amber');
+
+  assert.equal(await t.command({ type: 'blindStart' }), null);
+  assert.equal(await t.command({ type: 'draft', cmd: { type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 } }), null);
+  assert.equal(await t.command({ type: 'draft', cmd: { type: 'groupLevel', group: 'audience', value: 0.3 } }), null);
+  assert.equal(await t.command({ type: 'draft', cmd: { type: 'tempo', bpm: 91 } }), null);
+  assert.equal(await t.command({ type: 'saveServiceItem', key: 'c1' }), null);
+  const show = await showOf(rig);
+  const header = show.operator.service.items.find((i: any) => i.key === 'c1');
+  const made = lookIn(show, header.look);
+  assert.equal(entry(made, 'back-wall').preset, 'back-amber');
+  assert.equal(entry(made, 'audience').level, 0.3);
+  assert.equal(made.tempo, 91);
+  assert.equal(show.operator.runningOrder[1], header.look, 'after Basic lights, as no look is above the header');
+
+  // The stage keeps what it ran.
+  await sleep(150);
+  assert.equal(app.state!.look, song);
+  assert.equal(app.state!.groups['back-wall']!.preset, liveWall);
+  assert.equal(await t.command({ type: 'blindEnd' }), null);
+  t.close();
+}));
+
+test('itemCopyLook gives a song another look\'s groups, keeps its name and is one Undo step; Basic lights refuses it', () => withPlanning(async (rig) => {
+  const { tablet } = rig;
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const loaded = await showOf(rig);
+  const [basic, one, two] = await orderOf(rig) as [string, string, string];
+  const quick = loaded.operator.quickLooks.at(-1).look as string;
+  assert.notDeepEqual(lookIn(loaded, quick).groups, lookIn(loaded, one).groups);
+
+  assert.equal(await t.command({ type: 'itemCopyLook', item: one, from: quick }), null);
+  const show = await showOf(rig);
+  assert.deepEqual(lookIn(show, one).groups, lookIn(loaded, quick).groups);
+  assert.equal(lookIn(show, one).name, 'Song One');
+  assert.equal(show.operator.remembered['song:' + S1], one);
+  assert.equal(show.operator.service.items[1].look, one);
+  assert.deepEqual(lookIn(show, quick), lookIn(loaded, quick), 'the look it copied is untouched');
+  // Another song's look can be copied too.
+  assert.equal(await t.command({ type: 'itemCopyLook', item: two, from: one }), null);
+  assert.deepEqual(lookIn(await showOf(rig), two).groups, lookIn(show, one).groups);
+
+  assert.equal(await t.command({ type: 'undo' }), null);
+  assert.equal(await t.command({ type: 'undo' }), null);
+  assert.deepEqual(lookIn(await showOf(rig), one), lookIn(loaded, one), 'one Undo step each');
+
+  assert.equal(await t.command({ type: 'itemCopyLook', item: basic, from: quick }), 'Basic lights is set by Save.');
+  assert.equal(await t.command({ type: 'itemCopyLook', item: one, from: 'no-such-look' }), '"no-such-look" isn\'t in the show');
+  assert.match((await t.command({ type: 'itemCopyLook', item: one }))!, /^invalid command/);
+  assert.deepEqual((await showOf(rig)).operator, loaded.operator);
+  t.close();
+}));
