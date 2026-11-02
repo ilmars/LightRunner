@@ -142,8 +142,13 @@ test('Planning is off by default and the layout says so', () => withPlanning(asy
   fake.login = COOKIE;
   assert.deepEqual((await call('GET', '/api/planning')).body, { loggedIn: true, problem: null, accounts: [], serviceTypes: [] });
   assert.equal((await call('GET', '/api/planning/services')).status, 503);
-  assert.equal((await call('PUT', '/api/planning/login', { cookie: COOKIE })).status, 400);
-  assert.deepEqual(fake.calls, []);
+  assert.deepEqual(fake.calls, [], 'nothing was asked while off');
+  // A login can still be saved while off (the Settings switch is a draft until Save); the pickers fill at once.
+  const login = await call('PUT', '/api/planning/login', { cookie: COOKIE });
+  assert.equal(login.status, 200);
+  assert.deepEqual(login.body, { loggedIn: true, problem: null, accounts: fake.accountList, serviceTypes: fake.types });
+  assert.deepEqual(fake.calls, ['setLogin', 'accounts', 'serviceTypes acc1']);
+  assert.deepEqual((await call('GET', '/api/planning')).body, { loggedIn: true, problem: null, accounts: [], serviceTypes: [] }, 'a plain GET still asks nothing');
 }));
 
 test('switching Planning on in Settings is kept, checked, and sent to the pages as a new layout', () => withPlanning(async (rig) => {

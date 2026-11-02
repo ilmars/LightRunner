@@ -1714,11 +1714,11 @@ export class App {
     return first.id;
   }
 
-  /** For Settings: whether a login is kept and what it can reach, or in plain words why it can't. Nothing is asked while Planning is off. */
-  private async planningView(): Promise<{ loggedIn: boolean; problem: string | null; accounts: { id: string; name: string }[]; serviceTypes: { id: string; name: string }[] }> {
+  /** For Settings: whether a login is kept and what it can reach, or in plain words why it can't. Nothing is asked while Planning is off, unless `force` (a login just saved). */
+  private async planningView(force = false): Promise<{ loggedIn: boolean; problem: string | null; accounts: { id: string; name: string }[]; serviceTypes: { id: string; name: string }[] }> {
     const loggedIn = this.planning.loggedIn();
     const view = { loggedIn, problem: null as string | null, accounts: [] as { id: string; name: string }[], serviceTypes: [] as { id: string; name: string }[] };
-    if (!loggedIn || !this.planningOn()) return view;
+    if (!loggedIn || (!force && !this.planningOn())) return view;
     try {
       view.accounts = await this.planning.accounts();
       const account = this.show.settings.planning?.account ?? view.accounts[0]?.id;
@@ -1745,6 +1745,7 @@ export class App {
       const looks = new Set(this.show.looks.map((l) => l.id));
       // A song counts once however often it is planned; it has a look when one is remembered for it.
       const hasLook = (songId: string) => {
+        // A song item with a songId always has a key.
         const look = remembered[rememberKey({ key: '', kind: 'song', name: '', songId })!];
         return look !== undefined && look !== safeLook && looks.has(look);
       };
@@ -2012,7 +2013,6 @@ export class App {
         return true;
       case 'PUT /api/planning/login': {
         // The cookie goes to the planning side and nowhere else: not into the show, a response or the log.
-        if (!this.planningOn()) throw new HttpError(400, 'Planning is off.');
         const { cookie } = (await readJson(req)) as { cookie?: unknown };
         if (typeof cookie !== 'string' || !cookie.trim()) throw new HttpError(400, 'Nothing was pasted.');
         try {
@@ -2020,7 +2020,8 @@ export class App {
         } catch (err) {
           throw new HttpError(400, this.planningFailure(err));
         }
-        json(res, 200, await this.planningView());
+        // The Settings switch is a draft until Save, so a login can be saved while Planning is still off; the pickers fill at once.
+        json(res, 200, await this.planningView(true));
         return true;
       }
       case 'GET /api/ofl/db':
