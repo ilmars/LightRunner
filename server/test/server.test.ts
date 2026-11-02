@@ -230,6 +230,7 @@ test('the layout carries the running-order rows and the loaded service', async (
         { key: 'v2', kind: 'verse', name: 'Psalmi 23:2' },
       ],
     });
+    loaded.settings.planning = { enabled: true }; // the rows and the service show only while Planning is on
     assert.equal((await api(app, 'PUT', '/api/show', loaded)).status, 200);
     const { body: layout } = await api(app, 'GET', '/api/layout');
     assert.deepEqual(layout.service, { title: 'Sunday', start: '2026-10-25T08:00:00' });
