@@ -84,10 +84,14 @@ async function load() {
 let planningView = null;
 let quickLooks = [];
 
-/** Sets one field of the planning choices; an empty value clears it (a save replaces the whole object). */
+/**
+ * Sets one field of the planning choices; an empty value clears it (a save replaces the whole object). The keys stay in
+ * the server's order, so setting a field to what it was doesn't read as a change.
+ */
 function setPlanning(s, key, value) {
-  if (value) s.planning[key] = value;
-  else delete s.planning[key];
+  const next = { ...s.planning, [key]: value || undefined };
+  s.planning = {};
+  for (const k of ['enabled', 'account', 'serviceType', 'newSongLook']) if (next[k] !== undefined) s.planning[k] = next[k];
 }
 
 async function loadPlanning() {
@@ -107,7 +111,7 @@ async function loadPlanning() {
   if (draft) renderPlanning();
 }
 
-/** Fills a menu: the first option means none chosen (empty value), then the choices; a chosen one that isn't listed stays selectable. */
+/** Fills a menu: the first option means none chosen (empty value), then the choices; a chosen one that isn't listed stays selectable, called "Saved choice" (its id means nothing to a person). */
 function fillMenu(select, first, choices, chosen) {
   select.replaceChildren();
   const add = (value, text) => {
@@ -117,7 +121,7 @@ function fillMenu(select, first, choices, chosen) {
   };
   add('', first);
   for (const c of choices) add(c.id, c.name);
-  if (chosen && !choices.some((c) => c.id === chosen)) add(chosen, chosen);
+  if (chosen && !choices.some((c) => c.id === chosen)) add(chosen, 'Saved choice');
   select.value = chosen ?? '';
 }
 
