@@ -24,6 +24,7 @@ const ID = /^[A-Za-z0-9_-]{1,64}$/;
 const COOKIE_VALUE = /^[\x21-\x3a\x3c-\x7e]+$/;
 
 const RUN_OUT = 'The planning login has run out. Paste a new one in Settings.';
+const UNEXPECTED = 'The planning service sent something unexpected.';
 const UNREACHABLE = "Can't reach the planning service. Check the internet connection.";
 
 /** An error whose message is fit to show to people as it is. */
@@ -87,13 +88,13 @@ export class PlanningClient {
 
   /** api.worship.tools: the token is kept for 50 minutes and renewed once if the service says it has expired. */
   async api(path: string, init: RequestInit = {}): Promise<any> {
-    const send = async (force: boolean) => {
-      const headers = { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${await this.getToken(force)}` };
-      return this.send(API + path, { ...init, headers });
+    const send = async (token: string) => {
+      const headers = { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${token}` };
+      return { token, res: await this.send(API + path, { ...init, headers }) };
     };
-    let res = await send(false);
-    if (res.status === 401) res = await send(true);
-    return this.read(res);
+    let sent = await send(await this.getToken());
+    if (sent.res.status === 401) sent = await send(await this.getToken(sent.token));
+    return this.read(sent.res);
   }
 
   async accounts(): Promise<{ id: string; name: string }[]> {
@@ -184,9 +185,17 @@ export class PlanningClient {
 
   // ---- Tokens ----
 
-  /** The api token, renewed when it is old (or `force`d, after the service said 401). */
-  private getToken(force: boolean): Promise<string> {
-    if (!force && this.token && Date.now() < this.tokenExpires) return this.token;
+  /**
+   * The api token, renewed when it is old. `refused` is a token the service just answered 401 to: it is renewed
+   * unless someone else already has, so calls that fail together renew once.
+   */
+  private async getToken(refused?: string): Promise<string> {
+    if (this.token && Date.now() < this.tokenExpires) {
+      const existing = this.token;
+      const current = await existing;
+      if (refused === undefined || current !== refused) return current;
+      if (this.token !== existing) return this.getToken(refused); // someone renewed while we waited
+    }
     const token = this.renewFromFile();
     this.token = token;
     this.tokenExpires = Date.now() + TOKEN_MS;
@@ -215,6 +224,8 @@ export class PlanningClient {
       const at = pair.indexOf('=');
       if (at > 0) cookies[pair.slice(0, at).trim()] = safeDecode(pair.slice(at + 1));
     }
+    // Only an answer that turns the cookie down means the login has run out; a failing service says nothing about it.
+    if (res.status >= 500) throw new PlanningError(`The planning service isn't answering right now (HTTP ${res.status}). Try again in a minute.`, res.status);
     if (!cookies.weAuthToken) return null;
     return { token: cookies.weAuthToken, ...(cookies.weAuthRefresh ? { rotated: cookies.weAuthRefresh } : {}) };
   }
@@ -222,17 +233,26 @@ export class PlanningClient {
   // ---- The document store ----
 
   /** Firebase's id token for the document store: asked for through the api, then kept like the api token. */
-  private firestoreAuth(force = false): Promise<Firestore> {
-    if (!force && this.firestoreSession && Date.now() < this.firestoreExpires) return this.firestoreSession;
+  private async firestoreAuth(refused?: Firestore): Promise<Firestore> {
+    if (this.firestoreSession && Date.now() < this.firestoreExpires) {
+      const existing = this.firestoreSession;
+      const current = await existing;
+      if (!refused || current.idToken !== refused.idToken) return current;
+      if (this.firestoreSession !== existing) return this.firestoreAuth(refused); // someone renewed while we waited
+    }
     const session = (async (): Promise<Firestore> => {
       const [firebase, custom] = await Promise.all([this.api('/config/firebase'), this.api('/firebase/token')]);
+      if (typeof firebase?.apiKey !== 'string' || typeof firebase.projectId !== 'string' || typeof custom?.token !== 'string') {
+        throw new PlanningError(UNEXPECTED);
+      }
       const res = await this.send(`${IDENTITY}?key=${encodeURIComponent(firebase.apiKey)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: custom.token, returnSecureToken: true }),
       });
-      const { idToken } = await this.read(res);
-      return { database: `projects/${firebase.projectId}/databases/(default)`, idToken };
+      const signedIn = await this.read(res);
+      if (typeof signedIn?.idToken !== 'string') throw new PlanningError(UNEXPECTED);
+      return { database: `projects/${firebase.projectId}/databases/(default)`, idToken: signedIn.idToken };
     })();
     this.firestoreSession = session;
     this.firestoreExpires = Date.now() + TOKEN_MS;
@@ -244,15 +264,14 @@ export class PlanningClient {
 
   /** A Firestore call under .../documents; the id token is renewed once if it is refused. */
   private async firestore(path: string, init: RequestInit = {}): Promise<any> {
-    const send = async (force: boolean) => {
-      const session = await this.firestoreAuth(force);
+    const send = async (session: Firestore) => {
       const headers = { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${session.idToken}` };
-      return this.send(`https://firestore.googleapis.com/v1/${session.database}/documents${path}`, { ...init, headers });
+      return { session, res: await this.send(`https://firestore.googleapis.com/v1/${session.database}/documents${path}`, { ...init, headers }) };
     };
-    let res = await send(false);
-    if (res.status === 401) res = await send(true);
-    if (res.status === 404) throw new PlanningError('That service was not found in the planning service.', 404);
-    return this.read(res);
+    let sent = await send(await this.firestoreAuth());
+    if (sent.res.status === 401) sent = await send(await this.firestoreAuth(sent.session));
+    if (sent.res.status === 404) throw new PlanningError('That service was not found in the planning service.', 404);
+    return this.read(sent.res);
   }
 
   /** Run a structured query under a document; the documents it finds, decoded, each with its `id`. */
@@ -281,7 +300,7 @@ export class PlanningClient {
     try {
       return body ? JSON.parse(body) : null;
     } catch {
-      throw new PlanningError('The planning service sent something unexpected.');
+      throw new PlanningError(UNEXPECTED);
     }
   }
 }

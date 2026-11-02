@@ -44,8 +44,13 @@ function fakePlanning(options: { cuelists?: ReturnType<typeof cuelist>[]; cues?:
     refreshes: 0,
     refreshCookies: [] as string[],
     tokens: 0,
-    /** Every api answer says 401 once. */
-    expireOnce: false,
+    /** The next this many api answers say 401. */
+    expire: 0,
+    /** Makes every refresh answer with this status (and no cookies). */
+    refreshStatus: 0,
+    firebase: { apiKey: 'made-up-key', projectId: 'made-up-project' } as unknown,
+    custom: { token: 'made-up-custom-token' } as unknown,
+    signIn: { idToken: 'made-up-id-token' } as unknown,
     queryRefusedWhenFiltered: false,
     queries: [] as any[],
     cuelists: options.cuelists ?? [],
@@ -56,6 +61,7 @@ function fakePlanning(options: { cuelists?: ReturnType<typeof cuelist>[]; cues?:
     const headers = (init?.headers ?? {}) as Record<string, string>;
     if (url === 'https://planning.worshiptools.com/auth/refresh') {
       state.refreshes++;
+      if (state.refreshStatus) return new Response(null, { status: state.refreshStatus });
       const cookie = /weAuthRefresh=([^;]*)/.exec(headers.Cookie ?? '')?.[1] ?? '';
       state.refreshCookies.push(cookie);
       if (!state.accepted.has(cookie)) return new Response(null, { status: 302, headers: { location: '/login' } });
@@ -67,13 +73,13 @@ function fakePlanning(options: { cuelists?: ReturnType<typeof cuelist>[]; cues?:
     }
     if (url.startsWith('https://api.worship.tools/v1/')) {
       if (!/^Bearer made-up-token-\d+$/.test(headers.Authorization ?? '')) return new Response('no', { status: 401 });
-      if (state.expireOnce) {
-        state.expireOnce = false;
+      if (state.expire > 0) {
+        state.expire--;
         return new Response('expired', { status: 401 });
       }
       const path = url.slice('https://api.worship.tools/v1'.length);
-      if (path === '/config/firebase') return json({ apiKey: 'made-up-key', projectId: 'made-up-project' });
-      if (path === '/firebase/token') return json({ token: 'made-up-custom-token' });
+      if (path === '/config/firebase') return json(state.firebase);
+      if (path === '/firebase/token') return json(state.custom);
       if (path === '/account') return json([{ id: ACCOUNT, name: 'Church' }]);
       if (path === `/account/${ACCOUNT}/meta/service-types`) {
         return json([
@@ -83,7 +89,7 @@ function fakePlanning(options: { cuelists?: ReturnType<typeof cuelist>[]; cues?:
       }
       return new Response('not found', { status: 404 });
     }
-    if (url.startsWith('https://identitytoolkit.googleapis.com/')) return json({ idToken: 'made-up-id-token' });
+    if (url.startsWith('https://identitytoolkit.googleapis.com/')) return json(state.signIn);
     if (url.startsWith(FS)) {
       if (headers.Authorization !== 'Bearer made-up-id-token') return new Response('no', { status: 401 });
       const path = url.slice(FS.length);
@@ -151,7 +157,7 @@ test('a rotated cookie from the refresh is kept', withClient(async (client, logi
   fake.state.rotateTo = 'made-up-refresh-2';
   fake.state.accepted.add('made-up-refresh-2');
   // A new token is needed only when the first one has expired; make the api say so.
-  fake.state.expireOnce = true;
+  fake.state.expire = 1;
   assert.deepEqual(await client.accounts(), [{ id: ACCOUNT, name: 'Church' }]);
   assert.equal(JSON.parse(readFileSync(loginFile, 'utf8')).refresh, 'made-up-refresh-2');
   assert.equal(fake.state.refreshCookies.at(-1), COOKIE);
@@ -161,7 +167,7 @@ test('a rotated cookie from the refresh is kept', withClient(async (client, logi
 test('a refused refresh says the login has run out', withClient(async (client, _loginFile, fake) => {
   await client.setLogin(COOKIE);
   fake.state.accepted.clear();
-  fake.state.expireOnce = true;
+  fake.state.expire = 1;
   await assert.rejects(client.accounts(), (e) => e instanceof PlanningError && e.message === 'The planning login has run out. Paste a new one in Settings.');
 }));
 
@@ -249,3 +255,52 @@ test('services() falls back when the filtered query is refused', withClient(asyn
     cuelist('x1', '2026-10-28T08:00:00', OTHER_TYPE),
   ],
 }));
+
+test('a second 401 after a renewal does not loop', withClient(async (client, _loginFile, fake) => {
+  await client.setLogin(COOKIE);
+  fake.state.expire = 100;
+  await assert.rejects(client.accounts(), (e) => e instanceof PlanningError && e.status === 401);
+  assert.equal(fake.state.refreshes, 2); // the login, and one renewal
+}));
+
+test('calls that are refused together renew the token once', withClient(async (client, _loginFile, fake) => {
+  await client.setLogin(COOKIE);
+  fake.state.expire = 2;
+  const [a, b] = await Promise.all([client.accounts(), client.accounts()]);
+  assert.equal(a.length + b.length, 2);
+  assert.equal(fake.state.refreshes, 2); // the login, and one renewal for both
+}));
+
+test('a cookie rotated while saving the login is the one kept', withClient(async (client, loginFile, fake) => {
+  fake.state.rotateTo = 'made-up-refresh-2';
+  await client.setLogin(COOKIE);
+  assert.equal(JSON.parse(readFileSync(loginFile, 'utf8')).refresh, 'made-up-refresh-2');
+}));
+
+test('a failing planning service is not taken for a login that ran out', withClient(async (client, loginFile, fake) => {
+  const failing = (e: unknown) => e instanceof PlanningError && /isn't answering right now \(HTTP 503\)/.test(e.message) && e.status === 503;
+  fake.state.refreshStatus = 503;
+  await assert.rejects(client.setLogin(COOKIE), failing);
+  assert.equal(client.loggedIn(), false);
+  fake.state.refreshStatus = 0;
+  await client.setLogin(COOKIE);
+  fake.state.expire = 1;
+  fake.state.refreshStatus = 503;
+  await assert.rejects(client.accounts(), failing);
+  assert.equal(JSON.parse(readFileSync(loginFile, 'utf8')).refresh, COOKIE);
+  // Still logged in once it answers again.
+  fake.state.refreshStatus = 0;
+  assert.equal((await client.accounts()).length, 1);
+}));
+
+test('an answer without what is needed says so instead of failing oddly', withClient(async (client, _loginFile, fake) => {
+  await client.setLogin(COOKIE);
+  const unexpected = (e: unknown) => e instanceof PlanningError && e.message === 'The planning service sent something unexpected.';
+  for (const [key, bad] of [['firebase', {}], ['custom', {}], ['signIn', {}], ['firebase', null]] as const) {
+    const good = fake.state[key];
+    fake.state[key] = bad;
+    await assert.rejects(client.service(ACCOUNT, 'svc-1'), unexpected, key);
+    fake.state[key] = good;
+  }
+  assert.equal((await client.service(ACCOUNT, 'svc-1')).id, 'svc-1');
+}, { cuelists: [cuelist('svc-1', '2026-10-25T08:00:00')] }));
