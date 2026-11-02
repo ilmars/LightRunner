@@ -322,6 +322,28 @@ test('loadService fills the running order and is one Undo step', () => withPlann
   assert.equal((await call('GET', '/api/layout')).status, 200);
 }));
 
+test('switching Planning off shows plain look rows and no service, and the data comes back with it on', () => withPlanning(async (rig) => {
+  const { call, tablet } = rig;
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const loaded = await layoutOf(rig);
+  assert.ok(loaded.rows.some((r: any) => r.kind === 'verses'));
+  assert.ok(loaded.service);
+
+  await call('PUT', '/api/settings', { planning: { enabled: false } });
+  const off = await layoutOf(rig);
+  assert.deepEqual(off.rows, off.runningOrder.map((l: any) => ({ kind: 'look', look: l.id, header: false })));
+  assert.equal(off.service, undefined);
+  assert.deepEqual(off.planning, { enabled: false });
+
+  await call('PUT', '/api/settings', { planning: { enabled: true } });
+  const on = await layoutOf(rig);
+  assert.deepEqual(on.rows, loaded.rows, 'the loaded service was kept');
+  assert.deepEqual(on.service, loaded.service);
+  t.close();
+}));
+
 test('the layout names the look for new songs and the remembered looks not in the running order', () => withPlanning(async (rig) => {
   const { tablet } = rig;
   await enable(rig, { enabled: true, account: 'acc1', serviceType: 'type1', newSongLook: 'worship' });

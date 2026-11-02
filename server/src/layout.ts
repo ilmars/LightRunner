@@ -207,12 +207,15 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
     return !!profile?.channels.some((c) => roles.includes(c.role));
   };
 
+  // With Planning switched off the show keeps the loaded service, but the running order shows as plain looks.
+  const planning = !!show.settings.planning?.enabled;
+
   return {
     show: show.name,
     looks: lookIds.flatMap(describe),
     runningOrder: show.operator.runningOrder.flatMap(describe),
-    rows: serviceRows(show),
-    ...(show.operator.service ? { service: { title: show.operator.service.title, start: show.operator.service.start } } : {}),
+    rows: planning ? serviceRows(show) : show.operator.runningOrder.map((look) => ({ kind: 'look' as const, look, header: false })),
+    ...(planning && show.operator.service ? { service: { title: show.operator.service.title, start: show.operator.service.start } } : {}),
     planning: planningOf(show),
     quickLooks: show.operator.quickLooks.flatMap((q) => describe(q.look).map((l) => ({
       ...l, tab: q.tab, groups: groupIds.filter((gid, k) => !smoke.has(gid) && l.entries[k] !== null),
