@@ -10,11 +10,12 @@
 //
 // --login reads the cookie from the keyboard (never from the command line, so it stays out of shell history).
 // To get it: sign in at planning.worshiptools.com, open the browser's developer tools > Application > Cookies >
-// planning.worshiptools.com and copy the value of weAuthRefresh. The cookie is never printed.
+// planning.worshiptools.com and copy the value of weAuthRefresh. The cookie is never printed, and not echoed as it is typed.
 
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
+import { Writable } from 'node:stream';
 import { parseArgs } from 'node:util';
 import { PlanningClient, PlanningError } from '../server/src/planning/client.ts';
 import type { PlannedService } from '../packages/shared/src/index.ts';
@@ -59,9 +60,17 @@ try {
 }
 
 async function login(): Promise<void> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const cookie = await rl.question('Paste the weAuthRefresh cookie value: ');
+  // On a terminal, readline takes over the keyboard and echoes through its output: giving it a sink keeps the cookie off the screen.
+  process.stdout.write('Paste the weAuthRefresh cookie value: ');
+  const sink = new Writable({ write: (_chunk, _encoding, done) => done() });
+  const rl = createInterface({ input: process.stdin, ...(process.stdin.isTTY ? { output: sink, terminal: true } : {}) });
+  rl.on('SIGINT', () => { // raw mode turns Ctrl+C into a key press
+    process.stdout.write('\n');
+    process.exit(130);
+  });
+  const cookie = await rl.question('');
   rl.close();
+  process.stdout.write('\n');
   await client.setLogin(cookie); // proves the cookie works before saving it
   console.log(`Saved to ${loginFile}. Login works.`);
 }
