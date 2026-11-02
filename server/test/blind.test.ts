@@ -794,3 +794,32 @@ test('an edit in Prepare made in the middle of a fade, or of Blackout fading out
   await sleep(1200);
   assert.ok(keyGreen(b, from) <= 2, `no green on the key lights through Blackout: ${keyGreen(b, from)}`);
 }));
+
+test('a draft takes quiet commands and a followed level, as the timeline runner will feed them', () => withApp(async (app, dir) => {
+  const show = savedShow(dir);
+  const runtime = { look: null, groups: {}, levels: {}, master: 1, speed: 1 };
+  const session = new BlindSession(show, runtime, { beats: 0, seconds: 0 }, 0);
+  assert.equal(session.apply({ type: 'look', id: 'worship', fade: 0 }, 0, () => false, { quiet: true }), null);
+  assert.equal(session.engine.liveState(0, 'off').canUndo, false);
+  assert.equal(session.apply({ type: 'look', id: 'worship', fade: 0 }, 1, () => false), null);
+  session.visual(2);
+  const lit = session.engine.lights().reduce((a, l) => a + l.i, 0);
+  assert.ok(lit > 0);
+  const group = show.groups.find((g) => g.kind !== 'smoke')!.id;
+  session.followLevel(group, 0, 2);
+  // 20 frames a second for 3 s: the group falls to silence, and its level (what Undo and the saved state keep) stays.
+  for (let t = 2.05; t <= 5; t += 0.05) session.visual(t);
+  assert.ok(session.engine.lights().reduce((a, l) => a + l.i, 0) < lit);
+  assert.equal(session.engine.liveState(5, 'off').groups[group].level, 1);
+}));
+
+test('a quiet stage command runs on the live stage and adds no Undo step', () => withApp(async (app) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  assert.equal(await app.quietStageCommand({ type: 'look', id: 'worship', fade: 0 }), null);
+  await waitFor(() => t.state()?.look === 'worship', 2000, 'worship on stage');
+  assert.equal(t.state().canUndo, false);
+  assert.equal(await t.send({ type: 'look', id: 'walk-in', fade: 0 }), null);
+  await waitFor(() => t.state()?.canUndo === true, 2000, 'the look to be an Undo step');
+  t.ws.close();
+}));

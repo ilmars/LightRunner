@@ -4,10 +4,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BAR_LENGTH, BAR_THICKNESS, MIN_THICKNESS, aimBeam, alignFixtures, boundsOf, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness,
-  setBarAngle, setShape, shapeOf, spaceEvenly, touches, turnBar,
+  BAR_LENGTH, BAR_THICKNESS, HANGS_CHOICES, MIN_THICKNESS, aimBeam, alignFixtures, boundsOf, changeTogether, guessHangs, moveTogether, placeRow, resizeEnd, resizeOutline, resizeThickness,
+  setBarAngle, setHangs, setShape, shapeOf, spaceEvenly, touches, turnBar,
 } from '../../web/patch/plan.js';
-import { BEAM_REACH, barAxis, barEnds, beamCone, outlineCells } from '../../web/shared/stage.js';
+import { BEAM_REACH, barAxis, barEnds, beamCone, beamHalfWidth, outlineCells } from '../../web/shared/stage.js';
 
 const near = (a: number, b: number, what = '') => assert.ok(Math.abs(a - b) < 0.002, `${what} ${a} is not ${b}`);
 const nearPoint = (p: { x: number; y: number }, x: number, y: number) => { near(p.x, x, 'x'); near(p.y, y, 'y'); };
@@ -151,6 +151,15 @@ test('a beam is aimed and sized from its tip', () => {
   assert.ok(cone.left.y < cone.tip.y && cone.right.y > cone.tip.y, 'the cone opens both sides of where it points');
 });
 
+test("a beam's width is its cone's, from the plan's spread and its reach", () => {
+  const down: any = { x: 0.5, y: 0.2, shape: 'beam', angle: 90, reach: 0.2 };
+  const cone = beamCone(down);
+  // Pointing down the plan, the cone's far corners are its full width apart across the plan.
+  near(beamHalfWidth(down), Math.abs(cone.right.x - cone.left.x) / 2);
+  near(beamHalfWidth({ ...down, reach: 0.4 }), 2 * beamHalfWidth(down), 'twice the reach, twice the width');
+  near(beamHalfWidth({ x: 0.5, y: 0.5, shape: 'beam' } as any), BEAM_REACH * Math.tan((20 * Math.PI) / 180), 'a new beam');
+});
+
 test('an outline is sized from its corner, evenly about the middle', () => {
   const f: any = { x: 0.5, y: 0.5, shape: 'outline', w: 0.1, h: 0.1 };
   resizeOutline(f, { x: 0.6, y: 0.7 });
@@ -264,4 +273,75 @@ test('a box selects every fixture it touches', () => {
   // A bar whose end reaches into the box.
   assert.equal(touches({ x: 0.75, y: 0.5, w: 0.4, h: 0.03 }, box), true);
   assert.equal(touches({ x: 0.85, y: 0.5, w: 0.4, h: 0.03 }, box), false);
+});
+
+test('Hangs on: what Patch offers, the guess it names, and taking a choice back', () => {
+  assert.deepEqual(HANGS_CHOICES.map((c) => c.value), ['truss', 'wall', 'riser', 'stand', 'side']);
+  assert.equal(HANGS_CHOICES.find((c) => c.value === 'wall')?.label, 'Back-wall floor');
+  // The guess is the stage view's: near the back is the floor at the wall, near the front a stand, the middle the truss.
+  assert.equal(guessHangs({ x: 0.5, y: 0.1 }), 'wall');
+  assert.equal(guessHangs({ x: 0.5, y: 0.9 }), 'stand');
+  assert.equal(guessHangs({ x: 0.5, y: 0.5 }), 'truss');
+  assert.equal(guessHangs({ x: 0.5, y: 0.5, w: 0.2, h: 0.03 }), 'wall', 'a bar in the middle of the stage');
+  assert.equal(guessHangs({ x: 0.9, y: 0.5, w: 0.0125, h: 0.48 }), 'side', 'an upright bar');
+  assert.equal(guessHangs({ x: 0.5, y: 0.5 }, true), 'wall', 'smoke is at the back wall');
+  assert.equal(guessHangs({ x: 0.5, y: 0.5, hangs: 'side' }), 'truss', 'the guess ignores what is stored');
+  const f: { x: number; y: number; hangs?: 'truss' | 'wall' | 'riser' | 'stand' | 'side' } = { x: 0.5, y: 0.5 };
+  setHangs(f, 'stand');
+  assert.equal(f.hangs, 'stand');
+  setHangs(f, '');
+  assert.equal('hangs' in f, false, 'the guess is no field at all');
+  setHangs(f, 'riser');
+  setHangs(f, 'nonsense');
+  assert.equal('hangs' in f, false);
+});
+
+// ---- Several selected: one handle changes them all the same way ----
+
+/** Drags the `how` handle on `lead` with `move`, then gives `others` the same change, as the plan does. */
+function dragTogether(lead: any, others: any[], how: any, move: (f: any) => void) {
+  const leadStart = { ...lead }, starts = others.map((f) => ({ ...f }));
+  move(lead);
+  changeTogether(lead, how, leadStart, others, starts);
+}
+
+test('several bars get longer at the same end, each from where it was', () => {
+  const lead: any = { x: 0.2, y: 0.2, shape: 'bar', w: 0.1, h: 0.03, angle: 0 };
+  const other: any = { x: 0.6, y: 0.5, shape: 'bar', w: 0.2, h: 0.03, angle: 0 };
+  const [, otherEnd] = barEnds(other);
+  const [otherStart] = barEnds(other);
+  dragTogether(lead, [other], 'end', (f) => resizeEnd(f, 'end', { x: 0.3, y: 0.2 }));
+  near(lead.w, 0.15);
+  near(other.w, 0.25, 'the same 0.05 longer');
+  nearPoint(barEnds(other)[0], otherStart!.x, otherStart!.y);
+  near(barEnds(other)[1].x, otherEnd!.x + 0.05);
+});
+
+test('several bars get thicker and turn by the same amount', () => {
+  const lead: any = { x: 0.3, y: 0.3, shape: 'bar', w: 0.2, h: 0.03, angle: 0 };
+  const other: any = { x: 0.6, y: 0.6, shape: 'bar', w: 0.2, h: 0.05, angle: 90 };
+  dragTogether(lead, [other], 'thick', (f) => { f.h = 0.06; });
+  near(other.h, 0.08);
+  dragTogether(lead, [other], 'turn', (f) => setBarAngle(f, 30));
+  assert.equal(lead.angle, 30);
+  assert.equal(other.angle, 120);
+});
+
+test('several beams are aimed and reach further by the same amount, within their limits', () => {
+  const lead: any = { x: 0.2, y: 0.8, shape: 'beam', angle: -90, reach: 0.14 };
+  const same: any = { x: 0.6, y: 0.8, shape: 'beam', angle: -90, reach: 0.14 };
+  const facing: any = { x: 0.5, y: 0.2, shape: 'beam', angle: 90, reach: 0.95 };
+  dragTogether(lead, [same, facing], 'tip', (f) => { f.reach = 0.2; f.angle = -75; });
+  near(same.reach, 0.2);
+  assert.equal(same.angle, -75);
+  assert.equal(facing.angle, 105, 'turned the same way from its own aim');
+  assert.equal(facing.reach, 1, 'no further than a beam can reach');
+});
+
+test('several outlines grow by the same size', () => {
+  const lead: any = { x: 0.3, y: 0.5, shape: 'outline', w: 0.1, h: 0.2 };
+  const other: any = { x: 0.7, y: 0.5, shape: 'outline', w: 0.2, h: 0.1 };
+  dragTogether(lead, [other], 'corner', (f) => resizeOutline(f, { x: 0.4, y: 0.65 }));
+  near(other.w, 0.3);
+  near(other.h, 0.2);
 });

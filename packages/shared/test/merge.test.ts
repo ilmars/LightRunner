@@ -257,3 +257,102 @@ test('hidden colours (Custom, and the copies Prepare keeps) are left out of the 
   assert.notEqual(used, 'custom-9');
   assert.deepEqual(both.presets.find((p) => p.id === used)!.layers, hidden('custom-9', '#00ff00').layers);
 });
+
+test('timelines are compared and taken like the other items, and removing what they point to leaves them alone', () => {
+  const current = rig();
+  const incoming = rig();
+  const tl = (name: string, level = 1) => ({
+    id: 'sunday', name, markers: [], offsetMs: 0,
+    layers: [{ group: 'front-lights', blocks: [{ id: 'a', start: 0, rise: 2, what: { kind: 'level' as const, level } }] }],
+  });
+  assert.deepEqual(diffShows(current, incoming), []);
+  incoming.timelines = [tl('Sunday')];
+  let items = diffShows(current, incoming);
+  assert.deepEqual(items, [{ kind: 'timeline', id: 'sunday', change: 'added', name: 'Sunday', details: [] }]);
+  const taken = applyPicks(current, incoming, [{ kind: 'timeline', id: 'sunday', change: 'added' }]);
+  assert.deepEqual(taken.timelines, incoming.timelines);
+  assert.deepEqual(diffShows(taken, incoming), []);
+
+  current.timelines = [tl('Sunday')];
+  incoming.timelines = [tl('Sunday morning', 0.5)];
+  items = diffShows(current, incoming);
+  assert.equal(items.length, 1);
+  assert.equal(items[0]!.change, 'changed');
+  assert.deepEqual(items[0]!.details, ['name "Sunday" → "Sunday morning"', 'blocks or layers changed']);
+  assert.equal(applyPicks(current, incoming, [{ kind: 'timeline', id: 'sunday', change: 'changed' }]).timelines[0]!.name, 'Sunday morning');
+  // Same name, other blocks; and markers and the offset on their own.
+  incoming.timelines = [tl('Sunday', 0.5)];
+  assert.deepEqual(diffShows(current, incoming)[0]!.details, ['blocks or layers changed']);
+  incoming.timelines = [{ ...tl('Sunday'), offsetMs: 80, markers: [{ t: 3, text: 'Hi' }] }];
+  assert.deepEqual(diffShows(current, incoming)[0]!.details, ['markers changed', 'lights earlier or later changed']);
+
+  incoming.timelines = [];
+  assert.deepEqual(diffShows(current, incoming), [{ kind: 'timeline', id: 'sunday', change: 'removed', name: 'Sunday', details: [] }]);
+  assert.deepEqual(applyPicks(current, incoming, [{ kind: 'timeline', id: 'sunday', change: 'removed' }]).timelines, []);
+
+  // Removing the group, a preset or a look a timeline uses does not touch the timeline.
+  const withTl = rig();
+  withTl.timelines = [{ ...tl('Sunday'), layers: [{ group: 'front-lights', blocks: [{ id: 'a', start: 0, rise: 0, what: { kind: 'colour', preset: 'front-lights-silti-3200k', level: 1 } }] }, { group: '*', blocks: [{ id: 'b', start: 0, rise: 0, what: { kind: 'look', look: 'worship' } }] }] }];
+  const gone = rig();
+  gone.timelines = withTl.timelines;
+  const frontFixtures = withTl.groups.find((g) => g.id === 'front-lights')!.fixtures;
+  gone.groups = gone.groups.filter((g) => g.id !== 'front-lights');
+  gone.presets = gone.presets.filter((p) => p.group !== 'front-lights');
+  gone.looks = gone.looks.filter((l) => l.id !== 'worship');
+  gone.fixtures = gone.fixtures.filter((f) => !frontFixtures.includes(f.id));
+  gone.operator.groups = gone.operator.groups.filter((g) => g !== 'front-lights');
+  gone.operator.looks = gone.operator.looks.filter((l) => l !== 'worship');
+  gone.operator.runningOrder = gone.operator.runningOrder.filter((l) => l !== 'worship');
+  gone.operator.quickLooks = gone.operator.quickLooks.filter((q) => q.look !== 'worship');
+  const picks = diffShows(withTl, gone).filter((i) => i.kind !== 'timeline').map((i) => ({ kind: i.kind, id: i.id, change: i.change }));
+  assert.ok(picks.length);
+  const after = applyPicks(withTl, gone, picks);
+  assert.deepEqual(after.timelines, withTl.timelines);
+});
+
+test('Hangs on and LEDs set up here are kept when the file has none (a Lightkey project): nothing is listed, nothing is lost', () => {
+  const current = rig();
+  assert.ok(current.fixtures.every((f) => f.hangs), 'the church show says where every light hangs');
+  assert.ok(current.profiles.some((p) => p.leds), 'and how many LEDs its bars have');
+  // What Lightkey gives: the same rig without either.
+  const incoming = rig();
+  for (const f of incoming.fixtures) delete f.hangs;
+  for (const p of incoming.profiles) delete p.leds;
+  assert.deepEqual(diffShows(current, incoming), [], 'no fixture and no type is listed as changed');
+  // A real change to a light still takes its Hangs on and LEDs along with it unchanged.
+  incoming.fixtures.find((f) => f.id === 'b3')!.address = 300;
+  incoming.profiles.find((p) => p.id === current.fixtures.find((f) => f.id === 'b3')!.profile)!.channels.pop();
+  const items = diffShows(current, incoming);
+  assert.deepEqual(items.find((i) => i.id === 'b3')?.details, ['address 1/48 → 1/300']);
+  const typeId = current.fixtures.find((f) => f.id === 'b3')!.profile;
+  const type = items.find((i) => i.kind === 'profile' && i.id === typeId);
+  assert.ok(type && type.details.every((d) => !d.includes('LEDs')), 'the type differs in its channels only');
+  const out = applyPicks(current, incoming, [
+    { kind: 'fixture', id: 'b3', change: 'changed' },
+    { kind: 'profile', id: typeId, change: 'changed' },
+  ]);
+  assert.equal(out.fixtures.find((f) => f.id === 'b3')!.hangs, current.fixtures.find((f) => f.id === 'b3')!.hangs);
+  assert.equal(out.profiles.find((p) => p.id === typeId)!.leds, current.profiles.find((p) => p.id === typeId)!.leds);
+});
+
+test('a file that says where a light hangs or how many LEDs it has is compared, described and taken', () => {
+  const current = rig();
+  const sixbar = current.fixtures.find((f) => f.id === 'b1')!;
+  assert.equal(sixbar.hangs, 'truss');
+  const incoming = rig();
+  incoming.fixtures.find((f) => f.id === 'b1')!.hangs = 'stand';
+  incoming.profiles.find((p) => p.id === sixbar.profile)!.leds = 8;
+  const items = diffShows(current, incoming);
+  assert.deepEqual(items.find((i) => i.kind === 'fixture' && i.id === 'b1')?.details, ['hangs on truss → stand']);
+  assert.deepEqual(items.find((i) => i.kind === 'profile' && i.id === sixbar.profile)?.details, ['LEDs 6 → 8']);
+  const out = applyPicks(current, incoming, [
+    { kind: 'fixture', id: 'b1', change: 'changed' },
+    { kind: 'profile', id: sixbar.profile, change: 'changed' },
+  ]);
+  assert.equal(out.fixtures.find((f) => f.id === 'b1')!.hangs, 'stand');
+  assert.equal(out.profiles.find((p) => p.id === sixbar.profile)!.leds, 8);
+  // Both ways: a file that has them where this show has none is a change too.
+  const bare = rig();
+  delete bare.fixtures.find((f) => f.id === 'b1')!.hangs;
+  assert.deepEqual(diffShows(bare, incoming).find((i) => i.id === 'b1')?.details, ['hangs on guessed → stand']);
+});

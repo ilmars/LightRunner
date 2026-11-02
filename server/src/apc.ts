@@ -4,8 +4,9 @@
 // MIDI numbers from Akai's "APC mini mk2 Communications Protocol" v1.0: pads notes 0-63 (bottom left 0,
 // left to right, bottom to top), track buttons 100-107, scene buttons 112-119 (top to bottom), Shift 122,
 // faders CC 48-56 on channel 1. Pad LEDs: note-on, the channel sets brightness (channels 1-7 = 10 %-100 %),
-// velocity a colour from a fixed palette; or any colour by the RGB SysEx (F0 47 7F 4F 24 ...). Button
-// LEDs: note-on on channel 1, velocity 0 off, 1 on, 2 blink.
+// velocity a colour from a fixed palette. (The RGB SysEx, F0 47 7F 4F 24 ..., is not used: on the church's
+// mk2 most pads sent that way stayed dark, while palette notes always lit.) Button LEDs: note-on on
+// channel 1, velocity 0 off, 1 on, 2 blink.
 // The older APC mini uses the same pads and faders, track buttons 64-71, scene buttons 82-89, Shift 98;
 // its pads are green, red or yellow: velocity 0 off, 1 green, 2 green blink, 3 red, 4 red blink,
 // 5 yellow, 6 yellow blink.
@@ -303,10 +304,45 @@ function shownRgb(hex: string | null): [number, number, number] {
   return rgb.map((v, i) => Math.round(((v / k) * 0.4 + CREAM[i]! * 0.6) * k)) as [number, number, number];
 }
 
-/** The mk2's RGB SysEx for one pad: each of red, green and blue (0-255) as two 7-bit bytes. */
-export function rgbSysex(pad: number, r: number, g: number, b: number): number[] {
-  const two = (v: number) => [(v >> 7) & 1, v & 0x7f];
-  return [0xf0, 0x47, 0x7f, 0x4f, 0x24, 0x00, 0x08, pad, pad, ...two(r), ...two(g), ...two(b), 0xf7];
+/**
+ * The bright colours of the mk2's palette (Akai's table), by velocity. The dark ones are left out: the
+ * channel sets the brightness, so a pad only needs the hue.
+ */
+const PALETTE: [number, number, number, number][] = [
+  [3, 255, 255, 255], [4, 255, 76, 76], [5, 255, 0, 0], [8, 255, 189, 108], [9, 255, 84, 0], [12, 255, 255, 76],
+  [13, 255, 255, 0], [16, 136, 255, 76], [17, 84, 255, 0], [20, 76, 255, 76], [21, 0, 255, 0], [24, 76, 255, 94],
+  [25, 0, 255, 25], [28, 76, 255, 136], [29, 0, 255, 85], [32, 76, 255, 183], [33, 0, 255, 153], [36, 76, 195, 255],
+  [37, 0, 169, 255], [40, 76, 136, 255], [41, 0, 85, 255], [44, 76, 76, 255], [45, 0, 0, 255], [48, 135, 76, 255],
+  [49, 84, 0, 255], [52, 255, 76, 255], [53, 255, 0, 255], [56, 255, 76, 135], [57, 255, 0, 84], [60, 255, 21, 0],
+];
+
+/** The palette velocity nearest a colour, compared at full brightness. */
+export function paletteColour([r, g, b]: [number, number, number]): number {
+  const max = Math.max(r, g, b);
+  if (max <= 0) return 0;
+  const [nr, ng, nb] = [r, g, b].map((v) => (v / max) * 255) as [number, number, number];
+  let best = PALETTE[0]!;
+  let bestD = Infinity;
+  for (const c of PALETTE) {
+    const d = (c[1] - nr) ** 2 + (c[2] - ng) ** 2 + (c[3] - nb) ** 2;
+    if (d < bestD) [best, bestD] = [c, d];
+  }
+  return best[0];
+}
+
+/** Each saturated palette colour's paler partner (red 5 → 4, orange 9 → 8, …): what is on stage shows lighter. */
+const PALER: Record<number, number> = {
+  5: 4, 9: 8, 13: 12, 17: 16, 21: 20, 25: 24, 29: 28, 33: 32, 37: 36, 41: 40, 45: 44, 49: 48, 53: 52, 57: 56, 60: 4,
+};
+
+/** The mk2's brightness steps, by channel 1-7. */
+const STEPS = [0.1, 0.25, 0.5, 0.65, 0.75, 0.9, 1];
+
+/** A pad lit in a palette colour at the step nearest `level`; velocity 0 is off. */
+export function padNote(pad: number, velocity: number, level = 1): number[] {
+  let step = 0;
+  for (let k = 1; k < STEPS.length; k++) if (Math.abs(STEPS[k]! - level) < Math.abs(STEPS[step]! - level)) step = k;
+  return [0x90 + (velocity ? step : 0), pad, velocity];
 }
 
 const note = (n: number, velocity: number) => [0x90, n, velocity];
@@ -318,9 +354,10 @@ export function apcLeds(model: ApcModel, layout: ApcLayout, state: ApcState, opt
   /** A pad: off, or (mk2) its swatch at a brightness, or (older model) green or yellow. */
   const pad = (n: number, lit: { swatch: string | null; level: number; mk1: number } | null) => {
     if (model === 'mk1') return leds.set(n, note(n, lit?.mk1 ?? OFF));
-    if (!lit) return leds.set(n, rgbSysex(n, 0, 0, 0));
-    const [r, g, b] = shownRgb(lit.swatch).map((v) => Math.round(v * lit.level)) as [number, number, number];
-    return leds.set(n, rgbSysex(n, r, g, b));
+    if (!lit) return leds.set(n, padNote(n, 0));
+    const colour = paletteColour(shownRgb(lit.swatch));
+    // On stage (or running): full, in the colour's paler tint, so it stands out from the dim pads around it.
+    return leds.set(n, padNote(n, lit.level >= STAGE ? (PALER[colour] ?? colour) : colour, lit.level));
   };
 
   // A running-order item: bright on stage, dim when next, low otherwise.

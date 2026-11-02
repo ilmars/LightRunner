@@ -1,6 +1,8 @@
 #!/bin/sh
 # Re-import the stage L1 rig from Lightkey with the agreed groups.
 # Usage: tools/import-stage-l1.sh path/to/project.lightkeyproj
+# Note: this rewrites shows/stage-l1.json from Lightkey, which has no Hangs on and no LEDs, so they are lost. Set them
+# again in Patch, or use Settings > Compare with a file instead: that keeps them (a file without them changes neither).
 set -e
 cd "$(dirname "$0")/.."
 PROJECT="${1:-$LIGHTKEY_PROJECT}"

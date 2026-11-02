@@ -19,13 +19,16 @@
   <div class="appbar-wrap">
     <header class="appbar">
       <h1 class="appbar-title"><img src="/shared/icon.svg" alt="" width="26" height="26"><span class="appbar-name"><span class="ds-caps">Light Runner</span><b>Patch</b></span></h1>
-      <span class="grow"></span>
       <!-- Only while something is wrong with the lights. -->
       <span id="status" class="ds-pill ds-pill--warn" role="status" hidden>● <span class="long"></span><span class="short"></span></span>
       <!-- While the server doesn't answer: the page keeps trying by itself. -->
       <span id="offline" class="ds-pill offline" role="status" title="Light Runner isn't answering. The page keeps trying and carries on by itself." hidden>● Not connected</span>
-      <nav class="applinks" aria-label="Pages"><a href="/operator/">Operator</a><a href="/patch/" aria-current="page">Patch</a><a href="/settings/">Settings</a></nav>
+      <span class="grow"></span>
       <span id="clock" class="clock"></span>
+      <!-- Full screen: only where the browser can do it and the page is not already an app (see /shared/fullscreen.js). -->
+      <button id="fsBtn" class="ds-iconbtn" type="button" aria-label="Full screen" title="Full screen" aria-pressed="false" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg></button>
+      <!-- The four pages, the same icons on every page (/shared/pagetabs.js). -->
+      <nav class="ds-pagetabs" data-page="patch" aria-label="Pages"></nav>
     </header>
   </div>
 
@@ -121,6 +124,11 @@
           <span id="teRepeatHint" class="hint"></span>
         </div>
         <p id="teSummary" class="te-summary"></p>
+        <div class="field te-leds">
+          <label for="teLeds">LEDs</label>
+          <input id="teLeds" class="ds-field" type="text" inputmode="numeric" autocomplete="off" aria-describedby="teLedsHint">
+          <p id="teLedsHint" class="hint">How many the light really has (spread over its segments). Leave empty to draw one per segment.</p>
+        </div>
       </div>
       <div class="sub">
         <h3 class="ds-caps">Use it for</h3>
@@ -188,7 +196,7 @@
       <div class="card-head">
         <div class="card-title">
           <h2 class="ds-caps">Stage plan</h2>
-          <p class="card-desc">Where each light hangs, as the operator page draws it. The back of the stage is at the top.</p>
+          <p class="card-desc">Where each light hangs, as the operator page draws it. The back of the stage is at the top; under the plan, the same stage from the audience.</p>
         </div>
       </div>
       <div class="plan-frame">
@@ -210,8 +218,13 @@
           <button type="button" class="ds-btn ds-btn--quiet" data-angle="0">Across</button>
           <button type="button" class="ds-btn ds-btn--quiet" data-angle="90">Upright</button>
         </span>
+        <span class="plan-hangs">
+          <label for="planHangs" class="ds-caps plan-label">Hangs on</label>
+          <select id="planHangs" class="ds-field" aria-describedby="planHangsHint"></select>
+        </span>
         <span id="planToolsHint" class="hint"></span>
       </div>
+      <p id="planHangsHint" class="hint plan-hangs-hint" hidden>Where the light is in the view from the audience, under the plan. Guess works it out from its place on the plan.</p>
       <div id="planArrange" class="plan-tools" hidden>
         <span class="ds-caps plan-label">Align</span>
         <div id="planAlign" class="ds-seg" role="group" aria-label="Align">
@@ -243,6 +256,12 @@
           <button class="ds-btn ds-btn--primary">Add</button>
         </div>
       </form>
+      <!-- The same stage from the audience, drawn from the plan as it is now (saved or not); selected lights in blue. -->
+      <div id="frontBox" class="plan-front">
+        <canvas id="front" class="front" aria-label="The stage from the audience"></canvas>
+        <span class="plan-back ds-caps" aria-hidden="true">From the audience</span>
+        <button id="frontGrip" class="ds-stage-grip front-grip" type="button" aria-label="Make the view from the audience taller or shorter (double-tap: back to its size)" title="Drag to make the view from the audience taller or shorter; double-tap to put it back"></button>
+      </div>
     </section>
   </main>
 

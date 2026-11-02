@@ -38,6 +38,8 @@ export const Profile = z.object({
   name: z.string(),
   channels: z.array(ProfileChannel).min(1).max(512),
   gamma: z.number().min(1).max(4).optional(),
+  /** How many LEDs the light really has, spread over its segments; the stage view draws them. Missing = one per segment. */
+  leds: z.number().int().min(1).max(512).optional(),
   /** Where the definition came from, e.g. { ofl: 'stairville/sonicpulse-led-bar-10', mode: '39-channel' }. */
   source: z.object({ ofl: z.string(), mode: z.string() }).optional(),
 });
@@ -48,6 +50,10 @@ export type Profile = z.infer<typeof Profile>;
 /** How a fixture is drawn on the stage plan: a dot, a dot with a cone, a bar, a strip round something, or a smoke cloud. */
 export const FixtureShape = z.enum(['dot', 'beam', 'bar', 'outline', 'smoke']);
 export type FixtureShape = z.infer<typeof FixtureShape>;
+
+/** Where a fixture hangs, for the stage view from the audience: from the truss, on the floor at the back wall, on the riser, on a stand at the front, or upright at the side. */
+export const Hangs = z.enum(['truss', 'wall', 'riser', 'stand', 'side']);
+export type Hangs = z.infer<typeof Hangs>;
 
 export const Fixture = z.object({
   id,
@@ -67,6 +73,8 @@ export const Fixture = z.object({
   angle: z.number().min(-180).max(180).optional(),
   /** How far a beam's cone reaches, as a fraction of the plan's width. */
   reach: unit.optional(),
+  /** Where it hangs, for the stage view from the audience; missing = guessed from its place on the plan. */
+  hangs: Hangs.optional(),
   gamma: z.number().min(1).max(4).optional(),
   /** Hung the other way round: its segments run backwards along a group's line. */
   reversed: z.boolean().optional(),
@@ -382,6 +390,95 @@ export const StagePlan = z.object({
 });
 export type StagePlan = z.infer<typeof StagePlan>;
 
+// ---- Timelines ----
+
+/** What a block puts on its layer. The Whole stage layer (`*`) takes only look, dark and full. */
+export const BlockWhat = z.discriminatedUnion('kind', [
+  /** A colour of the group, at a level. */
+  z.object({ kind: z.literal('colour'), preset: id, level: unit }),
+  /** A level, keeping the group's colour. */
+  z.object({ kind: z.literal('level'), level: unit }),
+  /** An effect of the group, at its own speed when given, at a level (full when not given). */
+  z.object({ kind: z.literal('effect'), preset: id, speed: EffectSpeed.optional(), level: unit.optional() }),
+  /** A song's own colours and levels (on the stage layer). */
+  z.object({ kind: z.literal('look'), look: id }),
+  /** Level 0, keeping the colour. */
+  z.object({ kind: z.literal('dark') }),
+  /** Level 1, keeping the colour. */
+  z.object({ kind: z.literal('full') }),
+  /** The group's level follows the loudness of the recording, between low and high; it may bring a colour of its own. */
+  z.object({ kind: z.literal('follow'), low: unit, high: unit, preset: id.optional() }),
+]);
+export type BlockWhat = z.infer<typeof BlockWhat>;
+
+/** A time on a timeline (seconds): at most 24 hours, like the play position the pages send. */
+const timelineTime = z.number().min(0).max(24 * 3600);
+
+export const TimelineBlock = z.object({
+  id,
+  /** Seconds from the start of the timeline. */
+  start: timelineTime,
+  /** Seconds. Missing means until the next block on the layer. */
+  end: timelineTime.optional(),
+  /** Seconds to fade in. */
+  rise: seconds.default(0),
+  what: BlockWhat,
+});
+export type TimelineBlock = z.infer<typeof TimelineBlock>;
+
+/** The layer id of Whole stage blocks. It is not an id a group can have, so a group called "Stage" is no clash. */
+export const STAGE_LAYER = '*';
+
+/** One row of blocks: a group's, or `*` for the whole stage. */
+export const TimelineLayer = z.object({
+  group: z.union([id, z.literal(STAGE_LAYER)]),
+  blocks: z.array(TimelineBlock),
+});
+export type TimelineLayer = z.infer<typeof TimelineLayer>;
+
+const base64 = z.string().regex(/^[A-Za-z0-9+/]*={0,2}$/, 'a base64 string');
+
+/** The sound a timeline is laid out against. The file itself is kept in the data folder; this is what the page and the runner need. */
+export const Recording = z.object({
+  id,
+  name: z.string(),
+  /** Seconds. */
+  duration: timelineTime,
+  /** One byte per 1/25 s: how loud it is, 0..255. */
+  loudness: base64,
+  /** One byte per bar of the waveform, at most 4000 bars. */
+  peaks: base64.max(Math.ceil(4000 / 3) * 4),
+});
+export type Recording = z.infer<typeof Recording>;
+
+export const TimelineMarker = z.object({ t: z.number().min(0), text: z.string() });
+export type TimelineMarker = z.infer<typeof TimelineMarker>;
+
+/**
+ * A recording with layers of blocks. What the stage shows at any moment follows from the blocks alone
+ * (see timeline.ts). A block may point at a colour, effect, look or group that is gone: it is shown as
+ * missing and skipped, so timelines have no entries in checkReferences.
+ */
+export const Timeline = z.object({
+  id,
+  name: z.string(),
+  recording: Recording.optional(),
+  layers: z.array(TimelineLayer),
+  markers: z.array(TimelineMarker).default([]),
+  /** Milliseconds the lights run earlier (negative) or later (positive) than the sound. */
+  offsetMs: z.number().min(-500).max(500).default(0),
+}).superRefine((t, ctx) => {
+  // The runner tells blocks apart by id, across all the layers.
+  const seen = new Set<string>();
+  for (const layer of t.layers) {
+    for (const b of layer.blocks) {
+      if (seen.has(b.id)) ctx.addIssue({ code: 'custom', message: `two blocks have the id "${b.id}"`, path: ['layers'] });
+      seen.add(b.id);
+    }
+  }
+});
+export type Timeline = z.infer<typeof Timeline>;
+
 export const Show = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
   name: z.string(),
@@ -394,6 +491,7 @@ export const Show = z.object({
   operator: OperatorLayout.default({ looks: [], groups: [], manualForOperators: false, runningOrder: [], quickLooks: [] }),
   settings: Settings.default({ output: { kind: 'artnet', host: '2.255.255.255' }, outputEnabled: true, frameRate: 40, gamma: 2.2 }),
   stage: StagePlan.default({ grid: 10 }),
+  timelines: z.array(Timeline).default([]),
 });
 export type Show = z.infer<typeof Show>;
 

@@ -173,11 +173,15 @@ export function compareRows(a, b) {
   return rows;
 }
 
-/** The first thing wrong with a type, in plain words, or null when it can be saved. */
-export function validateType(name, channels) {
+/** The LEDs a light really has: 1 to 512, whole. Empty (nothing typed) is allowed. Text the editor kept as typed is not a number. */
+export const ledsAreValid = (leds) => leds === undefined || leds === null || (isWhole(leds) && leds >= 1 && leds <= 512);
+
+/** The first thing wrong with a type, in plain words, or null when it can be saved. `leds` is the LEDs field as the editor has it. */
+export function validateType(name, channels, leds) {
   if (typeof name !== 'string' || name.trim() === '') return 'Give the type a name.';
   if (channels.length === 0) return 'Add at least one channel.';
   if (channels.length > 512) return 'A fixture type has at most 512 channels.';
+  if (!ledsAreValid(leds)) return 'LEDs: type a whole number from 1 to 512, or leave it empty.';
   for (const row of groupRows(channels)) {
     const ch = channels[row.index];
     // A fine byte that is its own row has no first channel of the same job just before it.

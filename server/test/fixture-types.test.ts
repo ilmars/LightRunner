@@ -10,7 +10,7 @@ import { WebSocket } from 'ws';
 import { App } from '../src/app.ts';
 import {
   JOBS, addChannel, channelRows, channelText, compareRows, copyOf, isReadOnly, moveRow, newTypeId, removeRow, repeatLastSegment,
-  segmentCount, setJob, setKelvin, setSixteenBit, setValue, summary, validateType,
+  ledsAreValid, segmentCount, setJob, setKelvin, setSixteenBit, setValue, summary, validateType,
 } from '../../web/patch/types.js';
 import type { Channel } from '../../web/patch/types.js';
 import { BUILT_IN_PROFILES } from '../../packages/shared/src/profiles.ts';
@@ -386,6 +386,23 @@ test('a copy keeps every channel and is a separate type', () => {
   assert.equal('gamma' in copyOf(withFine, new Set()), false);
 });
 
+test('LEDs: empty or a whole number from 1 to 512; anything else says so in plain words', () => {
+  const ok: Channel[] = [{ role: 'dimmer' }];
+  const message = 'LEDs: type a whole number from 1 to 512, or leave it empty.';
+  for (const good of [undefined, 1, 24, 512]) assert.equal(validateType('X', ok, good), null, String(good));
+  for (const bad of [0, -3, 513, 2.5, NaN, 'abc', '12x', '']) assert.equal(validateType('X', ok, bad as never), message, String(bad));
+  assert.equal(ledsAreValid(undefined), true);
+  assert.equal(ledsAreValid(64), true);
+  assert.equal(ledsAreValid(0), false);
+  assert.equal(ledsAreValid('64'), false, 'text the editor kept as typed is not a number');
+  // The name and the channels are still checked first.
+  assert.equal(validateType('', ok, 0), 'Give the type a name.');
+  assert.equal(validateType('X', [], 0), 'Add at least one channel.');
+  // A copy carries the LEDs along (and a type without them gets none).
+  assert.equal(copyOf({ id: 'a', name: 'A', channels: ok, leds: 24 }, new Set()).leds, 24);
+  assert.equal('leds' in copyOf({ id: 'a', name: 'A', channels: ok }, new Set()), false);
+});
+
 test('ids are slugs, made unique', () => {
   const none = new Set<string>();
   assert.equal(newTypeId('Walimex 3200–5600 K', none), 'walimex-3200-5600-k');
@@ -414,21 +431,21 @@ test('GET /api/profiles gives each type its channels, and says which are read-on
   const dir = mkdtempSync(join(tmpdir(), 'light-runner-types-'));
   const root = fileURLToPath(new URL('../../', import.meta.url));
   const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'server/seed/demo-show.json'), webDir: join(root, 'web'), log: () => {} });
-  const call = async (method: string, path: string, body?: unknown) => {
+  const call = async (method: string, path: string, body?: unknown, revision?: string) => {
     const res = await fetch(`http://127.0.0.1:${app.port}${path}`, {
       method,
-      headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+      headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(revision ? { 'x-show-revision': revision } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
-    return { status: res.status, body: (await res.json()) as any };
+    return { status: res.status, body: (await res.json()) as any, revision: res.headers.get('x-show-revision') ?? undefined };
   };
   try {
     await app.start();
     await call('PUT', '/api/settings', { output: { kind: 'none' } });
-    const current = (await call('GET', '/api/show')).body;
+    const { body: current, revision } = await call('GET', '/api/show');
     const fromLibrary = { id: 'ofl-bar', name: 'Library bar', channels: [{ role: 'dimmer' }, { role: 'red' }], source: { ofl: 'maker/bar', mode: '2ch' } };
     const withTypes = { ...current, profiles: [...current.profiles, as600b, pulse39, fromLibrary] };
-    assert.equal((await call('PUT', '/api/show?source=patch', withTypes)).status, 200);
+    assert.equal((await call('PUT', '/api/show?source=patch', withTypes, revision)).status, 200);
 
     const list = (await call('GET', '/api/profiles')).body as { id: string; channels: number; segments: number; defs: Channel[]; readOnly: boolean; builtIn: boolean }[];
     const typeOf = (id: string) => {
@@ -455,8 +472,8 @@ test('GET /api/profiles gives each type its channels, and says which are read-on
 
     // A type of the show's that reuses a built-in's id wins in the list (its own channels), and stays read-only.
     const sameId = { id: 'generic-rgbw', name: 'My RGBW', channels: [{ role: 'dimmer' }, { role: 'red' }] };
-    const current2 = (await call('GET', '/api/show')).body;
-    assert.equal((await call('PUT', '/api/show?source=patch', { ...current2, profiles: [...current2.profiles, sameId] })).status, 200);
+    const { body: current2, revision: revision2 } = await call('GET', '/api/show');
+    assert.equal((await call('PUT', '/api/show?source=patch', { ...current2, profiles: [...current2.profiles, sameId] }, revision2)).status, 200);
     const again = (await call('GET', '/api/profiles')).body as { id: string; name: string; defs: Channel[]; readOnly: boolean; builtIn: boolean }[];
     const mine = again.filter((p) => p.id === 'generic-rgbw');
     assert.equal(mine.length, 1);
@@ -478,8 +495,10 @@ test('a type with fewer segments saves, and the engine carries on with its fixtu
   const root = fileURLToPath(new URL('../../', import.meta.url));
   const app = new App({ port: 0, host: '127.0.0.1', dataDir: dir, seedPath: join(root, 'server/seed/demo-show.json'), webDir: join(root, 'web'), output: { kind: 'none' }, log: (line: string) => logged.push(line) });
   const base = () => `http://127.0.0.1:${app.port}`;
+  // Saved as a Patch page that has the live show's revision.
   const put = async (body: unknown) => {
-    const res = await fetch(`${base()}/api/show?source=patch`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const revision = (await fetch(`${base()}/api/show`)).headers.get('x-show-revision') ?? '';
+    const res = await fetch(`${base()}/api/show?source=patch`, { method: 'PUT', headers: { 'content-type': 'application/json', 'x-show-revision': revision }, body: JSON.stringify(body) });
     return { status: res.status, body: (await res.json()) as any };
   };
   const wait = async <T>(get: () => T | null | undefined | false, what: string): Promise<T> => {
