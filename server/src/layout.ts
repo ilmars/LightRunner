@@ -110,6 +110,8 @@ export interface OperatorLayout {
   rows: ServiceRow[];
   /** The loaded planning service's name and first start time (as the planner writes it), when one is loaded. */
   service?: { title: string; start: string };
+  /** Whether loading a service from the planning service is switched on (Settings), so the page knows whether to offer Load service. */
+  planning?: { enabled: boolean };
   /** Looks kept close at hand for the Quick looks tabs: with the tab, and the ids of the (light) groups each one sets. */
   quickLooks: (OperatorLook & { tab: QuickTab; groups: string[] })[];
   /** Id of the safe look (Basic lights), or null when the show has none. */
@@ -193,6 +195,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
     runningOrder: show.operator.runningOrder.flatMap(describe),
     rows: serviceRows(show),
     ...(show.operator.service ? { service: { title: show.operator.service.title, start: show.operator.service.start } } : {}),
+    planning: { enabled: show.settings.planning?.enabled ?? false },
     quickLooks: show.operator.quickLooks.flatMap((q) => describe(q.look).map((l) => ({
       ...l, tab: q.tab, groups: groupIds.filter((gid, k) => !smoke.has(gid) && l.entries[k] !== null),
     }))),
