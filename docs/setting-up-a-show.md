@@ -215,11 +215,25 @@ Sound that goes through the mixer or a projector can reach the room a little lat
 
 *Example: the Christmas intro.* Make a timeline "Christmas intro" and add the recording. On **Whole stage** leave the **Dark** block at 0:00. Add **Colour** blocks on the Background and Key lights layers, one at each step of the build, each with a long **Rise** (say 20 s), and an **Everything full** block on **Whole stage** where the whole stage should be full. On the Front lights layer add a **Follow the voice** block from where the speech starts (**Low** 10 %, **High** 100 %). While you listen, press **◆ Mark here** at the places in the speech you want to line the lights up with. Try it in **Prepare**, then run it **Live** on the day (see the [service guide](running-a-service.md)).
 
-## 11. Check before Sunday
+## 11. The running order from the planning service (optional)
+
+If the church plans its Sunday in a planning service, Light Runner can load that plan as the running order, so the songs are listed for you instead of typed in. It is off until you switch it on, and while it is off Light Runner works exactly as before.
+
+1. Open **Settings** (with the PIN) and find the card for the planning service. Switch on **Use … for the running order**.
+2. **Paste the login.** The **Login cookie** field has a hint under it that says where to get it. Paste it and press **Save login**. The field never shows it again; the line under the button says **Logged in · works**, or what is wrong. Treat it like a password: it is kept only on this computer, and it is not in the show, in **Export show file** or in a backup. When it runs out the line says so, and you paste a new one.
+3. **Services:** choose the kind of service to load (the first in the list until you choose).
+4. **Look for new songs:** choose the quick look a song starts with the first time Light Runner sees it (the first quick look on the first tab until you choose). Pick something plain, such as a warm look: it is only a starting point, and each song keeps whatever look you give it afterwards.
+5. Go to the operator page on the iPad. **Load service** now sits beside **Edit list**. The [service guide](running-a-service.md) says how to use it before a service.
+
+What a song's look is: a song remembers its look, so a song sung again comes back with the look it had last time. A new song gets a copy of the one you chose in step 4, at the tempo it was planned with. Change a song's look the way you change any song (start it, change the stage, hold **Save to <song>**), or in **Edit list** press **Look ▾** on the song to give it a copy of another look.
+
+Parts of the service (such as the welcome or the sermon), slides and pictures can have a look too: in **Prepare**, tap the row, set the draft as you want it and hold **Save to <name>**. Light Runner remembers it by name for the next service. Bible verses and blanks cannot have one of their own: verses leave the lights as they are, and a blank uses its part's look.
+
+## 12. Check before Sunday
 
 1. Switch Lightkey's output off, then **Send DMX** on in Settings.
 2. On the operator page, turn **Prepare** on and tap through every song, watching the stage view; then **Live** and tap through them again with the lights in the room.
 3. Look for anything that jumps, flickers or looks wrong. Hold **Flash** for each group to see that it moves the lights you expect; **Identify** in Patch finds a single light.
-4. Press every controller key once.
+4. Press every controller key once. If you use the planning service, press **Load service** for this Sunday and check that every song has a look (see "Before people arrive" in the [service guide](running-a-service.md)).
 5. If you made a timeline, play it through once in **Prepare** and once **Live** with the lights in the room, with the recording playing from the computer it will play from on the day.
 6. Set the PIN, check **Who to call**, and **Export show file** again. Keep the file.
