@@ -356,7 +356,7 @@ function mutedOf(row) {
   if (row.kind === 'header') return { key: row.key, keys: [row.key], name: row.name, base: 'no look', part: true, says: null };
   const kind = row.itemKind;
   const word = kind === 'slides' ? 'slides' : kind === 'media' ? mediaWord(row.name) : kind === 'blank' ? 'blank' : kind === 'verse' ? 'lights stay' : 'no look';
-  const says = kind === 'blank' ? 'Blanks use their part\'s look.' : kind === 'verse' ? 'Verses don\'t change the lights.'
+  const says = kind === 'blank' ? 'Blanks don\'t change the lights.' : kind === 'verse' ? 'Verses don\'t change the lights.'
     // A song without a look (its look was deleted in Edit list) gets one again from the next load.
     : kind === 'song' ? `Load the service again to give ${row.name || 'this song'} a look.` : null;
   // An item without a name (a blank, say) shows its kind instead, once.

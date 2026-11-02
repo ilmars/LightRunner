@@ -340,7 +340,7 @@ export function saveServiceItem(show: Show, key: string, stage: Stage): Show {
   const item = out.operator.service?.items.find((i) => i.key === key);
   if (!item) throw new Error("That item isn't in the loaded service.");
   if (item.kind === 'verse') throw new Error("Verses don't change the lights.");
-  if (item.kind === 'blank') throw new Error("Blanks use their part's look.");
+  if (item.kind === 'blank') throw new Error("Blanks don't change the lights.");
   if (item.look !== undefined) throw new Error(`${item.name} already has a look: use Save to ${item.name}.`);
   // A song's look comes with the load; one that lost it (deleted in Edit list) is given again by loading the service.
   if (item.kind === 'song') throw new Error(`Load the service again to give ${item.name} a look.`);
