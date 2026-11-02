@@ -42,7 +42,9 @@ let pendingColour = null;
 // `session` counts the times Prepare went on or off, so a drag that started before never lands in the other one.
 // `startRef` is the ref of the blindStart that began this Prepare (it stays after the answer, to tell this Prepare's
 // answers from older ones); `starting` is true until that answer comes.
-const prep = { on: false, session: 0, state: null, visual: null, startRef: null, starting: false, goRef: null };
+// `target`: the key of a loaded service's item without a look (a header, slides) tapped in Prepare: it is the item
+// being prepared, and Save gives it the draft as its look. Any running-order look tapped after takes over again.
+const prep = { on: false, session: 0, state: null, visual: null, startRef: null, starting: false, goRef: null, target: null };
 /** The server's answer to a draft command when it has no draft for this tablet. */
 const PREPARE_OFF = 'Prepare is off.';
 
@@ -82,6 +84,11 @@ function connect() {
       // Operators can lose manual control in Settings; the panel goes with it.
       if (!layout.manualForOperators) closeManual();
       else if (manualSel.open) buildManual();
+      // Planning switched off in Settings takes Load service with it.
+      if (!planningOn()) closeLoad();
+      renderLoadButton();
+      renderServiceLine();
+      renderLoad();
       render();
     } else if (msg.type === 'state') {
       if (state && msg.state.look !== seenLook) previousLook = seenLook;
@@ -118,6 +125,12 @@ function connect() {
         if (!msg.error) toast(`Saved to ${itemSave.name}`, true);
         itemSave = null;
       }
+      if (pendingCopy && msg.ref === pendingCopy.ref) {
+        if (!msg.error) toast(pendingCopy.text, true);
+        pendingCopy = null;
+      }
+      // Load service's answer: a problem is shown in its panel, not in a toast.
+      if (loadResult(msg)) return;
       // Individual lights' answers say what went wrong in plain words (once for the whole drag).
       if (msg.ref !== null && manualRefs.has(msg.ref)) {
         manualRefs.delete(msg.ref);
@@ -140,6 +153,11 @@ function setConnected(on) {
     moves.clear();
     // The server dropped the draft with the connection; Prepare is off here too.
     setPrepare(false);
+    // A Load whose answer can't come now: Load can be tapped again.
+    if (loadSvc.ref !== null) {
+      loadSvc.ref = null;
+      renderLoad();
+    }
   }
   if (!on && pendingEdit !== null) {
     pendingEdit = null;
@@ -230,6 +248,11 @@ const startCommand = (item) => (isBasic(item) ? { type: 'safe' } : { type: 'look
 
 /** Start an item from the running order (in Prepare, in the draft: it becomes the item being prepared). */
 function start(item) {
+  // A look tapped in Prepare is the item being prepared now, not a header or slides tapped before.
+  if (prep.target) {
+    prep.target = null;
+    render();
+  }
   sendStage(startCommand(item));
 }
 
@@ -294,34 +317,119 @@ function replaceRows(nodes) {
   rebuilding = false;
 }
 
+/**
+ * One small dot per group (smoke machines left out), in group order: the colour this item gives it, whites drawn as
+ * whites. Basic lights' groups without a saved colour run the built-in warm light.
+ */
+function itemDots(item) {
+  const basic = isBasic(item);
+  const strip = el('span', 'dots');
+  for (const { colour: c, name } of stripBlocks(item.colours)) {
+    const colour = c ?? (basic ? layout.basicSwatch : null);
+    // A group the item leaves alone is a faint dot; one it turns off is a ring.
+    const dot = el('i', colour === '#000000' ? 'off' : colour ? null : 'unset');
+    if (colour && colour !== '#000000') dot.style.background = tint(colour, 0.85);
+    dot.title = name;
+    strip.append(dot);
+  }
+  return strip;
+}
+
+// The loaded service's rows without a look of their own (headers, verses, slides …), on screen now:
+// { key, keys, name, el, tag, base, says }. `says`: what a tap says instead (verses, blanks), or null when Prepare can give it a look.
+let mutedRows = [];
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/** What a picture or video is, from its file name when it has one. */
+function mediaWord(name) {
+  if (/\.(jpe?g|png|gif|heic|webp|bmp|tiff?)$/i.test(name)) return 'picture';
+  if (/\.(mp4|mov|m4v|avi|mkv|webm|wmv)$/i.test(name)) return 'video';
+  return 'picture or video';
+}
+
+/** A service row without a look: its name, tag and what a tap on it says (see `mutedRows`). */
+function mutedOf(row) {
+  if (row.kind === 'verses') {
+    return { key: row.keys[0], keys: row.keys, name: plural(row.keys.length, 'Bible verse'), base: 'lights stay', part: false, says: 'Verses don\'t change the lights.' };
+  }
+  if (row.kind === 'header') return { key: row.key, keys: [row.key], name: row.name, base: 'no look', part: true, says: null };
+  const kind = row.itemKind;
+  const word = kind === 'slides' ? 'slides' : kind === 'media' ? mediaWord(row.name) : kind === 'blank' ? 'blank' : kind === 'verse' ? 'lights stay' : 'no look';
+  const says = kind === 'blank' ? 'Blanks use their part\'s look.' : kind === 'verse' ? 'Verses don\'t change the lights.'
+    // A song without a look (its look was deleted in Edit list) gets one again from the next load.
+    : kind === 'song' ? `Load the service again to give ${row.name || 'this song'} a look.` : null;
+  // An item without a name (a blank, say) shows its kind instead, once.
+  const name = row.name || word.charAt(0).toUpperCase() + word.slice(1);
+  return { key: row.key, keys: [row.key], name, base: row.name ? word : '', part: false, says };
+}
+
 function buildPlainRows(order) {
   const nodes = [];
   orderRows = [];
   editRows = [];
-  order.forEach((item, k) => {
-    const basic = isBasic(item);
-    const b = el('button', 'item');
-    // One small dot per group (smoke machines left out), in group order: the colour this item
-    // gives it, whites drawn as whites. Basic lights' groups without a saved colour run the built-in warm light.
-    const strip = el('span', 'dots');
-    for (const { colour: c, name } of stripBlocks(item.colours)) {
-      const colour = c ?? (basic ? layout.basicSwatch : null);
-      // A group the item leaves alone is a faint dot; one it turns off is a ring.
-      const dot = el('i', colour === '#000000' ? 'off' : colour ? null : 'unset');
-      if (colour && colour !== '#000000') dot.style.background = tint(colour, 0.85);
-      dot.title = name;
-      strip.append(dot);
+  mutedRows = [];
+  const byId = new Map(order.map((item) => [item.id, item]));
+  // The server's rows: the looks in running-order order, with the loaded service's other items between them. Out of
+  // step with the running order (an older server), one row per look as before: `orderRows` stays one per look, in order.
+  let rows = layout.rows ?? [];
+  const lookRows = rows.filter((r) => r.kind === 'look');
+  if (lookRows.length !== order.length || lookRows.some((r, k) => r.look !== order[k].id)) {
+    rows = order.map((item) => ({ kind: 'look', look: item.id, header: false }));
+  }
+  rows.forEach((row, n) => {
+    const repeat = row.kind === 'item' && row.look !== undefined && byId.has(row.look);
+    if (row.kind === 'look' || repeat) {
+      const item = byId.get(row.look);
+      // A header with its own look is a small label in spaced capitals ("look" on the right).
+      const b = el('button', row.kind === 'look' && row.header ? 'item item--part' : 'item');
+      // "● changed", "next" or "safe look"; in Prepare "preparing" on the draft's item, "on stage" on the real stage's.
+      const tag = el('span', 'tag');
+      b.append(itemDots(item), el('span', 'name', repeat ? row.name || item.name : item.name), tag);
+      b.addEventListener('click', () => start(item));
+      nodes.push(b);
+      // A song planned twice starts the same look from its second place too; only its first place counts for Next,
+      // the marks and the controllers.
+      if (repeat) {
+        tag.hidden = true;
+        return;
+      }
+      orderRows.push({ item, button: b, tag, part: row.header });
+      if (isBasic(item) && n < rows.length - 1) nodes.push(el('div', 'sep'));
+      return;
     }
-    // "● changed", "next" or "safe look"; in Prepare "preparing" on the draft's item, "on stage" on the real stage's.
-    const tag = el('span', 'tag');
-    b.append(strip, el('span', 'name', item.name), tag);
-    b.addEventListener('click', () => start(item));
-    nodes.push(b);
-    orderRows.push({ item, button: b, tag });
-    if (basic && k < order.length - 1) nodes.push(el('div', 'sep'));
+    // No look of its own: muted, with hollow dots; the lights stay as they are.
+    const m = mutedOf(row);
+    const div = el('div', m.part ? 'item item--muted item--part' : 'item item--muted');
+    const strip = el('span', 'dots');
+    for (let g = lightGroups().length; g > 0; g--) strip.append(el('i'));
+    m.tag = el('span', 'tag', m.base);
+    m.tag.hidden = !m.base;
+    div.append(strip, el('span', 'name', m.name), m.tag);
+    div.addEventListener('click', () => tapMuted(m));
+    m.el = div;
+    nodes.push(div);
+    mutedRows.push(m);
   });
+  // The item being prepared went (saved to, or the service changed).
+  if (prep.target && !mutedRows.some((m) => m.key === prep.target)) prep.target = null;
   replaceRows(nodes);
 }
+
+/**
+ * A tap on a row without a look. Live, nothing changes and a quiet note says why. In Prepare a header, slides or a
+ * picture becomes the item being prepared, with the draft as it is: Save to it gives it the draft as its look.
+ */
+function tapMuted(m) {
+  if (m.says) return toast(m.says, true);
+  // (The phone has no Prepare: it only says there is no look.)
+  if (!prep.on) return toast(phoneQuery.matches ? 'No look yet.' : 'No look yet. Use Prepare to give it one.', true);
+  prep.target = m.key;
+  render();
+}
+
+/** The row without a look that is being prepared ({ key, name, … }), or null. */
+const prepTarget = () => (prep.on && prep.target ? mutedRows.find((m) => m.key === prep.target) ?? null : null);
 
 const currentName = (id) => layout?.runningOrder.find((i) => i.id === id)?.name;
 const isRenaming = (id) => [...renames.values()].some((r) => r.id === id);
@@ -358,7 +466,9 @@ function buildEditRows(order) {
   }
   orderRows = [];
   editRows = [];
+  mutedRows = [];
   editKeys = keysShown();
+  showLookMenu(null);
   const nodes = [];
   let refocus = null;
   for (const item of order) {
@@ -388,6 +498,8 @@ function buildEditRows(order) {
     grip.setAttribute('role', 'button');
     grip.setAttribute('aria-label', 'Drag to move');
     node.append(del, input);
+    // With Planning on: Look ▾ gives the song another look (a quick look, another song's, one from an earlier service).
+    if (planningOn()) node.append(lookButton(item.id));
     if (showsChip({ kind: 'song', id: item.id })) node.append(keyChip({ kind: 'song', id: item.id }, item.name));
     node.append(grip);
     const row = { id: item.id, name: item.name, el: node, input, del };
@@ -561,6 +673,9 @@ function setEditing(on) {
   if (drag || on === editing) return;
   // Editing the order doesn't mix with Prepare.
   if (on) setPrepare(false);
+  // Nor with Load service: the panel closes, and its button waits until Done.
+  if (on) closeLoad();
+  if (!on) showLookMenu(null);
   // On a tablet a tap on this button doesn't leave the field, so do it here: it sends the rename.
   if (document.activeElement instanceof HTMLElement && $('runningOrder').contains(document.activeElement)) document.activeElement.blur();
   editing = on;
@@ -571,6 +686,7 @@ function setEditing(on) {
   $('editBtn').textContent = on ? 'Done' : 'Edit list';
   $('editBtn').classList.toggle('on', on);
   $('editBtn').setAttribute('aria-pressed', String(on));
+  renderLoadButton();
   if (layout) {
     buildOrder();
     render();
@@ -578,14 +694,279 @@ function setEditing(on) {
 }
 $('editBtn').addEventListener('click', () => setEditing(!editing));
 
+// ---- Edit list's Look ▾: another look for a song ----
+// The song takes a copy of the picked look's colours and levels (and its tempo); its name and place stay. No PIN.
+
+/** The song whose Look ▾ menu is open: { id, button }, or null. */
+let lookMenuFor = null;
+
+function lookButton(id) {
+  const b = el('button', 'ebtn elook', 'Look ▾');
+  b.type = 'button';
+  b.setAttribute('aria-haspopup', 'menu');
+  b.setAttribute('aria-expanded', 'false');
+  b.setAttribute('aria-label', 'Take another look');
+  // A tap on it doesn't reach the row (no drag, no rename).
+  b.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+  b.addEventListener('click', () => showLookMenu(lookMenuFor?.id === id ? null : { id, button: b }));
+  return b;
+}
+
+/** Opens the menu under (or over) a song's Look ▾, or closes it (`what` null). */
+function showLookMenu(what) {
+  const menu = $('lookMenu');
+  lookMenuFor?.button.setAttribute('aria-expanded', 'false');
+  lookMenuFor = what;
+  menu.hidden = !what;
+  if (!what) return;
+  what.button.setAttribute('aria-expanded', 'true');
+  // The quick looks, then the running order's other looks, then those kept from earlier services; each look once.
+  const seen = new Set([what.id]);
+  const nodes = [];
+  const section = (title, looks) => {
+    const fresh = looks.filter((l) => !seen.has(l.id));
+    if (!fresh.length) return;
+    nodes.push(el('span', 'ds-caps lm-cap', title));
+    for (const l of fresh) {
+      seen.add(l.id);
+      const b = el('button', null, l.name);
+      b.type = 'button';
+      b.setAttribute('role', 'menuitem');
+      b.addEventListener('click', () => copyLook(what.id, l));
+      nodes.push(b);
+    }
+  };
+  section('Quick looks', layout.quickLooks ?? []);
+  section('Running order', layout.runningOrder ?? []);
+  const kept = [...(layout.planning?.remembered ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'lv'));
+  section('From earlier services', kept);
+  if (!nodes.length) nodes.push(el('span', 'lm-none', 'No other looks yet'));
+  menu.replaceChildren(...nodes);
+  // Fixed on the page (the list scrolls and would cut it off): under the button, or over it when there is more room there.
+  const r = what.button.getBoundingClientRect();
+  const below = window.innerHeight - r.bottom - 14, above = r.top - 14;
+  const down = below >= Math.min(menu.scrollHeight, 320) || below >= above;
+  const height = Math.min(menu.scrollHeight, Math.max(140, down ? below : above));
+  menu.style.maxHeight = `${height}px`;
+  menu.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${down ? r.bottom + 6 : Math.max(8, r.top - 6 - height)}px`;
+  menu.scrollTop = 0;
+}
+
+/** The copy sent from the menu, to say so when the server has done it: { ref, text }. */
+let pendingCopy = null;
+
+function copyLook(id, from) {
+  showLookMenu(null);
+  const name = currentName(id) ?? '';
+  const ref = send({ type: 'itemCopyLook', item: id, from: from.id });
+  if (ref !== null) pendingCopy = { ref, text: `${name} has the look of ${from.name} now` };
+}
+
+document.addEventListener('pointerdown', (ev) => {
+  if (lookMenuFor && !$('lookMenu').contains(ev.target) && !lookMenuFor.button.contains(ev.target)) showLookMenu(null);
+}, true);
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && lookMenuFor) showLookMenu(null);
+});
+$('runningOrder').addEventListener('scroll', () => showLookMenu(null), { passive: true });
+
+// ---- Load service: the church's planned service into the running order ----
+// Only while Planning is on in Settings. The panel takes the right column (as the colour editor does) and lists the
+// coming services of the kind chosen in Settings, nearest first, then the last one. Load sends `loadService`: the
+// server puts the service's items after Basic lights, as one Undo step. Not in Prepare (opening it turns Prepare off)
+// and not while the list is being edited.
+
+const planningOn = () => !!layout?.planning?.enabled;
+
+// The panel: the services as the server listed them, the one picked, the Load waiting for its answer, and a counter
+// so an older list that arrives late is dropped.
+const loadSvc = { open: false, type: '', services: [], pick: null, problem: null, waiting: false, ref: null, ask: 0 };
+
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const LONG_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** A planned start as the planner writes it (2026-10-18T08:00:00, the church's time): "Sun 18 Oct", "08:00" and the day; or null. */
+function planDate(start) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(start ?? '');
+  if (!m) return null;
+  const day = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const at = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+  return { date: `${DAYS[day.getDay()]} ${day.getDate()} ${MONTHS[day.getMonth()]}`, time: `${m[4]}:${m[5]}`, day, at };
+}
+
+/** Days from today to a planned day (0 today, 1 tomorrow, -7 a week ago). */
+const daysFromToday = (day) => {
+  const t = new Date();
+  return Math.round((day - new Date(t.getFullYear(), t.getMonth(), t.getDate())) / 86_400_000);
+};
+
+/** The quiet note beside the nearest coming service and the last one: "this Sunday", "last week", "today" … */
+function whenNote(d) {
+  const n = daysFromToday(d.day);
+  if (n === 0) return 'today';
+  if (n === 1) return 'tomorrow';
+  if (n === -1) return 'yesterday';
+  if (n > 1 && n < 7) return `this ${LONG_DAYS[d.day.getDay()]}`;
+  if (n < -1 && n > -7) return `last ${LONG_DAYS[d.day.getDay()]}`;
+  if (n <= -7 && n > -14) return 'last week';
+  return '';
+}
+
+/** The running order's line under its title: the loaded service's date, time and place ("Sun 18 Oct · 08:00 · Rīga"). */
+function renderServiceLine() {
+  const s = layout?.service;
+  const d = s ? planDate(s.start) : null;
+  $('svcLine').hidden = !d;
+  // The place is the service type's name up to " - " ("Rīga - Svētdienas Dievkalpojums").
+  if (d) $('svcLine').textContent = [d.date, d.time, s.title.split(' - ')[0].trim()].filter(Boolean).join(' · ');
+}
+
+function renderLoadButton() {
+  $('loadBtn').hidden = !planningOn() || editing;
+  $('loadBtn').classList.toggle('on', loadSvc.open);
+  $('loadBtn').setAttribute('aria-expanded', String(loadSvc.open));
+}
+
+function openLoad() {
+  if (!planningOn() || editing || phoneQuery.matches) return;
+  // A load replaces the running order: never in the middle of preparing.
+  setPrepare(false);
+  closePicker();
+  closeSheet();
+  closeManual();
+  loadSvc.open = true;
+  $('loadSvc').hidden = false;
+  markEditorOpen();
+  renderLoadButton();
+  $('loadSvc').scrollTop = 0;
+  askServices();
+}
+
+function closeLoad() {
+  if (!loadSvc.open) return;
+  loadSvc.open = false;
+  loadSvc.ask++;
+  // A Load already sent still loads; the panel just doesn't wait for it.
+  loadSvc.ref = null;
+  $('loadSvc').hidden = true;
+  markEditorOpen();
+  renderLoadButton();
+}
+
+/** Asks the server for the services (it asks the planning service); a problem is shown in the panel as it comes. */
+async function askServices() {
+  const ask = ++loadSvc.ask;
+  Object.assign(loadSvc, { services: [], pick: null, problem: null, waiting: true });
+  renderLoad();
+  let answer;
+  try {
+    const res = await fetch('/api/planning/services');
+    const data = await res.json().catch(() => ({}));
+    answer = res.ok ? data : { error: data.error || 'That did not work.' };
+  } catch {
+    answer = { error: 'Not connected. Lights keep running; try again in a moment.' };
+  }
+  if (ask !== loadSvc.ask) return;
+  loadSvc.waiting = false;
+  if (answer.error) loadSvc.problem = answer.error;
+  else {
+    loadSvc.type = answer.type ?? '';
+    loadSvc.services = answer.services ?? [];
+    // Today's service if there is one (it may have started), else the nearest coming one, else the last one.
+    const can = loadSvc.services.filter((s) => s.items > 0 && planDate(s.start));
+    const now = Date.now();
+    loadSvc.pick = (can.find((s) => daysFromToday(planDate(s.start).day) === 0) ?? can.find((s) => planDate(s.start).at >= now) ?? can[0])?.id ?? null;
+  }
+  renderLoad();
+}
+
+/** "5 songs have a look · 2 new get "All white"": songs planned twice count once. */
+function looksLine(s) {
+  const songs = (s.withLook ?? 0) + (s.newSongs ?? 0);
+  if (!songs) return 'no songs';
+  if (!s.newSongs) return 'all have a look';
+  const parts = [];
+  if (s.withLook) parts.push(`${plural(s.withLook, 'song')} ${s.withLook === 1 ? 'has' : 'have'} a look`);
+  const look = layout.planning?.newSongLook;
+  parts.push(`${s.newSongs} new${look ? ` ${s.newSongs === 1 ? 'gets' : 'get'} "${look}"` : ''}`);
+  return parts.join(' · ');
+}
+
+function renderLoad() {
+  if (!loadSvc.open) return;
+  $('lsType').textContent = loadSvc.type;
+  $('lsProblem').hidden = !loadSvc.problem && !loadSvc.waiting && loadSvc.services.length > 0;
+  $('lsProblem').textContent = loadSvc.problem ?? (loadSvc.waiting ? 'Asking the planning service …' : 'No services are planned yet.');
+  $('lsProblem').classList.toggle('bad', !!loadSvc.problem);
+  const now = Date.now();
+  // The nearest coming service and the last one (the one before now) get a note.
+  const firstComing = loadSvc.services.find((s) => (planDate(s.start)?.at ?? 0) >= now);
+  const rows = loadSvc.services.map((s) => {
+    const d = planDate(s.start);
+    const b = el('button', 'ls-svc');
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    const on = s.id === loadSvc.pick;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+    // An empty service can't be loaded.
+    b.disabled = !s.items || loadSvc.ref !== null;
+    const date = el('span', 'ls-date');
+    date.append(el('b', null, d ? d.date : s.start), el('span', null, d ? d.time : ''));
+    const what = el('span', 'ls-what', s.items ? [plural(s.items, 'item'), s.songs ? plural(s.songs, 'song') : ''].filter(Boolean).join(' · ') : '0 items');
+    what.append(el('span', null, s.items ? looksLine(s) : 'not planned yet'));
+    b.append(date, what);
+    const past = d && d.at < now;
+    const note = d && (s === firstComing || past) ? whenNote(d) : '';
+    if (note) b.append(el('span', 'ls-when', note));
+    b.addEventListener('click', () => {
+      loadSvc.pick = s.id;
+      renderLoad();
+    });
+    return b;
+  });
+  $('lsList').replaceChildren(...rows);
+  const busy = loadSvc.ref !== null;
+  $('lsLoad').disabled = !loadSvc.pick || busy;
+  $('lsLoad').textContent = busy ? 'Loading …' : 'Load';
+}
+
+/** The server's answer to Load: the panel closes when it worked; a problem shows in the panel. True when it was Load's. */
+function loadResult(msg) {
+  if (msg.ref === null || msg.ref !== loadSvc.ref) return false;
+  loadSvc.ref = null;
+  if (msg.error) {
+    loadSvc.problem = msg.error;
+    renderLoad();
+    return true;
+  }
+  const s = loadSvc.services.find((x) => x.id === loadSvc.pick);
+  const d = s ? planDate(s.start) : null;
+  closeLoad();
+  toast(d ? `${d.date} is loaded. Undo takes it back.` : 'The service is loaded. Undo takes it back.', true);
+  return true;
+}
+
+$('loadBtn').addEventListener('click', () => (loadSvc.open ? closeLoad() : openLoad()));
+$('lsBack').addEventListener('click', closeLoad);
+$('lsCancel').addEventListener('click', closeLoad);
+$('lsLoad').addEventListener('click', () => {
+  if (!loadSvc.pick || loadSvc.ref !== null) return;
+  loadSvc.problem = null;
+  loadSvc.ref = send({ type: 'loadService', id: loadSvc.pick });
+  renderLoad();
+});
+
 // ---- Controller keys: a song's or a quick look's key, taken by pressing it on the controller ----
 // Only when the server can use MIDI controllers (layout.keys.midi). A tap on a Key chip asks the server to take the
 // next key pressed (it waits up to 10 s, one page at a time); the bar at the bottom says so and has Clear and Cancel.
 // The key follows the song, not its place. Keys always act on the real stage.
 
-/** What the running-order Edit rows' Key chips were built from (rebuilt when it changes). */
+/** What the running-order Edit rows' Key chips (and Look ▾, with Planning on) were built from (rebuilt when it changes). */
 let editKeys = '';
-const keysShown = () => JSON.stringify(layout?.keys ?? null);
+const keysShown = () => JSON.stringify([layout?.keys ?? null, planningOn()]);
 /**
  * A Key chip shows while a controller is listened to, or when the song or quick look already has a key (so it can
  * be seen and cleared); never without MIDI support.
@@ -726,10 +1107,14 @@ function setPrepare(on, tell = true) {
     prep.startRef = null;
     prep.starting = false;
   }
-  // Individual lights holds the real stage: it closes for Prepare.
-  if (on) closeManual();
+  // Individual lights holds the real stage: it closes for Prepare. So does Load service (a load replaces the list).
+  if (on) {
+    closeManual();
+    closeLoad();
+  }
   prep.on = on;
   prep.session++;
+  prep.target = null;
   prep.state = null;
   prep.visual = null;
   prep.goRef = null;
@@ -1141,7 +1526,7 @@ function render() {
   $('prepHead').hidden = !prep.on;
   if (prep.on) {
     const draft = shownState();
-    $('prepName').textContent = draft.look ? lookName(draft.look) : '—';
+    $('prepName').textContent = prepTarget()?.name ?? (draft.look ? lookName(draft.look) : '—');
     $('prepStage').textContent = `On stage: ${onStage}`;
   }
 
@@ -1197,9 +1582,11 @@ function render() {
 
   // Running order: the item on stage is blue, with "● changed" while it has live changes; "next" on the item Next
   // starts; "safe look" on Basic lights otherwise. In Prepare the draft's item is the violet "preparing" one, and the
-  // item on the real stage (when it is another) keeps a dashed outline with "on stage".
+  // item on the real stage (when it is another) keeps a dashed outline with "on stage". A header with its own look
+  // says "look" when nothing else. A header or slides tapped in Prepare is the violet one instead of the draft's item.
   const shownStage = shownState();
-  const on = stageIndex(shownStage);
+  const target = prepTarget();
+  const on = target ? -1 : stageIndex(shownStage);
   const live = prep.on ? stageIndex(state) : -1;
   const next = nextItem();
   orderRows.forEach((row, k) => {
@@ -1211,11 +1598,19 @@ function render() {
     row.button.setAttribute('aria-current', active ? 'true' : 'false');
     const changed = active && !prep.on && !blackedOut && shownStage.lookChanged;
     const isNext = !editing && !prep.on && !active && !!next && row.item.id === next.id;
-    const tag = active && prep.on ? 'preparing' : staged ? 'on stage' : changed ? '● changed' : isNext ? 'next' : isBasic(row.item) && !active ? 'safe look' : '';
+    const tag = active && prep.on ? 'preparing' : staged ? 'on stage' : changed ? '● changed' : isNext ? 'next'
+      : isBasic(row.item) && !active ? 'safe look' : row.part && !active ? 'look' : '';
     row.tag.textContent = tag;
     row.tag.hidden = !tag;
     row.tag.classList.toggle('changed-tag', changed);
   });
+  for (const m of mutedRows) {
+    const preparing = m === target;
+    m.el.classList.toggle('prep', preparing);
+    const tag = preparing ? 'preparing' : m.base;
+    m.tag.textContent = tag;
+    m.tag.hidden = !tag;
+  }
   // Keep what is on stage (in Prepare, what is being prepared) in view when it changes (and when editing ends).
   const onId = on >= 0 ? layout.runningOrder[on].id : null;
   if (!editing && orderRows.length && onId !== revealedId) {
@@ -1562,21 +1957,21 @@ function wireDimmer(row) {
 function renderDetails() {
   // The item on stage (in Prepare, the one being prepared: Save keeps the draft in it).
   const item = stageItem();
-  $('dSub').textContent = prep.on ? `${item ? item.name : lookName(shownState().look)} · draft` : 'drag to dim';
+  // In Prepare a header or slides tapped in the running order takes Save instead (Save to <it> gives it the draft).
+  const target = prepTarget();
+  $('dSub').textContent = prep.on ? `${target ? target.name : item ? item.name : lookName(shownState().look)} · draft` : 'drag to dim';
   // Without an item on stage there is nothing to save into or go back to.
   const changed = !!item && shownState().lookChanged;
   $('backBtn').hidden = !changed;
-  $('saveBtn').hidden = !item;
+  $('saveBtn').hidden = !item && !target;
   $('saveBtn').classList.toggle('dirty', changed && !prep.on);
   // Individual lights: only when operators have manual control; faded in Prepare (manual control is live only).
   $('manualBtn').hidden = !layout.manualForOperators;
   $('manualBtn').classList.toggle('unavail', prep.on);
   $('manualBtn').setAttribute('aria-disabled', String(prep.on));
   $('manualBtn').title = prep.on ? MANUAL_LIVE_ONLY : 'Set single lights';
-  if (item) {
-    $('backBtn').setAttribute('aria-label', `Back to ${item.name} as saved`);
-    $('saveBtn').querySelector('.label').replaceChildren(el('span', null, `Save to ${item.name}`), el('small', null, 'hold'));
-  }
+  if (item) $('backBtn').setAttribute('aria-label', `Back to ${item.name} as saved`);
+  if (item || target) $('saveBtn').querySelector('.label').replaceChildren(el('span', null, `Save to ${(target ?? item).name}`), el('small', null, 'hold'));
   const now = performance.now();
   for (const row of detailRows) {
     if (row.smoke) {
@@ -1617,16 +2012,28 @@ let itemSave = null;
 saveBtn.addEventListener('pointerdown', (ev) => {
   ev.preventDefault();
   const item = stageItem();
-  if (!item) return;
-  saveFor = item.id;
+  const target = prepTarget();
+  if (!item && !target) return;
+  // A header or slides being prepared is saved to by its key (`saveServiceItem`); a look by its id.
+  saveFor = target ? { key: target.key } : item.id;
   saveSession = prep.session;
   saveBtn.classList.add('holding');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveBtn.classList.remove('holding');
+    if (prep.session !== saveSession) return;
+    const t = prepTarget();
+    if (saveFor && typeof saveFor === 'object') {
+      // Only if it is still the one being prepared.
+      if (t && t.key === saveFor.key) {
+        const sent = send({ type: 'saveServiceItem', key: t.key });
+        if (sent !== null) itemSave = { ref: sent, name: t.name };
+      }
+      return;
+    }
     // Only if the same item is still on stage, in the same Live or Prepare session; for Basic lights the id is the safe look's.
     const now = stageItem();
-    if (now && now.id === saveFor && prep.session === saveSession) {
+    if (!t && now && now.id === saveFor) {
       const sent = send({ type: 'saveItem', id: now.id });
       if (sent !== null) itemSave = { ref: sent, name: now.name };
     }
@@ -3026,7 +3433,7 @@ function closeColourEditor(keepPending = false) {
 
 /** An editor (colour or effect) or Individual lights open: it takes the whole right column, and Quick looks and Groups give way. */
 function markEditorOpen() {
-  $('colEdit').parentElement.classList.toggle('ce-open', !$('colEdit').hidden || !$('fxEdit').hidden || !$('manual').hidden);
+  $('colEdit').parentElement.classList.toggle('ce-open', !$('colEdit').hidden || !$('fxEdit').hidden || !$('manual').hidden || !$('loadSvc').hidden);
 }
 
 /** Closes whichever editor is open (colour or effect). */
@@ -4385,6 +4792,7 @@ function openManual() {
   }
   closePicker();
   closeSheet();
+  closeLoad();
   manualSel.open = true;
   $('manual').hidden = false;
   markEditorOpen();
@@ -5750,6 +6158,8 @@ function applyPhone() {
     if (picker.group) closeEditor();
     closeSheet();
     closeManual();
+    // Loading a service changes the prepared show: the iPad's.
+    closeLoad();
   } else {
     if (flash.parentElement !== $('masterFader').parentElement) $('masterFader').after(flash);
     if (tempo.parentElement !== $('quiet')) $('fadeButton').parentElement.after(tempo);

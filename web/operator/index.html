@@ -135,8 +135,14 @@
     <nav class="order" aria-label="Running order">
       <div id="orderHead" class="order-head">
         <span class="order-title">Running order</span>
-        <button id="editBtn" class="ebtn" aria-pressed="false">Edit list</button>
+        <!-- Load service (only while Planning is on in Settings) sits left of Edit list. -->
+        <span class="order-btns">
+          <button id="loadBtn" class="ebtn" aria-expanded="false" aria-controls="loadSvc" hidden>Load service</button>
+          <button id="editBtn" class="ebtn" aria-pressed="false">Edit list</button>
+        </span>
       </div>
+      <!-- The loaded service's date, time and place ("Sun 18 Oct · 08:00 · Rīga"). -->
+      <p id="svcLine" class="svc-line" hidden></p>
       <div class="cue-host grow-host"><div id="runningOrder" class="order-list"></div></div>
       <div id="orderFoot" class="order-foot">
         <button id="addSong" class="add-song">＋ Add song</button>
@@ -469,6 +475,25 @@
         <button id="mRelease" class="hbtn">Release picked</button>
       </div>
     </section>
+    <!-- Load service: the coming services of the kind chosen in Settings (and the last one), as the colour editor takes the
+         column. Load puts the chosen one's items after Basic lights; Undo takes it back. -->
+    <section id="loadSvc" class="block cedit lsvc" aria-label="Load service" hidden>
+      <div class="ce-head">
+        <button id="lsBack" class="ebtn">‹ Running order</button>
+        <div class="m-title">
+          <b>Load service</b>
+          <span id="lsType"></span>
+        </div>
+      </div>
+      <div id="lsList" class="ls-list" role="radiogroup" aria-label="Services"></div>
+      <p id="lsProblem" class="ls-problem" role="status" hidden></p>
+      <span class="grow"></span>
+      <div class="ls-foot">
+        <p class="ls-note">Replaces the songs after Basic lights with this service's items. Basic lights stays first. Undo takes it back.</p>
+        <button id="lsCancel" class="ds-btn ds-btn--quiet">Cancel</button>
+        <button id="lsLoad" class="ds-btn ds-btn--primary ls-load">Load</button>
+      </div>
+    </section>
   </main>
 
   <!-- Bottom bar: Master, Flash, Undo, Basic lights, Next and Blackout. -->
@@ -502,6 +527,8 @@
     <button id="lbClear" class="lb-btn" type="button">Clear key</button>
     <button id="lbCancel" class="lb-btn" type="button">Cancel</button>
   </div>
+  <!-- Edit list's Look ▾: another look for a song (the quick looks, the running order's, and those kept from earlier services). -->
+  <div id="lookMenu" class="fade-menu look-menu" role="menu" aria-label="Take the look of" hidden></div>
   <div id="toast" class="toast" hidden></div>
   <script type="module" src="/shared/pwa.js"></script>
   <script type="module" src="app.js"></script>

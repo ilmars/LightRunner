@@ -1,6 +1,6 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupSegments, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, serviceRows } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupSegments, newSongLookOf, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, serviceRows } from '../../packages/shared/src/index.ts';
 import type { ChannelRole, FixtureShape, GroupKind, Hangs, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, ServiceRow, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 import { keyLabel, keyPlace, keyShort } from './keynames.ts';
@@ -110,8 +110,12 @@ export interface OperatorLayout {
   rows: ServiceRow[];
   /** The loaded planning service's name and first start time (as the planner writes it), when one is loaded. */
   service?: { title: string; start: string };
-  /** Whether loading a service from the planning service is switched on (Settings), so the page knows whether to offer Load service. */
-  planning?: { enabled: boolean };
+  /**
+   * Whether loading a service from the planning service is switched on (Settings), so the page knows whether to offer Load service.
+   * While on: the name of the look new songs get a copy of (when there is one), and the remembered looks that are not in the
+   * running order now (a song's look from last month), for the menu that gives a song another look.
+   */
+  planning?: { enabled: boolean; newSongLook?: string; remembered?: { id: string; name: string }[] };
   /** Looks kept close at hand for the Quick looks tabs: with the tab, and the ids of the (light) groups each one sets. */
   quickLooks: (OperatorLook & { tab: QuickTab; groups: string[] })[];
   /** Id of the safe look (Basic lights), or null when the show has none. */
@@ -151,6 +155,20 @@ export interface KeyName {
   /** The place shortened for a small chip ("1,3"). */
   short: string;
   name: string;
+}
+
+/** The layout's `planning`: off is only `{ enabled: false }`. */
+function planningOf(show: Show): NonNullable<OperatorLayout['planning']> {
+  if (!show.settings.planning?.enabled) return { enabled: false };
+  const nameOf = (id: string) => show.looks.find((l) => l.id === id)?.name;
+  const forNew = newSongLookOf(show);
+  const order = new Set(show.operator.runningOrder);
+  const remembered: { id: string; name: string }[] = [];
+  for (const id of new Set(Object.values(show.operator.remembered ?? {}))) {
+    const name = nameOf(id);
+    if (name !== undefined && !order.has(id) && id !== show.operator.safeLook) remembered.push({ id, name });
+  }
+  return { enabled: true, ...(forNew !== undefined ? { newSongLook: nameOf(forNew)! } : {}), remembered };
 }
 
 /** `midi`: the server has MIDI support (the add-on loaded), so keys can be assigned; `connected`: controllers listened to now. */
@@ -195,7 +213,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
     runningOrder: show.operator.runningOrder.flatMap(describe),
     rows: serviceRows(show),
     ...(show.operator.service ? { service: { title: show.operator.service.title, start: show.operator.service.start } } : {}),
-    planning: { enabled: show.settings.planning?.enabled ?? false },
+    planning: planningOf(show),
     quickLooks: show.operator.quickLooks.flatMap((q) => describe(q.look).map((l) => ({
       ...l, tab: q.tab, groups: groupIds.filter((gid, k) => !smoke.has(gid) && l.entries[k] !== null),
     }))),

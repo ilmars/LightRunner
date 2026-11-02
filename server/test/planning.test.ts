@@ -160,8 +160,8 @@ test('switching Planning on in Settings is kept, checked, and sent to the pages 
   assert.equal(on.status, 200);
   assert.deepEqual(on.body.planning, { enabled: true, account: 'acc1', serviceType: 'type1' });
   await waitFor(() => t.layouts.length > before, 'the new layout');
-  assert.deepEqual(t.layouts.at(-1).planning, { enabled: true });
-  assert.deepEqual((await layoutOf(rig)).planning, { enabled: true });
+  assert.equal(t.layouts.at(-1).planning.enabled, true);
+  assert.equal((await layoutOf(rig)).planning.enabled, true);
   assert.deepEqual((await call('GET', '/api/settings')).body.planning, { enabled: true, account: 'acc1', serviceType: 'type1' });
   // Other settings leave it alone; nonsense is refused in plain words.
   assert.equal((await call('PUT', '/api/settings', { gamma: 2.4 })).body.planning.enabled, true);
@@ -320,6 +320,26 @@ test('loadService fills the running order and is one Undo step', () => withPlann
   assert.deepEqual(await orderOf(rig), order);
   t.close();
   assert.equal((await call('GET', '/api/layout')).status, 200);
+}));
+
+test('the layout names the look for new songs and the remembered looks not in the running order', () => withPlanning(async (rig) => {
+  const { tablet } = rig;
+  await enable(rig, { enabled: true, account: 'acc1', serviceType: 'type1', newSongLook: 'worship' });
+  const t = await tablet();
+  assert.deepEqual((await layoutOf(rig)).planning, { enabled: true, newSongLook: 'Worship', remembered: [] });
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  // Every song of the service is in the running order, so none is listed apart.
+  assert.deepEqual((await layoutOf(rig)).planning.remembered, []);
+  // The next service leaves Song One out: its look is kept and offered by name.
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-b' }), null);
+  const layout = await layoutOf(rig);
+  const songOne = layout.planning.remembered;
+  assert.deepEqual(songOne.map((l: any) => l.name), ['Song One']);
+  assert.ok(!layout.runningOrder.some((l: any) => l.id === songOne[0].id));
+  // Off: nothing but the switch.
+  await enable(rig, { enabled: false });
+  assert.deepEqual((await layoutOf(rig)).planning, { enabled: false });
+  t.close();
 }));
 
 test('a load frees the controller keys of the songs it takes away', () => withPlanning(async (rig) => {

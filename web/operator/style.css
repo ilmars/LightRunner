@@ -186,7 +186,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
   flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px; padding: 8px;
   background: var(--ds-panel-fill); border-radius: var(--ds-r-panel); box-shadow: var(--ds-shadow-raise);
 }
-.order-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 4px 4px 8px; }
+.order-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 4px 4px 8px; }
+/* Load service (with Planning on) and Edit list side by side, a little tighter so the title keeps its room. */
+.order-head .order-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.order-btns { flex: none; display: flex; gap: 4px; }
+.order-btns .ebtn { padding: 0 8px; }
+/* The loaded service under the title: "Sun 18 Oct · 08:00 · Rīga". */
+.svc-line { flex: none; margin: -2px 0 4px 8px; color: var(--ds-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Quiet header buttons: Edit list, Edit looks. */
 .ebtn { flex: none; min-height: 44px; padding: 0 12px; border: 1px solid var(--ds-edge); border-radius: 10px; background: transparent; color: var(--ds-muted); font-size: 13px; white-space: nowrap; }
 .ebtn:active { background: var(--ds-elevated); }
@@ -222,6 +228,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .item.prep .tag { color: var(--prep-text); }
 .item.live { border: 1px dashed rgba(148, 163, 184, 0.45); }
 .sep { flex: none; height: 1px; margin: 3px 10px; background: var(--ds-edge); }
+/* A loaded service's header ("Ievads"): a small label in spaced capitals, "look" or "no look" on the right. */
+.item--part .dots { display: none; }
+.item--part .name { color: var(--ds-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; }
+.item--part.on .name, .item--part.prep .name { color: var(--ds-text); }
+/* Items without a look (slides, a picture, Bible verses): muted, with hollow dots; the lights stay as they are. */
+.item--muted { color: var(--ds-muted); cursor: default; }
+.item--muted .dots i { box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.28); }
+.item--muted.prep { color: var(--ds-text); }
 
 /* Editing the running order: a delete button, the name as a field, a handle to drag. */
 .erow {
@@ -736,6 +750,41 @@ body:not(.phone) .rows.two-col .row .pct { grid-column: 2; grid-row: 1 / 3; alig
 .m-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .m-title b { font-size: 17px; font-weight: 600; white-space: nowrap; }
 .m-title span { color: var(--ds-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ---- Load service: the whole right column, as the editors (the mockup's Load service) ---- */
+.lsvc { gap: 10px; }
+.ls-list { flex: none; display: flex; flex-direction: column; gap: 8px; }
+/* One service: the date and time, what it has, and a quiet note ("this Sunday", "last week"). Picked: blue. */
+.ls-svc {
+  display: flex; align-items: center; gap: 14px; min-height: 60px; padding: 8px 14px; border: 0; border-radius: var(--ds-r-tile);
+  background: var(--ds-tile-fill); box-shadow: inset 0 0 0 1px var(--ds-edge); color: var(--ds-text); font: inherit; text-align: left;
+}
+.ls-svc:active { background: var(--ds-elevated); }
+.ls-svc.on { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.ls-svc:disabled { opacity: 0.55; }
+.ls-date { flex: none; width: 96px; display: flex; flex-direction: column; gap: 2px; }
+.ls-date b { font-size: 15px; font-weight: 600; white-space: nowrap; }
+.ls-date span, .ls-what span, .ls-when { color: var(--ds-muted); font-size: 12px; }
+.ls-what { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.ls-what span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ls-when { flex: none; white-space: nowrap; }
+.ls-problem { flex: none; margin: 0; color: var(--ds-muted); font-size: 13px; line-height: 1.4; }
+.ls-problem.bad { color: var(--ds-warn-text); }
+.ls-foot { flex: none; display: flex; align-items: center; gap: 10px; }
+.ls-note { flex: 1; min-width: 0; margin: 0; color: var(--ds-muted); font-size: 12px; line-height: 1.45; }
+.ls-foot .ds-btn { flex: none; }
+.ls-load { padding: 0 22px; }
+
+/* Edit list's Look ▾ and its menu (fixed on the page: the list scrolls). */
+.elook { padding: 0 8px; margin: 0 2px; }
+.erow:has(.ename:focus) .elook { display: none; }
+.look-menu {
+  position: fixed; right: auto; top: 0; left: 0; min-width: 220px; max-width: 320px; overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: var(--ds-elevated) transparent;
+}
+.look-menu button { flex: none; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lm-cap { padding: 8px 12px 2px; }
+.lm-none { padding: 10px 12px; color: var(--ds-muted); font-size: 13px; }
+
 /* Pick: All, each group, None. */
 .m-pick { flex: none; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .m-pick > .ds-caps { margin-right: 4px; }
@@ -977,6 +1026,9 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   .row { grid-template-columns: 92px minmax(120px, 160px) minmax(0, 1fr) 54px; gap: 10px; }
   .qgrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .sec-sub { display: none; }
+  /* The narrower column has no room for the title beside Load service and Edit list. */
+  .order-head:has(#loadBtn:not([hidden])) .order-title { display: none; }
+  .order-btns { margin-left: auto; }
 }
 
 /* ---- Phone remote: narrow screens (portrait phones, and phones on their side) ----
@@ -1033,7 +1085,7 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   body[data-tab="groups"] #quickLooks, body[data-tab="looks"] #details { display: none; }
 
   /* A remote doesn't change the prepared show. */
-  #editBtn, #qEditBtn, #orderFoot, #saveBtn, #pEditCur, #pAddOpen, #pAdd, #colEdit, #fxEdit, .pc.newfx, .ql.newq { display: none !important; }
+  #editBtn, #loadBtn, #loadSvc, #lookMenu, #qEditBtn, #orderFoot, #saveBtn, #pEditCur, #pAddOpen, #pAdd, #colEdit, #fxEdit, .pc.newfx, .ql.newq { display: none !important; }
   /* Individual lights needs the iPad's room for the stage plan. */
   #manualBtn, #manual { display: none !important; }
   /* Effects can be picked here, but their settings stay on the iPad; so does holding a tile to edit it. */
@@ -1043,7 +1095,7 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
 
   /* Order: the list on its own (the tab names it), big rows. */
   .order { padding: 8px; gap: 4px; }
-  .order-head, .sep { display: none; }
+  .order-head, .svc-line, .sep { display: none; }
   .order-list { gap: 4px; }
   .item { min-height: 52px; padding: 0 12px; font-size: 16px; }
 
