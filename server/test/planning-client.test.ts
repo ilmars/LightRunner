@@ -52,6 +52,8 @@ function fakePlanning(options: { cuelists?: ReturnType<typeof cuelist>[]; cues?:
     custom: { token: 'made-up-custom-token' } as unknown,
     signIn: { idToken: 'made-up-id-token' } as unknown,
     queryRefusedWhenFiltered: false,
+    /** Makes every query answer with this status. */
+    queryStatus: 0,
     queries: [] as any[],
     cuelists: options.cuelists ?? [],
   };
@@ -96,6 +98,7 @@ function fakePlanning(options: { cuelists?: ReturnType<typeof cuelist>[]; cues?:
       if (path === `/accounts/${ACCOUNT}:runQuery`) {
         const query = JSON.parse(String(init?.body)).structuredQuery;
         state.queries.push(query);
+        if (state.queryStatus) return new Response('refused', { status: state.queryStatus });
         if (query.where && state.queryRefusedWhenFiltered) return new Response('{"error":{"status":"FAILED_PRECONDITION"}}', { status: 400 });
         let found = state.cuelists;
         if (query.where) found = found.filter((d) => d.fields.service.mapValue.fields.type.stringValue === query.where.fieldFilter.value.stringValue);
@@ -178,7 +181,7 @@ test('the token is reused until it is refused', withClient(async (client, _login
   assert.equal(fake.state.refreshes, 1);
   // Without a login there is nothing to ask for.
   const bare = new PlanningClient({ loginFile: join(tmpdir(), 'light-runner-planning-nothing', 'x.json'), fetch: fake.fetchFn });
-  await assert.rejects(bare.accounts(), /run out|Paste/);
+  await assert.rejects(bare.accounts(), (e) => e instanceof PlanningError && e.message === 'Not logged in yet. Paste a login in Settings.');
 }));
 
 test('serviceTypes leaves archived ones out', withClient(async (client) => {
@@ -255,6 +258,41 @@ test('services() falls back when the filtered query is refused', withClient(asyn
     cuelist('x1', '2026-10-28T08:00:00', OTHER_TYPE),
   ],
 }));
+
+test('services() does not ask again when the first query fails for another reason', withClient(async (client, _loginFile, fake) => {
+  await client.setLogin(COOKIE);
+  for (const status of [401, 403, 500]) {
+    fake.state.queries.length = 0;
+    fake.state.queryStatus = status;
+    await assert.rejects(client.services(ACCOUNT, TYPE, new Date('2026-10-26T12:00:00')), (e) => e instanceof PlanningError && e.status === status);
+    assert.ok(fake.state.queries.length >= 1 && fake.state.queries.every((q) => q.where), 'only the filtered query, never the unfiltered one');
+  }
+  // A refused index (412) falls back like a 400.
+  fake.state.queries.length = 0;
+  fake.state.queryStatus = 412;
+  await assert.rejects(client.services(ACCOUNT, TYPE, new Date('2026-10-26T12:00:00')), (e) => e instanceof PlanningError && e.status === 412);
+  assert.equal(fake.state.queries.length, 2, '412 tries the unfiltered query too');
+}));
+
+test('a call that never answers gives up with the not-reachable message', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'light-runner-planning-'));
+  try {
+    let seen: AbortSignal | undefined;
+    const hang = ((_url: unknown, init?: RequestInit) => {
+      seen = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal!.reason)));
+    }) as typeof fetch;
+    const client = new PlanningClient({ loginFile: join(dir, 'login.json'), fetch: hang, timeoutMs: 30 });
+    await assert.rejects(client.setLogin(COOKIE), (e) => e instanceof PlanningError && e.message === "Can't reach the planning service. Check the internet connection.");
+    assert.ok(seen, 'every call carries a signal');
+    // The default is 20 seconds.
+    const slow = new PlanningClient({ loginFile: join(dir, 'login.json'), fetch: ((_u: unknown, init?: RequestInit) => { seen = init?.signal ?? undefined; return Promise.reject(new Error('stop')); }) as typeof fetch });
+    await assert.rejects(slow.setLogin(COOKIE), PlanningError);
+    assert.equal(seen!.aborted, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('a second 401 after a renewal does not loop', withClient(async (client, _loginFile, fake) => {
   await client.setLogin(COOKIE);

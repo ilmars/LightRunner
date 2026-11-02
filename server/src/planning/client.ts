@@ -24,7 +24,11 @@ const ID = /^[A-Za-z0-9_-]{1,64}$/;
 const COOKIE_VALUE = /^[\x21-\x3a\x3c-\x7e]+$/;
 
 const RUN_OUT = 'The planning login has run out. Paste a new one in Settings.';
+const NOT_LOGGED_IN = 'Not logged in yet. Paste a login in Settings.';
 const UNEXPECTED = 'The planning service sent something unexpected.';
+/** How long one call may take before it counts as not reachable. */
+const TIMEOUT_MS = 20_000;
+
 const UNREACHABLE = "Can't reach the planning service. Check the internet connection.";
 
 /** An error whose message is fit to show to people as it is. */
@@ -47,13 +51,15 @@ export class PlanningClient {
   private readonly loginFile: string;
   private readonly fetchFn: typeof fetch;
   private readonly log: (line: string) => void;
+  private readonly timeoutMs: number;
   private token: Promise<string> | undefined;
   private tokenExpires = 0;
   private firestoreSession: Promise<Firestore> | undefined;
   private firestoreExpires = 0;
 
-  constructor({ loginFile, fetch: fetchFn = fetch, log = () => {} }: { loginFile: string; fetch?: typeof fetch; log?: (line: string) => void }) {
+  constructor({ loginFile, fetch: fetchFn = fetch, log = () => {}, timeoutMs = TIMEOUT_MS }: { loginFile: string; fetch?: typeof fetch; log?: (line: string) => void; timeoutMs?: number }) {
     this.loginFile = loginFile;
+    this.timeoutMs = timeoutMs;
     this.fetchFn = fetchFn;
     this.log = log;
   }
@@ -118,8 +124,9 @@ export class PlanningClient {
         where: { fieldFilter: { field: { fieldPath: 'service.type' }, op: 'EQUAL', value: { stringValue: type } } },
       });
     } catch (e) {
-      if (!(e instanceof PlanningError)) throw e;
-      // Most likely a missing index: take the newest ones and pick the type here.
+      // Only a 400 or 412 says the index is missing; a run-out login or a dead network would fail the second query too.
+      if (!(e instanceof PlanningError) || (e.status !== 400 && e.status !== 412)) throw e;
+      // Take the newest ones and pick the type here.
       docs = (
         await this.query(parent, {
           from: [{ collectionId: 'cuelists' }],
@@ -207,7 +214,7 @@ export class PlanningClient {
 
   private async renewFromFile(): Promise<string> {
     const refresh = this.readLogin().refresh;
-    if (!refresh) throw new PlanningError(RUN_OUT);
+    if (!refresh) throw new PlanningError(NOT_LOGGED_IN);
     const got = await this.renew(refresh);
     if (!got) throw new PlanningError(RUN_OUT);
     // The service may hand out a new refresh cookie; keep it so the login does not wear out.
@@ -288,7 +295,7 @@ export class PlanningClient {
 
   private async send(url: string, init: RequestInit): Promise<Response> {
     try {
-      return await this.fetchFn(url, init);
+      return await this.fetchFn(url, { ...init, signal: AbortSignal.timeout(this.timeoutMs) });
     } catch {
       throw new PlanningError(UNREACHABLE);
     }
