@@ -227,7 +227,7 @@ If the church plans its Sunday in a planning service, Light Runner can load that
 
 What a song's look is: a song remembers its look, so a song sung again comes back with the look it had last time. A new song gets a copy of the one you chose in step 4, at the tempo it was planned with. Change a song's look the way you change any song (start it, change the stage, hold **Save to <song>**), or in **Edit list** press **Look ▾** on the song to give it a copy of another look.
 
-Parts of the service (such as the welcome or the sermon), slides and pictures can have a look too: in **Prepare**, tap the row, set the draft as you want it and hold **Save to <name>**. Light Runner remembers it by name for the next service. Bible verses and blanks cannot have one of their own: verses leave the lights as they are, and a blank uses its part's look.
+Parts of the service (such as the welcome or the sermon), slides and pictures can have a look too: in **Prepare**, tap the row, set the draft as you want it and hold **Save to <name>**. Light Runner remembers it by name for the next service. Bible verses and blanks cannot have one of their own: tapping or reaching a verse or a blank leaves the lights as they are.
 
 ## 12. Check before Sunday
 
