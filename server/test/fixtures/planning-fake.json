@@ -1,0 +1,245 @@
+{
+  "accounts": [
+    {
+      "id": "account-1",
+      "name": "Rīgas draudze"
+    }
+  ],
+  "types": [
+    {
+      "id": "type-riga-sunday",
+      "name": "Rīga - Svētdienas Dievkalpojums"
+    },
+    {
+      "id": "type-youth",
+      "name": "Jauniešu vakars"
+    }
+  ],
+  "services": [
+    {
+      "id": "5e1a0c1a-1018-4000-8000-000000000018",
+      "type": "type-riga-sunday",
+      "title": "Rīga - Svētdienas Dievkalpojums",
+      "start": "2026-10-18T08:00:00",
+      "items": [
+        {
+          "key": "c18-01",
+          "kind": "header",
+          "name": "Ievads"
+        },
+        {
+          "key": "c18-02",
+          "kind": "song",
+          "name": "Klints uz mūžiem (Nav tādas klints)",
+          "songId": "00000001-aaaa-4bbb-8ccc-000000000001",
+          "tempo": 141
+        },
+        {
+          "key": "c18-03",
+          "kind": "song",
+          "name": "Slava Tev, Jēzu",
+          "songId": "00000002-aaaa-4bbb-8ccc-000000000002",
+          "tempo": 96
+        },
+        {
+          "key": "c18-04",
+          "kind": "header",
+          "name": "Slavēšana"
+        },
+        {
+          "key": "c18-05",
+          "kind": "song",
+          "name": "Lielais Dievs",
+          "songId": "00000003-aaaa-4bbb-8ccc-000000000003",
+          "tempo": 120
+        },
+        {
+          "key": "c18-06",
+          "kind": "song",
+          "name": "Slava Tev, Jēzu",
+          "songId": "00000002-aaaa-4bbb-8ccc-000000000002",
+          "tempo": 96
+        },
+        {
+          "key": "c18-07",
+          "kind": "blank",
+          "name": ""
+        },
+        {
+          "key": "c18-08",
+          "kind": "slides",
+          "name": "Draudzes Nedēļas Aktivitātes"
+        },
+        {
+          "key": "c18-09",
+          "kind": "header",
+          "name": "Vārds"
+        },
+        {
+          "key": "c18-v1",
+          "kind": "verse",
+          "name": "Jāņa 3:1"
+        },
+        {
+          "key": "c18-v2",
+          "kind": "verse",
+          "name": "Jāņa 3:2"
+        },
+        {
+          "key": "c18-v3",
+          "kind": "verse",
+          "name": "Jāņa 3:3"
+        },
+        {
+          "key": "c18-v4",
+          "kind": "verse",
+          "name": "Jāņa 3:4"
+        },
+        {
+          "key": "c18-v5",
+          "kind": "verse",
+          "name": "Jāņa 3:5"
+        },
+        {
+          "key": "c18-v6",
+          "kind": "verse",
+          "name": "Jāņa 3:6"
+        },
+        {
+          "key": "c18-v7",
+          "kind": "verse",
+          "name": "Jāņa 3:7"
+        },
+        {
+          "key": "c18-v8",
+          "kind": "verse",
+          "name": "Jāņa 3:8"
+        },
+        {
+          "key": "c18-v9",
+          "kind": "verse",
+          "name": "Jāņa 3:9"
+        },
+        {
+          "key": "c18-v10",
+          "kind": "verse",
+          "name": "Jāņa 3:10"
+        },
+        {
+          "key": "c18-v11",
+          "kind": "verse",
+          "name": "Jāņa 3:11"
+        },
+        {
+          "key": "c18-v12",
+          "kind": "verse",
+          "name": "Jāņa 3:12"
+        },
+        {
+          "key": "c18-v13",
+          "kind": "verse",
+          "name": "Jāņa 3:13"
+        },
+        {
+          "key": "c18-v14",
+          "kind": "verse",
+          "name": "Jāņa 3:14"
+        },
+        {
+          "key": "c18-v15",
+          "kind": "verse",
+          "name": "Jāņa 3:15"
+        },
+        {
+          "key": "c18-v16",
+          "kind": "verse",
+          "name": "Jāņa 3:16"
+        },
+        {
+          "key": "c18-v17",
+          "kind": "verse",
+          "name": "Jāņa 3:17"
+        },
+        {
+          "key": "c18-v18",
+          "kind": "verse",
+          "name": "Jāņa 3:18"
+        },
+        {
+          "key": "c18-10",
+          "kind": "media",
+          "name": "Svētdienas bilde"
+        },
+        {
+          "key": "c18-11",
+          "kind": "header",
+          "name": "Beigas"
+        },
+        {
+          "key": "c18-12",
+          "kind": "song",
+          "name": "Mīlestības dziesma",
+          "songId": "00000004-aaaa-4bbb-8ccc-000000000004",
+          "tempo": 78
+        }
+      ]
+    },
+    {
+      "id": "5e1a0c1a-1025-4000-8000-000000000025",
+      "type": "type-riga-sunday",
+      "title": "Rīga - Svētdienas Dievkalpojums",
+      "start": "2026-10-25T08:00:00",
+      "items": [
+        {
+          "key": "c25-01",
+          "kind": "header",
+          "name": "Ievads"
+        },
+        {
+          "key": "c25-02",
+          "kind": "song",
+          "name": "Klints uz mūžiem (Nav tādas klints)",
+          "songId": "00000001-aaaa-4bbb-8ccc-000000000001",
+          "tempo": 141
+        },
+        {
+          "key": "c25-03",
+          "kind": "song",
+          "name": "Tēvs mūsu",
+          "songId": "00000005-aaaa-4bbb-8ccc-000000000005"
+        },
+        {
+          "key": "c25-04",
+          "kind": "header",
+          "name": "Slavēšana"
+        },
+        {
+          "key": "c25-05",
+          "kind": "song",
+          "name": "Slava Tev, Jēzu",
+          "songId": "00000002-aaaa-4bbb-8ccc-000000000002",
+          "tempo": 96
+        },
+        {
+          "key": "c25-06",
+          "kind": "song",
+          "name": "Augstākais Dievs",
+          "songId": "00000006-aaaa-4bbb-8ccc-000000000006",
+          "tempo": 110
+        },
+        {
+          "key": "c25-07",
+          "kind": "header",
+          "name": "Beigas"
+        }
+      ]
+    },
+    {
+      "id": "5e1a0c1a-1108-4000-8000-000000000108",
+      "type": "type-riga-sunday",
+      "title": "Rīga - Svētdienas Dievkalpojums",
+      "start": "2026-11-08T08:00:00",
+      "items": []
+    }
+  ]
+}

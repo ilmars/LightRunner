@@ -588,3 +588,20 @@ test('itemCopyLook gives a song another look\'s groups, keeps its name and is on
   assert.deepEqual((await showOf(rig)).operator, loaded.operator);
   t.close();
 }));
+
+test('FakePlanning.fromFile reads the planning-fake.json fixture the pages are checked with', async () => {
+  const fake = FakePlanning.fromFile(join(root, 'server/test/fixtures/planning-fake.json'));
+  assert.equal(fake.accountList.length, 1);
+  assert.equal(fake.types.length, 2);
+  assert.ok(fake.types.some((t) => t.name === 'Rīga - Svētdienas Dievkalpojums'));
+  assert.deepEqual(fake.plannedServices.map((s) => s.start.slice(0, 10)), ['2026-10-18', '2026-10-25', '2026-11-08']);
+  assert.equal(fake.plannedServices[2]!.items.length, 0, '8 Nov is not planned yet');
+  const sunday = fake.plannedServices[0]!;
+  assert.equal(sunday.items.filter((i) => i.kind === 'verse').length, 18);
+  const songs = sunday.items.filter((i) => i.kind === 'song');
+  assert.ok(new Set(songs.map((i) => i.songId)).size < songs.length, 'a song is planned twice');
+  const shared = new Set(fake.plannedServices[1]!.items.flatMap((i) => (i.songId ? [i.songId] : [])));
+  assert.ok(songs.some((i) => shared.has(i.songId!)), '25 Oct has songs from 18 Oct');
+  const coming = await fake.services('account-1', 'type-riga-sunday', new Date('2026-10-20T12:00:00'));
+  assert.deepEqual(coming.map((s) => s.start.slice(0, 10)), ['2026-10-25', '2026-11-08', '2026-10-18']);
+});
