@@ -721,7 +721,8 @@ function showLookMenu(what) {
   if (!what) return;
   what.button.setAttribute('aria-expanded', 'true');
   // The quick looks, then the running order's other looks, then those kept from earlier services; each look once.
-  const seen = new Set([what.id]);
+  // Basic lights is no source: it is all still, and copying it would empty the song.
+  const seen = new Set([what.id, layout.basicLights]);
   const nodes = [];
   const section = (title, looks) => {
     const fresh = looks.filter((l) => !seen.has(l.id));
@@ -1970,7 +1971,9 @@ function renderDetails() {
   $('manualBtn').classList.toggle('unavail', prep.on);
   $('manualBtn').setAttribute('aria-disabled', String(prep.on));
   $('manualBtn').title = prep.on ? MANUAL_LIVE_ONLY : 'Set single lights';
-  if (item) $('backBtn').setAttribute('aria-label', `Back to ${item.name} as saved`);
+  // Not while a header or slides row is the Prepare target: the draft is going there, not to the song on stage.
+  if (item && !target) $('backBtn').setAttribute('aria-label', `Back to ${item.name} as saved`);
+  else $('backBtn').removeAttribute('aria-label');
   if (item || target) $('saveBtn').querySelector('.label').replaceChildren(el('span', null, `Save to ${(target ?? item).name}`), el('small', null, 'hold'));
   const now = performance.now();
   for (const row of detailRows) {

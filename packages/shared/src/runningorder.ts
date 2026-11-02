@@ -605,12 +605,13 @@ export function setItemTempo(show: Show, itemId: string, bpm: number): Show {
 /**
  * Gives a running-order item a copy of another look's groups (and its tempo, when it has one): "pick another look
  * from a menu". The item keeps its name, id and remembered key, and the look it copied is untouched.
- * Basic lights is set by Save alone.
+ * Basic lights is set by Save alone, and is no source either: its groups are all still, which would empty the song.
  */
 export function copyLookToItem(show: Show, itemId: string, fromId: string): Show {
   const out = structuredClone(show);
   const target = itemLook(out, itemId);
   if (itemId === out.operator.safeLook) throw new Error('Basic lights is set by Save.');
+  if (fromId === out.operator.safeLook) throw new Error("Basic lights can't be copied: use a quick look.");
   const from = lookIn(out, fromId);
   target.groups = structuredClone(from.groups);
   if (from.tempo !== undefined) target.tempo = from.tempo;

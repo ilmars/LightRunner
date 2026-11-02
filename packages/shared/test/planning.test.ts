@@ -519,6 +519,7 @@ test('copyLookToItem refuses Basic lights, an unknown look and an item outside t
   const loaded = loadService(rig(), planned([song('a', 'A')]));
   const a = loaded.operator.runningOrder[1]!;
   assert.throws(() => copyLookToItem(loaded, safeOf(loaded), a), { message: 'Basic lights is set by Save.' });
+  assert.throws(() => copyLookToItem(loaded, a, safeOf(loaded)), { message: "Basic lights can't be copied: use a quick look." });
   assert.throws(() => copyLookToItem(loaded, a, 'nope'), { message: '"nope" isn\'t in the show' });
   assert.throws(() => copyLookToItem(loaded, loaded.operator.quickLooks[0]!.look, a), /only running-order items/);
 });
