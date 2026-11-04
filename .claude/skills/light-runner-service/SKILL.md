@@ -45,7 +45,7 @@ The lights are real and people may be in the room, so:
 - **Lightkey and Light Runner must never send to the node at the same time.** Light Runner takes over with Send DMX on only after Lightkey's output is off; Lightkey takes back after Send DMX is off.
 - **Before building or a big change**, have them press **Export show file** in Settings and keep the file; **Backups** in Settings can undo a save. Save Patch and Settings changes only when they say so.
 - **Build with Send DMX off** (or the Light Runner window's Test mode) so a half-built show never reaches real lights; Send DMX on only for a final check, with Lightkey off.
-- **Never edit `show.json`, `data/` or a show file by hand**, and don't change the show through the API yourself for them: every change is a button on Patch, Settings or the operator page. **Open a show file…** replaces the whole show; **Compare with a file…** takes only what they tick.
+- **Never edit `show.json`, `data/` or a show file by hand.** When they are doing it themselves, every change is a button on Patch, Settings or the operator page. When they ask you to do it for them ("make it moody", "patch these lights", "make a song for the sermon"), use the `light-runner-control` skill: it changes the show and the stage through the running server, the way the pages do. **Open a show file…** replaces the whole show; **Compare with a file…** takes only what they tick.
 - **The PIN** is the programmer's; never print it, ask for it in chat, or put it in a command. If they need Settings, they type it on the page.
 
 ## Things people often get wrong
