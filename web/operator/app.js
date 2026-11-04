@@ -837,8 +837,8 @@ function renderServiceLine() {
   const s = layout?.service;
   const d = s ? planDate(s.start) : null;
   $('svcLine').hidden = !d;
-  // The place is the service type's name up to " - " ("Rīga - Svētdienas Dievkalpojums").
-  if (d) $('svcLine').textContent = [d.date, d.time, s.title.split(' - ')[0].trim()].filter(Boolean).join(' · ');
+  // The place: the service type's name up to its dash ("Rīga - Svētdienas Dievkalpojums"), worked out by the server.
+  if (d) $('svcLine').textContent = [d.date, d.time, s.place ?? s.title.split(' - ')[0].trim()].filter(Boolean).join(' · ');
 }
 
 function renderLoadButton() {
@@ -1466,7 +1466,9 @@ function renderTempo() {
 function lookName(id) {
   if (id === 'blackout') return 'Blackout';
   if (id === 'safe') return layout.runningOrder.find(isBasic)?.name ?? 'Basic lights';
-  return layout.runningOrder.find((i) => i.id === id)?.name ?? layout.looks.find((l) => l.id === id)?.name ?? (id ? 'Deleted item' : '—');
+  // A look from an earlier service is kept (remembered) but not in this service's order: still its own name.
+  return layout.runningOrder.find((i) => i.id === id)?.name ?? layout.looks.find((l) => l.id === id)?.name
+    ?? layout.planning?.remembered?.find((l) => l.id === id)?.name ?? (id ? 'Deleted item' : '—');
 }
 
 // ---- The problem pill: tap it for what is wrong, who to call and what still works ----

@@ -233,7 +233,7 @@ test('the layout carries the running-order rows and the loaded service', async (
     loaded.settings.planning = { enabled: true }; // the rows and the service show only while Planning is on
     assert.equal((await api(app, 'PUT', '/api/show', loaded)).status, 200);
     const { body: layout } = await api(app, 'GET', '/api/layout');
-    assert.deepEqual(layout.service, { title: 'Sunday', start: '2026-10-25T08:00:00' });
+    assert.deepEqual(layout.service, { title: 'Sunday', start: '2026-10-25T08:00:00', place: 'Sunday' });
     // Basic lights, then the kept Sermon and Midweek calm, then the service.
     assert.deepEqual(layout.rows.map((r: any) => r.kind), ['look', 'look', 'look', 'header', 'look', 'verses']);
     assert.deepEqual(layout.rows[0], { kind: 'look', look: layout.basicLights, header: false });
