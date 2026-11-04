@@ -13,8 +13,8 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, rememberKey,
-  applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,  type OflFixture, type Pick, type PlannedService, type Scope,
+  BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, rememberKey,
+  applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
   BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
   pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
@@ -1022,6 +1022,7 @@ export class App {
       case 'itemTempo': next = setItemTempo(before, cmd.item, cmd.bpm); break;
       case 'itemQuickLook': next = applyQuickLookToItem(before, cmd.item, cmd.look); break;
       case 'itemCopyLook': next = copyLookToItem(before, cmd.item, cmd.from); break;
+      case 'keepItem': next = setKept(before, cmd.id, cmd.kept); break;
       // A colour doesn't depend on the stage, so it is fine during Blackout.
       case 'addColour': next = addColour(before, cmd).show; break;
       case 'editColour': next = editColour(before, cmd).show; break;
@@ -1908,9 +1909,9 @@ export class App {
         // itself; the file's output settings (the node's address and so on) are taken.
         // Controller keys are assigned while Patch may be open, so its copy keeps the live ones too, and so do the timelines
         // (they are made on the Timeline page). The loaded service and the looks the planner remembers change when an
-        // operator loads a service, so Patch keeps the live ones as well.
+        // operator loads a service, and the kept rows when one taps Keep, so Patch keeps the live ones as well.
         show = fromPatch
-          ? { ...show, operator: { ...show.operator, controller: this.show.operator.controller, service: this.show.operator.service, remembered: this.show.operator.remembered }, settings: this.show.settings, timelines: this.show.timelines }
+          ? { ...show, operator: { ...show.operator, controller: this.show.operator.controller, service: this.show.operator.service, remembered: this.show.operator.remembered, kept: this.show.operator.kept }, settings: this.show.settings, timelines: this.show.timelines }
           : withIgnored({ ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash, outputEnabled: this.show.settings.outputEnabled } }, this.show.operator.controller?.ignored);
         await this.setShow(show);
         this.log(fromPatch ? 'Patch saved' : `Imported show "${show.name}"`);
@@ -2409,7 +2410,7 @@ export function showRevision(show: Show): string {
  */
 function ensureShow(show: Show): Show {
   // A key for a song, quick look or group that is gone is freed.
-  return pruneKeys(ensureGroupColours(ensureEffects(ensurePlanning(ensureBasicLights(ensureRunningOrder(show))))));
+  return pruneKeys(ensureGroupColours(ensureEffects(ensurePlanning(ensureKept(ensureBasicLights(ensureRunningOrder(show)))))));
 }
 
 /**

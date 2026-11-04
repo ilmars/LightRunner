@@ -300,6 +300,11 @@ export const OperatorLayout = z.object({
   manualForOperators: z.boolean().default(false),
   /** The service's looks in order, as look ids. The first is always the safe look ("Basic lights"). */
   runningOrder: z.array(id).default([]),
+  /**
+   * Running-order looks a loaded service never replaces (besides Basic lights, which always stays), as look ids.
+   * Absent in older shows: ensureKept then keeps Sermon and Midweek calm, the first running order's own rows.
+   */
+  kept: z.array(id).optional(),
   /** Looks offered under "Quick looks", each on a tab. */
   quickLooks: z.array(QuickLook).default([]),
   /** The ready-made effects have been added once (see ensureEffects); they are never added again. */
@@ -551,6 +556,7 @@ export function checkReferences(show: Show): string[] {
   for (const l of show.operator.looks) if (!looks.has(l)) problems.push(`operator layout lists unknown look "${l}"`);
   for (const g of show.operator.groups) if (!groups.has(g)) problems.push(`operator layout lists unknown group "${g}"`);
   for (const l of show.operator.runningOrder) if (!looks.has(l)) problems.push(`running order lists unknown look "${l}"`);
+  for (const l of show.operator.kept ?? []) if (!looks.has(l)) problems.push(`kept rows list unknown look "${l}"`);
   for (const q of show.operator.quickLooks) if (!looks.has(q.look)) problems.push(`quick looks list unknown look "${q.look}"`);
   if (show.operator.safeLook && !looks.has(show.operator.safeLook)) problems.push(`Safe uses unknown look "${show.operator.safeLook}"`);
   return problems;

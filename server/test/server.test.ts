@@ -234,9 +234,10 @@ test('the layout carries the running-order rows and the loaded service', async (
     assert.equal((await api(app, 'PUT', '/api/show', loaded)).status, 200);
     const { body: layout } = await api(app, 'GET', '/api/layout');
     assert.deepEqual(layout.service, { title: 'Sunday', start: '2026-10-25T08:00:00' });
-    assert.deepEqual(layout.rows.map((r: any) => r.kind), ['look', 'header', 'look', 'verses']);
+    // Basic lights, then the kept Sermon and Midweek calm, then the service.
+    assert.deepEqual(layout.rows.map((r: any) => r.kind), ['look', 'look', 'look', 'header', 'look', 'verses']);
     assert.deepEqual(layout.rows[0], { kind: 'look', look: layout.basicLights, header: false });
-    assert.deepEqual(layout.rows[3].keys, ['v1', 'v2']);
+    assert.deepEqual(layout.rows[5].keys, ['v1', 'v2']);
     assert.deepEqual(layout.rows.filter((r: any) => r.kind === 'look').map((r: any) => r.look), layout.runningOrder.map((l: any) => l.id));
 
     // WebSocket clients get the same rows in the layout they are sent.

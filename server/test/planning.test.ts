@@ -300,10 +300,10 @@ test('loadService fills the running order and is one Undo step', () => withPlann
   assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
 
   const layout = await layoutOf(rig);
-  assert.deepEqual(layout.runningOrder.map((l: any) => l.name), ['Basic lights', 'Song One', 'Song Two']);
-  assert.equal(layout.runningOrder[1].tempo, 90);
+  assert.deepEqual(layout.runningOrder.map((l: any) => l.name), ['Basic lights', 'Sermon', 'Midweek calm', 'Song One', 'Song Two']);
+  assert.equal(layout.runningOrder[3].tempo, 90);
   assert.deepEqual(layout.service, { title: 'Sunday service', start: '2099-01-04T08:00:00' });
-  assert.equal(layout.rows.filter((r: any) => r.kind === 'look').length, 3);
+  assert.equal(layout.rows.filter((r: any) => r.kind === 'look').length, 5);
   assert.ok(layout.rows.some((r: any) => r.kind === 'verses'));
   assert.equal(layout.runningOrder[0].id, order[0], 'Basic lights stays first');
 
@@ -315,7 +315,7 @@ test('loadService fills the running order and is one Undo step', () => withPlann
   assert.deepEqual(back.rows, rows);
   // ... and the show can be loaded again afterwards (a load leaves the Undo list in order).
   assert.equal(await t.command({ type: 'loadService', id: 'svc-b' }), null);
-  assert.deepEqual(await names(rig), ['Basic lights', 'Song Two', 'Song Three']);
+  assert.deepEqual(await names(rig), ['Basic lights', 'Sermon', 'Midweek calm', 'Song Two', 'Song Three']);
   assert.equal(await t.command({ type: 'undo' }), null);
   assert.deepEqual(await orderOf(rig), order);
   t.close();
@@ -448,7 +448,7 @@ test('loading never changes the lights', () => withPlanning(async (rig) => {
   assert.equal(dark.look, 'blackout');
   assert.equal(await t.command({ type: 'loadService', id: 'svc-b' }), null);
   await sleep(150);
-  assert.deepEqual(await names(rig), ['Basic lights', 'Song Two', 'Song Three']);
+  assert.deepEqual(await names(rig), ['Basic lights', 'Sermon', 'Midweek calm', 'Song Two', 'Song Three']);
   assert.deepEqual({ look: app.state!.look, ...lights(rig) }, dark);
   t.close();
 }));
@@ -470,7 +470,7 @@ test('a load in Prepare (a draft) still loads, and the draft carries on', () => 
   const t = await tablet();
   assert.equal(await t.command({ type: 'blindStart' }), null);
   assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
-  assert.deepEqual(await names(rig), ['Basic lights', 'Song One', 'Song Two']);
+  assert.deepEqual(await names(rig), ['Basic lights', 'Sermon', 'Midweek calm', 'Song One', 'Song Two']);
   assert.equal(await t.command({ type: 'blindEnd' }), null);
   t.close();
 }));
@@ -529,7 +529,7 @@ test('saveServiceItem gives a header or slides a look, as one Undo step', () => 
   assert.equal(lookIn(show, slides.look).name, 'Welcome');
   assert.equal(show.operator.remembered['item:Welcome'], slides.look);
   assert.deepEqual(show.operator.runningOrder, [...loaded.operator.runningOrder, slides.look], 'after the last song, its anchor');
-  assert.deepEqual((await layoutOf(rig)).runningOrder.map((l: any) => l.name), ['Basic lights', 'Song One', 'Song Two', 'Welcome']);
+  assert.deepEqual((await layoutOf(rig)).runningOrder.map((l: any) => l.name), ['Basic lights', 'Sermon', 'Midweek calm', 'Song One', 'Song Two', 'Welcome']);
   // The stage is untouched by it.
   assert.equal(app.state!.look, song);
 
@@ -589,7 +589,7 @@ test('saveServiceItem from a tablet in Prepare saves the draft, not the stage', 
   assert.equal(entry(made, 'back-wall').preset, 'back-amber');
   assert.equal(entry(made, 'audience').level, 0.3);
   assert.equal(made.tempo, 91);
-  assert.equal(show.operator.runningOrder[1], header.look, 'after Basic lights, as no look is above the header');
+  assert.equal(show.operator.runningOrder[3], header.look, 'after Basic lights and the kept rows, as no look is above the header');
 
   // The stage keeps what it ran.
   await sleep(150);
@@ -605,7 +605,7 @@ test('itemCopyLook gives a song another look\'s groups, keeps its name and is on
   const t = await tablet();
   assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
   const loaded = await showOf(rig);
-  const [basic, one, two] = await orderOf(rig) as [string, string, string];
+  const [basic, , , one, two] = await orderOf(rig) as [string, string, string, string, string];
   const quick = loaded.operator.quickLooks.at(-1).look as string;
   assert.notDeepEqual(lookIn(loaded, quick).groups, lookIn(loaded, one).groups);
 
@@ -628,6 +628,42 @@ test('itemCopyLook gives a song another look\'s groups, keeps its name and is on
   assert.equal(await t.command({ type: 'itemCopyLook', item: one, from: 'no-such-look' }), '"no-such-look" isn\'t in the show');
   assert.match((await t.command({ type: 'itemCopyLook', item: one }))!, /^invalid command/);
   assert.deepEqual((await showOf(rig)).operator, loaded.operator);
+  t.close();
+}));
+
+test('kept rows: the layout lists them, Next skips them once a service is loaded, and keepItem is one Undo step', () => withPlanning(async (rig) => {
+  const { tablet } = rig;
+  const t = await tablet();
+  const order = await orderOf(rig);
+  const nameOf = async (id: string) => (await layoutOf(rig)).runningOrder.find((l: any) => l.id === id)?.name;
+  const [sermon, midweek] = [order.at(-2)!, order.at(-1)!];
+  assert.deepEqual([await nameOf(sermon), await nameOf(midweek)], ['Sermon', 'Midweek calm']);
+  let layout = await layoutOf(rig);
+  assert.deepEqual(layout.kept, [sermon, midweek]);
+  // Planning off: Next goes through every row, as before.
+  assert.deepEqual(layout.skip, []);
+
+  await enable(rig);
+  assert.deepEqual((await layoutOf(rig)).skip, [], 'nothing skipped before a service is loaded');
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  layout = await layoutOf(rig);
+  assert.deepEqual(layout.skip, [sermon, midweek]);
+  const one = layout.runningOrder[3].id;
+  assert.deepEqual(layout.fromPlan, [one, layout.runningOrder[4].id]);
+  assert.equal(await t.command({ type: 'safe' }), null);
+  assert.equal(await t.command({ type: 'look', id: sermon }), null);
+  await waitFor(() => rig.app.state?.look === sermon, 'Sermon on stage');
+  // Next from a kept row starts the service from its top (the APC's Next uses the same rule).
+  assert.equal((await rig.call('POST', '/api/next')).status, 200);
+  await waitFor(() => rig.app.state?.look === one, 'the first song');
+
+  // Song One comes from the plan: it can't be kept. Sermon can be unkept, as one Undo step.
+  assert.match((await t.command({ type: 'keepItem', id: one, kept: true }))!, /comes from the planned service/);
+  assert.equal(await t.command({ type: 'keepItem', id: sermon, kept: false }), null);
+  assert.deepEqual((await layoutOf(rig)).kept, [midweek]);
+  assert.equal(await t.command({ type: 'undo' }), null);
+  assert.deepEqual((await layoutOf(rig)).kept, [sermon, midweek]);
+  assert.equal(await t.command({ type: 'keepItem', id: order[0], kept: false }), 'Basic lights always stays.');
   t.close();
 }));
 

@@ -119,19 +119,31 @@ export type ServiceRow =
   /** A run of one or more consecutive verses. */
   | { kind: 'verses'; keys: string[]; names: string[] };
 
+/** The last row of the running order's top: Basic lights and the kept rows straight after it. */
+function topOf(show: Show): string {
+  const basic = show.operator.safeLook ?? show.operator.runningOrder[0] ?? '';
+  const kept = new Set([basic, ...(show.operator.kept ?? [])]);
+  let last = basic;
+  for (const id of show.operator.runningOrder) {
+    if (!kept.has(id)) break;
+    last = id;
+  }
+  return last;
+}
+
 /**
  * Where each service item sits in the order. An item "owns" its look's row when it is the first item with a
- * look that is in the running order; every other item follows the nearest owner above it (Basic lights when
- * none). A repeat of a song never owns, so what follows it stays with the song's first place.
+ * look that is in the running order; every other item follows the nearest owner above it (when none, the last of
+ * Basic lights and the kept rows at the top). A repeat of a song never owns, so what follows it stays with the
+ * song's first place.
  */
 function placeItems(show: Show): { owner: boolean[]; anchor: string[] } {
   const items = show.operator.service?.items ?? [];
   const order = new Set(show.operator.runningOrder);
-  const basic = show.operator.safeLook ?? show.operator.runningOrder[0] ?? '';
-  const seen = new Set<string>();
   const owner: boolean[] = [];
   const anchor: string[] = [];
-  let current = basic;
+  let current = topOf(show);
+  const seen = new Set<string>();
   for (const item of items) {
     anchor.push(current);
     const owns = item.look !== undefined && order.has(item.look) && !seen.has(item.look);
@@ -146,11 +158,11 @@ function placeItems(show: Show): { owner: boolean[]; anchor: string[] } {
 
 /**
  * The look id of the running-order row a service item (by its key) sits after: the nearest service item above
- * it whose look is in the running order, else Basic lights.
+ * it whose look is in the running order, else the last of Basic lights and the kept rows at the top.
  */
 export function anchorOf(show: Show, key: string): string {
   const at = (show.operator.service?.items ?? []).findIndex((i) => i.key === key);
-  return at < 0 ? show.operator.safeLook ?? show.operator.runningOrder[0] ?? '' : placeItems(show).anchor[at]!;
+  return at < 0 ? topOf(show) : placeItems(show).anchor[at]!;
 }
 
 /**

@@ -242,6 +242,8 @@ function stripBlocks(colours) {
 // ---- Running order ----
 
 const isBasic = (item) => item.id === layout?.basicLights;
+/** A kept row: a load never replaces it (Basic lights always stays, so it is not one of these). */
+const isKept = (item) => !!layout?.kept?.includes(item.id);
 
 /** The command that starts an item: Basic lights is the show's Safe look; every other item is a look. */
 const startCommand = (item) => (isBasic(item) ? { type: 'safe' } : { type: 'look', id: item.id });
@@ -498,8 +500,11 @@ function buildEditRows(order) {
     grip.setAttribute('role', 'button');
     grip.setAttribute('aria-label', 'Drag to move');
     node.append(del, input);
-    // With Planning on: Look ▾ gives the song another look (a quick look, another song's, one from an earlier service).
-    if (planningOn()) node.append(lookButton(item.id));
+    // A row of the loaded service, with Planning on: Look ▾ gives the song another look (a quick look, another song's,
+    // one from an earlier service). Any other row: Keep, so a load never replaces it.
+    const planned = layout.fromPlan?.includes(item.id);
+    if (planned && planningOn()) node.append(lookButton(item.id));
+    else if (!planned) node.append(keepButton(item));
     if (showsChip({ kind: 'song', id: item.id })) node.append(keyChip({ kind: 'song', id: item.id }, item.name));
     node.append(grip);
     const row = { id: item.id, name: item.name, el: node, input, del };
@@ -709,6 +714,18 @@ function lookButton(id) {
   // A tap on it doesn't reach the row (no drag, no rename).
   b.addEventListener('pointerdown', (ev) => ev.stopPropagation());
   b.addEventListener('click', () => showLookMenu(lookMenuFor?.id === id ? null : { id, button: b }));
+  return b;
+}
+
+/** Keep, lit while the row is kept: a tap keeps it through a load, or lets the next load replace it. */
+function keepButton(item) {
+  const kept = isKept(item);
+  const b = el('button', kept ? 'ebtn ekeep on' : 'ebtn ekeep', 'Keep');
+  b.type = 'button';
+  b.setAttribute('aria-pressed', String(kept));
+  b.setAttribute('aria-label', `Keep ${item.name} when a service is loaded`);
+  b.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+  b.addEventListener('click', () => send({ type: 'keepItem', id: item.id, kept: !kept }));
   return b;
 }
 
@@ -965,9 +982,9 @@ $('lsLoad').addEventListener('click', () => {
 // next key pressed (it waits up to 10 s, one page at a time); the bar at the bottom says so and has Clear and Cancel.
 // The key follows the song, not its place. Keys always act on the real stage.
 
-/** What the running-order Edit rows' Key chips (and Look ▾, with Planning on) were built from (rebuilt when it changes). */
+/** What the running-order Edit rows' Key chips, Keep and Look ▾ were built from (rebuilt when it changes). */
 let editKeys = '';
-const keysShown = () => JSON.stringify([layout?.keys ?? null, planningOn()]);
+const keysShown = () => JSON.stringify([layout?.keys ?? null, planningOn(), layout?.kept ?? [], layout?.fromPlan ?? []]);
 /**
  * A Key chip shows while a controller is listened to, or when the song or quick look already has a key (so it can
  * be seen and cleared); never without MIDI support.
@@ -1193,15 +1210,17 @@ function stageIndex(s = shownState()) {
 /**
  * The item after the one on stage; the first song when nothing is on stage.
  * After Blackout the item before it still counts, so Next carries on the service.
- * Always the real stage's: Next stays live in Prepare.
+ * Always the real stage's: Next stays live in Prepare. The kept rows of a loaded service are passed over
+ * (`layout.skip`, as the controllers' Next does).
  */
 function nextItem() {
   const order = layout?.runningOrder ?? [];
   if (!order.length) return null;
+  const skip = new Set(layout.skip ?? []);
   let k = stageIndex(state);
   if (k < 0 && state?.lastLook) k = order.findIndex((i) => i.id === state.lastLook);
-  if (k < 0) return order.find((i) => !isBasic(i)) ?? null;
-  return order[k + 1] ?? null;
+  if (k < 0) return order.find((i) => !isBasic(i) && !skip.has(i.id)) ?? null;
+  return order.slice(k + 1).find((i) => !skip.has(i.id)) ?? null;
 }
 
 $('next').addEventListener('click', () => {
@@ -1600,7 +1619,7 @@ function render() {
     const changed = active && !prep.on && !blackedOut && shownStage.lookChanged;
     const isNext = !editing && !prep.on && !active && !!next && row.item.id === next.id;
     const tag = active && prep.on ? 'preparing' : staged ? 'on stage' : changed ? '● changed' : isNext ? 'next'
-      : isBasic(row.item) && !active ? 'safe look' : row.part && !active ? 'look' : '';
+      : isBasic(row.item) && !active ? 'safe look' : isKept(row.item) && !active ? 'kept' : row.part && !active ? 'look' : '';
     row.tag.textContent = tag;
     row.tag.hidden = !tag;
     row.tag.classList.toggle('changed-tag', changed);

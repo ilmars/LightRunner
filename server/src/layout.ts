@@ -1,6 +1,6 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupSegments, newSongLookOf, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, serviceRows } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupSegments, keptOf, newSongLookOf, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, serviceRows } from '../../packages/shared/src/index.ts';
 import type { ChannelRole, FixtureShape, GroupKind, Hangs, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, ServiceRow, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 import { keyLabel, keyPlace, keyShort } from './keynames.ts';
@@ -120,6 +120,12 @@ export interface OperatorLayout {
   quickLooks: (OperatorLook & { tab: QuickTab; groups: string[] })[];
   /** Id of the safe look (Basic lights), or null when the show has none. */
   basicLights: string | null;
+  /** The kept rows (a load never replaces them), Basic lights left out: it always stays. */
+  kept: string[];
+  /** Running-order items Next passes over: the kept rows while Planning is on and a service is loaded. */
+  skip: string[];
+  /** Running-order items that are looks of the loaded service's items: the next load replaces them, so they can't be kept. */
+  fromPlan: string[];
   groups: OperatorGroup[];
   /** The engine's own Basic light (a group Basic lights doesn't list), as an Any colour pick would make it. */
   basicLight: LiveLight;
@@ -221,6 +227,9 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
       ...l, tab: q.tab, groups: groupIds.filter((gid, k) => !smoke.has(gid) && l.entries[k] !== null),
     }))),
     basicLights: show.operator.safeLook ?? null,
+    kept: keptOf(show),
+    skip: planning && show.operator.service ? keptOf(show) : [],
+    fromPlan: [...new Set((show.operator.service?.items ?? []).flatMap((i) => (i.look !== undefined && show.operator.runningOrder.includes(i.look) ? [i.look] : [])))],
     basicLight: liveLight(SAFE_LIGHT, SAFE_LIGHT.intensity),
     basicSwatch: SAFE_LIGHT.hex,
     groups: groupIds.flatMap((id) => {

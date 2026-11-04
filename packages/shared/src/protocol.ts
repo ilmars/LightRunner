@@ -180,6 +180,8 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('saveServiceItem'), key: z.string().min(1).max(64) }),
   /** Give a running-order item a copy of another look's groups (and tempo) without touching the stage: "pick another look". */
   z.object({ type: z.literal('itemCopyLook'), item: id, from: id }),
+  /** Mark a running-order item kept (a load never replaces it) or not. */
+  z.object({ type: z.literal('keepItem'), id, kept: z.boolean() }),
   // Controller keys (the server's learn sends setKey once a key is pressed): one key, one job.
   /** Give `does` this key; a key that did something else moves to it. */
   z.object({ type: z.literal('setKey'), key: ControlKey, does: KeyTarget }),
@@ -200,7 +202,7 @@ export type Command = z.infer<typeof Command>;
 
 const SHOW_EDITS = [
   'saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemQuickLook',
-  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'loadService', 'saveServiceItem', 'itemCopyLook', 'setKey', 'clearKey', 'resetKeys',
+  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'loadService', 'saveServiceItem', 'itemCopyLook', 'keepItem', 'setKey', 'clearKey', 'resetKeys',
 ] as const;
 /** Commands that change the show rather than the stage. */
 export type ShowEdit = Extract<Command, { type: (typeof SHOW_EDITS)[number] }>;

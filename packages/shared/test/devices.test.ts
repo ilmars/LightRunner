@@ -33,6 +33,17 @@ test('after Blackout, Next carries on from the last look', () => {
   assert.equal(nextItemId(layout, at(null, 'one')), 'two');
 });
 
+test('Next passes over the kept rows of a loaded service', () => {
+  const kept: DeviceLayout = { ...layout, runningOrder: [{ id: 'basic' }, { id: 'sermon' }, { id: 'midweek' }, { id: 'one' }, { id: 'two' }], skip: ['sermon', 'midweek'] };
+  assert.equal(nextItemId(kept, at(null)), 'one');
+  assert.equal(nextItemId(kept, at('safe')), 'one');
+  // From a kept row the service starts again from its top.
+  assert.equal(nextItemId(kept, at('sermon', 'sermon')), 'one');
+  assert.equal(nextItemId(kept, at('one', 'one')), 'two');
+  assert.equal(nextItemId({ ...kept, skip: ['two'] }, at('one', 'one')), null);
+  assert.deepEqual(commandFor({ kind: 'next' }, kept, at('safe')), { type: 'look', id: 'one' });
+});
+
 test('a look outside the running order falls back to the last look', () => {
   assert.equal(nextItemId(layout, at('quick-thing', 'one')), 'two');
 });

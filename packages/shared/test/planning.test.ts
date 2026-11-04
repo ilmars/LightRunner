@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensurePlanning, ensureRunningOrder, itemKind, loadService, moveItem, newSongLookOf, parseShow, rememberKey,
+  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, rememberKey, setKept,
   serviceRows, toPlannedService, type PlannedService, type ServiceItem, type Show,
 } from '../src/index.ts';
 
@@ -73,7 +73,14 @@ test('remember keys: songs by id, headers and slides by name, verses and blanks 
 
 // ---- Loading a service into the show ----
 
-const rig = (): Show => ensureBasicLights(ensureRunningOrder(parseShow(JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8')))));
+/** The church show with its first running order, and its Sermon and Midweek calm kept. */
+const keptRig = (): Show => ensureBasicLights(ensureRunningOrder(parseShow(JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8')))));
+/** The same with no kept rows: only Basic lights stays through a load. */
+const rig = (): Show => {
+  const show = keptRig();
+  show.operator.kept = [];
+  return show;
+};
 
 const song = (key: string, name: string, tempo?: number): ServiceItem => ({
   key: `cue-${key}-${name}`, kind: 'song', name, songId: `song-${key}`, ...(tempo === undefined ? {} : { tempo }),
@@ -522,4 +529,106 @@ test('copyLookToItem refuses Basic lights, an unknown look and an item outside t
   assert.throws(() => copyLookToItem(loaded, a, safeOf(loaded)), { message: "Basic lights can't be copied: use a quick look." });
   assert.throws(() => copyLookToItem(loaded, a, 'nope'), { message: '"nope" isn\'t in the show' });
   assert.throws(() => copyLookToItem(loaded, loaded.operator.quickLooks[0]!.look, a), /only running-order items/);
+});
+
+// ---- Kept rows ----
+
+const named = (s: Show, name: string) => s.operator.runningOrder.find((id) => lookOf(s, id).name === name)!;
+
+test('the first running order keeps its Sermon and Midweek calm', () => {
+  const show = keptRig();
+  assert.deepEqual(show.operator.kept, [named(show, 'Sermon'), named(show, 'Midweek calm')]);
+  assert.deepEqual(keptOf(show), show.operator.kept);
+  parseShow(show);
+});
+
+test('ensureKept gives an older show its Sermon and Midweek calm, once', () => {
+  const show = keptRig();
+  delete show.operator.kept;
+  const out = ensureKept(show);
+  assert.deepEqual(out.operator.kept, [named(show, 'Sermon'), named(show, 'Midweek calm')]);
+  // A show that has its own choice (even none) keeps it.
+  assert.deepEqual(ensureKept(rig()).operator.kept, []);
+});
+
+test('a load keeps the kept rows after Basic lights, untouched, and the service below them', () => {
+  const show = keptRig();
+  const sermon = named(show, 'Sermon');
+  const midweek = named(show, 'Midweek calm');
+  const before = [structuredClone(lookOf(show, sermon)), structuredClone(lookOf(show, midweek))];
+  const out = loadService(show, planned([header('Ievads'), song('a', 'A'), song('b', 'B')]));
+  const [, a, b] = out.operator.service!.items.map((i) => i.look);
+  assert.deepEqual(out.operator.runningOrder, [safeOf(show), sermon, midweek, a, b]);
+  assert.deepEqual([lookOf(out, sermon), lookOf(out, midweek)], before);
+  assert.deepEqual(out.operator.kept, [sermon, midweek]);
+  // Song 1 to 5 were not kept, so they went.
+  assert.equal(out.looks.some((l) => l.name === 'Song 1'), false);
+  // A header with no look sits under the kept rows, not between them.
+  assert.deepEqual(serviceRows(out).map(label), [safeOf(show), sermon, midweek, 'header', a, b]);
+  assert.equal(anchorOf(out, 'cue-h-Ievads'), midweek);
+  // And they stay through the next load.
+  const again = loadService(out, planned([song('b', 'B')], 'svc2'));
+  assert.deepEqual(again.operator.runningOrder.slice(0, 3), [safeOf(show), sermon, midweek]);
+  assert.deepEqual(checkReferences(again), []);
+});
+
+test('a new Vārds gets its own copy of the kept Sermon, and keeps it in later services', () => {
+  const show = keptRig();
+  const sermon = named(show, 'Sermon');
+  lookOf(show, sermon).tempo = 70;
+  const out = loadService(show, planned([song('a', 'A'), header('VĀRDS'), song('b', 'B')]));
+  const word = out.operator.service!.items[1]!.look!;
+  assert.ok(word && word !== sermon);
+  assert.equal(lookOf(out, word).name, 'VĀRDS');
+  assert.deepEqual(lookOf(out, word).groups, lookOf(out, sermon).groups);
+  assert.notEqual(lookOf(out, word).groups, lookOf(out, sermon).groups, 'a copy, not shared');
+  assert.equal(lookOf(out, word).tempo, 70);
+  assert.equal(out.operator.remembered!['header:VĀRDS'], word);
+  assert.deepEqual(serviceRows(out).filter((r) => r.kind === 'look').map(label), out.operator.runningOrder);
+  // Changed on its own, it comes back as it is; Sermon is left alone.
+  const edited = structuredClone(out);
+  lookOf(edited, word).groups = [];
+  const next = loadService(edited, planned([header('VĀRDS')], 'svc2'));
+  assert.equal(next.operator.service!.items[0]!.look, word);
+  assert.deepEqual(lookOf(next, word).groups, []);
+  assert.deepEqual(lookOf(next, sermon), lookOf(out, sermon));
+});
+
+test('Vārds is found without capitals or the long ā, and needs a kept Sermon', () => {
+  for (const name of ['Vārds', 'vards', ' VARDS ']) {
+    const out = loadService(keptRig(), planned([{ key: 'cue-w', kind: 'header', name }]));
+    assert.notEqual(out.operator.service!.items[0]!.look, undefined, name);
+  }
+  // Slides called Vārds are found too; a verse never is.
+  const slides = loadService(keptRig(), planned([{ key: 'cue-w', kind: 'slides', name: 'Vārds' }]));
+  assert.notEqual(slides.operator.service!.items[0]!.look, undefined);
+  const verse = loadService(keptRig(), planned([{ key: 'cue-w', kind: 'verse', name: 'Vārds' }]));
+  assert.equal(verse.operator.service!.items[0]!.look, undefined);
+  // No kept Sermon: Vārds has no look, like other parts.
+  const out = loadService(rig(), planned([header('Vārds')]));
+  assert.equal(out.operator.service!.items[0]!.look, undefined);
+  assert.deepEqual(out.operator.runningOrder, [safeOf(out)]);
+});
+
+test('setKept marks and unmarks a row; Basic lights and rows of the plan are refused', () => {
+  const show = keptRig();
+  const song1 = named(show, 'Song 1');
+  const kept = setKept(show, song1, true);
+  assert.deepEqual(keptOf(kept), [song1, named(show, 'Sermon'), named(show, 'Midweek calm')]);
+  const out = loadService(kept, planned([song('a', 'A')]));
+  assert.deepEqual(out.operator.runningOrder.slice(0, 4), [safeOf(show), song1, named(show, 'Sermon'), named(show, 'Midweek calm')]);
+  const unkept = setKept(kept, named(show, 'Sermon'), false);
+  assert.deepEqual(keptOf(unkept), [song1, named(show, 'Midweek calm')]);
+  assert.throws(() => setKept(show, safeOf(show), false), { message: 'Basic lights always stays.' });
+  const a = out.operator.service!.items[0]!.look!;
+  assert.throws(() => setKept(out, a, true), /comes from the planned service/);
+  assert.doesNotThrow(() => setKept(out, a, false));
+  assert.throws(() => setKept(show, 'nope', true), /isn't in the running order/);
+});
+
+test('deleting a kept row forgets it', () => {
+  const show = keptRig();
+  const out = deleteItem(show, named(show, 'Sermon'));
+  assert.deepEqual(out.operator.kept, [named(show, 'Midweek calm')]);
+  assert.deepEqual(checkReferences(out), []);
 });

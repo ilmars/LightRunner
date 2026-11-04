@@ -316,6 +316,7 @@ function cascadeRemove(show: Show, kind: MergeKind, id: string): void {
     case 'look':
       show.operator.looks = show.operator.looks.filter((l) => l !== id);
       show.operator.runningOrder = show.operator.runningOrder.filter((l) => l !== id);
+      if (show.operator.kept) show.operator.kept = show.operator.kept.filter((l) => l !== id);
       show.operator.quickLooks = show.operator.quickLooks.filter((q) => q.look !== id);
       if (show.operator.safeLook === id) show.operator.safeLook = undefined;
       break;

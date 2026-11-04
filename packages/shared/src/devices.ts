@@ -7,6 +7,8 @@ import type { Command } from './protocol.ts';
 export interface DeviceLayout {
   runningOrder: { id: string }[];
   basicLights: string | null;
+  /** Running-order items Next passes over (the kept rows while a planned service is loaded); absent = none. */
+  skip?: string[];
   /** The quick looks, for a key that starts one by id. */
   quickLooks?: { id: string }[];
   groups?: { id: string; kind?: string; presets: { id: string; effect?: unknown }[] }[];
@@ -74,15 +76,16 @@ export function stageIndexOf(layout: Pick<DeviceLayout, 'runningOrder' | 'basicL
 
 /**
  * The item after the one on stage; after the item before Blackout (or a look outside the order) when nothing
- * in the order is on stage; the first song when there is neither. Null at the end of the list.
+ * in the order is on stage; the first song when there is neither. Items in `skip` are passed over. Null at the end of the list.
  */
-export function nextItemId(layout: Pick<DeviceLayout, 'runningOrder' | 'basicLights'>, state: Pick<DeviceState, 'look' | 'lastLook'>): string | null {
+export function nextItemId(layout: Pick<DeviceLayout, 'runningOrder' | 'basicLights' | 'skip'>, state: Pick<DeviceState, 'look' | 'lastLook'>): string | null {
   const order = layout.runningOrder;
   if (!order.length) return null;
+  const skip = new Set(layout.skip ?? []);
   let k = stageIndexOf(layout, state);
   if (k < 0 && state.lastLook) k = order.findIndex((i) => i.id === state.lastLook);
-  if (k < 0) return order.find((i) => i.id !== layout.basicLights)?.id ?? null;
-  return order[k + 1]?.id ?? null;
+  if (k < 0) return order.find((i) => i.id !== layout.basicLights && !skip.has(i.id))?.id ?? null;
+  return order.slice(k + 1).find((i) => !skip.has(i.id))?.id ?? null;
 }
 
 /** The command that starts a running-order item: Basic lights is the engine's own Safe, the rest are looks. */
