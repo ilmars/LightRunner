@@ -1031,6 +1031,35 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   .order-btns { margin-left: auto; }
 }
 
+/* ---- The iPad in landscape and bigger: two rows ----
+   Top: the stage view, wide (over the running order and part of Groups), and Quick looks beside it. Bottom: the
+   running order, and Groups the rest of the width. The grip makes the picture taller and the bottom row gives way.
+   An editor (a group's colours or effects, the colour and effect editors, a new quick look, Individual lights,
+   Load service) takes the whole right side, top to bottom, in place of Quick looks and Groups; the stage view stays
+   where it is, so the picture shows what the editor does, and the running order runs under all of it. */
+@media (min-width: 1080px) and (min-height: 501px) {
+  body { grid-template-columns: 292px minmax(0, 1fr) minmax(0, 2fr); grid-template-rows: 60px auto minmax(0, 1fr) 76px; }
+  body.tl-on { grid-template-rows: auto auto minmax(0, 1fr) 76px; }
+  body.bar-two-rows { grid-template-rows: 60px auto minmax(0, 1fr) auto; }
+  body.tl-on.bar-two-rows { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .left, .right { display: contents; }
+  .topbar { grid-row: 1; }
+  .bottom { grid-row: 4; }
+  .stage-box { grid-column: 1 / 3; grid-row: 2; align-self: start; }
+  .stage { height: var(--stage-h, 200px); }
+  .order { grid-column: 1; grid-row: 3; }
+  /* Quick looks fill the height the picture gives them (their own looks never make the row taller). */
+  #quickLooks { grid-column: 3; grid-row: 2; contain: size; }
+  #quickLooks .cue-host { flex: 1; }
+  .qgrid { max-height: none; flex: 1; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  #quickLooks .sec-sub { display: none; }
+  #details { grid-column: 2 / 4; grid-row: 3; }
+  .cedit { grid-column: 3; grid-row: 2 / 4; }
+  body:has(#details.picking, #qSheet:not([hidden])) #quickLooks { display: none; }
+  body:has(#details.picking, #qSheet:not([hidden])) #details { grid-column: 3; grid-row: 2 / 4; }
+  body:has(#details.picking, #qSheet:not([hidden]), .right.ce-open) .order { grid-column: 1 / 3; }
+}
+
 /* ---- Phone remote: narrow screens (portrait phones, and phones on their side) ----
    The same page as a remote in the director's hand, as the designer's phone artboard: "On stage" with the
    problem pill, Order / Groups / Looks tabs, one panel for the tab, then Master and Undo · Basic lights · Next ·
