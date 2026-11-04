@@ -217,9 +217,19 @@ export function ensureBasicLights(show: Show): Show {
 // loadService and ensurePlanning live here, not in planning.ts: planning.ts must not import from
 // schema.ts (which imports it), and these need uniqueId and the look rules from this file.
 
-/** Cuts a planned name to a look's 40 characters; `fallback` when nothing is left of it. */
-function planLookName(name: string, fallback: string): string {
-  return name.trim().slice(0, MAX_NAME).trim() || fallback;
+/**
+ * Fits a planned name into a look's 40 characters; `fallback` when nothing is left of it. Song names often carry a
+ * second title in brackets ("Tad, Kad Jūra Krāc (Vēlos, Kungs, zem Taviem spārniem būt)"): a name too long loses
+ * that first, then is cut at a word with "…" rather than in the middle of one.
+ */
+export function planLookName(name: string, fallback: string): string {
+  const whole = name.trim().replace(/\s+/g, ' ');
+  if (whole.length <= MAX_NAME) return whole || fallback;
+  const short = whole.replace(/\s*\([^()]*\)?\s*$/, '').trim();
+  if (short && short.length <= MAX_NAME) return short;
+  const cut = whole.slice(0, MAX_NAME - 1);
+  const at = cut.lastIndexOf(' ');
+  return at >= MAX_NAME / 2 ? `${cut.slice(0, at).replace(/[\s,;:(-]+$/, '')}…` : whole.slice(0, MAX_NAME).trim();
 }
 
 /** Forgets, in place, everything the planning feature keeps that names a look that is gone. */

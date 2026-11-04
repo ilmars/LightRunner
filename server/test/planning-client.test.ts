@@ -221,7 +221,8 @@ test('services() lists coming ones nearest first, then the last past one, at mos
   const now = new Date('2026-10-26T12:00:00');
   const list = await client.services(ACCOUNT, TYPE, now);
   assert.deepEqual(list.map((s) => s.id), ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'p2']);
-  assert.deepEqual(list[0], { id: 'f1', start: `${day(1)}T08:00:00`, items: 3, songs: 1, songIds: [SONG] });
+  // The header is left out of the items.
+  assert.deepEqual(list[0], { id: 'f1', start: `${day(1)}T08:00:00`, items: 2, songs: 1, songIds: [SONG] });
   assert.deepEqual(list.at(-1), { id: 'p2', start: '2026-10-25T08:00:00', items: 0, songs: 0, songIds: [] });
   // Asked for the type only, with an equality filter on the service type.
   assert.equal(fake.state.queries[0].where.fieldFilter.field.fieldPath, 'service.type');

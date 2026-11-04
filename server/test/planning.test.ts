@@ -24,7 +24,7 @@ const S3 = '33333333-3333-4333-8333-333333333333';
 const item = (key: string, kind: PlannedService['items'][number]['kind'], name: string, songId?: string, tempo?: number) =>
   ({ key, kind, name, ...(songId ? { songId } : {}), ...(tempo ? { tempo } : {}) });
 
-/** Two coming services, an empty one and a past one, all of the one service type. */
+/** Two coming services, an empty one, one with only its parts and a past one, all of the one service type. */
 function planned(): FakePlanning {
   const fake = new FakePlanning();
   fake.accountList = [{ id: 'acc1', name: 'Church' }, { id: 'acc2', name: 'Other' }];
@@ -40,6 +40,8 @@ function planned(): FakePlanning {
       items: [item('d1', 'song', 'Song Two', S2), item('d2', 'song', 'Song Three', S3), item('d3', 'song', 'Song Three', S3)],
     },
     { id: 'svc-empty', type: 'type1', title: 'Sunday service', start: '2099-01-18T08:00:00', items: [] },
+    // The template every new Sunday starts from: its parts and nothing else.
+    { id: 'svc-parts', type: 'type1', title: 'Sunday service', start: '2099-01-25T08:00:00', items: [item('g1', 'header', 'Ievads'), item('g2', 'header', 'Slavēšana'), item('g3', 'header', 'Vārds'), item('g4', 'header', 'Beigas')] },
     { id: 'svc-past', type: 'type1', title: 'Sunday service', start: '2020-01-05T08:00:00', items: [item('e1', 'song', 'Old song', S1)] },
     { id: 'svc-youth', type: 'type2', title: 'Youth', start: '2099-01-09T18:00:00', items: [item('f1', 'song', 'Song One', S1)] },
   ];
@@ -260,11 +262,13 @@ test('the services list counts songs that have a look and new ones', () => withP
   await enable(rig);
   let list = (await call('GET', '/api/planning/services')).body;
   assert.equal(list.type, 'Sunday service');
-  assert.deepEqual(list.services.map((s: any) => s.id), ['svc-a', 'svc-b', 'svc-empty', 'svc-past'], 'coming ones, nearest first, then the last one past');
+  assert.deepEqual(list.services.map((s: any) => s.id), ['svc-a', 'svc-b', 'svc-empty', 'svc-parts', 'svc-past'], 'coming ones, nearest first, then the last one past');
   const row = (id: string) => list.services.find((s: any) => s.id === id);
   // Nothing is remembered yet: every song is new.
   assert.deepEqual([row('svc-a').songs, row('svc-a').withLook, row('svc-a').newSongs], [2, 0, 2]);
-  assert.deepEqual([row('svc-a').items, row('svc-a').start], [5, '2099-01-04T08:00:00']);
+  // The items leave the part headers out, so a service with only its parts has none: "not planned yet".
+  assert.deepEqual([row('svc-a').items, row('svc-a').start], [4, '2099-01-04T08:00:00']);
+  assert.deepEqual([row('svc-parts').items, row('svc-parts').songs], [0, 0]);
   assert.ok(fake.calls.includes('services acc1 type1'));
 
   const t = await tablet();
@@ -302,7 +306,7 @@ test('loadService fills the running order and is one Undo step', () => withPlann
   const layout = await layoutOf(rig);
   assert.deepEqual(layout.runningOrder.map((l: any) => l.name), ['Basic lights', 'Sermon', 'Midweek calm', 'Song One', 'Song Two']);
   assert.equal(layout.runningOrder[3].tempo, 90);
-  assert.deepEqual(layout.service, { title: 'Sunday service', start: '2099-01-04T08:00:00' });
+  assert.deepEqual(layout.service, { title: 'Sunday service', start: '2099-01-04T08:00:00', place: 'Sunday service' });
   assert.equal(layout.rows.filter((r: any) => r.kind === 'look').length, 5);
   assert.ok(layout.rows.some((r: any) => r.kind === 'verses'));
   assert.equal(layout.runningOrder[0].id, order[0], 'Basic lights stays first');
@@ -453,12 +457,13 @@ test('loading never changes the lights', () => withPlanning(async (rig) => {
   t.close();
 }));
 
-test('an empty service is refused', () => withPlanning(async (rig) => {
+test('an empty service, or one with only its parts, is refused', () => withPlanning(async (rig) => {
   const { tablet } = rig;
   await enable(rig);
   const t = await tablet();
   const order = await orderOf(rig);
   assert.equal(await t.command({ type: 'loadService', id: 'svc-empty' }), 'Nothing is planned in this service yet.');
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-parts' }), 'Nothing is planned in this service yet.');
   assert.deepEqual(await orderOf(rig), order);
   assert.equal((await layoutOf(rig)).service, undefined);
   t.close();

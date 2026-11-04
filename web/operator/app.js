@@ -837,8 +837,8 @@ function renderServiceLine() {
   const s = layout?.service;
   const d = s ? planDate(s.start) : null;
   $('svcLine').hidden = !d;
-  // The place is the service type's name up to " - " ("Rīga - Svētdienas Dievkalpojums").
-  if (d) $('svcLine').textContent = [d.date, d.time, s.title.split(' - ')[0].trim()].filter(Boolean).join(' · ');
+  // The place: the service type's name up to its dash ("Rīga - Svētdienas Dievkalpojums"), worked out by the server.
+  if (d) $('svcLine').textContent = [d.date, d.time, s.place ?? s.title.split(' - ')[0].trim()].filter(Boolean).join(' · ');
 }
 
 function renderLoadButton() {

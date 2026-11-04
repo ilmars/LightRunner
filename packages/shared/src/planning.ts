@@ -42,6 +42,8 @@ const obj = (v: unknown): Json => (v && typeof v === 'object' ? (v as Json) : {}
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const clean = (v: string): string => v.trim().slice(0, MAX_NAME).trim();
 
+const inRange = (v: unknown): v is number => typeof v === 'number' && v >= MIN_TEMPO && v <= MAX_TEMPO;
+
 /** A song item stores the song's id as its text: { cue_foreground: { type: 'text', text: id } }. */
 function songIdOf(cue: Json): string | undefined {
   const fg = obj(cue.cue_foreground);
@@ -56,7 +58,8 @@ export function itemKind(cue: unknown): ItemKind {
   const fg = str(obj(c.cue_foreground).type);
   const bg = str(obj(c.cue_background).type);
   if (fg === 'bible') return 'verse';
-  if (fg === 'slides') return 'slides';
+  // A PowerPoint or Keynote file shows as slides too (fg 'presentation', seen in Kuldīga's services).
+  if (fg === 'slides' || fg === 'presentation') return 'slides';
   if (fg === 'text') return songIdOf(c) ? 'song' : str(obj(c.cue_foreground).text) === '' ? 'blank' : 'other';
   if (fg === '' && bg === '') return 'blank';
   if (fg === '' && bg === 'media') return 'media';
@@ -68,6 +71,8 @@ export function toPlannedService(idOfService: string, doc: unknown, songs: Map<s
   const d = obj(doc);
   const cues = obj(d.data).cues;
   const times = obj(d.service).times;
+  // What the service sets for its own songs, by cue id: { key, notes, tempo }.
+  const songMeta = obj(obj(d.data).songMeta);
   const items = (Array.isArray(cues) ? cues : []).map((cueValue): ServiceItem => {
     const cue = obj(cueValue);
     const kind = itemKind(cue);
@@ -80,13 +85,28 @@ export function toPlannedService(idOfService: string, doc: unknown, songs: Map<s
     const item: ServiceItem = { key: str(cue.cue_id), kind, name: clean(name) };
     if (songId) {
       item.songId = songId;
-      const tempo = obj(song.data).tempo;
-      if (typeof tempo === 'number' && tempo >= MIN_TEMPO && tempo <= MAX_TEMPO) item.tempo = tempo;
+      // The service's own tempo for the song when it sets one, else the song library's.
+      const own = obj(songMeta[str(cue.cue_id)]).tempo;
+      const tempo = inRange(own) ? own : obj(song.data).tempo;
+      if (inRange(tempo)) item.tempo = tempo;
     }
     return item;
   });
   const start = str(obj(Array.isArray(times) ? times[0] : undefined).time);
   return PlannedService.parse({ id: idOfService, title: clean(typeName), start: start.slice(0, 32), items });
+}
+
+/**
+ * How many items a service has, part headers left out. A service that has only its parts (the template every new
+ * Sunday starts from: Ievads, Slavēšana, Vārds, Beigas) is not planned yet.
+ */
+export function plannedCount(items: readonly ServiceItem[]): number {
+  return items.filter((i) => i.kind !== 'header').length;
+}
+
+/** The place in a service type's name: "Rīga - Svētdienas Dievkalpojums" and "Liepāja- Svētdienas Dievkalpojums" give the town. */
+export function placeOf(typeName: string): string {
+  return typeName.split(/\s*-\s+/)[0]!.trim();
 }
 
 /** What to remember a look against, so it comes back next week; null for items that are never remembered. */
