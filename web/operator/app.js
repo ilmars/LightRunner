@@ -2406,6 +2406,19 @@ function liveOfPicker() {
 /** A light with nothing in it: black with no White, Amber or UV (the server refuses to keep it: "that colour has no light"). */
 const noLight = (c) => /^#0{6}$/.test(c.hex) && !c.white && !c.amber && !c.uv;
 
+/** The other groups with the same light type as this one (RGB with RGB, RGBW with RGBW): a new colour is theirs too. */
+function sameTypeGroups(group) {
+  if (!group || group.lightType == null) return [];
+  return layout.groups.filter((g) => g.id !== group.id && !isSmoke(g) && g.lightType === group.lightType);
+}
+
+/** "Background and Zale K", or "Background and 3 more like it": the groups a colour added for the same light type goes to. */
+function sameTypeText(group, others) {
+  if (others.length > 2) return `${group.name} and ${others.length} more like it`;
+  const names = [group.name, ...others.map((g) => g.name)];
+  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
 /**
  * ＋ Keep as a colour is always there; it works while the group runs a strip colour that isn't a swatch yet (and has
  * some light in it) and the form isn't open. Keeps the form in step.
@@ -2414,6 +2427,11 @@ function renderAddColour() {
   const row = pickerRow();
   if (!row) return;
   $('paAllText').textContent = row.group.whiteOnly ? 'Add to every white-only group' : 'Add to every colour group';
+  const alike = sameTypeGroups(row.group);
+  $('paTypeRow').hidden = !alike.length;
+  $('paTypeText').textContent = alike.length ? `Add to ${alike.length <= 2 ? alike.map((g) => g.name).join(' and ') : `${alike.length} groups`} too (same kind of light)` : '';
+  // Every colour group reaches them anyway.
+  $('paType').disabled = $('paAll').checked;
   const pick = liveOfPicker();
   // Listed: the group's list has this very light (its colour, White, Amber and UV).
   const listed = !!pick && row.group.presets.some((p) => !p.effect && p.light && colourKey(p.light) === colourKey(pick));
@@ -2428,6 +2446,8 @@ function openAddColour() {
   if (!liveOfPicker()) return;
   $('paName').value = '';
   $('paAll').checked = false;
+  // Lights of one kind share their colours: on unless someone turns it off.
+  $('paType').checked = true;
   $('pAdd').hidden = false;
   renderAddColour();
   // With a long colour list the form opens below the fold of the picker.
@@ -2459,6 +2479,8 @@ function mixedColour(hex, { white = 0, amber = 0, uv = 0 }) {
 
 $('pAddOpen').addEventListener('click', openAddColour);
 $('paCancel').addEventListener('click', closeAddColour);
+// Every colour group reaches the same-kind groups anyway: their switch waits while it is on.
+$('paAll').addEventListener('change', renderAddColour);
 // The keyboard's Done closes the keyboard; nothing else on the page reacts to typing.
 $('paName').addEventListener('keydown', (ev) => {
   ev.stopPropagation();
@@ -2473,7 +2495,7 @@ $('paAddBtn').addEventListener('click', () => {
     return;
   }
   const { hex, white, amber, uv } = pick;
-  pendingColour = send({ type: 'addColour', group: picker.group, colour: hex, white, amber, uv, name: $('paName').value, allGroups: $('paAll').checked });
+  pendingColour = send({ type: 'addColour', group: picker.group, colour: hex, white, amber, uv, name: $('paName').value, allGroups: $('paAll').checked, sameType: !$('paTypeRow').hidden && $('paType').checked });
   $('paAddBtn').disabled = pendingColour !== null;
 });
 
@@ -3424,7 +3446,7 @@ function openColourEditor(preset) {
   const startExtras = preset && recolour ? presetExtras(preset) : { ...NO_EXTRAS };
   // The colour as it is: its own hex (before its brightness), so Exact values show exactly what was typed or picked.
   const startHex = preset && recolour ? presetHex(preset) : null;
-  colourEdit = { group: group.id, id: preset?.id ?? null, name: preset?.name ?? '', hex: null, startHex, level, startLevel: level, fade, startFade: fade, all: false, startExtras };
+  colourEdit = { group: group.id, id: preset?.id ?? null, name: preset?.name ?? '', hex: null, startHex, level, startLevel: level, fade, startFade: fade, all: preset || !sameTypeGroups(group).length ? false : 'type', startExtras };
   pendingEdit = null;
   disarmDelete();
   $('ceName').value = colourEdit.name;
@@ -3530,9 +3552,13 @@ function renderEditor() {
   if (!reachesMore) colourEdit.all = false;
   $('ceApplyRow').hidden = !showAll;
   const everyLabel = isNew ? (group.whiteOnly ? 'Every white-only group' : 'Every colour group') : `Every group with ${p.name}`;
-  buildChoice($('ceApply'), [false, true], (all) => (all ? everyLabel : `Only ${group.name}`), (all) => { colourEdit.all = all; });
+  // A new colour can also go to the groups of the same light type (the default when there are any).
+  const alike = isNew ? sameTypeGroups(group) : [];
+  const scopes = alike.length ? [false, 'type', true] : [false, true];
+  const scopeText = (all) => (all === true ? everyLabel : all === 'type' ? sameTypeText(group, alike) : `Only ${group.name}`);
+  buildChoice($('ceApply'), scopes, scopeText, (all) => { colourEdit.all = all; });
   markChoice($('ceApply'), colourEdit.all);
-  $('ceApply').children[1].disabled = !reachesMore;
+  $('ceApply').lastElementChild.disabled = !reachesMore;
 
   // Used in: what Save will change. With every group, the other groups' colours of this name, and with a new
   // colour (or White, Amber or UV) everything that uses the shared colour.
@@ -3639,7 +3665,7 @@ $('ceSave').addEventListener('click', () => {
   if (!colourEdit.id) {
     if (!editReady()) return;
     // No colour picked: the light is its White, Amber or UV alone, on a black colour.
-    const cmd = { type: 'addColour', group: group.id, colour: colourEdit.hex ?? '#000000', ...editLevels(), name, allGroups: colourEdit.all, fade: colourEdit.fade };
+    const cmd = { type: 'addColour', group: group.id, colour: colourEdit.hex ?? '#000000', ...editLevels(), name, allGroups: colourEdit.all === true, sameType: colourEdit.all === 'type', fade: colourEdit.fade };
     if (colourEdit.level !== null && colourEdit.level < 1) cmd.level = editLevel();
     pendingEditToast = 'Added to colours';
     pendingEdit = send(cmd);

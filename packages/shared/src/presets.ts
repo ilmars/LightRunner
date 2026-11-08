@@ -26,6 +26,11 @@ export interface AddColour {
   /** Also add it to every other group of the same kind (colour groups, or white-only groups). */
   allGroups: boolean;
   /**
+   * Also add it to every other group of the same light type (see `groupLightType`: RGB with RGB, RGBW with RGBW),
+   * so lights of one type share their colours. `allGroups` reaches further and wins.
+   */
+  sameType?: boolean;
+  /**
    * White, amber and UV levels 0..1 (missing is 0), kept to whole percent as an Any colour pick
    * keeps them. A group whose fixtures lack a channel shows it as the engine shows any colour
    * with it: white and amber made from red, green and blue, UV left out.
@@ -72,9 +77,12 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
 
   const whiteOnly = groupIsWhiteOnly(out, input.group);
   const shown = shownGroups(out);
+  const type = groupLightType(out, input.group);
   const targets = input.allGroups
     ? out.groups.filter((g) => g.id === input.group || (shown.includes(g.id) && groupIsWhiteOnly(out, g.id) === whiteOnly)).map((g) => g.id)
-    : [input.group];
+    : input.sameType && type !== null
+      ? out.groups.filter((g) => g.id === input.group || (shown.includes(g.id) && g.kind !== 'smoke' && groupLightType(out, g.id) === type)).map((g) => g.id)
+      : [input.group];
 
   const extras: { white?: number; amber?: number; uv?: number } = {};
   for (const k of ['white', 'amber', 'uv'] as const) {
@@ -104,7 +112,7 @@ export function addColour(show: Show, input: AddColour): { show: Show; ids: stri
     out.presets.push({ id, name, group, layers: [structuredClone(layer)], fade, swatch });
     ids.push(id);
   }
-  if (!ids.length) throw new Error(input.allGroups ? 'every group already has that colour' : 'that colour is already in the list');
+  if (!ids.length) throw new Error(targets.length > 1 ? 'every group already has that colour' : 'that colour is already in the list');
   return { show: out, ids };
 }
 
@@ -479,25 +487,113 @@ export function ensureEffects(show: Show): Show {
 /** The warm white a new group starts with (the same warm light the importer gives a white-only group). */
 const STARTER_WARM = '#ffb46b';
 
+/** The channels that make a light's colour; the dimmer, strobe and the rest don't change which colours suit it. */
+const COLOUR_ROLES: readonly ChannelRole[] = ['red', 'green', 'blue', 'white', 'amber', 'uv', 'cct'];
+
 /**
- * Gives every light group that has no colours a starter set, so its colour list is never empty: Warm
- * white, and Off (a way to turn the group off that needs no colour made first). A group made in Patch
- * starts with none; so does an old show's. Hidden colours (Basic light, Any colour) are not the group's
- * own colours. Smoke machines have no colours. A group that has any colour, effect or Off is left alone,
- * and nothing is added to it again. The input is not changed.
+ * A group's light type: the colour channels its lights have, together ("red,green,blue" for RGB lights,
+ * "red,green,blue,white" for RGBW, "cct" for bi-colour whites, "" for plain dimmers). Null for a group
+ * with no lights (or none whose type the show knows): its type isn't known yet.
+ */
+export function groupLightType(show: Show, groupId: string): string | null {
+  const group = show.groups.find((g) => g.id === groupId);
+  const roles = new Set<ChannelRole>();
+  let known = false;
+  for (const id of group?.fixtures ?? []) {
+    const fixture = show.fixtures.find((f) => f.id === id);
+    const profile = fixture ? findProfile(show, fixture.profile) : undefined;
+    if (!profile) continue;
+    known = true;
+    for (const c of profile.channels) roles.add(c.role);
+  }
+  return known ? COLOUR_ROLES.filter((r) => roles.has(r)).join(',') : null;
+}
+
+/** A group's own colours (not its effects, not the hidden ones), in the list's order. */
+function ownColours(show: Show, groupId: string): Preset[] {
+  return show.presets.filter((p) => p.group === groupId && !p.custom && !isEffectPreset(p));
+}
+
+/** True when a group's own presets are just the starter set (Warm white and Off) as it was given, nothing else. */
+function onlyStarters(show: Show, groupId: string): boolean {
+  const own = show.presets.filter((p) => p.group === groupId && !p.custom);
+  const starter = (p: Preset, name: string, hex: string, intensity: number) => {
+    const l = p.layers[0];
+    return p.name === name && p.layers.length === 1 && l?.kind === 'static' && 'hex' in l.colour
+      && l.colour.hex.toLowerCase() === hex && !l.colour.white && !l.colour.amber && !l.colour.uv && l.intensity === intensity;
+  };
+  return own.length === 2 && starter(own[0]!, 'Warm white', STARTER_WARM, 1) && starter(own[1]!, 'Off', '#000000', 0);
+}
+
+/**
+ * The colours groups of this light type already have, for a new group of the type to start with: every group
+ * of the type's own colours in turn (groups in the show's order), a name taken once, from the first group that
+ * has it. Groups in `leave` give none.
+ */
+function coloursOfType(show: Show, type: string, leave: ReadonlySet<string>): Preset[] {
+  const seen = new Set<string>();
+  const out: Preset[] = [];
+  for (const g of show.groups) {
+    if (g.kind === 'smoke' || leave.has(g.id) || groupLightType(show, g.id) !== type) continue;
+    for (const p of ownColours(show, g.id)) {
+      const key = cleanName(p.name).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+/**
+ * Gives every light group that has no colours its colours, so its colour list is never empty and a new light
+ * reuses the colours already made for its kind. A group made in Patch starts with none; so does an old show's.
+ *
+ * - **Its kind has colours:** a group whose lights have the same colour channels as another group's (RGB with
+ *   RGB, RGBW with RGBW, bi-colour with bi-colour: see `groupLightType`) gets copies of the colours those groups
+ *   have (not their effects, not hidden ones), each name once, plus Off if none of them is one. A group that
+ *   still has only the starter set, untouched (one made empty and given its lights later), gets them added
+ *   after its own two.
+ * - **Otherwise** (the first group of its kind, or one with no lights yet): the starter set, Warm white and Off
+ *   (a way to turn the group off that needs no colour made first).
+ *
+ * Hidden colours (Basic light, Any colour) are not the group's own colours. Smoke machines have no colours.
+ * A group that has any other colour or effect is left alone, and nothing is added to it again; the copies are
+ * the group's own from then on (changing one doesn't change the group it came from). The input is not changed.
  */
 export function ensureGroupColours(show: Show): Show {
   const bare = show.groups.filter((g) => g.kind !== 'smoke' && !show.presets.some((p) => p.group === g.id && !p.custom));
-  if (!bare.length) return show;
+  // A starter-only group of a type others have colours for: it was made before it had lights.
+  const starters = show.groups.filter((g) => {
+    if (g.kind === 'smoke' || !onlyStarters(show, g.id)) return false;
+    const type = groupLightType(show, g.id);
+    return type !== null && coloursOfType(show, type, new Set([g.id])).some((p) => !['warm white', 'off'].includes(cleanName(p.name).toLowerCase()));
+  });
+  if (!bare.length && !starters.length) return show;
   const out = structuredClone(show);
-  const starters: { name: string; hex: string; intensity: number }[] = [
-    { name: 'Warm white', hex: STARTER_WARM, intensity: 1 },
-    { name: 'Off', hex: '#000000', intensity: 0 },
-  ];
+  // Copies come from the show as it came in, so a group filled here is never the source for another.
+  const filling = new Set([...bare, ...starters].map((g) => g.id));
+  const add = (group: string, name: string, from: Omit<Preset, 'id' | 'group' | 'name'>) => {
+    const id = uniqueId(`${group} ${name}`, out.presets.map((p) => p.id));
+    out.presets.push({ id, name, group, ...structuredClone(from) });
+  };
+  const starter = (hex: string, intensity: number): Omit<Preset, 'id' | 'group' | 'name'> =>
+    ({ fade: 3, swatch: hex, layers: [{ kind: 'static', colour: { hex }, intensity }] });
   for (const group of bare) {
-    for (const { name, hex, intensity } of starters) {
-      const id = uniqueId(`${group.id} ${name}`, out.presets.map((p) => p.id));
-      out.presets.push({ id, name, group: group.id, fade: 3, swatch: hex, layers: [{ kind: 'static', colour: { hex }, intensity }] });
+    const type = groupLightType(show, group.id);
+    const copies = type === null ? [] : coloursOfType(show, type, filling);
+    if (!copies.length) {
+      add(group.id, 'Warm white', starter(STARTER_WARM, 1));
+      add(group.id, 'Off', starter('#000000', 0));
+      continue;
+    }
+    for (const { id: _id, group: _group, name, custom: _custom, ...rest } of copies) add(group.id, name, rest);
+    if (!copies.some(isOff)) add(group.id, 'Off', starter('#000000', 0));
+  }
+  for (const group of starters) {
+    const has = new Set(ownColours(show, group.id).map((p) => cleanName(p.name).toLowerCase()));
+    for (const { id: _id, group: _group, name, custom: _custom, ...rest } of coloursOfType(show, groupLightType(show, group.id)!, filling)) {
+      if (!has.has(cleanName(name).toLowerCase())) add(group.id, name, rest);
     }
   }
   return out;

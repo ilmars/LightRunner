@@ -41,7 +41,7 @@ Ids come from `get layout`. `fade` is seconds and optional everywhere.
 | a song's tempo | `{"type":"itemTempo","item","bpm"}` |
 | new quick look from the stage | `{"type":"saveQuickLook","name","tab":"plain\|colours\|effects","groups":["<g>",...]}` |
 | change a quick look | `{"type":"editQuickLook","look","name"?,"tab"?,"groups"?,"fromStage"?:true}` |
-| new colour in a group's list | `{"type":"addColour","group","colour":"#rrggbb","name","allGroups":false,"level"?:0.05..1}` (`allGroups: true` adds it to every light group) |
+| new colour in a group's list | `{"type":"addColour","group","colour":"#rrggbb","name","allGroups":false,"sameType"?:true,"level"?:0.05..1}` (`sameType: true` adds it to every group of the same light type too, as the page does by default: RGB with RGB, RGBW with RGBW, `layout.groups[].lightType`; `allGroups: true` to every light group) |
 | change a colour | `{"type":"editColour","preset","name"?,"colour"?,"level"?,"sameName":false}` |
 | new effect | `{"type":"addEffect","group","name","effect":{"kind":"effect","effect":"wave\|chase\|colourFade\|sparkle\|breathe\|meteor\|fill\|yoyo","colours":[{"hex":"#..."}],"speed":{"beats":4}}}` |
 
