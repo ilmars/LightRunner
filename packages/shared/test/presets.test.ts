@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  addColour, addEffect, canRecolour, checkReferences, deleteColour, displayColour, editColour, editEffect, EffectLayer, ensureEffects, ensureGroupColours, ensureRunningOrder, groupIsWhiteOnly,
+  addColour, addEffect, canRecolour, checkReferences, deleteColour, displayColour, editColour, editEffect, EffectLayer, ensureEffects, ensureGroupColours, ensureRunningOrder, groupIsWhiteOnly, groupLightType,
   effectKey, groupSegments, isEffectPreset, isOff, keepLitPresets, listNames, parseShow, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, resolvedLayers, swatchOf,
   type Show, type StaticLayer,
 } from '../src/index.ts';
@@ -31,6 +31,23 @@ test('a colour is added to one group as a normal preset', () => {
   assert.deepEqual(checkReferences(show), []);
   assert.equal(before.presets.some((p) => p.id === ids[0]), false); // the input is not changed
   parseShow(JSON.parse(JSON.stringify(show))); // still a valid show
+});
+
+test('a colour added for the same light type goes to every group of that type, and only them', () => {
+  const before = rig();
+  // B8 and the background are both RGBW; the drum cage is RGB, the key lights RGBWA+UV.
+  const { show, ids } = addColour(before, { group: 'background', colour: '#ff6600', name: 'Ember', allGroups: false, sameType: true });
+  assert.deepEqual(show.presets.filter((p) => ids.includes(p.id)).map((p) => p.group).sort(), ['b8-side-bar', 'background']);
+  for (const g of ['drum-cage', 'key-lights', 'front-lights']) assert.deepEqual(names(show, g), names(before, g), g);
+  // Every colour group wins over the same type.
+  const wide = addColour(before, { group: 'background', colour: '#ff6600', name: 'Ember', allGroups: true, sameType: true });
+  assert.ok(wide.ids.length > 2);
+  // A group with no lights yet has no type: the colour is its own.
+  before.groups.push({ id: 'empty', name: 'Empty', kind: 'light', fixtures: [] });
+  before.operator.groups.push('empty');
+  assert.deepEqual(addColour(before, { group: 'empty', colour: '#ff6600', name: 'Ember', allGroups: false, sameType: true }).ids.length, 1);
+  // Already in every one of them: refused as for every group.
+  assert.throws(() => addColour(show, { group: 'b8-side-bar', colour: '#ff6600', name: 'Ember again', allGroups: false, sameType: true }), /every group already has that colour/);
 });
 
 test('a colour with white, amber or UV is added with them, kept to whole percent, and the swatch shows them', () => {
@@ -709,6 +726,67 @@ test('a light group with no colours gets Warm white and Off, and nothing else is
   clash.groups.push({ id: 'balcony', name: 'Balcony', kind: 'light', fixtures: [] });
   clash.presets.push({ id: 'balcony-off', name: 'Off', group: 'front-lights', fade: 3, layers: [{ kind: 'static', colour: { hex: '#000000' }, intensity: 0 }] });
   assert.deepEqual(checkReferences(ensureGroupColours(clash)), []);
+});
+
+test('a group\'s light type is its colour channels, not its dimmer or strobe', () => {
+  const s = rig();
+  assert.equal(groupLightType(s, 'front-lights'), 'cct');
+  assert.equal(groupLightType(s, 'drum-cage'), 'red,green,blue');
+  assert.equal(groupLightType(s, 'background'), 'red,green,blue,white');
+  assert.equal(groupLightType(s, 'key-lights'), 'red,green,blue,white,amber,uv');
+  s.groups.push({ id: 'empty', name: 'Empty', kind: 'light', fixtures: [] });
+  assert.equal(groupLightType(s, 'empty'), null, 'no lights: not known yet');
+  assert.equal(groupLightType(s, 'nope'), null);
+});
+
+test('a new group gets the colours groups of its light type have, each name once, and nothing else changes', () => {
+  const before = rig();
+  // A second RGBW light (as B8 and the background are) and an RGB one (as the drum cage's strip).
+  before.fixtures.push({ ...structuredClone(before.fixtures.find((f) => f.id === 'b8')!), id: 'b9', name: 'B9', address: 400 });
+  before.fixtures.push({ ...structuredClone(before.fixtures.find((f) => f.id === 'l1')!), id: 'l2', name: 'L2', universe: 2, address: 1 });
+  before.groups.push({ id: 'balcony', name: 'Balcony', kind: 'light', fixtures: ['b9'] });
+  before.groups.push({ id: 'aisle', name: 'Aisle', kind: 'light', fixtures: ['l2'] });
+  // A colour only B8 has, an effect and a hidden colour, which are not copied.
+  before.presets.push({ id: 'b8-only', name: 'Only B8', group: 'b8-side-bar', fade: 2, layers: [{ kind: 'static', colour: { hex: '#123456', white: 0.5 }, intensity: 0.7 }] });
+  before.presets.push({ id: 'b8-hidden', name: 'Custom', group: 'b8-side-bar', custom: true, fade: 3, layers: [{ kind: 'static', colour: { hex: '#abcdef' }, intensity: 1 }] });
+  const out = ensureGroupColours(before);
+  const own = (s: Show, g: string) => s.presets.filter((p) => p.group === g && !p.custom && !isEffectPreset(p));
+  const byName = (s: Show, groups: string[]) => [...new Set(groups.flatMap((g) => own(s, g).map((p) => p.name)))];
+  assert.deepEqual(names(out, 'balcony'), byName(before, ['background', 'b8-side-bar']), 'the background\'s, then the names only B8 has');
+  assert.deepEqual(names(out, 'aisle'), byName(before, ['drum-cage']));
+  // A copy makes the same light as the colour it came from, under its own id.
+  const copy = out.presets.find((p) => p.group === 'balcony' && p.name === 'Only B8')!;
+  assert.deepEqual({ ...copy, id: 'x', group: 'x' }, { ...before.presets.find((p) => p.id === 'b8-only')!, id: 'x', group: 'x' });
+  assert.equal(out.presets.some((p) => p.group === 'balcony' && (p.custom || isEffectPreset(p))), false, 'no effects, no hidden colours');
+  assert.equal(names(out, 'balcony').filter((n) => n === 'Off').length, names(before, 'background').filter((n) => n === 'Off').length);
+  for (const g of before.groups) if (!['balcony', 'aisle'].includes(g.id)) assert.deepEqual(names(out, g.id), names(before, g.id), g.id);
+  assert.equal(new Set(out.presets.map((p) => p.id)).size, out.presets.length, 'ids are unique');
+  assert.deepEqual(checkReferences(out), []);
+  parseShow(JSON.parse(JSON.stringify(out)));
+  assert.equal(before.presets.some((p) => p.group === 'balcony'), false, 'the input is not changed');
+  assert.deepEqual(ensureGroupColours(out), out, 'done once');
+});
+
+test('the first group of its light type gets the starter set; given lights later, an untouched starter set is topped up', () => {
+  const s = rig();
+  s.fixtures.push({ ...structuredClone(s.fixtures.find((f) => f.id === 'l1')!), id: 'l2', name: 'L2', universe: 2, address: 1 });
+  // A plain dimmer: no group has that type yet.
+  s.fixtures.push({ id: 'd1', name: 'D1', profile: 'generic-dimmer', universe: 2, address: 10, x: 0.5, y: 0.5 });
+  s.groups.push({ id: 'dimmers', name: 'Dimmers', kind: 'light', fixtures: ['d1'] });
+  s.groups.push({ id: 'aisle', name: 'Aisle', kind: 'light', fixtures: [] });
+  const first = ensureGroupColours(s);
+  assert.deepEqual(names(first, 'dimmers'), ['Warm white', 'Off']);
+  assert.deepEqual(names(first, 'aisle'), ['Warm white', 'Off']);
+  first.groups.find((g) => g.id === 'aisle')!.fixtures = ['l2'];
+  const later = ensureGroupColours(first);
+  assert.deepEqual(names(later, 'aisle').slice(0, 2), ['Warm white', 'Off'], 'its own two stay first');
+  assert.deepEqual(names(later, 'aisle').slice(2), names(s, 'drum-cage').filter((n) => !['Warm white', 'Off'].includes(n)));
+  assert.deepEqual(ensureGroupColours(later), later, 'done once');
+  // A starter set someone changed is theirs: nothing is added.
+  const changed = structuredClone(first);
+  changed.groups.find((g) => g.id === 'aisle')!.fixtures = ['l2'];
+  (changed.presets.find((p) => p.group === 'aisle' && p.name === 'Warm white')!.layers[0] as StaticLayer).intensity = 0.5;
+  assert.deepEqual(ensureGroupColours(changed), changed);
 });
 
 test('a show whose groups all have colours is left exactly as it is', () => {
