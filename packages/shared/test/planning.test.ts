@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, rememberKey, setKept,
+  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept,
   serviceRows, toPlannedService, type PlannedService, type ServiceItem, type Show,
 } from '../src/index.ts';
 
@@ -17,6 +17,32 @@ test('item kinds are told apart as the planning service stores them', () => {
   assert.equal(itemKind({ cue_type: '', cue_foreground: { type: '' }, cue_background: { type: '' }, displayName: '[blank]' }), 'blank');
   assert.equal(itemKind({ cue_type: '', cue_foreground: { type: 'text', text: '' }, displayName: '[blank]' }), 'blank');
   assert.equal(itemKind({ cue_type: '', cue_foreground: { type: 'countdown' } }), 'other');
+  // A PowerPoint file, as Kuldīga plans one (1 Nov 2026).
+  assert.equal(itemKind({ cue_type: '', cue_foreground: { type: 'presentation' }, cue_background: { type: '' }, displayName: 'prezentacija.pptx' }), 'slides');
+});
+
+test('a tempo the service sets for its song wins over the song library\'s', () => {
+  const songs = new Map<string, unknown>([[SONG, { name: 'Klints', data: { tempo: 141 } }]]);
+  const own = doc();
+  own.data.songMeta = { c2: { key: 'D', tempo: 88 } } as any;
+  assert.equal(toPlannedService('svc1', own, songs, 'T').items[1]!.tempo, 88);
+  // Out of range, it is passed over for the library's.
+  own.data.songMeta = { c2: { key: 'D', tempo: 400 } } as any;
+  assert.equal(toPlannedService('svc1', own, songs, 'T').items[1]!.tempo, 141);
+});
+
+test('only the part headers is nothing planned', () => {
+  const header = (key: string, name: string): ServiceItem => ({ key, kind: 'header', name });
+  assert.equal(plannedCount([header('a', 'Ievads'), header('b', 'Slavēšana'), header('c', 'Vārds'), header('d', 'Beigas')]), 0);
+  assert.equal(plannedCount([header('a', 'Ievads'), { key: 'x', kind: 'blank', name: '[blank]' }]), 1);
+  assert.equal(plannedCount([]), 0);
+});
+
+test('the place is the service type\'s name up to its dash', () => {
+  assert.equal(placeOf('Rīga - Svētdienas Dievkalpojums'), 'Rīga');
+  assert.equal(placeOf('Liepāja- Svētdienas Dievkalpojums'), 'Liepāja');
+  assert.equal(placeOf('Mājasgrupa (Rīga)'), 'Mājasgrupa (Rīga)');
+  assert.equal(placeOf('Slavēšanas vakars'), 'Slavēšanas vakars');
 });
 
 const doc = () => ({
@@ -132,6 +158,17 @@ test('a new song without a tempo has none, and a long name is cut to a look name
   const made = lookOf(out, out.operator.runningOrder[1]!);
   assert.equal(made.tempo, undefined);
   assert.equal(made.name, 'x'.repeat(40));
+});
+
+test('a long song name loses its second title in brackets, else is cut at a word', () => {
+  // Real names from the church's services (Nov 2026).
+  assert.equal(planLookName('Tad, Kad Jūra Krāc (Vēlos, Kungs, zem Taviem spārniem būt)', 'Song'), 'Tad, Kad Jūra Krāc');
+  assert.equal(planLookName('Jēzu, Tavs Vārds liek tumsai drebēt (Miers, Tevī valda miers)', 'Song'), 'Jēzu, Tavs Vārds liek tumsai drebēt');
+  assert.equal(planLookName('Visas slavas cienīgs Tu (Worthy of it all)', 'Song'), 'Visas slavas cienīgs Tu');
+  assert.equal(planLookName('Es dziedu - Jēzus (Es pasludināt vēlos)', 'Song'), 'Es dziedu - Jēzus (Es pasludināt vēlos)');
+  assert.equal(planLookName('Pāvila  pirmā vēstule Korintiešiem un vēl kaut kas garš', 'Item'), 'Pāvila pirmā vēstule Korintiešiem un…');
+  assert.equal(planLookName('   ', 'Song'), 'Song');
+  for (const name of ['Tad, Kad Jūra Krāc (Vēlos, Kungs, zem Taviem spārniem būt)', 'a'.repeat(80), 'word '.repeat(20)]) assert.ok(planLookName(name, 'Song').length <= 40, name);
 });
 
 test('a show with no quick look gives a new song an empty look', () => {

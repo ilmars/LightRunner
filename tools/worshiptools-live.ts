@@ -6,8 +6,9 @@
 // Without an account it follows every account you belong to. Log in first (see tools/worshiptools.ts).
 //
 // This listens the way stage.worshiptools.com (Presenter's stage display) does. Presenter
-// joins a Pusher channel "presence-{account}" as a member with client "weDesktop"; its id
-// is "{account}.{machine}". On "private-{id}" we send client-command {action: "activate"} and
+// joins a Pusher channel "presence-{account}" as a member with client "weDesktop". Older Presenters had the
+// member id "{account}.{machine}"; Presenter 2026.1.11 (seen 4 Nov 2026) has a bare id, and its channels are
+// still named "{account}.{id}". On "private-{account}.{id}" we send client-command {action: "activate"} and
 // Presenter answers with client-event (current_cue, next_cue, current_slide, cuelist),
 // client-slides (the live item's slides) and client-cuelist, each split into chunks
 // {id, i, total, chunk} that join into JSON.
@@ -47,6 +48,9 @@ function follow(account: { id: string; name: string }, retry = 0): void {
   const chunks = new Map<string, string[]>();
   const label = account.name || account.id;
 
+  /** A Presenter's channel name: its member id, with the account in front when the id doesn't carry it. */
+  const channelOf = (id: string) => (id.includes('.') ? id : `${account.id}.${id}`);
+
   const send = (event: string, data: unknown, channel?: string) =>
     ws.send(JSON.stringify(channel ? { event, channel, data } : { event, data }));
 
@@ -71,8 +75,9 @@ function follow(account: { id: string; name: string }, retry = 0): void {
     const p: Presenter = { id, name: info.machineName || info.name || id.split('.')[1] || id, slides: [] };
     presenters.set(id, p);
     status(`Presenter open on ${p.name} (${label})`);
-    subscribe(`presence-${id}`, socketId).catch(fail);
-    subscribe(`private-${id}`, socketId).catch(fail);
+    // Its channels are named "{account}.{machine}", whichever shape the member id has.
+    subscribe(`presence-${channelOf(id)}`, socketId).catch(fail);
+    subscribe(`private-${channelOf(id)}`, socketId).catch(fail);
   }
 
   function presenterMessage(p: Presenter, event: string, data: any): void {
@@ -140,12 +145,13 @@ function follow(account: { id: string; name: string }, retry = 0): void {
           const p = m.channel === `presence-${account.id}` && presenters.get(data.user_id);
           if (!p) return;
           presenters.delete(p.id);
-          send('pusher:unsubscribe', { channel: `presence-${p.id}` });
-          send('pusher:unsubscribe', { channel: `private-${p.id}` });
+          send('pusher:unsubscribe', { channel: `presence-${channelOf(p.id)}` });
+          send('pusher:unsubscribe', { channel: `private-${channelOf(p.id)}` });
           return status(`Presenter closed on ${p.name} (${label})`);
         }
       }
-      const p = m.channel && presenters.get(m.channel.replace(/^(private|presence)-/, ''));
+      const member = m.channel?.replace(/^(private|presence)-/, '');
+      const p = member && [...presenters.values()].find((x) => channelOf(x.id) === member);
       if (!p || !m.event.startsWith('client-')) return;
       if (data && typeof data === 'object' && 'chunk' in data && 'total' in data) {
         const key = `${m.event} ${data.id}`;

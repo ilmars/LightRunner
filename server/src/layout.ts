@@ -1,6 +1,6 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupLightType, groupSegments, keptOf, newSongLookOf, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, serviceRows } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupLightType, groupSegments, keptOf, newSongLookOf, paletteEntryOf, placeOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, serviceRows } from '../../packages/shared/src/index.ts';
 import type { ChannelRole, FixtureShape, GroupKind, Hangs, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, ServiceRow, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 import { keyLabel, keyPlace, keyShort } from './keynames.ts';
@@ -111,7 +111,7 @@ export interface OperatorLayout {
    */
   rows: ServiceRow[];
   /** The loaded planning service's name and first start time (as the planner writes it), when one is loaded. */
-  service?: { title: string; start: string };
+  service?: { title: string; start: string; place: string };
   /**
    * Whether loading a service from the planning service is switched on (Settings), so the page knows whether to offer Load service.
    * While on: the name of the look new songs get a copy of (when there is one), and the remembered looks that are not in the
@@ -223,7 +223,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
     looks: lookIds.flatMap(describe),
     runningOrder: show.operator.runningOrder.flatMap(describe),
     rows: planning ? serviceRows(show) : show.operator.runningOrder.map((look) => ({ kind: 'look' as const, look, header: false })),
-    ...(planning && show.operator.service ? { service: { title: show.operator.service.title, start: show.operator.service.start } } : {}),
+    ...(planning && show.operator.service ? { service: { title: show.operator.service.title, start: show.operator.service.start, place: placeOf(show.operator.service.title) } } : {}),
     planning: planningOf(show),
     quickLooks: show.operator.quickLooks.flatMap((q) => describe(q.look).map((l) => ({
       ...l, tab: q.tab, groups: groupIds.filter((gid, k) => !smoke.has(gid) && l.entries[k] !== null),

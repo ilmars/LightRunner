@@ -3,7 +3,7 @@
 
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
-import { PlannedService } from '../../../packages/shared/src/index.ts';
+import { PlannedService, plannedCount } from '../../../packages/shared/src/index.ts';
 import { PlanningError, type ServiceSummary } from './client.ts';
 import type { Planning } from './index.ts';
 
@@ -88,5 +88,5 @@ export class FakePlanning implements Planning {
 
 function summaryOf(s: PlannedService): ServiceSummary {
   const songIds = [...new Set(s.items.flatMap((i) => (i.songId ? [i.songId] : [])))];
-  return { id: s.id, start: s.start, items: s.items.length, songs: s.items.filter((i) => i.kind === 'song').length, songIds };
+  return { id: s.id, start: s.start, items: plannedCount(s.items), songs: s.items.filter((i) => i.kind === 'song').length, songIds };
 }

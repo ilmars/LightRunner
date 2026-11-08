@@ -7,7 +7,7 @@
 
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { toPlannedService, type PlannedService } from '../../../packages/shared/src/index.ts';
+import { plannedCount, toPlannedService, type PlannedService } from '../../../packages/shared/src/index.ts';
 import { writeAtomic } from '../store.ts';
 import { fromFirestore } from './firestore.ts';
 
@@ -42,6 +42,7 @@ export class PlanningError extends Error {
   }
 }
 
+/** `items` leaves the part headers out: a service with only its parts is not planned yet. */
 export type ServiceSummary = { id: string; start: string; items: number; songs: number; songIds: string[] };
 
 type Login = { refresh?: string; machineId?: string };
@@ -142,7 +143,7 @@ export class PlanningClient {
       try {
         const planned = toPlannedService(doc.id, doc, new Map(), '');
         const songIds = [...new Set(planned.items.flatMap((i) => (i.songId ? [i.songId] : [])))];
-        all.push({ id: planned.id, start: planned.start, items: planned.items.length, songs: planned.items.filter((i) => i.kind === 'song').length, songIds, at });
+        all.push({ id: planned.id, start: planned.start, items: plannedCount(planned.items), songs: planned.items.filter((i) => i.kind === 'song').length, songIds, at });
       } catch {
         // a document that is not a service is passed over
       }
