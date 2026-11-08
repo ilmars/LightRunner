@@ -5,6 +5,8 @@
 import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, liveEffectId, livePresetId, parseLiveEffect, parseLivePreset } from './protocol.ts';
 import { effectKey, isEffectPreset, resolveColour } from './schema.ts';
 import { followQuickLook } from './keys.ts';
+import { anchorOf, rememberKey } from './planning.ts';
+import type { PlannedService } from './planning.ts';
 import type { EffectLayer, Layer, Look, LookEntry, Preset, QuickLook, QuickTab, Show } from './schema.ts';
 
 /** Where the stage is going: preset ids (possibly live ones) and level targets, as in RuntimeState. */
@@ -160,7 +162,7 @@ function inOrder(show: Show, id: string): void {
 
 /**
  * Gives a show that has no running order its first one: Basic lights, five
- * songs, a sermon and a midweek look. Does nothing when there is one already.
+ * songs, a sermon and a midweek look, the last two kept. Does nothing when there is one already.
  */
 export function ensureRunningOrder(show: Show): Show {
   const out = structuredClone(show);
@@ -183,9 +185,10 @@ export function ensureRunningOrder(show: Show): Show {
   const copy = (name: string, from?: Look) => addLook(out, name, structuredClone((from ?? basic).groups));
   const order = [safeId!];
   for (let n = 1; n <= 5; n++) order.push(copy(`Song ${n}`, worship));
-  order.push(copy('Sermon', sermon));
-  order.push(copy('Midweek calm', prayer));
+  const kept = [copy('Sermon', sermon), copy('Midweek calm', prayer)];
+  order.push(...kept);
   out.operator.runningOrder = order;
+  out.operator.kept = kept;
 
   out.operator.quickLooks = before
     .filter((l) => l.id !== safeId)
@@ -207,6 +210,145 @@ export function ensureBasicLights(show: Show): Show {
     out.operator.safeLook = safeId;
   }
   out.operator.runningOrder = [safeId, ...out.operator.runningOrder.filter((id) => id !== safeId)];
+  return out;
+}
+
+// ---- The planned service ----
+// loadService and ensurePlanning live here, not in planning.ts: planning.ts must not import from
+// schema.ts (which imports it), and these need uniqueId and the look rules from this file.
+
+/** Cuts a planned name to a look's 40 characters; `fallback` when nothing is left of it. */
+function planLookName(name: string, fallback: string): string {
+  return name.trim().slice(0, MAX_NAME).trim() || fallback;
+}
+
+/** Forgets, in place, everything the planning feature keeps that names a look that is gone. */
+function forgetMissing(show: Show): void {
+  const exists = new Set(show.looks.map((l) => l.id));
+  const op = show.operator;
+  if (op.remembered) {
+    for (const [key, look] of Object.entries(op.remembered)) if (!exists.has(look)) delete op.remembered[key];
+  }
+  if (op.kept) op.kept = op.kept.filter((look) => exists.has(look));
+  for (const item of op.service?.items ?? []) if (item.look !== undefined && !exists.has(item.look)) delete item.look;
+  const planning = show.settings.planning;
+  if (planning?.newSongLook !== undefined && !exists.has(planning.newSongLook)) delete planning.newSongLook;
+}
+
+/** Drops the planning references (remembered looks, the loaded service's looks, the look for new songs) that name a look the show no longer has. */
+export function ensurePlanning(show: Show): Show {
+  const out = structuredClone(show);
+  forgetMissing(out);
+  return out;
+}
+
+// ---- Kept rows ----
+
+/** The first running order's own rows (ensureRunningOrder), kept in a show from before kept rows. */
+const FIRST_KEPT = ['Sermon', 'Midweek calm'];
+
+/** Gives a show from before kept rows its default ones: the running order's Sermon and Midweek calm. */
+export function ensureKept(show: Show): Show {
+  const out = structuredClone(show);
+  if (out.operator.kept) return out;
+  out.operator.kept = out.operator.runningOrder.filter((id) => {
+    const look = out.looks.find((l) => l.id === id);
+    return id !== out.operator.safeLook && !!look && FIRST_KEPT.includes(look.name);
+  });
+  return out;
+}
+
+/** The kept rows in running-order order, Basic lights left out (it always stays). */
+export function keptOf(show: Show): string[] {
+  const kept = new Set(show.operator.kept ?? []);
+  return show.operator.runningOrder.filter((id) => kept.has(id) && id !== show.operator.safeLook);
+}
+
+/** Marks a running-order row kept (a load never replaces it) or not. Basic lights is always kept; a row of the loaded service is not. */
+export function setKept(show: Show, id: string, kept: boolean): Show {
+  if (id === show.operator.safeLook) throw new Error('Basic lights always stays.');
+  const out = structuredClone(show);
+  inOrder(out, id);
+  if (kept && out.operator.service?.items.some((i) => i.look === id)) {
+    throw new Error('This row comes from the planned service. The next load replaces it.');
+  }
+  const rest = (out.operator.kept ?? []).filter((x) => x !== id);
+  out.operator.kept = kept ? [...rest, id] : rest;
+  return out;
+}
+
+/** A name compared without capitals, long vowels or other marks: "VĀRDS" and "vards" are the same. */
+function plainName(name: string): string {
+  return name.normalize('NFD').replace(/\p{M}/gu, '').trim().toLowerCase();
+}
+
+const QUICK_TABS: QuickTab[] = ['plain', 'colours', 'effects'];
+
+/** The look a new song is copied from: the one chosen in Settings if it exists, else the first quick look (tabs in the order they are shown). */
+export function newSongLookOf(show: Show): string | undefined {
+  const chosen = show.settings.planning?.newSongLook;
+  if (chosen !== undefined && show.looks.some((l) => l.id === chosen)) return chosen;
+  for (const tab of QUICK_TABS) {
+    const quick = show.operator.quickLooks.find((q) => q.tab === tab && show.looks.some((l) => l.id === q.look));
+    if (quick) return quick.look;
+  }
+  return undefined;
+}
+
+/**
+ * Puts a planned service into the running order: Basic lights first (untouched), then the kept rows (untouched),
+ * then each item's look in the service's order, each look once. A look the planner has given before comes back
+ * (renamed to the item's name); a new song gets a copy of the look for new songs, and a new Vārds (the sermon) a
+ * copy of the kept Sermon row, remembered at once. Running-order looks nothing keeps or remembers are
+ * removed; quick looks and remembered looks stay, hidden when the service does not use them.
+ */
+export function loadService(show: Show, service: PlannedService): Show {
+  const out = ensureBasicLights(show);
+  const safe = out.operator.safeLook!;
+  forgetMissing(out);
+  const remembered = (out.operator.remembered ??= {});
+  const kept = keptOf(out);
+  // Basic lights and the kept rows are never a planned item's look.
+  const fixed = new Set([safe, ...kept]);
+  for (const [key, look] of Object.entries(remembered)) if (fixed.has(look)) delete remembered[key];
+  // A new Vārds starts as a copy of the kept Sermon row.
+  const sermonId = kept.find((id) => plainName(lookIn(out, id).name) === 'sermon');
+  const sermon = sermonId === undefined ? undefined : lookIn(out, sermonId);
+
+  const keep = new Set<string>([...fixed, ...Object.values(remembered), ...out.operator.quickLooks.map((q) => q.look)]);
+  const forNew = out.settings.planning?.newSongLook;
+  if (forNew !== undefined) keep.add(forNew);
+  const dropped = new Set(out.operator.runningOrder.filter((id) => !keep.has(id)));
+  out.looks = out.looks.filter((l) => !dropped.has(l.id));
+  out.operator.looks = out.operator.looks.filter((id) => !dropped.has(id));
+
+  const source = newSongLookOf(out);
+  const order: string[] = [safe, ...kept];
+  const items = service.items.map((planned) => {
+    const item = structuredClone(planned);
+    delete item.look;
+    const key = rememberKey(item);
+    let id = key === null ? undefined : remembered[key];
+    if (id !== undefined) {
+      lookIn(out, id).name = planLookName(item.name, lookIn(out, id).name);
+    } else if (item.kind === 'song') {
+      const from = source === undefined ? undefined : lookIn(out, source);
+      id = addLook(out, planLookName(item.name, 'Song'), structuredClone(from?.groups ?? []));
+      if (item.tempo !== undefined) lookIn(out, id).tempo = item.tempo;
+      if (key !== null) remembered[key] = id;
+    } else if (key !== null && sermon && plainName(item.name) === 'vards') {
+      id = addLook(out, planLookName(item.name, 'Vārds'), structuredClone(sermon.groups));
+      if (sermon.tempo !== undefined) lookIn(out, id).tempo = sermon.tempo;
+      remembered[key] = id;
+    }
+    if (id !== undefined) {
+      item.look = id;
+      if (!order.includes(id)) order.push(id);
+    }
+    return item;
+  });
+  out.operator.runningOrder = order;
+  out.operator.service = { ...service, items };
   return out;
 }
 
@@ -237,6 +379,32 @@ export function saveItem(show: Show, lookId: string, stage: Stage): Show {
     target.groups = entriesFor(out, stage);
   }
   if (stage.tempo !== undefined) target.tempo = stage.tempo;
+  return out;
+}
+
+/**
+ * Gives a loaded service's header, slides, picture or other item (by its key) a look made from the stage, as Save
+ * makes one. The look goes in the running order right after the look the item sits after now, and is remembered
+ * for the next load. Verses and blanks never have a look; an item that has one is saved with Save to it.
+ */
+export function saveServiceItem(show: Show, key: string, stage: Stage): Show {
+  const out = structuredClone(show);
+  const item = out.operator.service?.items.find((i) => i.key === key);
+  if (!item) throw new Error("That item isn't in the loaded service.");
+  if (item.kind === 'verse') throw new Error("Verses don't change the lights.");
+  if (item.kind === 'blank') throw new Error("Blanks don't change the lights.");
+  if (item.look !== undefined) throw new Error(`${item.name} already has a look: use Save to ${item.name}.`);
+  // A song's look comes with the load; one that lost it (deleted in Edit list) is given again by loading the service.
+  if (item.kind === 'song') throw new Error(`Load the service again to give ${item.name} a look.`);
+  const after = anchorOf(out, key);
+  const id = addLook(out, planLookName(item.name, 'Look'), entriesFor(out, stage));
+  if (stage.tempo !== undefined) lookIn(out, id).tempo = stage.tempo;
+  const at = out.operator.runningOrder.indexOf(after);
+  if (at < 0) out.operator.runningOrder.push(id);
+  else out.operator.runningOrder.splice(at + 1, 0, id);
+  item.look = id;
+  const remember = rememberKey(item);
+  if (remember !== null) (out.operator.remembered ??= {})[remember] = id;
   return out;
 }
 
@@ -275,6 +443,8 @@ export function deleteItem(show: Show, id: string): Show {
   if (!out.operator.quickLooks.some((q) => q.look === id)) {
     out.looks = out.looks.filter((l) => l.id !== id);
     out.operator.looks = out.operator.looks.filter((x) => x !== id);
+    // A song's look that was remembered for the planned service is forgotten with it.
+    forgetMissing(out);
   }
   return out;
 }
@@ -481,6 +651,22 @@ export function setItemTempo(show: Show, itemId: string, bpm: number): Show {
   if (!(bpm >= MIN_TEMPO && bpm <= MAX_TEMPO)) throw new Error(`the tempo is ${MIN_TEMPO} to ${MAX_TEMPO} beats per minute`);
   const out = structuredClone(show);
   itemLook(out, itemId).tempo = bpm;
+  return out;
+}
+
+/**
+ * Gives a running-order item a copy of another look's groups (and its tempo, when it has one): "pick another look
+ * from a menu". The item keeps its name, id and remembered key, and the look it copied is untouched.
+ * Basic lights is set by Save alone, and is no source either: its groups are all still, which would empty the song.
+ */
+export function copyLookToItem(show: Show, itemId: string, fromId: string): Show {
+  const out = structuredClone(show);
+  const target = itemLook(out, itemId);
+  if (itemId === out.operator.safeLook) throw new Error('Basic lights is set by Save.');
+  if (fromId === out.operator.safeLook) throw new Error("Basic lights can't be copied: use a quick look.");
+  const from = lookIn(out, fromId);
+  target.groups = structuredClone(from.groups);
+  if (from.tempo !== undefined) target.tempo = from.tempo;
   return out;
 }
 

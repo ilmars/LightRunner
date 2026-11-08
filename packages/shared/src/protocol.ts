@@ -154,9 +154,13 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('itemTempo'), item: id, bpm }),
   /** Copy a quick look's groups into a running-order item without touching the stage. */
   z.object({ type: z.literal('itemQuickLook'), item: id, look: id }),
-  /** Keep an Any colour pick, or ＋ New colour: add it to a group's colour list, or to every group of its kind (`level` and `fade`: its brightness and fade, full and 3 s when left out). */
+  /**
+   * Keep an Any colour pick, or ＋ New colour: add it to a group's colour list, to every group of its light type too (`sameType`:
+   * RGB with RGB, RGBW with RGBW), or to every group of its kind (`allGroups`) (`level` and `fade`: its brightness and fade, full
+   * and 3 s when left out).
+   */
   z.object({
-    type: z.literal('addColour'), group: id, colour: hex, name: z.string(), allGroups: z.boolean(),
+    type: z.literal('addColour'), group: id, colour: hex, name: z.string(), allGroups: z.boolean(), sameType: z.boolean().optional(),
     white: unit.optional(), amber: unit.optional(), uv: unit.optional(), level: unit.min(0.05).optional(), fade,
   }),
   /**
@@ -174,6 +178,14 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('addEffect'), group: id, name: z.string(), effect: LiveEffectLayer }),
   /** New settings for an effect in a group's list, with a new name when given (one Undo step); a name alone can go with editColour. */
   z.object({ type: z.literal('editEffect'), preset: id, effect: LiveEffectLayer, name: z.string().optional() }),
+  /** Put a service of the planning service into the running order (the server fetches it). One Undo step; the lights are never touched. */
+  z.object({ type: z.literal('loadService'), id: z.string().min(1).max(64) }),
+  /** Store the stage (or the tablet's draft) as the look of a loaded service's header, slides or picture, by the item's key; it goes in the running order after the look above it. */
+  z.object({ type: z.literal('saveServiceItem'), key: z.string().min(1).max(64) }),
+  /** Give a running-order item a copy of another look's groups (and tempo) without touching the stage: "pick another look". */
+  z.object({ type: z.literal('itemCopyLook'), item: id, from: id }),
+  /** Mark a running-order item kept (a load never replaces it) or not. */
+  z.object({ type: z.literal('keepItem'), id, kept: z.boolean() }),
   // Controller keys (the server's learn sends setKey once a key is pressed): one key, one job.
   /** Give `does` this key; a key that did something else moves to it. */
   z.object({ type: z.literal('setKey'), key: ControlKey, does: KeyTarget }),
@@ -194,7 +206,7 @@ export type Command = z.infer<typeof Command>;
 
 const SHOW_EDITS = [
   'saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemQuickLook',
-  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'setKey', 'clearKey', 'resetKeys',
+  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'loadService', 'saveServiceItem', 'itemCopyLook', 'keepItem', 'setKey', 'clearKey', 'resetKeys',
 ] as const;
 /** Commands that change the show rather than the stage. */
 export type ShowEdit = Extract<Command, { type: (typeof SHOW_EDITS)[number] }>;

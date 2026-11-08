@@ -13,8 +13,8 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OscSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureRunningOrder, isManualCommand,
-  applyQuickLookToItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo,  type OflFixture, type Pick, type Scope,
+  BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, rememberKey,
+  applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
   BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
   pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
@@ -30,6 +30,7 @@ import { MidiDriver, type ApcStatus } from './controllers.ts';
 import { keyLabel, keyPlace } from './keynames.ts';
 import type { FakeMidi, MidiPorts } from './midi.ts';
 import { operatorLayout, type OperatorLayout } from './layout.ts';
+import { PlanningError, createPlanning, type Planning } from './planning/index.ts';
 import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from './messages.ts';
 import { isLocalAddress, isThisComputer } from './net.ts';
 import { AlreadyRunning, liveMarker, removeMarker, writeMarker } from './marker.ts';
@@ -88,6 +89,8 @@ export interface AppOptions {
   recordingsTotal?: number;
   /** Test only: where an uploaded recording is written (one that fails, for a full disk). */
   recordingWriter?: (path: string) => import('node:stream').Writable;
+  /** The online planning service; tests and `LIGHT_RUNNER_FAKE_PLANNING` give a fake. Without it, the real one, keeping its login in the data folder. */
+  planning?: Planning;
 }
 
 export type Role = 'operator' | 'programmer';
@@ -249,6 +252,7 @@ export class App {
   private readonly identifyTimers = new Map<string, NodeJS.Timeout>();
   private ofl!: OflClient;
   private recordings!: Recordings;
+  private readonly planning: Planning;
   /** Files waiting for someone to pick what to take from them. */
   private readonly imports = new Map<string, { show: Show; scope: Scope; at: number }>();
   private readonly nodeWatch = new NodeWatch((problem, otherDesk) => {
@@ -264,6 +268,7 @@ export class App {
     this.store = new Store(opts.dataDir, opts.seedPath);
     this.saver = new RuntimeSaver(this.store);
     this.ofl = new OflClient(join(opts.dataDir, 'ofl'), opts.fetch);
+    this.planning = opts.planning ?? createPlanning(opts.dataDir, this.log);
     this.recordings = new Recordings(opts.dataDir, { limit: opts.recordingLimit, total: opts.recordingsTotal, writer: opts.recordingWriter });
     this.sessions = new Sessions({ file: join(opts.dataDir, 'sessions.json'), pin: () => this.show?.settings.pinHash });
   }
@@ -972,10 +977,12 @@ export class App {
 
   /**
    * Operator edits to the running order and quick looks. Throws with a plain message when refused.
-   * `draft`: the tablet is in Blind, so Save, Add song and Save as quick look (and a quick look's Update from the stage) store its draft instead of the stage.
+   * `draft`: the tablet is in Blind, so Save, Save to a service item, Add song and Save as quick look (and a quick look's Update from the stage) store its draft instead of the stage.
    */
   private async editShow(cmd: ShowEdit, draft?: BlindSession): Promise<void> {
-    const usesStage = cmd.type === 'saveItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook' || (cmd.type === 'editQuickLook' && !!cmd.fromStage);
+    // The service is fetched before anything is read or replaced below, so no other edit can slip in while it is on its way.
+    const service = cmd.type === 'loadService' ? await this.fetchService(cmd.id) : null;
+    const usesStage = cmd.type === 'saveItem' || cmd.type === 'saveServiceItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook' || (cmd.type === 'editQuickLook' && !!cmd.fromStage);
     // Deleting a colour only looks at the stage to keep a lit colour; it is fine during Blackout.
     const stage = usesStage && draft ? draft.engine.runtime() : usesStage || cmd.type === 'deleteColour' ? await this.stage() : null;
     // In Prepare an edit never changes the lights: what the stage shows now (each group, and Blackout's memory), taken
@@ -999,6 +1006,8 @@ export class App {
         if (!before.operator.runningOrder.includes(cmd.id)) throw new Error('only running-order items can be saved');
         next = saveItem(before, cmd.id, stage!);
         break;
+      // Save to a header, slides or picture of the loaded service: its look is made from the stage (or the draft), like Save.
+      case 'saveServiceItem': next = saveServiceItem(before, cmd.key, stage!); break;
       case 'addSong': next = addSong(before, cmd.after, stage!).show; break;
       case 'renameItem': next = renameItem(before, cmd.id, cmd.name); break;
       case 'deleteItem': next = deleteItem(before, cmd.id); break;
@@ -1012,12 +1021,16 @@ export class App {
       case 'itemGroup': next = setItemGroup(before, cmd.item, cmd); break;
       case 'itemTempo': next = setItemTempo(before, cmd.item, cmd.bpm); break;
       case 'itemQuickLook': next = applyQuickLookToItem(before, cmd.item, cmd.look); break;
+      case 'itemCopyLook': next = copyLookToItem(before, cmd.item, cmd.from); break;
+      case 'keepItem': next = setKept(before, cmd.id, cmd.kept); break;
       // A colour doesn't depend on the stage, so it is fine during Blackout.
       case 'addColour': next = addColour(before, cmd).show; break;
       case 'editColour': next = editColour(before, cmd).show; break;
       // Effects are edited like colours: never from the stage, fine during Blackout.
       case 'addEffect': next = addEffect(before, cmd).show; break;
       case 'editEffect': next = editEffect(before, cmd); break;
+      // The result goes through operatorSave like any edit, so keys of looks the load took away are freed. Never touches the stage.
+      case 'loadService': next = loadService(before, service!); break;
       // Controller keys don't look at the stage either.
       case 'setKey': next = assignKey(before, cmd.key, cmd.does).show; break;
       case 'clearKey': next = clearKey(before, cmd.does); break;
@@ -1678,7 +1691,91 @@ export class App {
       osc: { enabled: s.osc?.enabled ?? false, port: s.osc?.port ?? 8000 },
       oscProblem: this.oscProblem,
       apc: this.apcStatus(),
+      /** Loading the service from the planning service. The login is not part of it: it is kept apart and never shown. */
+      planning: s.planning ?? { enabled: false },
     };
+  }
+
+  // ---- Planning ----
+
+  private planningOn(): boolean {
+    return this.show.settings.planning?.enabled === true;
+  }
+
+  /** What a person is told of a planning call that failed: its own words, or a plain one for something unexpected. */
+  private planningFailure(err: unknown): string {
+    if (err instanceof PlanningError) return err.message;
+    this.log(`Planning: ${(err as Error)?.message ?? String(err)}`);
+    return 'Something went wrong with the planning service. The running order was not changed.';
+  }
+
+  /** The account the services are in: the one chosen in Settings, else the first. */
+  private async planningAccount(): Promise<string> {
+    const chosen = this.show.settings.planning?.account;
+    if (chosen !== undefined) return chosen;
+    const first = (await this.planning.accounts())[0];
+    if (!first) throw new PlanningError('No planning account was found for this login.');
+    return first.id;
+  }
+
+  /** For Settings: whether a login is kept and what it can reach, or in plain words why it can't. Nothing is asked while Planning is off, unless `force` (a login just saved). */
+  private async planningView(force = false): Promise<{ loggedIn: boolean; problem: string | null; accounts: { id: string; name: string }[]; serviceTypes: { id: string; name: string }[] }> {
+    const loggedIn = this.planning.loggedIn();
+    const view = { loggedIn, problem: null as string | null, accounts: [] as { id: string; name: string }[], serviceTypes: [] as { id: string; name: string }[] };
+    if (!loggedIn || (!force && !this.planningOn())) return view;
+    try {
+      view.accounts = await this.planning.accounts();
+      const account = this.show.settings.planning?.account ?? view.accounts[0]?.id;
+      if (account !== undefined) view.serviceTypes = await this.planning.serviceTypes(account);
+    } catch (err) {
+      view.problem = this.planningFailure(err);
+      view.accounts = [];
+      view.serviceTypes = [];
+    }
+    return view;
+  }
+
+  /** The services of the chosen type for the Load service panel, each with how many of its songs already have a look. */
+  private async servicesList() {
+    if (!this.planningOn()) throw new HttpError(503, 'Planning is off.');
+    try {
+      const account = await this.planningAccount();
+      const types = await this.planning.serviceTypes(account);
+      const chosen = this.show.settings.planning?.serviceType;
+      const type = chosen === undefined ? types[0] : types.find((t) => t.id === chosen);
+      if (!type) throw new PlanningError(chosen === undefined ? 'This account has no service types.' : 'The service type chosen in Settings is no longer there. Choose another.');
+      const services = await this.planning.services(account, type.id, new Date());
+      const { remembered = {}, safeLook } = this.show.operator;
+      const looks = new Set(this.show.looks.map((l) => l.id));
+      // A song counts once however often it is planned; it has a look when one is remembered for it.
+      const hasLook = (songId: string) => {
+        // A song item with a songId always has a key.
+        const look = remembered[rememberKey({ key: '', kind: 'song', name: '', songId })!];
+        return look !== undefined && look !== safeLook && looks.has(look);
+      };
+      return {
+        type: type.name,
+        services: services.map((s) => {
+          const withLook = s.songIds.filter(hasLook).length;
+          return { ...s, withLook, newSongs: s.songIds.length - withLook };
+        }),
+      };
+    } catch (err) {
+      throw new HttpError(503, this.planningFailure(err));
+    }
+  }
+
+  /** One service to load, from the chosen account. Throws in plain words; the show is not touched. */
+  private async fetchService(id: string): Promise<PlannedService> {
+    if (!this.planningOn()) throw new Error('Planning is off.');
+    let service: PlannedService;
+    try {
+      service = await this.planning.service(await this.planningAccount(), id);
+    } catch (err) {
+      throw new Error(this.planningFailure(err));
+    }
+    if (!service.items.length) throw new Error('Nothing is planned in this service yet.');
+    return service;
   }
 
   /** Handles programmer routes; returns false for anything else. */
@@ -1696,6 +1793,7 @@ export class App {
       'PUT /api/controller', 'POST /api/keys/reset',
       'GET /api/recordings', 'POST /api/recordings', 'GET /api/recordings/file', 'DELETE /api/recordings',
       'PUT /api/timeline', 'DELETE /api/timeline',
+      'GET /api/planning', 'PUT /api/planning/login',
     ];
     if (!routes.includes(route)) return false;
     if (!open && !this.isProgrammer(req)) throw new HttpError(401, 'enter the programmer PIN');
@@ -1810,9 +1908,10 @@ export class App {
         // It keeps this installation's Send DMX switch as well, so opening a file never starts sending to the lights by
         // itself; the file's output settings (the node's address and so on) are taken.
         // Controller keys are assigned while Patch may be open, so its copy keeps the live ones too, and so do the timelines
-        // (they are made on the Timeline page).
+        // (they are made on the Timeline page). The loaded service and the looks the planner remembers change when an
+        // operator loads a service, and the kept rows when one taps Keep, so Patch keeps the live ones as well.
         show = fromPatch
-          ? { ...show, operator: { ...show.operator, controller: this.show.operator.controller }, settings: this.show.settings, timelines: this.show.timelines }
+          ? { ...show, operator: { ...show.operator, controller: this.show.operator.controller, service: this.show.operator.service, remembered: this.show.operator.remembered, kept: this.show.operator.kept }, settings: this.show.settings, timelines: this.show.timelines }
           : withIgnored({ ...show, settings: { ...show.settings, pinHash: this.show.settings.pinHash, outputEnabled: this.show.settings.outputEnabled } }, this.show.operator.controller?.ignored);
         await this.setShow(show);
         this.log(fromPatch ? 'Patch saved' : `Imported show "${show.name}"`);
@@ -1911,6 +2010,22 @@ export class App {
         this.timelinesSave(this.show.timelines.filter((t) => t !== gone), true);
         this.log(`Timeline "${gone.name}" deleted`);
         json(res, 200, { ok: true });
+        return true;
+      }
+      case 'GET /api/planning':
+        json(res, 200, await this.planningView());
+        return true;
+      case 'PUT /api/planning/login': {
+        // The cookie goes to the planning side and nowhere else: not into the show, a response or the log.
+        const { cookie } = (await readJson(req)) as { cookie?: unknown };
+        if (typeof cookie !== 'string' || !cookie.trim()) throw new HttpError(400, 'Nothing was pasted.');
+        try {
+          await this.planning.setLogin(cookie);
+        } catch (err) {
+          throw new HttpError(400, this.planningFailure(err));
+        }
+        // The Settings switch is a draft until Save, so a login can be saved while Planning is still off; the pickers fill at once.
+        json(res, 200, await this.planningView(true));
         return true;
       }
       case 'GET /api/ofl/db':
@@ -2081,6 +2196,11 @@ export class App {
       if (body.gamma !== undefined) show.settings.gamma = Number(body.gamma);
       if (body.osc !== undefined) show.settings.osc = OscSettings.parse(body.osc);
       if (body.contact !== undefined) show.settings.contact = contactOf(body.contact);
+      if (body.planning !== undefined) {
+        const planning = PlanningSettings.parse(body.planning);
+        if (planning.newSongLook !== undefined && !show.looks.some((l) => l.id === planning.newSongLook)) throw new Error('There is no such look to start new songs from.');
+        show.settings.planning = planning;
+      }
       if (typeof body.manualForOperators === 'boolean') show.operator.manualForOperators = body.manualForOperators;
       if (body.universe !== undefined) {
         // Move the whole rig to one universe (only for single-universe shows).
@@ -2197,6 +2317,8 @@ export class App {
         });
       case 'GET /layout':
         return json(res, 200, this.layout);
+      case 'GET /planning/services':
+        return json(res, 200, await this.servicesList());
       case 'GET /looks/:/visual': {
         // From this.show, so it always shows the latest edit.
         if (!this.show.looks.some((l) => l.id === parts[1])) throw new HttpError(404, `unknown look: ${parts[1]}`);
@@ -2288,7 +2410,7 @@ export function showRevision(show: Show): string {
  */
 function ensureShow(show: Show): Show {
   // A key for a song, quick look or group that is gone is freed.
-  return pruneKeys(ensureGroupColours(ensureEffects(ensureBasicLights(ensureRunningOrder(show)))));
+  return pruneKeys(ensureGroupColours(ensureEffects(ensurePlanning(ensureKept(ensureBasicLights(ensureRunningOrder(show)))))));
 }
 
 /**

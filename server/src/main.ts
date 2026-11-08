@@ -5,6 +5,8 @@
 //   LIGHT_RUNNER_FAKE_MIDI=1   test only: simulated controllers (an APC mini mk2 and a nanoKONTROL2) instead of
 //                              the real ones, pressed through POST /api/test/midi (for checking the pages);
 //                              LIGHT_RUNNER_FAKE_MIDI=missing runs as if the MIDI add-on weren't installed
+//   LIGHT_RUNNER_FAKE_PLANNING=<json file>   test only: a made-up planning service ({ accounts, types, services })
+//                              instead of the real one, for checking the pages; any pasted login is accepted
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +14,7 @@ import { resolve } from 'node:path';
 import { App } from './app.ts';
 import { AlreadyRunning } from './marker.ts';
 import { FakeMidi, loadMidi } from './midi.ts';
+import { FakePlanning } from './planning/fake.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 function readVersion(): string {
@@ -32,6 +35,12 @@ if (process.env.LIGHT_RUNNER_FAKE_MIDI === '1') {
   console.log('TEST ONLY: simulated MIDI controllers (LIGHT_RUNNER_FAKE_MIDI=1); no real controller is used');
 }
 
+let fakePlanning: FakePlanning | undefined;
+if (process.env.LIGHT_RUNNER_FAKE_PLANNING) {
+  fakePlanning = FakePlanning.fromFile(resolve(process.env.LIGHT_RUNNER_FAKE_PLANNING));
+  console.log('TEST ONLY: a made-up planning service (LIGHT_RUNNER_FAKE_PLANNING); the real one is not used');
+}
+
 const app = new App({
   port: Number(process.env.PORT ?? 8080),
   dataDir: resolve(process.env.LIGHT_RUNNER_DATA ?? resolve(root, 'data')),
@@ -43,6 +52,7 @@ const app = new App({
     : process.env.LIGHT_RUNNER_FAKE_MIDI === 'missing' ? (log) => loadMidi(log, async () => { throw new Error('test only: left out'); })
     : loadMidi,
   fakeMidi,
+  planning: fakePlanning,
   // One server per data folder (server.json), and the launcher's stop for one it didn't start.
   claimData: true,
   onStopRequest: () => void shutdown('stop asked by the launcher'),

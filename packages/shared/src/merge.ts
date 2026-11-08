@@ -6,11 +6,11 @@ import { uniqueId } from './runningorder.ts';
 import { isEffectPreset, layerColours, parseShow, type ColourSpec, type Fixture, type Group, type Look, type Palette, type Preset, type Profile, type Show, type Timeline } from './schema.ts';
 
 /** `palette`: the shared colours (from Lightkey) that colours in every group can point to. */
-export type ItemKind = 'profile' | 'fixture' | 'group' | 'palette' | 'preset' | 'look' | 'timeline';
+export type MergeKind = 'profile' | 'fixture' | 'group' | 'palette' | 'preset' | 'look' | 'timeline';
 export type Change = 'added' | 'changed' | 'removed';
 
 export interface DiffItem {
-  kind: ItemKind;
+  kind: MergeKind;
   id: string;
   change: Change;
   name: string;
@@ -22,19 +22,19 @@ export interface DiffItem {
 export type Scope = 'all' | 'patch';
 
 export interface Pick {
-  kind: ItemKind;
+  kind: MergeKind;
   id: string;
   change: Change;
 }
 
 type Item = Profile | Fixture | Group | Palette | Preset | Look | Timeline;
-const LISTS: Record<ItemKind, 'profiles' | 'fixtures' | 'groups' | 'palettes' | 'presets' | 'looks' | 'timelines'> = {
+const LISTS: Record<MergeKind, 'profiles' | 'fixtures' | 'groups' | 'palettes' | 'presets' | 'looks' | 'timelines'> = {
   profile: 'profiles', fixture: 'fixtures', group: 'groups', palette: 'palettes', preset: 'presets', look: 'looks', timeline: 'timelines',
 };
 // Shared colours come before presets: a preset is checked against the shared colours it points to.
 // Timelines come last: they point at groups, colours and looks, though nothing checks it (a missing one is skipped when it runs).
-const ORDER: ItemKind[] = ['profile', 'fixture', 'group', 'palette', 'preset', 'look', 'timeline'];
-const kindsFor = (scope: Scope): ItemKind[] => (scope === 'patch' ? ['profile', 'fixture'] : ORDER);
+const ORDER: MergeKind[] = ['profile', 'fixture', 'group', 'palette', 'preset', 'look', 'timeline'];
+const kindsFor = (scope: Scope): MergeKind[] => (scope === 'patch' ? ['profile', 'fixture'] : ORDER);
 
 /**
  * Two values are the same when they hold the same things: the order of an object's fields is not part of it
@@ -48,7 +48,7 @@ function canonical(value: unknown): string {
   });
 }
 const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
-const list = (show: Show, kind: ItemKind) => show[LISTS[kind]] as Item[];
+const list = (show: Show, kind: MergeKind) => show[LISTS[kind]] as Item[];
 
 /** True when a preset's swatch is just what its colour (shared colours looked up in its own show) shows. */
 const swatchFollows = (show: Show, p: Preset) => p.swatch !== undefined && p.swatch === swatchOf(show, p);
@@ -62,7 +62,7 @@ const swatchFollows = (show: Show, p: Preset) => p.swatch !== undefined && p.swa
  *   compared on its own, and taking it brings the swatch along.
  * - A fixture is compared field by field, whatever order its fields are in (see takenFixture).
  */
-const comparable = (kind: ItemKind, x: Item, show: Show): unknown => {
+const comparable = (kind: MergeKind, x: Item, show: Show): unknown => {
   if (kind === 'fixture') return Object.entries(x).filter(([, v]) => v !== undefined).sort(([k1], [k2]) => (k1 < k2 ? -1 : 1));
   if (kind === 'group') {
     const { kind: _ignored, ...rest } = x as Group;
@@ -74,7 +74,7 @@ const comparable = (kind: ItemKind, x: Item, show: Show): unknown => {
   }
   return x;
 };
-const sameItem = (kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show) => same(comparable(kind, a, show), comparable(kind, b, incoming));
+const sameItem = (kind: MergeKind, a: Item, b: Item, show: Show, incoming: Show) => same(comparable(kind, a, show), comparable(kind, b, incoming));
 
 /**
  * What our fixture becomes when the file's one is taken. Its shape on the stage plan belongs to this
@@ -117,7 +117,7 @@ function sharedColourLabel(show: Show, incoming: Show, palette: string, index: n
   return `colour ${index + 1}${names.length ? ` (${shown})` : ''}`;
 }
 
-function describe(kind: ItemKind, a: Item, b: Item, show: Show, incoming: Show): string[] {
+function describe(kind: MergeKind, a: Item, b: Item, show: Show, incoming: Show): string[] {
   const out: string[] = [];
   if (a.name !== b.name) out.push(`name "${a.name}" → "${b.name}"`);
   switch (kind) {
@@ -197,7 +197,7 @@ export function diffShows(current: Show, incoming: Show, scope: Scope = 'all'): 
   const items: DiffItem[] = [];
   // Hidden colours and effects (Any colour's Custom, a changed effect's, the copies Prepare keeps) are never listed:
   // nobody can pick them by name, and a look taken from the file brings its own (applyPicks).
-  const shown = (kind: ItemKind) => (x: Item) => kind !== 'preset' || !(x as Preset).custom;
+  const shown = (kind: MergeKind) => (x: Item) => kind !== 'preset' || !(x as Preset).custom;
   for (const kind of kindsFor(scope)) {
     const now = new Map(list(current, kind).filter(shown(kind)).map((x) => [x.id, x]));
     const next = new Map(list(incoming, kind).filter(shown(kind)).map((x) => [x.id, x]));
@@ -277,7 +277,7 @@ export function applyPicks(current: Show, incoming: Show, picks: Pick[]): Show {
     }
   }
   // Swatches agree with the shared colours they end up pointing to (the same rule as the colour editor).
-  const taken = (kind: ItemKind) => new Set(picks.filter((p) => p.kind === kind && p.change !== 'removed').map((p) => p.id));
+  const taken = (kind: MergeKind) => new Set(picks.filter((p) => p.kind === kind && p.change !== 'removed').map((p) => p.id));
   const palettes = taken('palette'), presets = taken('preset');
   const points = (c: ColourSpec) => 'palette' in c;
   for (const p of out.presets) {
@@ -294,7 +294,7 @@ export function applyPicks(current: Show, incoming: Show, picks: Pick[]): Show {
   }
 }
 
-function cascadeRemove(show: Show, kind: ItemKind, id: string): void {
+function cascadeRemove(show: Show, kind: MergeKind, id: string): void {
   switch (kind) {
     case 'profile':
       if (show.fixtures.some((f) => f.profile === id)) throw new Error(`fixture type "${id}" is still used by fixtures; remove those too`);
@@ -316,6 +316,7 @@ function cascadeRemove(show: Show, kind: ItemKind, id: string): void {
     case 'look':
       show.operator.looks = show.operator.looks.filter((l) => l !== id);
       show.operator.runningOrder = show.operator.runningOrder.filter((l) => l !== id);
+      if (show.operator.kept) show.operator.kept = show.operator.kept.filter((l) => l !== id);
       show.operator.quickLooks = show.operator.quickLooks.filter((q) => q.look !== id);
       if (show.operator.safeLook === id) show.operator.safeLook = undefined;
       break;

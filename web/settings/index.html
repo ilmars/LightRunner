@@ -206,6 +206,39 @@
       <p class="warn" id="oscProblem"></p>
     </section>
 
+    <section class="card ds-panel" id="planningCard">
+      <div class="card-head">
+        <div class="card-title">
+          <h2 class="ds-caps">WorshipTools</h2>
+          <p class="card-desc">Load the Sunday running order from the planning site, so the songs are listed for you.</p>
+        </div>
+      </div>
+      <label class="ds-switch">
+        <input id="planningEnabled" type="checkbox">
+        <span class="ds-switch-track"></span>
+        <span class="switch-label">Use WorshipTools for the running order</span>
+      </label>
+      <p class="hint">Off: Light Runner works as before.</p>
+      <div class="field">
+        <label for="planningCookie">Login cookie</label>
+        <input id="planningCookie" class="ds-field" type="password" autocomplete="off" spellcheck="false">
+        <span class="hint">Sign in at planning.worshiptools.com, then copy the weAuthRefresh cookie from the browser's developer tools and paste it here.</span>
+      </div>
+      <div class="row">
+        <button class="ds-btn" id="planningSaveLogin" type="button">Save login</button>
+      </div>
+      <p class="hint" id="planningStatus"></p>
+      <div class="field">
+        <label for="planningType">Services</label>
+        <select id="planningType" class="ds-field"></select>
+      </div>
+      <div class="field">
+        <label for="planningLook">Look for new songs</label>
+        <select id="planningLook" class="ds-field"></select>
+        <span class="hint">What a song you haven't used before starts with.</span>
+      </div>
+    </section>
+
     <section class="card ds-panel span2" id="keysCard">
       <div class="card-head">
         <div class="card-title">

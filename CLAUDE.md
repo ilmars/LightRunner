@@ -25,9 +25,9 @@ Pages: `/operator/` (volunteers, no login), `/patch/`, `/settings/` and `/timeli
 | --- | --- |
 | `packages/shared/src` | Show schema (zod), commands and live state (`protocol.ts`), built-in profiles, OFL converter (`ofl.ts`), show compare/merge (`merge.ts`) |
 | `packages/engine/src` | The engine. Pure: takes `now` in seconds, returns DMX buffers; no timers or I/O. `fade.ts` (Crossfade, Ramp, ease), `light.ts` (colour + intensity mixing), `layers.ts`, `output.ts` (channel mapping, gamma, CCT), `engine.ts` |
-| `server/src` | `app.ts` (HTTP API, WebSocket, command bus, programmer routes), `worker.ts` (frame clock + engine + DMX output on a worker thread), `output/` (Art-Net, sACN, ENTTEC), `store.ts` (atomic saves, 20 backups), `nodewatch.ts`, `discovery.ts`, `ofl.ts` + `ofldb.ts` (fixture database), `auth.ts` |
+| `server/src` | `app.ts` (HTTP API, WebSocket, command bus, programmer routes), `worker.ts` (frame clock + engine + DMX output on a worker thread), `output/` (Art-Net, sACN, ENTTEC), `store.ts` (atomic saves, 20 backups), `nodewatch.ts`, `discovery.ts`, `ofl.ts` + `ofldb.ts` (fixture database), `auth.ts`, `planning/` (the planning service: `client.ts`, `firestore.ts`, `index.ts`, and `fake.ts` for tests) |
 | `web/` | Plain HTML + JS pages, no framework or build: `operator/`, `patch/`, `settings/`, `timeline/` |
-| `tools/` | `import-lightkey.py` (Lightkey project → show), `import-stage-l1.sh`, `install-show.ts`, `jump-check.ts`, `timing-probe.ts` |
+| `tools/` | `import-lightkey.py` (Lightkey project → show), `import-stage-l1.sh`, `install-show.ts`, `jump-check.ts`, `timing-probe.ts`, `planning-service.ts` (log in, list or read a planned service) |
 
 ## Conventions
 

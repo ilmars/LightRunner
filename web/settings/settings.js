@@ -74,7 +74,82 @@ async function load() {
   loadBackups();
   loadOfl();
   loadKeys();
+  loadPlanning();
 }
+
+// ---- Planning (WorshipTools) ----
+// The login is kept by the server and never comes back here: the field is only ever written by the person.
+
+/** The view from GET /api/planning (null until it answers), and the quick looks the "new songs" menu offers. */
+let planningView = null;
+let quickLooks = [];
+
+/**
+ * Sets one field of the planning choices; an empty value clears it (a save replaces the whole object). The keys stay in
+ * the server's order, so setting a field to what it was doesn't read as a change.
+ */
+function setPlanning(s, key, value) {
+  const next = { ...s.planning, [key]: value || undefined };
+  s.planning = {};
+  for (const k of ['enabled', 'account', 'serviceType', 'newSongLook']) if (next[k] !== undefined) s.planning[k] = next[k];
+}
+
+async function loadPlanning() {
+  try {
+    planningView = await call('GET', '/api/planning');
+  } catch (err) {
+    planningView = { loggedIn: false, problem: err.message, accounts: [], serviceTypes: [] };
+  }
+  try {
+    // The settings carry every look by name; which of them are quick looks is in the show's operator layout.
+    const show = await call('GET', '/api/show');
+    const names = new Map((saved?.looks ?? []).map((l) => [l.id, l.name]));
+    quickLooks = (show.operator?.quickLooks ?? []).map((q) => ({ id: q.look, name: names.get(q.look) ?? q.look }));
+  } catch {
+    quickLooks = [];
+  }
+  if (draft) renderPlanning();
+}
+
+/** Fills a menu: the first option means none chosen (empty value), then the choices; a chosen one that isn't listed stays selectable, called "Saved choice" (its id means nothing to a person). */
+function fillMenu(select, first, choices, chosen) {
+  select.replaceChildren();
+  const add = (value, text) => {
+    const o = el('option', null, text);
+    o.value = value;
+    select.append(o);
+  };
+  add('', first);
+  for (const c of choices) add(c.id, c.name);
+  if (chosen && !choices.some((c) => c.id === chosen)) add(chosen, 'Saved choice');
+  select.value = chosen ?? '';
+}
+
+function renderPlanning() {
+  const p = draft.planning ?? { enabled: false };
+  $('planningEnabled').checked = p.enabled;
+  const v = planningView;
+  const status = $('planningStatus');
+  status.textContent = !v ? '' : v.loggedIn && !v.problem ? 'Logged in · works' : v.problem ? v.problem : 'Not logged in';
+  status.className = v?.problem ? 'warn' : 'hint';
+  fillMenu($('planningType'), 'First in the list', v?.serviceTypes ?? [], p.serviceType);
+  fillMenu($('planningLook'), 'First quick look', quickLooks, p.newSongLook);
+}
+
+$('planningSaveLogin').addEventListener('click', async () => {
+  const field = $('planningCookie');
+  const button = $('planningSaveLogin');
+  button.disabled = true;
+  try {
+    planningView = await call('PUT', '/api/planning/login', { cookie: field.value });
+    field.value = '';
+    renderPlanning();
+    toast('Login saved');
+  } catch (err) {
+    toast(err.message, true);
+  }
+  button.disabled = false;
+});
 
 // ---- Fixture database (Open Fixture Library) ----
 
@@ -182,6 +257,8 @@ function render() {
   $('oscPort').value = String(s.osc.port);
   $('oscPortField').hidden = !s.osc.enabled;
   $('oscProblem').textContent = s.osc.enabled ? s.oscProblem ?? '' : '';
+
+  renderPlanning();
 
   $('frameRate').value = String(s.frameRate);
   $('gamma').value = String(s.gamma);
@@ -453,7 +530,7 @@ function watch() {
 
 function changedFields() {
   const out = {};
-  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators', 'osc', 'contact'];
+  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators', 'osc', 'contact', 'planning'];
   for (const k of keys) if (JSON.stringify(draft[k]) !== JSON.stringify(saved[k])) out[k] = draft[k];
   if (draft.universe !== undefined && draft.universe !== saved.universes[0]) out.universe = draft.universe;
   return out;
@@ -491,6 +568,9 @@ $('contactName').addEventListener('input', (e) => { draft.contact.name = e.targe
 $('contactPhone').addEventListener('input', (e) => { draft.contact.phone = e.target.value; markDirty(); });
 $('oscEnabled').addEventListener('change', (e) => edit((s) => { s.osc.enabled = e.target.checked; }));
 $('oscPort').addEventListener('input', (e) => { draft.osc.port = Number(e.target.value); markDirty(); });
+$('planningEnabled').addEventListener('change', (e) => edit((s) => { s.planning.enabled = e.target.checked; }));
+$('planningType').addEventListener('change', (e) => edit((s) => setPlanning(s, 'serviceType', e.target.value)));
+$('planningLook').addEventListener('change', (e) => edit((s) => setPlanning(s, 'newSongLook', e.target.value)));
 $('frameRate').addEventListener('change', (e) => { draft.frameRate = Number(e.target.value); markDirty(); });
 $('gamma').addEventListener('input', (e) => { draft.gamma = Number(e.target.value); markDirty(); });
 $('showName').addEventListener('input', (e) => { draft.showName = e.target.value; markDirty(); });
@@ -507,6 +587,7 @@ $('save').addEventListener('click', async () => {
     render();
     toast('Saved');
     loadBackups();
+    loadPlanning();
   } catch (err) {
     toast(err.message, true);
   }

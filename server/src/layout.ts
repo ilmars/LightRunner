@@ -1,7 +1,7 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupSegments, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect } from '../../packages/shared/src/index.ts';
-import type { ChannelRole, FixtureShape, GroupKind, Hangs, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, Show } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupLightType, groupSegments, keptOf, newSongLookOf, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, serviceRows } from '../../packages/shared/src/index.ts';
+import type { ChannelRole, FixtureShape, GroupKind, Hangs, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, ServiceRow, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 import { keyLabel, keyPlace, keyShort } from './keynames.ts';
 
@@ -39,6 +39,8 @@ export interface OperatorGroup {
   kind: GroupKind;
   /** True when no fixture in the group can make colour, so the colour picker has nothing to do. */
   whiteOnly: boolean;
+  /** The group's light type (`groupLightType`: its colour channels, "red,green,blue" for RGB), null with no lights yet. Groups of one type share new colours. */
+  lightType: string | null;
   /** Which extra channels some fixture in the group has, for the White, Amber and UV sliders. */
   extras: { white: boolean; amber: boolean; uv: boolean };
   /** The length of the group's line: the segments of all its fixtures. */
@@ -103,10 +105,29 @@ export interface OperatorLayout {
   looks: OperatorLook[];
   /** The looks of the service, in order. The first is usually Basic lights. */
   runningOrder: OperatorLook[];
+  /**
+   * The running order as the page draws it: each look once, in order, with the loaded service's headers, verses and
+   * other items without a look between them. Look rows name a look of `runningOrder` by id.
+   */
+  rows: ServiceRow[];
+  /** The loaded planning service's name and first start time (as the planner writes it), when one is loaded. */
+  service?: { title: string; start: string };
+  /**
+   * Whether loading a service from the planning service is switched on (Settings), so the page knows whether to offer Load service.
+   * While on: the name of the look new songs get a copy of (when there is one), and the remembered looks that are not in the
+   * running order now (a song's look from last month), for the menu that gives a song another look.
+   */
+  planning?: { enabled: boolean; newSongLook?: string; remembered?: { id: string; name: string }[] };
   /** Looks kept close at hand for the Quick looks tabs: with the tab, and the ids of the (light) groups each one sets. */
   quickLooks: (OperatorLook & { tab: QuickTab; groups: string[] })[];
   /** Id of the safe look (Basic lights), or null when the show has none. */
   basicLights: string | null;
+  /** The kept rows (a load never replaces them), Basic lights left out: it always stays. */
+  kept: string[];
+  /** Running-order items Next passes over: the kept rows while Planning is on and a service is loaded. */
+  skip: string[];
+  /** Running-order items that are looks of the loaded service's items: the next load replaces them, so they can't be kept. */
+  fromPlan: string[];
   groups: OperatorGroup[];
   /** The engine's own Basic light (a group Basic lights doesn't list), as an Any colour pick would make it. */
   basicLight: LiveLight;
@@ -142,6 +163,20 @@ export interface KeyName {
   /** The place shortened for a small chip ("1,3"). */
   short: string;
   name: string;
+}
+
+/** The layout's `planning`: off is only `{ enabled: false }`. */
+function planningOf(show: Show): NonNullable<OperatorLayout['planning']> {
+  if (!show.settings.planning?.enabled) return { enabled: false };
+  const nameOf = (id: string) => show.looks.find((l) => l.id === id)?.name;
+  const forNew = newSongLookOf(show);
+  const order = new Set(show.operator.runningOrder);
+  const remembered: { id: string; name: string }[] = [];
+  for (const id of new Set(Object.values(show.operator.remembered ?? {}))) {
+    const name = nameOf(id);
+    if (name !== undefined && !order.has(id) && id !== show.operator.safeLook) remembered.push({ id, name });
+  }
+  return { enabled: true, ...(forNew !== undefined ? { newSongLook: nameOf(forNew)! } : {}), remembered };
 }
 
 /** `midi`: the server has MIDI support (the add-on loaded), so keys can be assigned; `connected`: controllers listened to now. */
@@ -180,14 +215,23 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
     return !!profile?.channels.some((c) => roles.includes(c.role));
   };
 
+  // With Planning switched off the show keeps the loaded service, but the running order shows as plain looks.
+  const planning = !!show.settings.planning?.enabled;
+
   return {
     show: show.name,
     looks: lookIds.flatMap(describe),
     runningOrder: show.operator.runningOrder.flatMap(describe),
+    rows: planning ? serviceRows(show) : show.operator.runningOrder.map((look) => ({ kind: 'look' as const, look, header: false })),
+    ...(planning && show.operator.service ? { service: { title: show.operator.service.title, start: show.operator.service.start } } : {}),
+    planning: planningOf(show),
     quickLooks: show.operator.quickLooks.flatMap((q) => describe(q.look).map((l) => ({
       ...l, tab: q.tab, groups: groupIds.filter((gid, k) => !smoke.has(gid) && l.entries[k] !== null),
     }))),
     basicLights: show.operator.safeLook ?? null,
+    kept: keptOf(show),
+    skip: planning && show.operator.service ? keptOf(show) : [],
+    fromPlan: [...new Set((show.operator.service?.items ?? []).flatMap((i) => (i.look !== undefined && show.operator.runningOrder.includes(i.look) ? [i.look] : [])))],
     basicLight: liveLight(SAFE_LIGHT, SAFE_LIGHT.intensity),
     basicSwatch: SAFE_LIGHT.hex,
     groups: groupIds.flatMap((id) => {
@@ -203,7 +247,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
         }));
       const any = (roles: ChannelRole[]) => g.fixtures.some((f) => hasRole(f, roles));
       return [{
-        id: g.id, name: g.name, kind: g.kind, whiteOnly: groupIsWhiteOnly(show, g.id),
+        id: g.id, name: g.name, kind: g.kind, whiteOnly: groupIsWhiteOnly(show, g.id), lightType: groupLightType(show, g.id),
         extras: { white: any(['white']), amber: any(['amber']), uv: any(['uv']) },
         segments: groupSegments(show, g.id),
         presets,

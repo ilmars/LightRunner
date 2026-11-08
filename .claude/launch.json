@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "start",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--env-file=.claude/preview.env",
+        "server/src/main.ts"
+      ],
+      "port": 8094
+    }
+  ]
+}
