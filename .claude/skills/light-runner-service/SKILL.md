@@ -57,7 +57,7 @@ The lights are real and people may be in the room, so:
 - Prepare (violet) changes nothing on stage until Go; Live throws the draft away. The same switch on the Timeline page plays a timeline on the stage view only.
 - A volunteer's Blackout, Basic lights or song during a timeline takes the lights but the recording plays on (on purpose); the lights come back with **Lights follow again** on the Timeline page.
 - The APC mini needs no setup (its standard layout); its faders "pick up" — they do nothing until moved to the current level.
-- A group made in Patch starts with two colours, Warm white and Off: on the operator page tap its colour button, then ＋ New colour for more. A song is made with ＋ Add song (it holds the stage as it is); the Key chip in Edit list only shows while a controller is plugged in.
+- A group made in Patch starts with the colours the groups of its light type already have (RGB with RGB, RGBW with RGBW); the first group of a new type starts with Warm white and Off. For more, tap its colour button on the operator page, then ＋ New colour; a new colour goes to every group of the same type too unless Only this group is picked. A song is made with ＋ Add song (it holds the stage as it is); the Key chip in Edit list only shows while a controller is plugged in.
 - A key for a song is set in running-order Edit list; the fixed actions (Blackout, Next, Master…) in Settings with the PIN.
 
 ## Not built yet (say so, don't improvise)

@@ -154,9 +154,13 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('itemTempo'), item: id, bpm }),
   /** Copy a quick look's groups into a running-order item without touching the stage. */
   z.object({ type: z.literal('itemQuickLook'), item: id, look: id }),
-  /** Keep an Any colour pick, or ＋ New colour: add it to a group's colour list, or to every group of its kind (`level` and `fade`: its brightness and fade, full and 3 s when left out). */
+  /**
+   * Keep an Any colour pick, or ＋ New colour: add it to a group's colour list, to every group of its light type too (`sameType`:
+   * RGB with RGB, RGBW with RGBW), or to every group of its kind (`allGroups`) (`level` and `fade`: its brightness and fade, full
+   * and 3 s when left out).
+   */
   z.object({
-    type: z.literal('addColour'), group: id, colour: hex, name: z.string(), allGroups: z.boolean(),
+    type: z.literal('addColour'), group: id, colour: hex, name: z.string(), allGroups: z.boolean(), sameType: z.boolean().optional(),
     white: unit.optional(), amber: unit.optional(), uv: unit.optional(), level: unit.min(0.05).optional(), fade,
   }),
   /**

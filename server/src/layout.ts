@@ -1,6 +1,6 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupSegments, keptOf, newSongLookOf, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, serviceRows } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupLightType, groupSegments, keptOf, newSongLookOf, paletteEntryOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, serviceRows } from '../../packages/shared/src/index.ts';
 import type { ChannelRole, FixtureShape, GroupKind, Hangs, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, ServiceRow, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 import { keyLabel, keyPlace, keyShort } from './keynames.ts';
@@ -39,6 +39,8 @@ export interface OperatorGroup {
   kind: GroupKind;
   /** True when no fixture in the group can make colour, so the colour picker has nothing to do. */
   whiteOnly: boolean;
+  /** The group's light type (`groupLightType`: its colour channels, "red,green,blue" for RGB), null with no lights yet. Groups of one type share new colours. */
+  lightType: string | null;
   /** Which extra channels some fixture in the group has, for the White, Amber and UV sliders. */
   extras: { white: boolean; amber: boolean; uv: boolean };
   /** The length of the group's line: the segments of all its fixtures. */
@@ -245,7 +247,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
         }));
       const any = (roles: ChannelRole[]) => g.fixtures.some((f) => hasRole(f, roles));
       return [{
-        id: g.id, name: g.name, kind: g.kind, whiteOnly: groupIsWhiteOnly(show, g.id),
+        id: g.id, name: g.name, kind: g.kind, whiteOnly: groupIsWhiteOnly(show, g.id), lightType: groupLightType(show, g.id),
         extras: { white: any(['white']), amber: any(['amber']), uv: any(['uv']) },
         segments: groupSegments(show, g.id),
         presets,
