@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 8 Nov 2026 (lights of one type share their colours: a new group gets its type's colours, and a new colour goes to the groups of its type; the planning service met the church's real services: five fixes, and a note on song sections; kept rows: Sermon and Midweek calm stay through a load, and Vārds gets a copy of Sermon; the running order can be loaded from the planning service; the APC mini mk2's pads light in palette colours; a Patch page left open can no longer save over newer changes). Update this file whenever a feature lands or a priority changes, so whoever picks the project up next (on any computer) knows where things stand.
+Last updated: 13 Nov 2026 (one light (drum cage, B8) breathes and fades on its Effects tab; lights of one type share their colours: a new group gets its type's colours, and a new colour goes to the groups of its type; the planning service met the church's real services: five fixes, and a note on song sections; kept rows: Sermon and Midweek calm stay through a load, and Vārds gets a copy of Sermon; the running order can be loaded from the planning service; the APC mini mk2's pads light in palette colours; a Patch page left open can no longer save over newer changes). Update this file whenever a feature lands or a priority changes, so whoever picks the project up next (on any computer) knows where things stand.
 
 ## Built
 

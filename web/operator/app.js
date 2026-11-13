@@ -1768,6 +1768,11 @@ function savedEntry(group, presetId) {
 /** The group's line: more than one segment (several fixtures, or a bar), so effects have somewhere to move. */
 const hasLine = (group) => (group?.segments ?? 1) > 1 || (layout?.members?.[group?.id]?.length ?? 0) > 1;
 
+/** The effects one light can show: the whole light changes together (a pulse, a fade through colours); the rest move along a line. */
+const ONE_LIGHT_KINDS = new Set(['colourFade', 'breathe']);
+/** An effect the group can show: any on a line of lights, a colour fade or breathe on one light. */
+const effectFits = (group, effect) => hasLine(group) || ONE_LIGHT_KINDS.has(effect?.effect);
+
 /** An effect's colours side by side, whites drawn as whites; `loop` ends on the first colour again, for a swatch that moves. */
 function effectGradient(effect, loop = false) {
   // White, Amber and UV mixed in, as the colours' swatches have them (an amber-only colour is amber, not black).
@@ -2193,25 +2198,21 @@ const listNames = (names) => (names.length > 1 ? `${names.slice(0, -1).join(', '
 
 /**
  * The Effects tab: one tile per effect in the group's list, with a small moving swatch of its colours, and
- * ＋ New effect last. A group that isn't a line of lights says so instead, and names the groups that take effects.
+ * ＋ New effect last. A group of one light lists only what one light can show (breathe, colour fade), and says so.
  */
 function buildEffectGrid(group) {
   const line = hasLine(group);
-  $('fxNotLine').hidden = line;
-  $('fxLab').hidden = $('fxGrid').hidden = !line;
-  const grid = $('fxGrid');
-  grid.replaceChildren();
+  $('fxOneLight').hidden = line;
   if (!line) {
     const lines = lightGroups().filter(hasLine).map((g) => g.name);
-    const others = lightGroups().filter((g) => !hasLine(g)).map((g) => g.name);
-    $('fxNotLineText').textContent = lines.length
-      ? `They run on ${listNames(lines)}. ${listNames(others)} ${others.length === 1 ? 'takes' : 'take'} colours only.`
-      : 'No group here is a line of lights, so every group takes colours only.';
-    return;
+    $('fxOneLight').textContent = `${group.name} is one light: it breathes (pulses) and fades through colours.`
+      + (lines.length ? ` Waves, chases and the rest run along a line of lights: ${listNames(lines)}.` : '');
   }
+  const grid = $('fxGrid');
+  grid.replaceChildren();
   // ", hold to edit" is left out on the phone (no editing there).
   $('fxLab').replaceChildren(`Effects · tap to run on ${group.name}`, el('span', 'hold-hint', ', hold to edit'));
-  for (const p of group.presets.filter((x) => x.effect)) {
+  for (const p of group.presets.filter((x) => x.effect && effectFits(group, x.effect))) {
     const b = el('button', 'pc fx');
     b.dataset.preset = p.id;
     const sw = el('i', 'fxsw');
@@ -2352,7 +2353,7 @@ function renderPicker() {
   for (const b of $('fxGrid').children) b.classList.toggle('on', b.dataset.preset === s?.preset);
   $('pEditCur').disabled = !currentColour(row.group, s);
   // The effect the group runs: its card under the list (the round's length, Speed, All settings).
-  $('fxCard').hidden = !info.effect || !hasLine(row.group);
+  $('fxCard').hidden = !info.effect || !effectFits(row.group, info.effect);
   if (info.effect) {
     // A listed effect by its name; one that isn't listed (a Speed change makes a live copy) by its kind: "Chase is running".
     const listed = row.group.presets.some((p) => p.id === s?.preset && p.effect);
@@ -2521,7 +2522,8 @@ function openPicker(groupId) {
   anyColour.fold(false);
   // A group that runs an effect opens on its Effects tab.
   const group = pickerRow()?.group;
-  showPickerTab(group && hasLine(group) && runningEffect(group, groupStatus(group)) ? 'fx' : 'col');
+  const running = group ? runningEffect(group, groupStatus(group)) : null;
+  showPickerTab(running && effectFits(group, running) ? 'fx' : 'col');
   // The picker takes the Groups panel's place.
   $('details').classList.add('picking');
   $('picker').hidden = false;
@@ -3779,10 +3781,14 @@ function addOwnChoice(choices, colour) {
 /** The group's Off colour: no light, so as a base it is the same as None. */
 const OFF_KEY = '#000000|0|0|0';
 
-/** A new effect starts as a wave of the group's first two colours (not Off), one round every 4 beats. */
-function newEffectLayer(choices) {
-  const colours = choices.filter((c) => c.key !== OFF_KEY).slice(0, 2).map((c) => ({ ...c.colour }));
+/**
+ * A new effect starts as a wave of the group's first two colours (not Off), one round every 4 beats; on one light
+ * (no line for a wave), as a pulse of its first colour every 2 beats.
+ */
+function newEffectLayer(choices, line = true) {
+  const colours = choices.filter((c) => c.key !== OFF_KEY).slice(0, line ? 2 : 1).map((c) => ({ ...c.colour }));
   if (!colours.length) colours.push({ hex: '#ffffff' });
+  if (!line) return liveLayer({ effect: 'breathe', colours, speed: { beats: 2 }, direction: 'ltr', waves: 1, size: 0.85, edge: 'soft', intensity: 1 });
   return liveLayer({ effect: 'wave', colours, speed: { beats: 4 }, direction: 'ltr', waves: 1, size: 0.5, edge: 'soft', intensity: 1 });
 }
 
@@ -3804,8 +3810,10 @@ function openEffectEditor(preset, from = null) {
   // and Save keeps just it, so `original` is the effect as saved.
   const opened = saved && ONE_COLOUR.has(saved.effect) ? { ...saved, colours: saved.colours.slice(0, 1) } : saved;
   const choices = effectChoices(row.group, opened ?? { colours: [] });
-  const effect = opened ?? newEffectLayer(choices);
-  effectEdit = { id: preset?.id ?? null, name: preset?.name ?? '', effect, original: effectSig(saved ?? effect), choices };
+  const line = hasLine(row.group);
+  const effect = opened ?? newEffectLayer(choices, line);
+  // `line`: whether the group is a line of lights; one light offers only the kinds it can show.
+  effectEdit = { id: preset?.id ?? null, name: preset?.name ?? '', effect, original: effectSig(saved ?? effect), choices, line };
   pendingEdit = null;
   disarmDelete();
   fineOpen = false;
@@ -3864,6 +3872,8 @@ function drawEffectEditor() {
     const on = b.dataset.kind === effect.effect;
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
+    // One light: only the kinds that change the whole light (the others need a line to move along).
+    b.hidden = !effectEdit.line && !ONE_LIGHT_KINDS.has(b.dataset.kind) && !on;
   }
   const one = ONE_COLOUR.has(effect.effect);
   const kindName = EFFECT_NAMES.find(([k]) => k === effect.effect)?.[1] ?? 'This effect';
