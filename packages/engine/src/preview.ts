@@ -58,7 +58,7 @@ export interface EffectFrames {
 function repeatCycles(kind: EffectKind, colours: number): number {
   switch (kind) {
     case 'colourFade': case 'chase': case 'fill': case 'breathe': return colours;
-    case 'wave': case 'meteor': case 'yoyo': return 1;
+    case 'wave': case 'meteor': case 'yoyo': case 'stripes': return 1;
     case 'sparkle': return Infinity;
   }
 }

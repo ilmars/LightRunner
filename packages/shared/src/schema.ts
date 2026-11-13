@@ -133,8 +133,8 @@ export const StaticLayer = z.object({
 });
 export type StaticLayer = z.infer<typeof StaticLayer>;
 
-/** The patterns an effect layer can run. */
-export const EffectKind = z.enum(['colourFade', 'wave', 'chase', 'sparkle', 'breathe', 'meteor', 'fill', 'yoyo']);
+/** The patterns an effect layer can run. Stripes holds still: its colours side by side along the line, each `parts` wide. */
+export const EffectKind = z.enum(['colourFade', 'wave', 'chase', 'sparkle', 'breathe', 'meteor', 'fill', 'yoyo', 'stripes']);
 export type EffectKind = z.infer<typeof EffectKind>;
 
 /** How long one cycle takes: in beats of the stage tempo, or free-running in seconds. */
@@ -158,8 +158,18 @@ export const EffectLayer = z.object({
   intensity: unit.default(1),
   /** A colour under the animation (none when missing). */
   base: EffectBase.optional(),
+  /**
+   * Stripes only: how wide each colour's stripe is, in parts of the line (2, 1, 2 for a flag of 2:1:2), one per colour.
+   * Missing (or not one per colour): every stripe the same width. Other effects leave it out.
+   */
+  parts: z.array(z.number().int().min(1).max(20)).min(1).max(6).optional(),
 });
 export type EffectLayer = z.infer<typeof EffectLayer>;
+
+/** The width of each stripe of an effect, one per colour: its `parts`, or 1 each when they don't match its colours. */
+export function stripeParts(l: Pick<EffectLayer, 'colours' | 'parts'>): number[] {
+  return l.parts && l.parts.length === l.colours.length ? [...l.parts] : l.colours.map(() => 1);
+}
 
 export const Layer = z.discriminatedUnion('kind', [StaticLayer, EffectLayer]);
 export type Layer = z.infer<typeof Layer>;
@@ -188,6 +198,7 @@ export function effectKey(l: EffectLayer): string {
     'beats' in l.speed ? ['beats', l.speed.beats] : ['seconds', l.speed.seconds],
     l.direction, l.waves, l.size, l.edge, l.intensity,
     ...(l.base ? [['base', colour(l.base.colour), l.base.level]] : []),
+    ...(l.effect === 'stripes' ? [['parts', stripeParts(l)]] : []),
   ]);
 }
 

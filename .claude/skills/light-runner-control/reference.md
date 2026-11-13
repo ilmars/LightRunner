@@ -43,7 +43,8 @@ Ids come from `get layout`. `fade` is seconds and optional everywhere.
 | change a quick look | `{"type":"editQuickLook","look","name"?,"tab"?,"groups"?,"fromStage"?:true}` |
 | new colour in a group's list | `{"type":"addColour","group","colour":"#rrggbb","name","allGroups":false,"sameType"?:true,"level"?:0.05..1}` (`sameType: true` adds it to every group of the same light type too, as the page does by default: RGB with RGB, RGBW with RGBW, `layout.groups[].lightType`; `allGroups: true` to every light group) |
 | change a colour | `{"type":"editColour","preset","name"?,"colour"?,"level"?,"sameName":false}` |
-| new effect | `{"type":"addEffect","group","name","effect":{"kind":"effect","effect":"wave\|chase\|colourFade\|sparkle\|breathe\|meteor\|fill\|yoyo","colours":[{"hex":"#..."}],"speed":{"beats":4}}}` |
+| new effect | `{"type":"addEffect","group","name","effect":{"kind":"effect","effect":"wave\|chase\|colourFade\|sparkle\|breathe\|meteor\|fill\|yoyo\|stripes","colours":[{"hex":"#..."}],"speed":{"beats":4}}}` |
+| still stripes (a flag) | the same with `"effect":"stripes"`, `"parts":[2,1,2]` (one whole-number width per colour; colours may repeat) and `"edge":"hard"`: the colours side by side along the line, holding still (Latvian flag: `#9e3039`, `#ffffff`, `#9e3039`, parts 2, 1, 2) |
 
 Basic lights can't be renamed, moved, deleted or given an effect.
 

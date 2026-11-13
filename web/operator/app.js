@@ -1778,6 +1778,18 @@ function effectGradient(effect, loop = false) {
   // White, Amber and UV mixed in, as the colours' swatches have them (an amber-only colour is amber, not black).
   const colours = effect.colours.map((c) => shown(mixedColour(c.hex, c)));
   if (colours.length === 1) return colours[0];
+  // Stripes: the colours side by side in their widths, sharp where they meet.
+  if (effect.effect === 'stripes') {
+    const widths = stripeWidths(effect);
+    const total = widths.reduce((a, b) => a + b, 0);
+    let at = 0;
+    const stops = colours.flatMap((c, k) => {
+      const from = (at / total) * 100;
+      at += widths[k];
+      return [`${c} ${from}%`, `${c} ${(at / total) * 100}%`];
+    });
+    return `linear-gradient(90deg, ${stops.join(', ')})`;
+  }
   return `linear-gradient(90deg, ${(loop ? [...colours, colours[0]] : colours).join(', ')})`;
 }
 
@@ -2385,6 +2397,7 @@ function currentColour(group, s) {
  * "one round = 10 s" for Free), with the speed dial; when light safety slows it, the slowed length and "· slowed to stay safe".
  */
 function roundText(effect, s) {
+  if (effect.effect === 'stripes') return 'holds still';
   const st = shownState();
   const speed = st?.speed ?? 1;
   const bpm = st?.tempo ?? 120;
@@ -2599,6 +2612,8 @@ const EFFECT_USES = {
   meteor: { direction: true, size: 'Tail' },
   fill: { direction: true },
   yoyo: { direction: true, size: 'Size' },
+  // Still: no speed; Edges soften where two stripes meet.
+  stripes: { direction: true, still: true },
 };
 function effectUses(effect) {
   const uses = EFFECT_USES[effect.effect] ?? { direction: true, waves: true, size: 'Size' };
@@ -2624,7 +2639,13 @@ function liveLayer(fx) {
     speed: 'beats' in fx.speed ? { beats: fx.speed.beats } : { seconds: fx.speed.seconds },
     direction: fx.direction, waves: fx.waves, size: fx.size, edge: fx.edge, intensity: fx.intensity,
     ...(fx.base ? { base: { colour: plainColour(fx.base.colour), level: fx.base.level } } : {}),
+    ...(fx.effect === 'stripes' ? { parts: stripeWidths(fx) } : {}),
   };
+}
+
+/** A stripe effect's widths, one per colour: its own, or 1 each (as the engine reads them). */
+function stripeWidths(fx) {
+  return Array.isArray(fx.parts) && fx.parts.length === fx.colours.length ? [...fx.parts] : fx.colours.map(() => 1);
 }
 
 /**
@@ -2730,8 +2751,8 @@ function effectControls(slots, onChange, current = null, { speedOnly = false } =
   dim.addEventListener('pointerup', end);
   dim.addEventListener('pointercancel', end);
 
-  // The parts each kind of effect may leave out (the editor's), set by show().
-  let dirRow = null, wavesCell = null, sizeCell = null;
+  // The parts each kind of effect may leave out (the editor's), set by show(). Speed goes for one that holds still.
+  let dirRow = null, wavesCell = null, sizeCell = null, speedRow = null;
   if (speedOnly) {
     // The card: "Speed" (a 64 px label), the choices, the unit.
     const box = el('span', 'fxitem');
@@ -2739,8 +2760,10 @@ function effectControls(slots, onChange, current = null, { speedOnly = false } =
     const row = el('div', 'fxrow');
     row.append(box);
     slots.speed.replaceChildren(row);
+    speedRow = row;
   } else {
     slots.speed.replaceChildren(beatsBox, secondsBox);
+    speedRow = slots.speed.closest('.ce-row');
     slots.direction.replaceChildren(dirBox);
     dirRow = slots.direction.closest('.ce-row');
     // Fine-tune: a muted 12 px label over each 44 px control.
@@ -2783,6 +2806,7 @@ function effectControls(slots, onChange, current = null, { speedOnly = false } =
       fewer.disabled = fx.waves <= 1;
       more.disabled = fx.waves >= 16;
       const uses = effectUses(fx);
+      if (speedRow) speedRow.hidden = !!uses.still;
       if (dirRow) dirRow.hidden = !uses.direction;
       if (wavesCell) wavesCell.hidden = !uses.waves;
       if (sizeCell) sizeCell.hidden = !uses.size;
@@ -3732,7 +3756,7 @@ function finishEdit(error) {
 
 const EFFECT_NAMES = [
   ['colourFade', 'Colour fade'], ['wave', 'Wave'], ['chase', 'Chase'], ['sparkle', 'Sparkle'],
-  ['breathe', 'Breathe'], ['meteor', 'Meteor'], ['fill', 'Fill'], ['yoyo', 'Yo-yo'],
+  ['breathe', 'Breathe'], ['meteor', 'Meteor'], ['fill', 'Fill'], ['yoyo', 'Yo-yo'], ['stripes', 'Stripes'],
 ];
 
 /** A colour as one string: its hex and White, Amber and UV levels, so the same colour always matches. */
@@ -3886,12 +3910,15 @@ function drawEffectEditor() {
   order.replaceChildren();
   order.setAttribute('role', 'group');
   order.setAttribute('aria-label', one ? 'Colour' : 'Colours, in the order they play');
+  const stripes = effect.effect === 'stripes';
+  const widths = stripes ? stripeWidths(effect) : [];
   effect.colours.forEach((c, at) => {
     const b = orderChip(choiceOf(c), one ? null : at + 1);
     if (!one && effect.colours.length > 1) effectMover.wire(b, at);
     // A tap opens the list (to take it out or add another); the click a drag ends with is not a tap.
     b.addEventListener('click', () => { if (!effectMover.quiet()) showTray('colours'); });
     order.append(b);
+    if (stripes) order.append(stripeWidthControl(effect, at, widths));
   });
   const add = el('button', 'fe-add', one ? 'Change colour' : '＋ Colour');
   add.type = 'button';
@@ -3899,12 +3926,14 @@ function drawEffectEditor() {
   add.classList.toggle('open', feTray === 'colours');
   add.addEventListener('click', () => showTray(feTray === 'colours' ? null : 'colours'));
   order.append(add);
-  const note = one ? `${kindName} runs in one colour` : effect.colours.length > 1 ? 'hold & drag to reorder' : '';
+  const note = one ? `${kindName} runs in one colour`
+    : stripes ? `widths ${widths.join(' : ')}${effect.colours.length > 1 ? ' · hold & drag to reorder' : ''}`
+      : effect.colours.length > 1 ? 'hold & drag to reorder' : '';
   if (note) order.append(el('span', 'fe-note', note));
 
   // The list: the group's colours and the effect's own; a tap adds or removes one (picks it, for one colour).
   $('feTray').hidden = feTray !== 'colours';
-  $('feTrayLab').textContent = one ? 'Tap a colour to use it' : 'Tap to add or remove · 1 to 6 colours';
+  $('feTrayLab').textContent = one ? 'Tap a colour to use it' : stripes ? 'Tap to add a stripe · 1 to 6 stripes' : 'Tap to add or remove · 1 to 6 colours';
   const keys = effect.colours.map(colourKey);
   const list = $('feChoices');
   list.replaceChildren();
@@ -4162,9 +4191,46 @@ const effectMover = holdToMove({
     const colours = [...effect.colours];
     const [colour] = colours.splice(from, 1);
     colours.splice(over, 0, colour);
+    // A stripe keeps its width when it moves.
+    if (effect.effect === 'stripes') {
+      const parts = stripeWidths(effect);
+      const [part] = parts.splice(from, 1);
+      parts.splice(over, 0, part);
+      return setEffectEdit({ ...effectEdit.effect, colours, parts });
+    }
     setEffectEdit({ ...effectEdit.effect, colours });
   },
 });
+
+/** A stripe's width (− n +) and × to take the stripe out, after its chip in the editor's order. */
+function stripeWidthControl(effect, at, widths) {
+  const box = el('span', 'fe-stripew');
+  const step = (text, label, by) => {
+    const b = el('button', 'fe-stepb', text);
+    b.type = 'button';
+    b.setAttribute('aria-label', label);
+    const to = widths[at] + by;
+    b.disabled = to < 1 || to > 20;
+    b.addEventListener('click', () => {
+      const parts = [...widths];
+      parts[at] = to;
+      setEffectEdit({ ...effectEdit.effect, parts });
+    });
+    return b;
+  };
+  const n = at + 1;
+  const width = el('b', 'fe-count', String(widths[at]));
+  width.setAttribute('aria-label', `Stripe ${n} is ${widths[at]} part${widths[at] === 1 ? '' : 's'} wide`);
+  const out = el('button', 'fe-stripex', '×');
+  out.type = 'button';
+  out.setAttribute('aria-label', `Take stripe ${n} out`);
+  out.disabled = effect.colours.length <= 1;
+  out.addEventListener('click', () => {
+    setEffectEdit({ ...effectEdit.effect, colours: effect.colours.filter((_, i) => i !== at), parts: widths.filter((_, i) => i !== at) });
+  });
+  box.append(step('−', `Stripe ${n} narrower`, -1), width, step('+', `Stripe ${n} wider`, 1), out);
+  return box;
+}
 
 /** One colour to choose in the editor: its swatch and name, on when chosen. */
 function colourChip(c, on, role) {
@@ -4254,6 +4320,11 @@ function toggleEffectColour(choice) {
     else drawEffectEditor();
     return;
   }
+  // Stripes: a tap adds a stripe at the end, a colour may come back (red, white, red); × on a stripe takes it out.
+  if (effect.effect === 'stripes') {
+    if (effect.colours.length >= 6) return toast('Stripes have at most six colours', true);
+    return setEffectEdit({ ...effect, colours: [...effect.colours, { ...choice.colour }], parts: [...stripeWidths(effect), 1] });
+  }
   const at = effect.colours.map(colourKey).indexOf(choice.key);
   if (at >= 0) {
     if (effect.colours.length === 1) return toast('An effect needs at least one colour', true);
@@ -4271,9 +4342,11 @@ for (const [kind, text] of EFFECT_NAMES) {
   b.setAttribute('role', 'radio');
   b.addEventListener('click', () => {
     if (!effectEdit || effectEdit.effect.effect === kind) return;
-    const { colours } = effectEdit.effect;
-    // Yo-yo and meteor run in one colour: they keep the first.
-    setEffectEdit({ ...effectEdit.effect, effect: kind, colours: ONE_COLOUR.has(kind) ? colours.slice(0, 1) : colours });
+    const { colours, parts: _parts, ...rest } = effectEdit.effect;
+    // Yo-yo and meteor run in one colour: they keep the first. Stripes start equal and sharp-edged; the others have no widths.
+    const next = { ...rest, effect: kind, colours: ONE_COLOUR.has(kind) ? colours.slice(0, 1) : colours };
+    if (kind === 'stripes') Object.assign(next, { edge: 'hard', parts: colours.map(() => 1) });
+    setEffectEdit(next);
   });
   $('feKind').append(b);
 }

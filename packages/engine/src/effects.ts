@@ -6,7 +6,7 @@
 // 20 % or more more than 3 times in any second. safeRate() halves an effect's
 // rate (again, if needed) until it doesn't, with a margin for frame timing.
 
-import { resolveColour, type EffectKind, type EffectLayer, type EffectSpeed, type Palette } from '../../shared/src/index.ts';
+import { resolveColour, stripeParts, type EffectKind, type EffectLayer, type EffectSpeed, type Palette } from '../../shared/src/index.ts';
 import { copy, dark, fromHex, type Light } from './light.ts';
 import type { LayerContext } from './layers.ts';
 
@@ -43,6 +43,8 @@ export interface CompiledEffect {
   intensity: number;
   /** The base colour at its level, under the animation; null for none. */
   base: Light | null;
+  /** Stripes: where each stripe ends along the line (0 … 1, the last 1), one per colour. Empty for the other effects. */
+  stripeEnds: number[];
   /**
    * The fastest rate (cycles per second) it may run at: 95 % of the rate at which no
    * segment changes brightness by 20 % or more, one way and then the other, more than
@@ -70,7 +72,7 @@ export class SafeRates {
     const light = (c: Light) => [c.r, c.g, c.b, c.w, c.a, c.u, c.i];
     const key = JSON.stringify([
       // Only whether there is a base matters (sparkle sparks from dark over one); its colour and level never do.
-      fx.effect, fx.colours.map(light), fx.direction, fx.waves, fx.size, fx.edge, fx.intensity, fx.base !== null,
+      fx.effect, fx.colours.map(light), fx.direction, fx.waves, fx.size, fx.edge, fx.intensity, fx.base !== null, fx.stripeEnds,
     ]);
     let rate = this.used.get(key) ?? this.kept.get(key);
     if (rate === undefined) rate = fastestRate(fx);
@@ -88,6 +90,13 @@ export class SafeRates {
 function fastestRate(fx: CompiledEffect): number {
   rateChecks.count++;
   return MARGIN * fastestSafeRate(fx);
+}
+
+/** Where each stripe ends along the line, from their widths: 2, 1, 2 → 0.4, 0.6, 1. */
+function stripeEnds(parts: number[]): number[] {
+  const total = parts.reduce((a, b) => a + b, 0);
+  let at = 0;
+  return parts.map((p, k) => (k === parts.length - 1 ? 1 : (at += p) / total));
 }
 
 export function compileEffect(layer: EffectLayer, palettes: ReadonlyMap<string, Palette>, rates?: SafeRates): CompiledEffect {
@@ -113,6 +122,7 @@ export function compileEffect(layer: EffectLayer, palettes: ReadonlyMap<string, 
     edge: layer.edge,
     intensity: layer.intensity,
     base,
+    stripeEnds: layer.effect === 'stripes' ? stripeEnds(stripeParts(layer)) : [],
     maxRate: Infinity,
   };
   fx.maxRate = rates ? rates.rate(fx) : fastestRate(fx);
@@ -188,6 +198,8 @@ function fastestSafeRate(fx: CompiledEffect): number {
     case 'meteor': return deep(first) ? perCycle(2) : Infinity;
     case 'fill': return deep(top) ? perCycle(2) - (soft && !same ? 0.5 : 0) : Infinity;
     case 'yoyo': return deep(first) && fx.size < 1 ? perCycle(4) : Infinity;
+    // Stripes never move.
+    case 'stripes': return Infinity;
   }
 }
 
@@ -449,6 +461,33 @@ function renderAnimation(out: Light, fx: CompiledEffect, ctx: Pick<LayerContext,
         level = smooth(covered / e);
       } else level = xp >= start && xp < start + width ? 1 : 0;
       lit(out, first, level);
+      break;
+    }
+    case 'stripes': {
+      // Still: each segment shows the stripe its middle falls in, by where it is along the line (its middle, so 32
+      // segments in 2:1:2 are 13, 6 and 13). Centre out puts the first stripe in the middle; outside in, at both ends.
+      const mid = count > 0 ? (index + 0.5) / count : 0.5;
+      let t: number;
+      switch (fx.direction) {
+        case 'ltr': t = mid; break;
+        case 'rtl': t = 1 - mid; break;
+        case 'centreOut': t = Math.abs(2 * mid - 1); break;
+        case 'outsideIn': t = 1 - Math.abs(2 * mid - 1); break;
+      }
+      const ends = fx.stripeEnds;
+      let k = 0;
+      while (k < ends.length - 1 && t >= ends[k]!) k++;
+      const own = fx.colours[k] ?? first;
+      if (!soft) {
+        copy(out, own);
+        break;
+      }
+      // Soft: a segment the edge runs through mixes the two stripes by how much of it each covers.
+      const w = count > 0 ? (centred ? 2 : 1) / count : 1;
+      const below = k > 0 ? ends[k - 1]! : -Infinity, above = k < ends.length - 1 ? ends[k]! : Infinity;
+      if (t + w / 2 > above) blend(out, own, fx.colours[k + 1]!, (t + w / 2 - above) / w);
+      else if (t - w / 2 < below) blend(out, own, fx.colours[k - 1]!, (below - (t - w / 2)) / w);
+      else copy(out, own);
       break;
     }
   }

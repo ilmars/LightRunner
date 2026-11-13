@@ -737,6 +737,12 @@ body:not(.phone) .rows.two-col .row .pct { grid-column: 2; grid-row: 1 / 3; alig
 .fe-stepb { width: 44px; height: 42px; padding: 0; border: 0; background: transparent; color: var(--ds-text); font-size: 18px; }
 .fe-stepb:disabled { opacity: 0.4; }
 .fe-count { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* A stripe's width after its chip: − n + and × to take it out. */
+.fe-stripew { display: inline-flex; align-items: center; height: 44px; box-sizing: border-box; margin-right: 6px; border-radius: 12px; border: 1px solid var(--ds-edge); background: rgba(255, 255, 255, 0.025); }
+.fe-stripew .fe-stepb { width: 36px; }
+.fe-stripew .fe-count { min-width: 18px; text-align: center; }
+.fe-stripex { width: 36px; height: 42px; padding: 0; border: 0; border-left: 1px solid var(--ds-edge); background: transparent; color: var(--ds-muted); font-size: 16px; }
+.fe-stripex:disabled { opacity: 0.4; }
 .fe-edges { display: flex; flex-wrap: nowrap; }
 .fe-edges > button { flex: 1; min-height: 44px; }
 .fe-used { flex: none; margin: 0; color: var(--ds-muted); font-size: 12px; }

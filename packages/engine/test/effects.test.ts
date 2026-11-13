@@ -254,7 +254,8 @@ test('without a base every effect renders exactly as before (one-colour sparkle 
     const s = (Math.round(v * 1e9) / 1e9).toString();
     for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
   };
-  for (const effect of EffectLayer.shape.effect.options) {
+  // The effects there were then (Stripes came later and has its own tests).
+  for (const effect of EffectLayer.shape.effect.options.filter((k) => k !== 'stripes')) {
     for (const edge of ['soft', 'hard'] as const) {
       for (const direction of ['ltr', 'rtl', 'centreOut'] as const) {
         for (const colours of [[RED], [RED, BLUE, DIM], [WARM, RED]]) {
@@ -919,4 +920,53 @@ test('the live state gives the length of a round as the effect really runs, ligh
   assert.equal(status(5).round, 2);
   // A plain colour: no round.
   assert.equal(e.liveState(5, 'off').groups['key-lights']!.round, null);
+});
+
+// ---- Stripes: still colours side by side, each its own width ----
+
+/** Which of the colours (by index) each segment shows: the one its red, green and blue match. */
+function stripesOf(f: CompiledEffect, count: number, phase = 0): string {
+  const names = new Map([['1,0,0', 'R'], ['1,1,1', 'W'], ['0,0,1', 'B']]);
+  return Array.from({ length: count }, (_, i) => {
+    const l = at(f, i, count, phase);
+    return names.get([l.r, l.g, l.b].map((v) => Math.round(v)).join(',')) ?? '?';
+  }).join('');
+}
+
+test('stripes lay their colours along the line in their widths, and hold still', () => {
+  const flag = fx({ effect: 'stripes', colours: [RED, { hex: '#ffffff' }, RED], parts: [2, 1, 2], edge: 'hard' });
+  // 32 segments in 2:1:2: 12.8, 6.4 and 12.8, each segment by its middle.
+  assert.equal(stripesOf(flag, 32), 'R'.repeat(13) + 'W'.repeat(6) + 'R'.repeat(13));
+  assert.equal(stripesOf(flag, 5), 'RRWRR');
+  for (const phase of [0.3, 7.9, 1234.5]) assert.equal(stripesOf(flag, 32, phase), stripesOf(flag, 32), 'the phase changes nothing');
+  assert.equal(flag.maxRate, Infinity, 'never slowed: it never moves');
+  // Every segment at full.
+  for (let i = 0; i < 32; i++) assert.equal(at(flag, i, 32, 0).i, 1);
+});
+
+test('stripes: equal widths without parts, and the direction turns or mirrors them', () => {
+  const three = (input: Partial<EffectInput> = {}) => fx({ effect: 'stripes', colours: [RED, { hex: '#ffffff' }, BLUE], edge: 'hard', ...input });
+  assert.equal(stripesOf(three(), 9), 'RRRWWWBBB');
+  assert.equal(stripesOf(three({ parts: [1, 2] }), 9), 'RRRWWWBBB', 'parts that are not one per colour are left out');
+  assert.equal(stripesOf(three({ direction: 'rtl' }), 9), 'BBBWWWRRR');
+  // Centre out: the first stripe in the middle, the last at both ends.
+  assert.equal(stripesOf(three({ direction: 'centreOut' }), 9), 'BBWRRRWBB');
+  assert.equal(stripesOf(three({ direction: 'outsideIn' }), 9), 'RRWBBBWRR');
+});
+
+test('soft stripes mix the two colours only in a segment an edge runs through', () => {
+  // 2:1:2 on 32 segments: the edge at 0.4 runs through segment 12 (12/32 … 13/32), 30 % into the white side.
+  const soft = fx({ effect: 'stripes', colours: [RED, { hex: '#ffffff' }, RED], parts: [2, 1, 2], edge: 'soft' });
+  const hard = fx({ effect: 'stripes', colours: [RED, { hex: '#ffffff' }, RED], parts: [2, 1, 2], edge: 'hard' });
+  for (const i of [0, 5, 11, 15, 20, 31]) assert.deepEqual(at(soft, i, 32, 0), at(hard, i, 32, 0), `segment ${i}`);
+  const edge = at(soft, 12, 32, 0);
+  assert.equal(edge.r, 1);
+  assert.ok(edge.g > 0.1 && edge.g < 0.5, `part white: ${edge.g}`);
+});
+
+test('a stripe effect keeps its widths through the show file, and they count in its key', () => {
+  const layer = EffectLayer.parse({ kind: 'effect', effect: 'stripes', colours: [RED, BLUE], parts: [3, 1], speed: { beats: 4 } });
+  assert.deepEqual(EffectLayer.parse(JSON.parse(JSON.stringify(layer))).parts, [3, 1]);
+  assert.throws(() => EffectLayer.parse({ ...layer, parts: [0, 1] }), 'a width is 1 or more');
+  assert.throws(() => EffectLayer.parse({ ...layer, parts: [1.5, 1] }), 'whole parts');
 });
