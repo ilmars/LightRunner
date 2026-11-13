@@ -67,6 +67,12 @@
             <span class="unit">ms</span>
           </span>
         </div>
+        <!-- Loop: started by a song (Edit list > Timeline ▾), it plays again from the start, lights only, until something else takes the stage. -->
+        <label class="ds-switch loop-field" title="A song that starts this timeline (Edit list on the operator page, Timeline ▾) plays it again and again, lights only, until another song, Basic lights or Blackout.">
+          <input id="loopField" type="checkbox">
+          <span class="ds-switch-track"></span>
+          Loop when a song starts it
+        </label>
         <span class="grow"></span>
         <span id="saveNote" class="save-note" role="status"></span>
         <button id="deleteBtn" class="ds-btn ds-btn--danger" type="button">Delete timeline</button>

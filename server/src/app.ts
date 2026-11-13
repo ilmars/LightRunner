@@ -14,7 +14,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
   BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
-  applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
+  applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo, setItemTimeline, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
   BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
   pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
@@ -708,7 +708,21 @@ export class App {
     // A song, Basic lights, Blackout or Back to saved from anyone (a tablet, a device) stops a live timeline; the
     // timeline's own changes never come this way (they go straight to stageCommand, quiet), and Prepare's taps came back above.
     if (cmd.type === 'look' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') this.stopLiveTimeline();
-    return this.stageCommand(cmd);
+    const reply = await this.stageCommand(cmd);
+    // A song with a timeline starts it, lights only, once its look is on the stage.
+    if (cmd.type === 'look' && !reply.error) this.startSongTimeline(cmd.id);
+    return reply;
+  }
+
+  /** The timeline a song runs (see Look.timeline), started live with no page: lights only, looping when set to Loop. */
+  private startSongTimeline(lookId: string): void {
+    const id = this.show.looks.find((l) => l.id === lookId)?.timeline;
+    const timeline = id ? this.show.timelines.find((t) => t.id === id) : undefined;
+    if (!timeline) return;
+    this.startLiveTimeline(null, timeline, 0).then(
+      (error) => { if (error) this.log(`Timeline "${timeline.name}" for the song did not start: ${error}`); },
+      (err) => this.log(`Timeline "${timeline.name}" for the song did not start: ${(err as Error).message}`),
+    );
   }
 
   /** Run a command on the live stage (Undo of a show edit puts the show back instead). */
@@ -822,10 +836,14 @@ export class App {
    * this.show's timelines on every tick.
    */
   private timelinesSave(timelines: Timeline[], backup = false): void {
+    // The operator page lists the timelines (Edit list's Timeline ▾): it hears of a new name, a Loop or a delete.
+    const listed = (list: Timeline[]) => JSON.stringify(list.map((t) => [t.id, t.name, !!t.loop]));
+    const changed = listed(this.show.timelines) !== listed(timelines);
     const show: Show = { ...this.show, timelines };
     this.store.saveShow(show, { backup: backup || !this.operatorBackedUp });
     this.show = show;
     this.operatorBackedUp = true;
+    if (changed && this.layout) this.refreshLayout();
   }
 
   private remember(step: Show | 'stage'): void {
@@ -1020,6 +1038,7 @@ export class App {
       // Preview edits never look at the stage, so they are fine during Blackout.
       case 'itemGroup': next = setItemGroup(before, cmd.item, cmd); break;
       case 'itemTempo': next = setItemTempo(before, cmd.item, cmd.bpm); break;
+      case 'itemTimeline': next = setItemTimeline(before, cmd.item, cmd.timeline); break;
       case 'itemQuickLook': next = applyQuickLookToItem(before, cmd.item, cmd.look); break;
       case 'itemCopyLook': next = copyLookToItem(before, cmd.item, cmd.from); break;
       case 'keepItem': next = setKept(before, cmd.id, cmd.kept); break;
@@ -1192,8 +1211,8 @@ export class App {
     }
   }
 
-  /** The live timeline; a live one running already stops first. */
-  private async startLiveTimeline(ws: WebSocket, timeline: Timeline, at: number): Promise<string | null> {
+  /** The live timeline; a live one running already stops first. `ws`: the page that plays its recording, or null for a song's (lights only). */
+  private async startLiveTimeline(ws: WebSocket | null, timeline: Timeline, at: number): Promise<string | null> {
     const turn = ++this.timelineTurn;
     // The stage as it is now: a group the timeline lets go of goes back to this.
     let before: RuntimeState | null = null;
@@ -1215,8 +1234,8 @@ export class App {
       this.replacingTimeline = false;
     }
     // One recording per page: a Prepare timeline this page ran stops.
-    this.prepareTimelines.get(ws)?.stop();
-    const entry: { runner: TimelineRunner; owner: WebSocket | null } = { runner: null!, owner: ws.readyState === ws.OPEN ? ws : null };
+    if (ws) this.prepareTimelines.get(ws)?.stop();
+    const entry: { runner: TimelineRunner; owner: WebSocket | null } = { runner: null!, owner: ws && ws.readyState === ws.OPEN ? ws : null };
     entry.runner = new TimelineRunner({
       show: () => this.show,
       apply: (cmd) => {

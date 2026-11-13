@@ -683,6 +683,7 @@ function open(id) {
   for (const part of ['transport', 'lanesCard', 'blockCard', 'markersCard', 'stageCard', 'openTools']) $(part).hidden = !t;
   $('nameField').value = t?.name ?? '';
   $('offsetField').value = String(t?.offsetMs ?? 0);
+  $('loopField').checked = !!t?.loop;
   // Its recording: the waveform and loudness kept with it, the sound from the Mac.
   peaks = t?.recording?.peaks ? decodeBytes(t.recording.peaks) : null;
   loudness = t?.recording?.loudness ? decodeBytes(t.recording.loudness) : null;
@@ -762,6 +763,14 @@ $('offsetField').addEventListener('change', () => {
     return;
   }
   setOffset(v);
+});
+// Loop: a song that starts it (Edit list's Timeline ▾ on the operator page) plays it again and again, lights only.
+$('loopField').addEventListener('change', () => {
+  const t = current();
+  if (!t) return;
+  if ($('loopField').checked) t.loop = true;
+  else delete t.loop;
+  scheduleSave(t.id);
 });
 $('offsetLess').addEventListener('click', () => setOffset((current()?.offsetMs ?? 0) - 10));
 $('offsetMore').addEventListener('click', () => setOffset((current()?.offsetMs ?? 0) + 10));

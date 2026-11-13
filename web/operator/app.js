@@ -505,6 +505,8 @@ function buildEditRows(order) {
     const planned = layout.fromPlan?.includes(item.id);
     if (planned && planningOn()) node.append(lookButton(item.id));
     else if (!planned) node.append(keepButton(item));
+    // Timeline ▾: a timeline that starts with the song (only once the show has timelines).
+    if (layout.timelines?.length) node.append(timelineButton(item));
     if (showsChip({ kind: 'song', id: item.id })) node.append(keyChip({ kind: 'song', id: item.id }, item.name));
     node.append(grip);
     const row = { id: item.id, name: item.name, el: node, input, del };
@@ -717,6 +719,45 @@ function lookButton(id) {
   return b;
 }
 
+/**
+ * Timeline ▾ on a song's Edit row: the song starts a timeline with it (lights only, looping when the timeline is set to
+ * Loop). Lit with the timeline's name while it has one.
+ */
+function timelineButton(item) {
+  const tl = layout.timelines.find((t) => t.id === item.timeline);
+  // An icon, so the row keeps room for the name on an iPad held upright: ◷ none, ⟳ one that loops, ▸ one that plays once.
+  const b = el('button', tl ? 'ebtn etl on' : 'ebtn etl', tl ? (tl.loop ? '⟳' : '▸') : '◷');
+  b.title = tl ? `Starts ${tl.name}${tl.loop ? ' (loops)' : ''}` : 'Start a timeline with this song';
+  b.type = 'button';
+  b.setAttribute('aria-haspopup', 'menu');
+  b.setAttribute('aria-expanded', 'false');
+  b.setAttribute('aria-label', tl ? `${item.name} starts the timeline ${tl.name}: change` : `Start a timeline with ${item.name}`);
+  b.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+  b.addEventListener('click', () => showLookMenu(lookMenuFor?.id === item.id && lookMenuFor.timeline ? null : { id: item.id, button: b, timeline: true }));
+  return b;
+}
+
+/** The timelines a song may start, in the shared menu: None first, then each (⟳ for one that loops). */
+function timelineMenuNodes(id) {
+  const now = (layout.runningOrder ?? []).find((l) => l.id === id)?.timeline ?? null;
+  const pick = (timeline, text) => {
+    const b = el('button', timeline === now ? 'on' : null, text);
+    b.type = 'button';
+    b.setAttribute('role', 'menuitemradio');
+    b.setAttribute('aria-checked', String(timeline === now));
+    b.addEventListener('click', () => {
+      showLookMenu(null);
+      if (timeline !== now) send({ type: 'itemTimeline', item: id, timeline });
+    });
+    return b;
+  };
+  return [
+    el('span', 'ds-caps lm-cap', 'Starts with the song · lights only'),
+    pick(null, 'No timeline'),
+    ...layout.timelines.map((t) => pick(t.id, `${t.loop ? '⟳ ' : ''}${t.name}${t.loop ? ' · loops' : ''}`)),
+  ];
+}
+
 /** Keep, lit while the row is kept: a tap keeps it through a load, or lets the next load replace it. */
 function keepButton(item) {
   const kept = isKept(item);
@@ -737,6 +778,10 @@ function showLookMenu(what) {
   menu.hidden = !what;
   if (!what) return;
   what.button.setAttribute('aria-expanded', 'true');
+  if (what.timeline) {
+    menu.replaceChildren(...timelineMenuNodes(what.id));
+    return placeMenu(menu, what.button);
+  }
   // The quick looks, then the running order's other looks, then those kept from earlier services; each look once.
   // Basic lights is no source: it is all still, and copying it would empty the song.
   const seen = new Set([what.id, layout.basicLights]);
@@ -760,8 +805,12 @@ function showLookMenu(what) {
   section('From earlier services', kept);
   if (!nodes.length) nodes.push(el('span', 'lm-none', 'No other looks yet'));
   menu.replaceChildren(...nodes);
-  // Fixed on the page (the list scrolls and would cut it off): under the button, or over it when there is more room there.
-  const r = what.button.getBoundingClientRect();
+  placeMenu(menu, what.button);
+}
+
+/** Fixed on the page (the list scrolls and would cut it off): under the button, or over it when there is more room there. */
+function placeMenu(menu, button) {
+  const r = button.getBoundingClientRect();
   const below = window.innerHeight - r.bottom - 14, above = r.top - 14;
   const down = below >= Math.min(menu.scrollHeight, 320) || below >= above;
   const height = Math.min(menu.scrollHeight, Math.max(140, down ? below : above));
@@ -984,7 +1033,8 @@ $('lsLoad').addEventListener('click', () => {
 
 /** What the running-order Edit rows' Key chips, Keep and Look ▾ were built from (rebuilt when it changes). */
 let editKeys = '';
-const keysShown = () => JSON.stringify([layout?.keys ?? null, planningOn(), layout?.kept ?? [], layout?.fromPlan ?? []]);
+const keysShown = () => JSON.stringify([layout?.keys ?? null, planningOn(), layout?.kept ?? [], layout?.fromPlan ?? [],
+  layout?.timelines ?? [], (layout?.runningOrder ?? []).map((l) => l.timeline ?? null)]);
 /**
  * A Key chip shows while a controller is listened to, or when the song or quick look already has a key (so it can
  * be seen and cleared); never without MIDI support.
@@ -3837,7 +3887,9 @@ function openEffectEditor(preset, from = null) {
   const line = hasLine(row.group);
   const effect = opened ?? newEffectLayer(choices, line);
   // `line`: whether the group is a line of lights; one light offers only the kinds it can show.
-  effectEdit = { id: preset?.id ?? null, name: preset?.name ?? '', effect, original: effectSig(saved ?? effect), choices, line };
+  // `stripeAt`: the stripe a tap in the list (or ＋ Own colour) gives its colour to; null adds a stripe instead.
+  // `stripeMenu`: the stripe whose menu (width, colour, move, take out) is open under it, or null.
+  effectEdit = { id: preset?.id ?? null, name: preset?.name ?? '', effect, original: effectSig(saved ?? effect), choices, line, stripeAt: null, stripeMenu: null };
   pendingEdit = null;
   disarmDelete();
   fineOpen = false;
@@ -3916,24 +3968,62 @@ function drawEffectEditor() {
     const b = orderChip(choiceOf(c), one ? null : at + 1);
     if (!one && effect.colours.length > 1) effectMover.wire(b, at);
     // A tap opens the list (to take it out or add another); the click a drag ends with is not a tap.
-    b.addEventListener('click', () => { if (!effectMover.quiet()) showTray('colours'); });
-    order.append(b);
-    if (stripes) order.append(stripeWidthControl(effect, at, widths));
+    // A stripe's tap opens its menu under it (width, colour, move, take out); again, or a touch elsewhere, closes it.
+    // Change colour picks it: the list's next tap, or ＋ Own colour, gives it its colour.
+    if (stripes) {
+      const picked = effectEdit.stripeAt === at;
+      b.classList.toggle('sel', picked);
+      b.setAttribute('aria-haspopup', 'menu');
+      b.setAttribute('aria-expanded', String(effectEdit.stripeMenu === at));
+      b.append(el('span', 'fechip-w', `· ${widths[at]}`));
+      b.setAttribute('aria-label', `Stripe ${at + 1}: ${choiceOf(c).name}, ${widths[at]} part${widths[at] === 1 ? '' : 's'} wide`);
+    }
+    b.addEventListener('click', () => {
+      if (effectMover.quiet()) return;
+      if (stripes) {
+        const open = effectEdit.stripeMenu === at;
+        effectEdit.stripeMenu = open ? null : at;
+        effectEdit.stripeAt = open ? null : at;
+        closeOwnStrips();
+        feTray = null;
+        drawEffectEditor();
+        // All of it in sight, low in a short window too.
+        $('feColours').querySelector('.fe-stripemenu')?.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      showTray('colours');
+    });
+    if (!stripes) return order.append(b);
+    const wrap = el('span', 'fe-stripe');
+    wrap.append(b);
+    if (effectEdit.stripeMenu === at) wrap.append(stripeMenu(effect, at, widths));
+    order.append(wrap);
   });
   const add = el('button', 'fe-add', one ? 'Change colour' : '＋ Colour');
   add.type = 'button';
   add.setAttribute('aria-expanded', String(feTray === 'colours'));
   add.classList.toggle('open', feTray === 'colours');
-  add.addEventListener('click', () => showTray(feTray === 'colours' ? null : 'colours'));
+  add.addEventListener('click', () => {
+    // On stripes, ＋ Colour always adds a stripe (after Change colour… too).
+    if (stripes && effectEdit.stripeAt !== null) {
+      effectEdit.stripeAt = null;
+      effectEdit.stripeMenu = null;
+      return showTray('colours');
+    }
+    showTray(feTray === 'colours' ? null : 'colours');
+  });
   order.append(add);
   const note = one ? `${kindName} runs in one colour`
-    : stripes ? `widths ${widths.join(' : ')}${effect.colours.length > 1 ? ' · hold & drag to reorder' : ''}`
+    : stripes ? `widths ${widths.join(' : ')} · tap a stripe to change it`
       : effect.colours.length > 1 ? 'hold & drag to reorder' : '';
   if (note) order.append(el('span', 'fe-note', note));
 
   // The list: the group's colours and the effect's own; a tap adds or removes one (picks it, for one colour).
   $('feTray').hidden = feTray !== 'colours';
-  $('feTrayLab').textContent = one ? 'Tap a colour to use it' : stripes ? 'Tap to add a stripe · 1 to 6 stripes' : 'Tap to add or remove · 1 to 6 colours';
+  const forStripe = stripes && effectEdit.stripeAt !== null && effectEdit.stripeAt < effect.colours.length;
+  $('feTrayLab').textContent = one ? 'Tap a colour to use it'
+    : forStripe ? `Tap a colour for stripe ${effectEdit.stripeAt + 1}`
+      : stripes ? 'Tap to add a stripe · tap a stripe above to change its colour' : 'Tap to add or remove · 1 to 6 colours';
   const keys = effect.colours.map(colourKey);
   const list = $('feChoices');
   list.replaceChildren();
@@ -4196,15 +4286,26 @@ const effectMover = holdToMove({
       const parts = stripeWidths(effect);
       const [part] = parts.splice(from, 1);
       parts.splice(over, 0, part);
+      effectEdit.stripeAt = null;
       return setEffectEdit({ ...effectEdit.effect, colours, parts });
     }
     setEffectEdit({ ...effectEdit.effect, colours });
   },
 });
 
-/** A stripe's width (− n +) and × to take the stripe out, after its chip in the editor's order. */
-function stripeWidthControl(effect, at, widths) {
-  const box = el('span', 'fe-stripew');
+/** A stripe's menu, under its chip: its width (− n +), Change colour, Move left / right and Take out. */
+function stripeMenu(effect, at, widths) {
+  const n = at + 1;
+  const menu = el('div', 'fade-menu fe-stripemenu');
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', `Stripe ${n}`);
+  const set = (colours, parts, stay) => {
+    effectEdit.stripeMenu = stay;
+    effectEdit.stripeAt = stay;
+    setEffectEdit({ ...effectEdit.effect, colours, parts });
+  };
+  // Width: − n + (it stays open, so a few taps make 3 or 4).
+  const row = el('div', 'fe-stripemenu-w');
   const step = (text, label, by) => {
     const b = el('button', 'fe-stepb', text);
     b.type = 'button';
@@ -4214,23 +4315,46 @@ function stripeWidthControl(effect, at, widths) {
     b.addEventListener('click', () => {
       const parts = [...widths];
       parts[at] = to;
-      setEffectEdit({ ...effectEdit.effect, parts });
+      set(effect.colours, parts, at);
     });
     return b;
   };
-  const n = at + 1;
   const width = el('b', 'fe-count', String(widths[at]));
-  width.setAttribute('aria-label', `Stripe ${n} is ${widths[at]} part${widths[at] === 1 ? '' : 's'} wide`);
-  const out = el('button', 'fe-stripex', '×');
-  out.type = 'button';
-  out.setAttribute('aria-label', `Take stripe ${n} out`);
-  out.disabled = effect.colours.length <= 1;
-  out.addEventListener('click', () => {
-    setEffectEdit({ ...effectEdit.effect, colours: effect.colours.filter((_, i) => i !== at), parts: widths.filter((_, i) => i !== at) });
+  row.append(el('span', null, 'Width'), step('−', `Stripe ${n} narrower`, -1), width, step('+', `Stripe ${n} wider`, 1));
+  menu.append(row);
+  const item = (text, act, disabled = false, cls = null) => {
+    const b = el('button', cls, text);
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.disabled = disabled;
+    b.addEventListener('click', act);
+    menu.append(b);
+  };
+  item('Change colour…', () => {
+    // The list opens with this stripe picked: its next tap, or ＋ Own colour, is this stripe's colour.
+    effectEdit.stripeMenu = null;
+    effectEdit.stripeAt = at;
+    showTray('colours');
   });
-  box.append(step('−', `Stripe ${n} narrower`, -1), width, step('+', `Stripe ${n} wider`, 1), out);
-  return box;
+  const move = (to) => {
+    const colours = [...effect.colours], parts = [...widths];
+    [colours[at], colours[to]] = [colours[to], colours[at]];
+    [parts[at], parts[to]] = [parts[to], parts[at]];
+    set(colours, parts, to);
+  };
+  item('◀ Move left', () => move(at - 1), at === 0);
+  item('Move right ▶', () => move(at + 1), at === effect.colours.length - 1);
+  item('Take out', () => set(effect.colours.filter((_, i) => i !== at), widths.filter((_, i) => i !== at), null), effect.colours.length <= 1, 'fe-delete');
+  return menu;
 }
+
+// A touch outside a stripe and its menu closes the menu.
+window.addEventListener('pointerdown', (ev) => {
+  if (effectEdit?.stripeMenu == null || ev.target.closest?.('.fe-stripe')) return;
+  effectEdit.stripeMenu = null;
+  if (feTray !== 'colours') effectEdit.stripeAt = null;
+  drawEffectEditor();
+}, true);
 
 /** One colour to choose in the editor: its swatch and name, on when chosen. */
 function colourChip(c, on, role) {
@@ -4322,6 +4446,12 @@ function toggleEffectColour(choice) {
   }
   // Stripes: a tap adds a stripe at the end, a colour may come back (red, white, red); × on a stripe takes it out.
   if (effect.effect === 'stripes') {
+    const at = effectEdit.stripeAt;
+    if (at !== null && at < effect.colours.length) {
+      const colours = [...effect.colours];
+      colours[at] = { ...choice.colour };
+      return setEffectEdit({ ...effect, colours, parts: stripeWidths(effect) });
+    }
     if (effect.colours.length >= 6) return toast('Stripes have at most six colours', true);
     return setEffectEdit({ ...effect, colours: [...effect.colours, { ...choice.colour }], parts: [...stripeWidths(effect), 1] });
   }
@@ -4346,6 +4476,7 @@ for (const [kind, text] of EFFECT_NAMES) {
     // Yo-yo and meteor run in one colour: they keep the first. Stripes start equal and sharp-edged; the others have no widths.
     const next = { ...rest, effect: kind, colours: ONE_COLOUR.has(kind) ? colours.slice(0, 1) : colours };
     if (kind === 'stripes') Object.assign(next, { edge: 'hard', parts: colours.map(() => 1) });
+    effectEdit.stripeAt = null;
     setEffectEdit(next);
   });
   $('feKind').append(b);
@@ -4388,7 +4519,10 @@ const ownPick = { strip: null, key: null, made: null };
 
 /** The place in the effect's colours of the own colour the open box made, or -1. */
 function ownPlace() {
-  if (ownPick.strip !== 'feOwn' || !ownPick.key || !effectEdit) return -1;
+  if (ownPick.strip !== 'feOwn' || !effectEdit) return -1;
+  // Stripes: the picked stripe (a colour may be in several stripes, so never found by its colour).
+  if (effectEdit.effect.effect === 'stripes') return effectEdit.stripeAt ?? -1;
+  if (!ownPick.key) return -1;
   return effectEdit.effect.colours.findIndex((c) => colourKey(c) === ownPick.key);
 }
 
@@ -4409,14 +4543,21 @@ function putOwnColour(stripId, hex, last) {
       if (last) toast('An effect has at most six colours', true);
       return false;
     }
-    // The list never holds a colour twice: one the effect already has elsewhere is passed over.
-    if (effect.colours.some((c, i) => i !== at && colourKey(c) === key)) {
+    // The list never holds a colour twice: one the effect already has elsewhere is passed over (stripes may repeat one).
+    if (effect.effect !== 'stripes' && effect.colours.some((c, i) => i !== at && colourKey(c) === key)) {
       if (last) toast('That colour is in the effect already', true);
       return false;
     }
     const colours = [...effect.colours];
     colours[at] = colour;
     next = { ...effect, colours };
+    // A new stripe is one part wide, and stays picked while the strip moves.
+    if (effect.effect === 'stripes') {
+      const parts = stripeWidths(effect);
+      if (at >= parts.length) parts.push(1);
+      next.parts = parts;
+      effectEdit.stripeAt = at;
+    }
   } else {
     next = { ...effect, base: { colour, level: effect.base?.level ?? 0.5 } };
   }

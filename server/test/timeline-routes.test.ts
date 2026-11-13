@@ -197,18 +197,31 @@ test("an operator's Undo of an earlier show edit keeps the timelines as they are
   });
 });
 
-test('a timeline save sends the pages no new layout and leaves the engine alone', async () => {
+test('a timeline save sends the pages a new layout only when the list of timelines changes, and leaves the engine alone', async () => {
   await withApp(async ({ json, app }) => {
     const p = await socket(app);
     await sleep(200);
-    const layouts = () => p.seen.filter((m) => m.type === 'layout').length;
-    const before = layouts();
+    const layouts = () => p.seen.filter((m) => m.type === 'layout');
+    const before = layouts().length;
     assert.ok(before >= 1);
+    const listed = () => (layouts().at(-1) as { layout: { timelines: unknown[] } }).layout.timelines;
+    // New, renamed, set to Loop and deleted: the Edit list's Timeline ▾ hears of each.
     assert.equal((await json('PUT', '/api/timeline', intro())).status, 200);
+    await sleep(100);
+    assert.equal(layouts().length, before + 1);
+    // An edit of its blocks or its offset: no new layout (the page saves after every pause in editing).
+    assert.equal((await json('PUT', '/api/timeline', intro({ offsetMs: 120 }))).status, 200);
+    await sleep(100);
+    assert.equal(layouts().length, before + 1);
     assert.equal((await json('PUT', '/api/timeline', intro({ name: 'Again' }))).status, 200);
+    assert.equal((await json('PUT', '/api/timeline', intro({ name: 'Again', loop: true }))).status, 200);
+    await sleep(100);
+    assert.equal(layouts().length, before + 3);
+    assert.deepEqual(listed(), [{ id: 'intro', name: 'Again', loop: true }]);
     assert.equal((await json('DELETE', '/api/timeline?id=intro')).status, 200);
     await sleep(300);
-    assert.equal(layouts(), before);
+    assert.equal(layouts().length, before + 4);
+    assert.deepEqual(listed(), []);
     p.ws.close();
   });
 });

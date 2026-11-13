@@ -28,6 +28,8 @@ export const SEEK_FADE = MIN_FADE;
 export const FOLLOW_END_FADE = MIN_FADE;
 /** A report that the sound has stopped this close to its end (seconds) means the recording has played out. */
 export const END_SLACK = 0.5;
+/** A looping timeline shorter than this (seconds) plays once: a loop must leave its blocks time to rise. */
+export const MIN_LOOP = 3;
 
 /** Why a runner stopped: its end, Stop (or Blackout, Basic lights, a song), its timeline deleted, or a problem. */
 export type StopReason = 'end' | 'stopped' | 'gone' | 'problem';
@@ -226,7 +228,17 @@ export class TimelineRunner {
     this.prev = next;
     this.lastT = t;
     this.jumped = false;
-    if (Math.min(pos, t) >= this.duration) this.finish('end');
+    if (Math.min(pos, t) < this.duration) return;
+    // A loop starts again from 0:00, from what the stage shows now: its first blocks come in with their rise.
+    if (timeline.loop && this.duration >= MIN_LOOP) {
+      this.basePos = 0;
+      this.baseAt = now;
+      this.floor = 0;
+      this.soundEnded = false;
+      this.lastT = -Infinity;
+      return;
+    }
+    this.finish('end');
   }
 
   private finish(why: StopReason): void {

@@ -664,6 +664,17 @@ export function setItemTempo(show: Show, itemId: string, bpm: number): Show {
   return out;
 }
 
+/** Gives a running-order item a timeline to start with it (null: none). Basic lights never runs one. */
+export function setItemTimeline(show: Show, itemId: string, timelineId: string | null): Show {
+  const out = structuredClone(show);
+  if (itemId === out.operator.safeLook) throw new Error('Basic lights never runs a timeline.');
+  const target = itemLook(out, itemId);
+  if (timelineId === null) delete target.timeline;
+  else if (!out.timelines.some((t) => t.id === timelineId)) throw new Error(`There is no timeline "${timelineId}" in the show.`);
+  else target.timeline = timelineId;
+  return out;
+}
+
 /**
  * Gives a running-order item a copy of another look's groups (and its tempo, when it has one): "pick another look
  * from a menu". The item keeps its name, id and remembered key, and the look it copied is untouched.

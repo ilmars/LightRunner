@@ -238,6 +238,11 @@ export const Look = z.object({
   /** Beats per minute the stage runs at when this look starts; 120 when not set. */
   tempo: z.number().min(40).max(240).optional(),
   groups: z.array(LookEntry),
+  /**
+   * A song's timeline (an id in `timelines`): started live, lights only, when the song starts, and looped when the
+   * timeline is set to Loop. One that is no longer in the show is passed over.
+   */
+  timeline: id.optional(),
 });
 export type Look = z.infer<typeof Look>;
 
@@ -483,6 +488,8 @@ export const Timeline = z.object({
   markers: z.array(TimelineMarker).default([]),
   /** Milliseconds the lights run earlier (negative) or later (positive) than the sound. */
   offsetMs: z.number().min(-500).max(500).default(0),
+  /** Starts again from the beginning at its end, lights only (as a song starts it), until something else takes the stage. */
+  loop: z.boolean().optional(),
 }).superRefine((t, ctx) => {
   // The runner tells blocks apart by id, across all the layers.
   const seen = new Set<string>();

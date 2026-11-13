@@ -12,6 +12,8 @@ export interface OperatorLook {
   section: string | null;
   /** Beats per minute the look sets when it starts; null = the default (120). */
   tempo: number | null;
+  /** The timeline the song starts with it (an id in the layout's `timelines`), or null. */
+  timeline: string | null;
   /** Colour this look gives each operator group (same order as `groups`); null = left alone (always for smoke groups). */
   colours: (string | null)[];
   /** Level this look gives each operator group (same order as `groups`); null = no level of its own (always for smoke groups). */
@@ -148,6 +150,8 @@ export interface OperatorLayout {
   }[];
   /** Fixture ids of each group, for tapping a group on the mini visualiser. */
   members: Record<string, string[]>;
+  /** The show's timelines, for a song to start one (Edit list): id, name, and whether it loops. */
+  timelines: { id: string; name: string; loop: boolean }[];
   manualForOperators: boolean;
   /** Who to call when the lights have a problem (Settings), or null when nobody is set. */
   contact: { name?: string; phone?: string } | null;
@@ -206,7 +210,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
       if (!entry || !preset) return null;
       return { preset: preset.id, name: preset.name, swatch: colours[k]!, light: presetLight(preset, palettes), effect: presetEffect(preset, palettes) };
     });
-    return [{ id: l.id, name: l.name, swatch: l.swatch ?? null, section: l.section ?? null, tempo: l.tempo ?? null, colours, levels, entries }];
+    return [{ id: l.id, name: l.name, swatch: l.swatch ?? null, section: l.section ?? null, tempo: l.tempo ?? null, timeline: l.timeline && show.timelines.some((t) => t.id === l.timeline) ? l.timeline : null, colours, levels, entries }];
   };
 
   const hasRole = (fixtureId: string, roles: ChannelRole[]): boolean => {
@@ -268,6 +272,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
       }];
     }),
     members: Object.fromEntries(show.groups.map((g) => [g.id, g.fixtures])),
+    timelines: show.timelines.map((t) => ({ id: t.id, name: t.name, loop: !!t.loop })),
     manualForOperators: show.operator.manualForOperators,
     contact: show.settings.contact ?? null,
     keys: layoutKeys(show, midi, connected),

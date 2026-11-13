@@ -152,6 +152,8 @@ export const Command = z.discriminatedUnion('type', [
   }),
   /** Set a running-order item's tempo without touching the stage. */
   z.object({ type: z.literal('itemTempo'), item: id, bpm }),
+  /** Give a running-order item a timeline that starts with it (null: none), without touching the stage. */
+  z.object({ type: z.literal('itemTimeline'), item: id, timeline: id.nullable() }),
   /** Copy a quick look's groups into a running-order item without touching the stage. */
   z.object({ type: z.literal('itemQuickLook'), item: id, look: id }),
   /**
@@ -205,7 +207,7 @@ export const Command = z.discriminatedUnion('type', [
 export type Command = z.infer<typeof Command>;
 
 const SHOW_EDITS = [
-  'saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemQuickLook',
+  'saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemTimeline', 'itemQuickLook',
   'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'loadService', 'saveServiceItem', 'itemCopyLook', 'keepItem', 'setKey', 'clearKey', 'resetKeys',
 ] as const;
 /** Commands that change the show rather than the stage. */

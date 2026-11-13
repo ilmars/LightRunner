@@ -112,6 +112,36 @@ test('the runner sends each block at its time, with its rise, and stops at the e
   assert.equal(r.sent.length, count, 'nothing after the end');
 });
 
+test('a looping timeline starts again from 0:00 at its end, with its first blocks\' rise, until it is stopped', () => {
+  const t = christmas({ loop: true });
+  const r = rig(showWith(t));
+  r.start(t);
+  r.run(10.1);
+  // At 10 it would end: it starts again instead.
+  assert.deepEqual(r.stops, []);
+  assert.ok(r.runner.state!.pos < 0.2, `back at the start: ${r.runner.state!.pos}`);
+  // Its Dark at 0:00 comes again over its rise (2 s), from the full stage it left.
+  for (const group of LIGHT_GROUPS) assert.deepEqual(r.cmds('groupLevel', group).at(-1)!.cmd, { type: 'groupLevel', group, value: 0, fade: 2 });
+  // The front wash's block at 3 comes again at 13.
+  const before = r.cmds('groupPreset', 'front-wash').length;
+  r.run(3);
+  assert.equal(r.cmds('groupPreset', 'front-wash').length, before + 1);
+  assert.ok(Math.abs(r.cmds('groupPreset', 'front-wash').at(-1)!.at - 13) < 0.06);
+  // Round and round, until Stop.
+  r.run(25);
+  assert.deepEqual(r.stops, []);
+  r.runner.stop();
+  assert.deepEqual(r.stops, ['stopped']);
+});
+
+test('a looping timeline shorter than 3 s plays once (its blocks need time to rise)', () => {
+  const t = timeline('short', [{ group: 'back-wall', blocks: [{ id: 's', start: 2, rise: 1, what: { kind: 'level', level: 0.5 } }] }], { loop: true });
+  const r = rig(showWith(t));
+  r.start(t);
+  r.run(2.5);
+  assert.deepEqual(r.stops, ['end']);
+});
+
 test('a page that stops reporting: the runner carries on by itself to the end and stops (RF 1)', () => {
   const t = christmas();
   const r = rig(showWith(t));
@@ -556,6 +586,7 @@ async function page(app: App, headers?: Record<string, string>) {
   return {
     ws, seen,
     state: () => latest('state'),
+    layout: () => latest('layout'),
     draft: () => latest('draftState', 'state'),
     send: (cmd: unknown) => reply({ type: 'command', cmd }),
     timeline: (msg: Record<string, unknown>) => reply(msg),
@@ -1116,4 +1147,62 @@ test('server: every Start has its own run number; reports and a Stop for an olde
   await waitFor(() => a.state()?.timeline === null, 2000, 'stopped');
   a.ws.close();
   back.ws.close();
+}));
+
+/** Three seconds, set to Loop: the back wall amber at 0, the audience at half at 1.5, nothing more until 3. */
+const loopy = (loop = true) => timeline('loopy', [
+  { group: 'back-wall', blocks: [{ id: 'y-back', start: 0, rise: 0.2, what: { kind: 'colour', preset: 'back-amber', level: 1 } }] },
+  { group: 'audience', blocks: [{ id: 'y-aud', start: 1.5, end: 2.5, rise: 0.2, what: { kind: 'level', level: 0.5 } }] },
+  { group: 'pulpit', blocks: [{ id: 'y-end', start: 3, rise: 0.2, what: { kind: 'level', level: 0.3 } }] },
+], loop ? { loop: true } : {});
+
+test('server: a song with a timeline starts it, lights only, after its look; a looping one goes round until another song', () => withApp(async (app) => {
+  await withTimelines(app, loopy());
+  const show = await liveShow(app);
+  const [song, other] = show.operator.runningOrder.filter((id) => id !== show.operator.safeLook);
+  const p = await page(app);
+  await waitFor(p.state);
+  // Basic lights never runs one; a timeline the show hasn't is refused.
+  assert.match(await p.send({ type: 'itemTimeline', item: show.operator.safeLook!, timeline: 'loopy' }), /Basic lights/);
+  assert.match(await p.send({ type: 'itemTimeline', item: song!, timeline: 'nope' }), /no timeline/);
+  assert.equal(await p.send({ type: 'itemTimeline', item: song!, timeline: 'loopy' }), null);
+  const row = await waitFor(() => p.layout()?.runningOrder.find((l: any) => l.id === song), 2000, 'the layout');
+  await waitFor(() => p.layout()?.runningOrder.find((l: any) => l.id === song)?.timeline === 'loopy', 2000, 'the song\'s timeline in the layout');
+  assert.ok(row);
+  assert.deepEqual(p.layout().timelines, [{ id: 'loopy', name: 'Timeline loopy', loop: true }]);
+  // Setting it changed nothing on the stage.
+  assert.equal(p.state().timeline, null);
+  assert.equal(await p.send({ type: 'look', id: song }), null);
+  await waitFor(() => p.state()?.timeline?.id === 'loopy', 2000, 'the song to start its timeline');
+  await waitFor(() => p.state()?.look === song, 2000, 'the song on stage');
+  await waitFor(() => p.state()?.groups['back-wall'].preset === 'back-amber', 2000, 'its first block');
+  // Past its end (3 s) it is still running, from the start again.
+  await sleep(3600);
+  assert.equal(p.state().timeline?.id, 'loopy', 'it loops');
+  assert.ok(p.state().timeline.pos < 1.5, `round again: ${p.state().timeline.pos}`);
+  // Another song stops it (and that song has no timeline).
+  assert.equal(await p.send({ type: 'look', id: other }), null);
+  await waitFor(() => p.state()?.timeline === null, 2000, 'another song to stop it');
+  await sleep(300);
+  assert.equal(p.state().timeline, null);
+  // None again: the song starts nothing.
+  assert.equal(await p.send({ type: 'itemTimeline', item: song!, timeline: null }), null);
+  assert.equal(await p.send({ type: 'look', id: song }), null);
+  await sleep(400);
+  assert.equal(p.state().timeline, null);
+  p.ws.close();
+}));
+
+test('server: a song\'s timeline that does not loop plays once and stops at its end', () => withApp(async (app) => {
+  await withTimelines(app, loopy(false));
+  const show = await liveShow(app);
+  const song = show.operator.runningOrder.find((id) => id !== show.operator.safeLook)!;
+  const p = await page(app);
+  await waitFor(p.state);
+  assert.equal(await p.send({ type: 'itemTimeline', item: song, timeline: 'loopy' }), null);
+  assert.equal(await p.send({ type: 'look', id: song }), null);
+  await waitFor(() => p.state()?.timeline?.id === 'loopy', 2000, 'started');
+  await waitFor(() => p.state()?.timeline === null, 4500, 'its end');
+  await waitFor(() => p.state()?.groups.pulpit.level === 0.3, 2000, 'its last block');
+  p.ws.close();
 }));

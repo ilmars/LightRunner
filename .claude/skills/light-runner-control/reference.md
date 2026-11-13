@@ -39,6 +39,7 @@ Ids come from `get layout`. `fade` is seconds and optional everywhere.
 | keep a row through a planned-service load | `{"type":"keepItem","id","kept":true}` |
 | change one group of a song, stage untouched | `{"type":"itemGroup","item":"<row id>","group":"<g>","preset":"<id>","level":0..1}` (or `colour` instead of `preset`) |
 | a song's tempo | `{"type":"itemTempo","item","bpm"}` |
+| a song starts a timeline | `{"type":"itemTimeline","item","timeline":"<timeline id>"}` (null: none); it runs lights only when the song starts, and loops when the timeline has Loop on (Timeline page) |
 | new quick look from the stage | `{"type":"saveQuickLook","name","tab":"plain\|colours\|effects","groups":["<g>",...]}` |
 | change a quick look | `{"type":"editQuickLook","look","name"?,"tab"?,"groups"?,"fromStage"?:true}` |
 | new colour in a group's list | `{"type":"addColour","group","colour":"#rrggbb","name","allGroups":false,"sameType"?:true,"level"?:0.05..1}` (`sameType: true` adds it to every group of the same light type too, as the page does by default: RGB with RGB, RGBW with RGBW, `layout.groups[].lightType`; `allGroups: true` to every light group) |
