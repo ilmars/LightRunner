@@ -708,3 +708,62 @@ test('Save to the song with a section and a running timeline saves the whole sta
   assert.equal(entry(show, own, 'front-wash').preset, entry(before, own, 'front-wash').preset);
   await waitFor(() => app.state?.section?.changed === false, 'no longer changed');
 }, { shape: withTimeline }));
+
+// ---- Back to saved during a section ----
+
+test("Back to saved during a section puts back the section's look on its groups; the song, tempo, timeline, section and Auto-follow stay; one Undo step", () => withFollow(async ({ app, songs }) => {
+  await followOn(app);
+  await app.command({ type: 'fadeTime', value: 0 }, 'operator');
+  await app.liveSlide(slide('c2', 'v1'));
+  await waitFor(() => app.state?.look === songs.c2 && app.state.timeline, 'Song One and its timeline');
+  await app.liveSlide(slide('c2', 'ch1'));
+  await waitFor(() => app.state?.section?.kind === 'chorus' && presetOf(app, 'back-wall') === 'back-amber', 'the chorus');
+  const run = app.state!.timeline!.run;
+  const front = presetOf(app, 'front-wash');
+  assert.equal(await app.command({ type: 'tempo', bpm: 99 }, 'operator'), null);
+  assert.equal(await app.command({ type: 'groupLevel', group: 'back-wall', value: 0.3 }, 'operator'), null);
+  assert.equal(await app.command({ type: 'groupPreset', group: 'back-wall', preset: 'back-purple' }, 'operator'), null);
+  await waitFor(() => app.state?.section?.changed === true && presetOf(app, 'back-wall') === 'back-purple', 'changed');
+
+  assert.equal(await app.command({ type: 'backToLook' }, 'operator'), null);
+  await waitFor(() => app.state?.groups['back-wall']!.level === 1 && presetOf(app, 'back-wall') === 'back-amber', "the chorus's look again");
+  await sleep(60);
+  const state = app.state!;
+  assert.deepEqual(state.section, { song: songs.c2, kind: 'chorus', changed: false });
+  assert.equal(state.look, songs.c2);
+  assert.equal(presetOf(app, 'front-wash'), front);
+  assert.equal(state.tempo, 99, 'the tempo is untouched');
+  assert.equal(state.timeline?.run, run, 'the timeline keeps running');
+  assert.equal(presetOf(app, 'audience'), 'aud-warm', "the group the timeline drives stays the timeline's");
+  assert.equal(state.follow?.on, true, 'Back to saved does not pause Auto-follow');
+
+  // One Undo step: the change by hand again, still in the chorus.
+  assert.equal(await app.command({ type: 'undo' }, 'operator'), null);
+  await waitFor(() => app.state?.groups['back-wall']!.level === 0.3 && presetOf(app, 'back-wall') === 'back-purple', 'the change back');
+  await sleep(60);
+  assert.deepEqual(app.state!.section, { song: songs.c2, kind: 'chorus', changed: true });
+}, { shape: withTimeline }));
+
+test("Back to saved during a section with no look of its own puts back the song's look on its groups", () => withFollow(async ({ app, songs }) => {
+  await changedChorus(app, songs);
+  assert.equal(await app.command({ type: 'backToLook' }, 'operator'), null);
+  await waitFor(() => presetOf(app, 'back-wall') === 'back-purple' && app.state?.groups.audience!.level === 1, "the song's colours and levels");
+  await sleep(60);
+  assert.deepEqual(app.state!.section, { song: songs.c2, kind: 'chorus', changed: false });
+}));
+
+test("in Prepare, Back to saved during the draft's section puts back the section's look in the draft; the section stays", () => withFollow(async ({ app, songs, tablet }) => {
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'blindStart' }), null);
+  assert.equal(await t.command({ type: 'section', song: songs.c2!, kind: 'chorus' }), null);
+  await waitFor(() => t.draft()?.section?.kind === 'chorus' && t.draft()?.groups['back-wall']?.preset === 'back-amber', "the draft's chorus");
+  assert.equal(await t.command({ type: 'draft', cmd: { type: 'groupLevel', group: 'back-wall', value: 0.3 } }), null);
+  await waitFor(() => t.draft()?.section?.changed === true, 'changed in the draft');
+  assert.equal(await t.command({ type: 'draft', cmd: { type: 'backToLook' } }), null);
+  await waitFor(() => t.draft()?.groups['back-wall']?.level === 1, "the chorus's level in the draft");
+  assert.deepEqual(t.draft().section, { song: songs.c2, kind: 'chorus', changed: false });
+  assert.equal(t.draft().groups['back-wall'].preset, 'back-amber');
+  assert.equal(t.draft().look, songs.c2);
+  assert.notEqual(app.state!.look, songs.c2, 'the stage is untouched');
+  t.close();
+}, { shape: chorusLook }));

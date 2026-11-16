@@ -761,6 +761,15 @@ export class App {
       const error = await this.startSection(cmd);
       return { error, recorded: !error };
     }
+    // Back to saved while a section is on stage: the section's look again, as its start set it; the section stays.
+    const sectionBack = cmd.type === 'backToLook' ? this.sectionBackCommand(this.stageSection) : null;
+    if (sectionBack) {
+      const section = this.stageSection;
+      const reply = await this.stageCommand(sectionBack);
+      // Its changed is worked out again from the state after this.
+      if (!reply.error && section && this.stageSection === section) this.setStageSection({ ...section, fresh: false });
+      return reply;
+    }
     // Starting something on the real stage by hand (a song, a quick look, Basic lights, Blackout; Next from a device is a
     // song too) pauses Auto-follow. Prepare's taps came back above, and Auto-follow's own starts never come this way.
     if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'safe' || cmd.type === 'blackout') this.follow.pause();
@@ -830,6 +839,20 @@ export class App {
     if (reply.error) return reply.error;
     this.setStageSection({ ref: { song: ref.song, kind: ref.kind }, groups: only, fresh: false });
     return null;
+  }
+
+  /**
+   * What Back to saved does while a section is on (on stage or in a draft): the section's look (its own, else the
+   * song's) on the groups the section set, as its start did; the tempo and a running timeline carry on. Null for no
+   * section, or one that can't be found in the show any more (Back to saved is then the song's, as always).
+   */
+  private sectionBackCommand(section: SectionOnStage | null): StageCommand | null {
+    if (!section) return null;
+    try {
+      return { type: 'quickLook', id: sectionLookOf(this.show, section.ref), only: [...section.groups] };
+    } catch {
+      return null;
+    }
   }
 
   /** The light groups a look sets for a section: the look's, less smoke and the groups in `driven`. */
@@ -1103,15 +1126,17 @@ export class App {
         if (!session) return done(BLIND_OFF);
         // A song, Basic lights or Blackout in Prepare stops that page's Prepare timeline, as they stop the live one.
         if (cmd.cmd.type === 'look' || cmd.cmd.type === 'safe' || cmd.cmd.type === 'blackout') this.prepareTimelines.get(tablet)?.stop();
+        // Back to saved in the draft's section puts back the section's look, as on the stage.
+        const sectionBack = cmd.cmd.type === 'backToLook' ? this.sectionBackCommand(session.section) : null;
         let error: string | null;
         try {
-          error = session.apply(cmd.cmd, performance.now() / 1000, (g) => this.isSmokeGroup(g));
+          error = session.apply(sectionBack ?? cmd.cmd, performance.now() / 1000, (g) => this.isSmokeGroup(g));
         } catch (err) {
           return done(this.draftProblem(tablet, err));
         }
         // A whole look (or a quick look) in the draft replaces its section, as on the stage.
         const whole = cmd.cmd.type === 'look' || cmd.cmd.type === 'quickLook' || cmd.cmd.type === 'safe' || cmd.cmd.type === 'blackout' || cmd.cmd.type === 'backToLook';
-        if (whole && !error) session.section = null;
+        if (whole && !sectionBack && !error) session.section = null;
         // A draft Undo puts back the lights it had, which no section is known for: Go would carry a stale one live.
         if (cmd.cmd.type === 'undo' && !error) session.section = null;
         this.sendDraft(tablet);
