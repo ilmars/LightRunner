@@ -68,9 +68,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .head-line:has(> .head-note) > .head-name { flex: 0 0 auto; max-width: 100%; }
 .head-note { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--ds-muted); }
 .changed { flex: none; color: var(--warn); font-size: 13px; }
-/* Auto-follow, after the name: a quiet pill that is its own switch. Its words give way before the name does. */
+/* Auto-follow, after the name: a quiet pill that is its own switch. Its few words always show whole: the name on
+   stage gives way first (the running order shows it too). Only a long problem would be cut, at 340 px. */
 .follow-pill {
-  flex: 0 1000 auto; min-width: 44px; max-width: 340px; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--ds-r-pill);
+  flex: none; max-width: 340px; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--ds-r-pill);
   background: transparent; box-shadow: inset 0 0 0 1px var(--ds-edge); color: var(--ds-muted); font-size: 12px; font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
@@ -122,6 +123,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .clock { flex: none; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; padding: 0 2px; }
 /* While preparing on an iPad-sized screen the clock gives way to the bar's own words (Go and the page tabs need the room). */
 @media (max-width: 1279px) { .topbar.prepare .clock { display: none; } }
+/* With the Auto-follow pill beside it, the problem pill uses its short words on an iPad-sized bar, so the name on
+   stage keeps some room ("Not sending"; a tap still explains it all). */
+@media (min-width: 701px) and (max-width: 1279px) and (min-height: 501px) {
+  .topbar:has(> .follow-pill:not([hidden])) #outputText { display: none; }
+  .topbar:has(> .follow-pill:not([hidden])) #outputShort { display: inline; }
+  /* And the clock gives way while both pills show (as it does while preparing). */
+  .topbar:has(> .follow-pill:not([hidden])):has(#outputNote:not([hidden])) .clock { display: none; }
+}
 /* Live / Prepare: one segmented switch. Live on is blue, Prepare on is violet. */
 .mode-seg { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 12px; background: rgba(0, 0, 0, 0.2); box-shadow: inset 0 0 0 1px var(--ds-edge); }
 .mode-seg button { min-height: 44px; min-width: 64px; padding: 0 12px; border: 0; border-radius: 9px; background: transparent; color: var(--ds-muted); font: inherit; font-size: 13px; white-space: nowrap; }
@@ -378,14 +387,19 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ghost:active { background: var(--ds-elevated); }
 /* Save to <item> (hold): an amber edge while the stage differs from the item; it fills while held. */
 .save {
-  position: relative; overflow: hidden; flex: none; min-height: 44px; padding: 0 14px; border: 1px solid var(--ds-edge); border-radius: 10px;
+  position: relative; overflow: hidden; flex: 0 1 auto; min-width: 0; min-height: 44px; padding: 0 14px; border: 1px solid var(--ds-edge); border-radius: 10px;
   background: var(--ds-tile-fill); font-size: 13px; font-weight: 600; white-space: nowrap;
 }
+/* A long song name gives way (…); "Save to Chorus · " and "hold" stay whole. */
+.save .save-name { display: flex; min-width: 0; }
+.save .save-to { flex: none; }
+.save .save-item { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.save small { flex: none; }
 .save.dirty { border-color: rgba(227, 166, 70, 0.45); }
 .save .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--ds-accent-fill); opacity: 0.35; }
 .save.holding { border-color: var(--ds-accent); }
 .save.holding .fill { width: 100%; transition: width 1s linear; }
-.save .label { position: relative; display: flex; align-items: center; gap: 8px; }
+.save .label { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; }
 /* In Prepare, Save keeps the draft in the item: violet, as the rest of Prepare. */
 body.prepare .save { background: rgba(var(--prep-tint), 0.14); border-color: rgba(var(--prep-edge), 0.5); }
 body.prepare .save .fill { background: rgb(var(--prep-tint)); opacity: 0.22; }
@@ -1057,6 +1071,9 @@ body.bar-two-rows { grid-template-rows: 60px minmax(0, 1fr) auto; }
   #fading, #flashNote, .clock { display: none !important; }
   .topbar { gap: 6px; padding: 8px 6px 8px 12px; flex-wrap: wrap; row-gap: 8px; }
   .topbar::after { content: ""; order: 9; flex-basis: 100%; }
+  /* A long name gives way on the first line (…) rather than pushing the page tabs onto a line of their own; the
+     pills after it stay whole. */
+  .now { flex: 1000 1 0; max-width: max-content; }
   #quiet, #modeSwitch, #goBtn { order: 10; }
   .go-btn { min-width: 64px; padding: 0 12px; }
   /* Groups: a narrower colour button. */

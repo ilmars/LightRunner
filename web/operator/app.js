@@ -279,13 +279,18 @@ const moves = new Set();
 let rebuilding = false;
 // The item that was on stage when the list last scrolled to it.
 let revealedId = null;
+// Asks the running order's "N more ↓" cue to count again (set once the cue is made, near the end of the file).
+let orderCue = null;
 
 /** Scrolls the running order just enough to show `node`. */
 function reveal(node) {
   const list = $('runningOrder');
   const l = list.getBoundingClientRect(), n = node.getBoundingClientRect();
+  // The "N more ↓" cue covers the list's foot while it shows: a row under it isn't in view.
+  const cue = list.parentElement.querySelector('.more-cue');
+  const bottom = l.bottom - (cue && !cue.hidden ? cue.offsetHeight : 0);
   if (n.top < l.top) list.scrollTop -= l.top - n.top + 4;
-  else if (n.bottom > l.bottom) list.scrollTop += n.bottom - l.bottom + 4;
+  else if (n.bottom > bottom) list.scrollTop += n.bottom - bottom + 4;
 }
 
 function buildOrder() {
@@ -1642,7 +1647,8 @@ function problemWords(s) {
 function followWords(follow) {
   if (!follow.on) return [['○ Auto-follow off']];
   const { live, note } = follow;
-  if (live.state !== 'open') return [[`○ ${live.problem ? live.problem.replace(/\.$/, '') : 'Presenter not open'}`]];
+  // The reason's first sentence only ("The planning login has run out"), so the pill stays short; the title has it all.
+  if (live.state !== 'open') return [[`○ ${live.problem ? live.problem.split(/\.(\s|$)/)[0] : 'Presenter not open'}`]];
   if (!note) return [['● Auto-follow']];
   if (note.kind === 'not-in-order') return [['● Auto-follow · Presenter is on '], [note.item, true], [' · not in the running order']];
   const after = note.section ? layoutSectionName(note.section) : note.kind === 'verse' ? 'verse' : '';
@@ -1675,7 +1681,8 @@ function renderFollow() {
   pill.classList.toggle('away', follow.on && follow.live.state !== 'open');
   pill.setAttribute('aria-pressed', String(follow.on));
   pill.setAttribute('aria-label', `${said.replace(/^[●○] /, '')}. ${follow.on ? 'Tap to switch Auto-follow off' : 'Tap to switch Auto-follow on'}`);
-  pill.title = follow.on ? 'The lights follow the presentation app. Tap to switch it off.' : 'Tap to let the lights follow the presentation app.';
+  pill.title = follow.on && follow.live.problem ? `${follow.live.problem} Tap to switch Auto-follow off.`
+    : follow.on ? 'The lights follow the presentation app. Tap to switch it off.' : 'Tap to let the lights follow the presentation app.';
 }
 
 // A tap is the switch. Switching on starts what the presentation app shows now.
@@ -1776,6 +1783,7 @@ function render() {
   const on = target ? -1 : stageIndex(shownStage);
   const live = prep.on ? stageIndex(state) : -1;
   const next = nextItem();
+  let moreToggled = false;
   orderRows.forEach((row, k) => {
     const active = k === on;
     const staged = k === live && !active;
@@ -1794,8 +1802,11 @@ function render() {
     row.tag.classList.toggle('changed-tag', changed);
     // The song's facts and sections show under it while it is on stage (in Prepare, while it is being prepared).
     if (row.more) {
-      // (Blackout is on no row, so it shows none.)
-      row.more.el.hidden = !active;
+      // (Blackout is on no row, so it shows none.) Opening or closing changes what is below: the cue counts again.
+      if (row.more.el.hidden === active) {
+        row.more.el.hidden = !active;
+        moreToggled = true;
+      }
       const mine = sectionOf(row.item.id, shownStage);
       const real = prep.on ? sectionOf(row.item.id, state) : null;
       for (const s of row.more.sections) {
@@ -1826,8 +1837,15 @@ function render() {
   if (!editing && orderRows.length && onKey !== revealedId) {
     revealedId = onKey;
     const row = onId ? orderRows[on] : null;
-    if (row) reveal(row.more?.sections.find((s) => s.kind === onSection?.kind)?.button ?? row.more?.el ?? row.button);
     if (row) reveal(row.button);
+    // The section on stage, else the first one (all of a long song's sections may not fit under it).
+    const show = row?.more ? row.more.sections.find((s) => s.kind === onSection?.kind) ?? row.more.sections[0] : null;
+    if (show) reveal(show.button);
+  }
+  // A song's sections opened or closed: the cue counts again, and the stage view's kept height still leaves three rows.
+  if (moreToggled) {
+    orderCue?.();
+    queueStageFit();
   }
 
   // Bottom bar.
@@ -2211,7 +2229,15 @@ function renderDetails() {
   // Not while a header or slides row is the Prepare target: the draft is going there, not to the song on stage.
   if (item && !target) $('backBtn').setAttribute('aria-label', `Back to ${item.name} as saved`);
   else $('backBtn').removeAttribute('aria-label');
-  if (item || target) $('saveBtn').querySelector('.label').replaceChildren(el('span', null, `Save to ${saveName(item, target)}`), el('small', null, 'hold'));
+  if (item || target) {
+    // "Save to Chorus · " stays whole; a long song name gives way (…), and "hold" always shows.
+    const section = !target ? sectionOf(item.id) : null;
+    const name = el('span', 'save-name');
+    // (A no-break space: a plain one at the end of the first part would be dropped.)
+    name.append(el('span', 'save-to', section ? `Save to ${sectionName(section)} · ` : 'Save to '), el('span', 'save-item', (target ?? item).name));
+    $('saveBtn').querySelector('.label').replaceChildren(name, el('small', null, 'hold'));
+    $('saveBtn').title = `Save to ${saveName(item, target)} (hold)`;
+  }
   const now = performance.now();
   for (const row of detailRows) {
     if (row.smoke) {
@@ -6245,11 +6271,13 @@ function scrollCue(scroller, { items, all = items, step }) {
   new ResizeObserver(update).observe(scroller);
   new MutationObserver(update).observe(scroller, { childList: true });
   update();
+  return update;
 }
 
-// The quick-look grid: one row (a tile and a gap) at a time. The running order: nearly a page.
+// The quick-look grid: one row (a tile and a gap) at a time. The running order: nearly a page; it counts the
+// running order's own rows, not a song's section rows under it (render() asks again when those open or close).
 scrollCue($('qGrid'), { items: '.ql:not(.newq)', all: '.ql', step: () => ($('qGrid').querySelector('.ql')?.offsetHeight ?? 56) + 8 });
-scrollCue($('runningOrder'), { items: '.item', step: () => Math.max(96, $('runningOrder').clientHeight - 56) });
+orderCue = scrollCue($('runningOrder'), { items: ':scope > .item', step: () => Math.max(96, $('runningOrder').clientHeight - 56) });
 
 // ---- Flash: hold a button and the group goes to full white ----
 
@@ -6381,7 +6409,10 @@ const ORDER_ROWS_LEFT = 3;
  */
 function stageMaxH() {
   const list = $('runningOrder');
-  const rows = [...list.children].filter((n) => !n.classList.contains('sep'));
+  // Rows on screen: not the dividers, and not a song's facts and sections while they are hidden (open, its section
+  // rows count; the facts line doesn't).
+  const rows = [...list.children].flatMap((n) => (n.classList.contains('sep') || n.hidden ? []
+    : n.classList.contains('song-more') ? [...n.querySelectorAll(':scope > .item')] : [n]));
   const third = rows[ORDER_ROWS_LEFT - 1];
   // Where the third row ends, measured from the top of the list (44 px rows, 2 px apart, until the list is built).
   let need = third && rows[0]
