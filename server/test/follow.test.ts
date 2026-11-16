@@ -3,7 +3,7 @@
 // service and a fake socket stand in, so nothing here touches the network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -767,3 +767,39 @@ test("in Prepare, Back to saved during the draft's section puts back the section
   assert.notEqual(app.state!.look, songs.c2, 'the stage is untouched');
   t.close();
 }, { shape: chorusLook }));
+
+// ---- A restart ----
+
+test("the section on stage is still on stage after a restart; it is dropped when its song is no longer a loaded song", async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'light-runner-follow-'));
+  try {
+    let song = '';
+    await withFollow(async ({ app, songs }) => {
+      song = songs.c2!;
+      await chorusOn(app);
+      await waitFor(() => presetOf(app, 'back-wall') === 'back-amber', "the chorus's colours");
+    }, { dir, shape: chorusLook });
+    await withFollow(async ({ app }) => {
+      const state = await waitFor(() => app.state?.section && app.state, 'the section restored');
+      assert.equal(state.look, song);
+      assert.deepEqual(state.section, { song, kind: 'chorus', changed: false });
+      // A change by hand shows against the chorus's look, not the song's.
+      assert.equal(await app.command({ type: 'groupLevel', group: 'back-wall', value: 0.3 }, 'operator'), null);
+      await waitFor(() => app.state?.section?.changed === true, 'changed');
+      assert.equal(await app.command({ type: 'groupLevel', group: 'back-wall', value: 1 }, 'operator'), null);
+      await waitFor(() => app.state?.section?.changed === false, 'not changed');
+    }, { dir, load: false });
+    // The song is no longer one of the loaded service's.
+    const path = join(dir, 'show.json');
+    const show = JSON.parse(readFileSync(path, 'utf8')) as Show;
+    show.operator.service!.items = show.operator.service!.items.filter((i) => i.look !== song);
+    writeFileSync(path, JSON.stringify(show));
+    await withFollow(async ({ app }) => {
+      await sleep(100);
+      assert.equal(app.state!.look, song);
+      assert.equal(app.state!.section, null);
+    }, { dir, load: false });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

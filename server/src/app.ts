@@ -343,6 +343,7 @@ export class App {
     if (this.latestRuntime) this.log(`Restoring last state: look "${this.latestRuntime.look ?? 'none'}"`);
     // Auto-follow starts off unless it was on when the server stopped; nothing starts until a slide comes.
     this.follow.restore(this.latestRuntime?.autoFollow === true);
+    this.stageSection = this.restoredSection(this.latestRuntime);
     this.startWorker();
     await this.ready;
     this.watchNode();
@@ -870,6 +871,8 @@ export class App {
   private setStageSection(section: (SectionOnStage & { fresh: boolean }) | null): void {
     if (section === null && this.stageSection === null) return;
     this.stageSection = section;
+    // Kept with the stage, so a restart has it too (a section start may change no light, and so no runtime).
+    if (this.latestRuntime) this.saver.save(this.runtimeToSave(this.latestRuntime));
     this.publishState();
   }
 
@@ -914,10 +917,27 @@ export class App {
     return this.blind.get(tablet) === session ? null : BLIND_PROBLEM;
   }
 
-  /** The runtime as it is kept on disk: with Auto-follow's switch when it is on (absent is off). */
+  /** The runtime as it is kept on disk: with Auto-follow's switch when it is on (absent is off), and the section on stage. */
   private runtimeToSave(rt: RuntimeState): RuntimeState {
-    const { autoFollow: _was, ...rest } = rt;
-    return this.follow.on ? { ...rest, autoFollow: true } : rest;
+    const { autoFollow: _was, section: _section, ...rest } = rt;
+    const out: RuntimeState = this.follow.on ? { ...rest, autoFollow: true } : rest;
+    const section = this.stageSection;
+    if (section) out.section = { song: section.ref.song, kind: section.ref.kind, groups: [...section.groups] };
+    return out;
+  }
+
+  /** The section that was on stage when the server stopped, while its song is still on stage and a loaded song with it. */
+  private restoredSection(rt: RuntimeState | null): (SectionOnStage & { fresh: boolean }) | null {
+    const kept = rt?.section;
+    if (!kept || rt.look !== kept.song) return null;
+    const ref: SectionRef = { song: kept.song, kind: kept.kind };
+    try {
+      sectionLookOf(this.show, ref);
+    } catch {
+      return null;
+    }
+    const groups = Array.isArray(kept.groups) ? kept.groups.filter((g) => typeof g === 'string') : [];
+    return { ref, groups, fresh: true };
   }
 
   /** The live connection runs while Planning is on (and a login is kept); `restart` connects again (a new login). */

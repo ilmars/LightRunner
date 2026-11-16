@@ -395,6 +395,8 @@ export interface RuntimeState {
   effects?: Record<string, EffectLayer>;
   /** Auto-follow is on (the server's, not the engine's). Absent: off, which is how it starts everywhere. */
   autoFollow?: boolean;
+  /** The song's section on stage and the groups it set (the server's, not the engine's). Absent: none. */
+  section?: SectionRef & { groups: string[] };
 }
 
 export const SAFE = 'safe';
