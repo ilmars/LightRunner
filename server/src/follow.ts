@@ -6,6 +6,7 @@ import {
   followDecision, sectionLookOf,
   type FollowNote, type FollowPlace, type FollowStart, type LiveSlide, type LiveState, type LiveStatus, type OnStage, type SectionRef, type Show,
 } from '../../packages/shared/src/index.ts';
+import { isDeepStrictEqual } from 'node:util';
 import { PlanningError, type Planning } from './planning/index.ts';
 import { PresenterLive, type WebSocketLike } from './planning/live.ts';
 
@@ -204,6 +205,23 @@ export interface SectionOnStage {
   groups: string[];
 }
 
+/** The same colour or effect: the same preset, or a live pick or live effect that a saved preset holds exactly. */
+function sameShown(show: Show, preset: string, now: LiveState['groups'][string]): boolean {
+  if (now.preset === preset) return true;
+  const saved = show.presets.find((p) => p.id === preset);
+  const layer = saved?.layers.length === 1 ? saved.layers[0] : undefined;
+  if (now.live) {
+    if (layer?.kind !== 'static') return false;
+    const c = layer.colour;
+    if (!('hex' in c)) return false;
+    const pct = (v: number | undefined) => Math.round((v ?? 0) * 100);
+    return c.hex.toLowerCase() === now.live.colour.toLowerCase()
+      && pct(c.white) === pct(now.live.white) && pct(c.amber) === pct(now.live.amber) && pct(c.uv) === pct(now.live.uv);
+  }
+  if (now.effect) return !!layer && isDeepStrictEqual(layer, now.effect);
+  return false;
+}
+
 /**
  * Whether a group the section set runs another colour or level than the section's look says (the save bar's cue).
  * Null when the section can't be found in the show any more (a load without its song).
@@ -220,7 +238,7 @@ export function sectionState(show: Show, section: SectionOnStage, state: Pick<Li
   const changed = section.groups.some((g) => {
     const entry = look.groups.find((e) => e.group === g);
     const now = state.groups[g];
-    return !!entry && !!now && (now.preset !== entry.preset || Math.abs(now.level - (entry.level ?? 1)) > 1e-9);
+    return !!entry && !!now && (!sameShown(show, entry.preset, now) || Math.abs(now.level - (entry.level ?? 1)) > 1e-9);
   });
   return { ...section.ref, changed };
 }

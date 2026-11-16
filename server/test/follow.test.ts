@@ -611,3 +611,56 @@ test("in Prepare, Save for this section uses the draft's section; a draft Undo c
   await waitFor(() => t.draft() && t.draft().section === null, "no section in the draft after its Undo");
   t.close();
 }));
+
+async function chorusOn(app: App) {
+  await followOn(app);
+  await app.command({ type: 'fadeTime', value: 0 }, 'operator');
+  await app.liveSlide(slide('c2', 'ch1'));
+  await waitFor(() => app.state?.section?.kind === 'chorus', 'the chorus');
+}
+
+test('Save for this section with an Any colour: the stage matches it (changed false), and Undo of the save makes it changed again', () => withFollow(async ({ app, songs, call }) => {
+  await chorusOn(app);
+  assert.equal(await app.command({ type: 'groupColour', group: 'back-wall', colour: '#123456', white: 0.4, fade: 0 }, 'operator'), null);
+  await waitFor(() => app.state?.section?.changed === true, 'changed');
+  assert.equal(await app.command({ type: 'saveSection', scope: 'section' }, 'operator'), null);
+  const show = await looksOf(call);
+  const own = sectionsOf(show, songs.c2!).find((s) => s.kind === 'chorus')!.look!;
+  assert.ok(show.presets.find((p) => p.id === entry(show, own, 'back-wall').preset)!.custom);
+  await waitFor(() => app.state?.section?.changed === false, 'matches after the save');
+  assert.ok(presetOf(app, 'back-wall')!.startsWith('live:'), 'the stage keeps its live colour');
+  assert.equal(await app.command({ type: 'undo' }, 'operator'), null);
+  await waitFor(() => app.state?.section?.changed === true, 'changed again after Undo');
+}));
+
+test('Save for this section with a live effect: the stage matches it (changed false), and Undo of the save makes it changed again', () => withFollow(async ({ app }) => {
+  await chorusOn(app);
+  const wave = { kind: 'effect' as const, effect: 'wave' as const, colours: [{ hex: '#ff0000' }, { hex: '#0000ff' }], speed: { beats: 16 }, direction: 'ltr' as const, waves: 3, size: 0.5, edge: 'soft' as const, intensity: 1 };
+  assert.equal(await app.command({ type: 'groupEffect', group: 'back-wall', effect: wave, fade: 0 } as any, 'operator'), null);
+  await waitFor(() => app.state?.section?.changed === true, 'changed');
+  assert.equal(await app.command({ type: 'saveSection', scope: 'section' }, 'operator'), null);
+  await waitFor(() => app.state?.section?.changed === false, 'matches after the save');
+  assert.ok(presetOf(app, 'back-wall')!.startsWith('fx:'));
+  assert.equal(await app.command({ type: 'undo' }, 'operator'), null);
+  await waitFor(() => app.state?.section?.changed === true, 'changed again after Undo');
+}));
+
+test('Save to the song with a section and a running timeline saves the whole stage except the groups the timeline drives', () => withFollow(async ({ app, songs, call }) => {
+  await followOn(app);
+  await app.command({ type: 'fadeTime', value: 0 }, 'operator');
+  await app.liveSlide(slide('c2', 'v1'));
+  await waitFor(() => app.state?.look === songs.c2 && app.state.timeline, 'Song One and its timeline');
+  await app.liveSlide(slide('c2', 'ch1'));
+  await waitFor(() => app.state?.section?.kind === 'chorus' && presetOf(app, 'back-wall') === 'back-amber', 'the chorus');
+  assert.equal(presetOf(app, 'audience'), 'aud-warm', 'the timeline drives it');
+  assert.equal(await app.command({ type: 'groupLevel', group: 'back-wall', value: 0.3 }, 'operator'), null);
+  await waitFor(() => app.state?.section?.changed === true, 'changed');
+  const before = await looksOf(call);
+  const own = sectionsOf(before, songs.c2!).find((s) => s.kind === 'chorus')!.look!;
+  assert.equal(await app.command({ type: 'saveItem', id: songs.c2! }, 'operator'), null);
+  const show = await looksOf(call);
+  assert.equal(entry(show, own, 'back-wall').level, 0.3);
+  assert.equal(entry(show, own, 'audience').preset, 'aud-blue', 'the timeline group keeps what the chorus had');
+  assert.equal(entry(show, own, 'front-wash').preset, entry(before, own, 'front-wash').preset);
+  await waitFor(() => app.state?.section?.changed === false, 'no longer changed');
+}, { shape: withTimeline }));

@@ -1247,7 +1247,11 @@ export class App {
           const onStage = draft ? draft.section : this.stageSection;
           if (onStage && onStage.ref.song === cmd.id) {
             const made = ensureSectionLook(before, onStage.ref);
-            next = saveItem(made.show, made.id, stage!);
+            // The whole stage, except the groups a running timeline drives: the section left those to it, and its look keeps them.
+            const set = new Set(onStage.groups);
+            const driven = new Set(made.show.looks.find((l) => l.id === made.id)!.groups.map((e) => e.group).filter((g) => !set.has(g) && !this.isSmokeGroup(g)));
+            if (!draft) for (const g of this.timelineGroups(this.liveTimeline?.runner.state?.id)) driven.add(g);
+            next = saveItem(made.show, made.id, stage!, [...driven]);
           } else {
             next = saveItem(before, cmd.id, stage!);
           }

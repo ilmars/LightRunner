@@ -384,8 +384,9 @@ function isEffect(show: Show, preset: string): boolean {
  * Replaces what a look holds with the stage as it is going; the look keeps its id, name and place.
  * Basic lights keeps no dimmer levels: it stores every group at full, as it always resets them.
  * Basic lights is always still too: a group running an effect keeps what Basic lights had for it.
+ * `keep`: groups the look keeps as it has them (the ones a running timeline drives).
  */
-export function saveItem(show: Show, lookId: string, stage: Stage): Show {
+export function saveItem(show: Show, lookId: string, stage: Stage, keep: string[] = []): Show {
   const out = structuredClone(show);
   const target = lookIn(out, lookId);
   if (lookId === out.operator.safeLook) {
@@ -396,6 +397,11 @@ export function saveItem(show: Show, lookId: string, stage: Stage): Show {
     const order = Object.keys(stage.groups);
     target.groups = [...fresh, ...kept].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
     for (const entry of target.groups) entry.level = 1;
+  } else if (keep.length > 0) {
+    const kept = target.groups.filter((e) => keep.includes(e.group));
+    const order = Object.keys(stage.groups);
+    target.groups = [...entriesFor(out, stage, Object.keys(stage.groups).filter((g) => !keep.includes(g))), ...kept]
+      .sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
   } else {
     target.groups = entriesFor(out, stage);
   }
