@@ -510,6 +510,33 @@ for (const [how, away] of [
   }));
 }
 
+test('a reconnect during a section, on a slide of no section, changes nothing when the same slide comes again', () => withFollow(async ({ app, songs, sockets }) => {
+  const ws = await presenterOpen(app, sockets);
+  await followOn(app);
+  await app.command({ type: 'fadeTime', value: 0 }, 'operator');
+  await app.liveSlide(slide('c2', 'ch1'));
+  await waitFor(() => app.state?.section?.kind === 'chorus' && presetOf(app, 'back-wall') === 'back-amber' && app.state.timeline, 'the chorus and the timeline');
+  // An untitled slide of the same song: no section.
+  await app.liveSlide(slide('c2', 'untitled'));
+  assert.equal(app.state!.follow?.note?.kind, 'nothing');
+  const run = app.state!.timeline!.run;
+  const canUndo = app.state!.canUndo;
+  // The Wi-Fi blips: the connection closes and comes back, and the presentation app sends its slide again.
+  ws.onclose!();
+  await waitFor(() => app.state?.follow?.live.state !== 'open', 'no longer open');
+  await waitFor(() => sockets.length === 2, 'a new live socket');
+  await presenterOpen(app, sockets);
+  await app.liveSlide(slide('c2', 'untitled'));
+  await sleep(100);
+  const state = app.state!;
+  assert.equal(state.look, songs.c2);
+  assert.deepEqual(state.section, { song: songs.c2, kind: 'chorus', changed: false });
+  assert.equal(state.timeline?.run, run, 'the timeline did not start again');
+  assert.equal(presetOf(app, 'back-wall'), 'back-amber');
+  assert.equal(state.follow?.note?.kind, 'nothing');
+  assert.equal(state.canUndo, canUndo);
+}, { shape: withTimeline }));
+
 test('switching on before the presentation app is open starts nothing', () => withFollow(async ({ app, songs }) => {
   await app.liveSlide(slide('c4', null, 'Song Two'));
   const before = app.state!.look;

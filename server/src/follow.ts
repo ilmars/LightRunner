@@ -40,7 +40,7 @@ export class Follow {
   private note: FollowNote | null = null;
   /** The last slide the presentation app showed (followed or not), forgotten when the connection is no longer open. */
   private lastSlide: LiveSlide | null = null;
-  /** Where the last followed slide stood, forgotten with the slide. */
+  /** Where the last followed slide stood. Kept across a reconnect, so a slide sent again is judged against it. */
   private place: FollowPlace | null = null;
   private presenter: PresenterLive | null = null;
   /** What the connection was made for, so a settings save that changes nothing leaves it be. */
@@ -195,11 +195,9 @@ export class Follow {
   }
 
   private setLive(status: LiveStatus): void {
-    // What the presentation app showed is no longer on screen once it has gone (or the connection has).
-    if (status.state !== 'open') {
-      this.lastSlide = null;
-      this.place = null;
-    }
+    // What the presentation app showed is no longer on screen once it has gone (or the connection has). Where it
+    // stood is kept: after a reconnect the same slide comes again and must change nothing.
+    if (status.state !== 'open') this.lastSlide = null;
     const was = this.live;
     if (was.state === status.state && was.problem === status.problem && was.presenter === status.presenter) return;
     this.live = { ...status };
