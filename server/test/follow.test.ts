@@ -803,3 +803,31 @@ test("the section on stage is still on stage after a restart; it is dropped when
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---- A timeline started live during a section ----
+
+/** The chorus look, and a timeline that drives the audience but is no song's. */
+function looseTimeline(show: Show, songs: Record<string, string>): Show {
+  show = withTimeline(show, songs);
+  delete show.looks.find((l) => l.id === songs.c2)!.timeline;
+  return show;
+}
+
+test("a timeline started live during a section takes its groups from the section: no save bar, and This section leaves them out", () => withFollow(async ({ app, songs, tablet, call }) => {
+  await chorusOn(app);
+  await waitFor(() => presetOf(app, 'audience') === 'aud-blue', "the chorus's audience");
+  assert.equal(app.state!.timeline, null);
+  const t = await tablet();
+  assert.equal(await t.send({ type: 'timelineStart', id: 'song-one-tl', at: 0 }), null);
+  await waitFor(() => presetOf(app, 'audience') === 'aud-warm', 'the timeline driving the audience');
+  await sleep(60);
+  assert.deepEqual(app.state!.section, { song: songs.c2, kind: 'chorus', changed: false }, 'no save bar for what the timeline does');
+  assert.equal(await app.command({ type: 'groupLevel', group: 'back-wall', value: 0.3 }, 'operator'), null);
+  await waitFor(() => app.state?.section?.changed === true, 'changed by hand');
+  assert.equal(await app.command({ type: 'saveSection', scope: 'section' }, 'operator'), null);
+  const show = await looksOf(call);
+  const own = sectionsOf(show, songs.c2!).find((s) => s.kind === 'chorus')!.look!;
+  assert.equal(entry(show, own, 'back-wall').level, 0.3);
+  assert.equal(entry(show, own, 'audience').preset, 'aud-blue', "the timeline's colour is not saved into the chorus");
+  t.close();
+}, { shape: looseTimeline }));

@@ -1556,6 +1556,13 @@ export class App {
       },
     });
     this.liveTimeline = entry;
+    // The groups it drives are the timeline's now, not the section's: no save bar for them, and This section leaves them out.
+    const section = this.stageSection;
+    if (section) {
+      const driven = drivenGroups(fresh, this.show);
+      const groups = section.groups.filter((g) => !driven.has(g));
+      if (groups.length !== section.groups.length) this.setStageSection({ ...section, groups });
+    }
     this.log(`Timeline "${fresh.name}" started at ${at.toFixed(1)} s`);
     // Started in Blackout, it takes the stage from there: Blackout ends without a light moving (before the timeline's
     // first change), so a look block never brings back the stage from before Blackout and the pages stop showing it.
