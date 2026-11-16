@@ -9,4 +9,5 @@ export * from './presets.ts';
 export * from './devices.ts';
 export * from './keys.ts';
 export * from './planning.ts';
+export * from './sections.ts';
 export * from './timeline.ts';

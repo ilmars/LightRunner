@@ -65,8 +65,41 @@ test('a planned service keeps the order, names, song ids, the service key and th
   assert.equal(service.start, '2026-10-25T08:00:00');
   assert.deepEqual(service.items.map((i) => i.kind), ['header', 'song', 'verse']);
   assert.equal(service.items[0].name, 'Ievads');
-  assert.deepEqual(service.items[1], { key: 'c2', kind: 'song', name: 'Klints uz mūžiem (Nav tādas klints)', songId: SONG, tempo: 141 });
+  assert.deepEqual(service.items[1], { key: 'c2', kind: 'song', name: 'Klints uz mūžiem (Nav tādas klints)', songId: SONG, tempo: 141, songKey: 'D' });
   assert.equal(service.items[2].name, 'Psalmi 23:3 L1');
+});
+
+test('a song item carries its sections and facts, and never the lyrics', () => {
+  const songs = new Map<string, unknown>([[SONG, {
+    name: 'Klints',
+    data: {
+      defaultKey: 'C', timeSignature: '6/8', text_artist: 'Hillsong',
+      slides: [
+        { slide_id: 'a', slide_title: 'Verse 1a', slide_content: 'SECRET LYRIC ONE' },
+        { slide_id: 'b', slide_title: 'Chorus', slide_content: 'SECRET LYRIC TWO' },
+      ],
+    },
+  }]]);
+  const d = doc();
+  (d.data.songMeta as any).c2 = { key: 'D', notes: 'Slow start' };
+  const item = toPlannedService('svc1', d, songs, 'T').items[1]!;
+  assert.deepEqual(item.sections, [{ kind: 'verse', slides: ['a'] }, { kind: 'chorus', slides: ['b'] }]);
+  assert.equal(item.songKey, 'D');
+  assert.equal(item.timeSignature, '6/8');
+  assert.equal(item.artist, 'Hillsong');
+  assert.equal(item.notes, 'Slow start');
+  assert.equal(JSON.stringify(item).includes('SECRET'), false);
+});
+
+test('the song library\'s key is used when the service sets none; no sections leaves the field out', () => {
+  const songs = new Map<string, unknown>([[SONG, { name: 'Klints', data: { defaultKey: 'C' } }]]);
+  const d = doc();
+  d.data.songMeta = {} as any;
+  const item = toPlannedService('svc1', d, songs, 'T').items[1]!;
+  assert.equal(item.songKey, 'C');
+  assert.equal('sections' in item, false);
+  assert.equal('notes' in item, false);
+  assert.equal('artist' in item, false);
 });
 
 test('a song tempo outside 40-240 is left out', () => {
