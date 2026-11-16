@@ -220,18 +220,18 @@ export function ensureBasicLights(show: Show): Show {
 // schema.ts (which imports it), and these need uniqueId and the look rules from this file.
 
 /**
- * Fits a planned name into a look's 40 characters; `fallback` when nothing is left of it. Song names often carry a
- * second title in brackets ("Tad, Kad Jūra Krāc (Vēlos, Kungs, zem Taviem spārniem būt)"): a name too long loses
- * that first, then is cut at a word with "…" rather than in the middle of one.
+ * Fits a planned name into a look's 40 characters (or `max`); `fallback` when nothing is left of it. Song names often
+ * carry a second title in brackets ("Tad, Kad Jūra Krāc (Vēlos, Kungs, zem Taviem spārniem būt)"): a name too long
+ * loses that first, then is cut at a word with "…" rather than in the middle of one.
  */
-export function planLookName(name: string, fallback: string): string {
+export function planLookName(name: string, fallback: string, max = MAX_NAME): string {
   const whole = name.trim().replace(/\s+/g, ' ');
-  if (whole.length <= MAX_NAME) return whole || fallback;
+  if (whole.length <= max) return whole || fallback;
   const short = whole.replace(/\s*\([^()]*\)?\s*$/, '').trim();
-  if (short && short.length <= MAX_NAME) return short;
-  const cut = whole.slice(0, MAX_NAME - 1);
+  if (short && short.length <= max) return short;
+  const cut = whole.slice(0, max - 1);
   const at = cut.lastIndexOf(' ');
-  return at >= MAX_NAME / 2 ? `${cut.slice(0, at).replace(/[\s,;:(-]+$/, '')}…` : whole.slice(0, MAX_NAME).trim();
+  return at >= max / 2 ? `${cut.slice(0, at).replace(/[\s,;:(-]+$/, '')}…` : whole.slice(0, max).trim();
 }
 
 /** Forgets, in place, everything the planning feature keeps that names a look that is gone. */
@@ -471,7 +471,10 @@ export function ensureSectionLook(show: Show, ref: SectionRef): { show: Show; id
   const { item, section } = sectionIn(out, ref);
   if (section.look !== undefined) return { show: out, id: section.look };
   const song = lookIn(out, ref.song);
-  const id = addLook(out, planLookName(`${song.name} · ${SECTION_NAMES[ref.kind]}`, SECTION_NAMES[ref.kind]), structuredClone(song.groups));
+  // A long song name is shortened, never " · Chorus": each section's look keeps a name of its own.
+  const tail = ` · ${SECTION_NAMES[ref.kind]}`;
+  const songPart = planLookName(song.name, '', MAX_NAME - tail.length);
+  const id = addLook(out, songPart ? `${songPart}${tail}` : SECTION_NAMES[ref.kind], structuredClone(song.groups));
   (out.operator.remembered ??= {})[sectionRememberKey(item.songId!, ref.kind)] = id;
   // A song planned twice shows the same sections twice.
   for (const same of out.operator.service!.items) {

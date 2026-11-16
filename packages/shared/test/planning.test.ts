@@ -756,6 +756,22 @@ test("a section's own look comes back next week", () => {
   parseShow(again);
 });
 
+test("a long song name is shortened in its section looks' names, never the section", () => {
+  let show = loadService(rig(), planned([withSections()]));
+  const a = show.operator.service!.items[0]!.look!;
+  lookOf(show, a).name = 'Jēzu, Tavs Vārds liek tumsai drebēt';
+  const names: string[] = [];
+  for (const kind of ['verse', 'chorus'] as const) {
+    const made = ensureSectionLook(show, { song: a, kind });
+    show = made.show;
+    names.push(lookOf(show, made.id).name);
+  }
+  assert.ok(names[0]!.endsWith(' · Verse'), names[0]);
+  assert.ok(names[1]!.endsWith(' · Chorus'), names[1]);
+  for (const name of names) assert.ok(name.length <= 40 && name.startsWith('Jēzu, Tavs Vārds'), name);
+  parseShow(show);
+});
+
 test('deleting the song deletes its section looks', () => {
   const loaded = loadService(rig(), planned([withSections(), song('b', 'B')]));
   const [a, b] = loaded.operator.service!.items.map((i) => i.look!) as [string, string];
