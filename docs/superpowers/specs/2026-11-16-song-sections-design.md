@@ -78,7 +78,7 @@ The presentation app sends a message on every slide change, naming the item and 
 
 **The Auto-follow switch:**
 
-- **One switch for all tablets** (shared, like Fade), on the server, kept across restarts. It exists only while Planning is on in Settings, and is on when Planning is first switched on.
+- **One switch for all tablets** (shared, like Fade), on the server, kept across restarts. It exists only while Planning is on in Settings, and **starts off**, on a new install and on the church's after the update; someone switches it on with the pill (owner, 16 Nov, so no Sunday has lights changing by themselves before it has been tried at the church).
 - It is a quiet pill in the top bar after the name on stage (the 25 Oct pill), and the pill is the switch: a tap turns it on or off. *(Claude's call on its look and place; the owner asked for "an autofollow button".)*
 
 | State | The pill says |
@@ -86,7 +86,7 @@ The presentation app sends a message on every slide change, naming the item and 
 | On, following | ● Auto-follow · **Uz Krustu** · Chorus |
 | On, on an item that changes nothing | ● Auto-follow · **Vārds** · verse |
 | On, the item isn't in the running order | ● Auto-follow · <Presenter> is on **…** · not in the running order |
-| Off (paused by a tap, or switched off) | ○ Auto-follow off · <Presenter> is on **Uz Krustu** |
+| Off (paused by a tap, or switched off) | ○ Auto-follow off (short, so the name on stage keeps its room; the preview on 16 Nov showed a longer text pushing the name out) |
 | The presentation app isn't reachable | ○ <Presenter> not open (or the plain reason: no internet, the login has run out) |
 
 - **Switching it on** starts what the presentation app has on screen now, straight away, by the rules above (the director's own tap, like the 25 Oct Start; the separate Start button is not needed).

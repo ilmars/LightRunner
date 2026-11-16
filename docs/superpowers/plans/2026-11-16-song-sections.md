@@ -181,7 +181,7 @@ In `planning.test.ts`: `toPlannedService` gives a song item `sections` (left out
   - Command `{ type: 'autoFollow'; on: boolean }` (operator, no PIN; no Undo step)
   - `LiveState.section?: (SectionRef & { changed: boolean }) | null` (server-set; `changed`: a group's preset or level differs from `sectionLookOf`); a draft's state has the draft's section
   - `LiveState.follow?: { on: boolean; live: LiveStatus; note: FollowNote | null } | null` (server-set; null while Planning is off)
-  - `RuntimeState.autoFollow?: boolean` (absent = on), saved with the runtime file
+  - `RuntimeState.autoFollow?: boolean` (absent = off: it starts off everywhere), saved with the runtime file
   - `App.liveSlide(s: LiveSlide): Promise<void>`
 
 **Starting a section** (from a follow or the `section` command): when the song on stage (`state.look`, or the `section`'s song) is the section's song, `stageCommand({type:'quickLook', id: sectionLookOf, only})` where `only` is the song's light groups minus the groups the running live timeline has blocks for; the timeline and the tempo are not touched; else start the song first as a tap would (`look`, its timeline), then the section the same way. Then set `section`. A `look`, `safe`, `blackout`, `blindGo` or `backToLook` clears `section`.
@@ -196,7 +196,7 @@ In `planning.test.ts`: `toPlannedService` gives a song item `sections` (left out
   - a tablet in Prepare (`blindStart`, `draft look`) doesn't pause it, and its draft is unchanged after a followed slide;
   - `state.section.changed` turns true after a `groupLevel` on a section's group, false again after `saveSection` (Task 6) or a new section;
   - Planning off → `follow` null and the connection stopped; on again → started;
-  - `autoFollow` off survives a restart (a new App on the same data folder).
+  - Auto-follow starts off (a fresh data folder: `follow.on` false); switched on, it survives a restart (a new App on the same data folder).
 - [ ] **Step 2: Run; expect FAIL.**
 - [ ] **Step 3: Implement.** The App owns one `PresenterLive` while Planning is on (started in the constructor and when a settings save turns Planning on, stopped when off and on `close()`). `liveSlide` keeps the last slide; when following, runs `followDecision` and starts the result (an item: `stopLiveTimeline`, `look`, `startSongTimeline`, as `run()` does). In `run()`, before the stage command, the starting commands above set `autoFollow` false. Broadcast state when `follow` or `section` changes.
 - [ ] **Step 4: Run tests, typecheck, both jump-checks; expect PASS.**
