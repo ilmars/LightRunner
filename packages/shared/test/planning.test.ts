@@ -91,6 +91,19 @@ test('a song item carries its sections and facts, and never the lyrics', () => {
   assert.equal(JSON.stringify(item).includes('SECRET'), false);
 });
 
+test('a song with a very long slide id or 250 chorus slides does not stop the service loading', () => {
+  const OTHER = '5fc3d2e1-2222-4333-8444-a55566677788';
+  const songs = new Map<string, unknown>([
+    [SONG, { name: 'Klints', data: { slides: [{ slide_id: 'y'.repeat(70), slide_title: 'Verse 1' }, { slide_id: 'b', slide_title: 'Chorus' }] } }],
+    [OTHER, { name: 'Long', data: { slides: Array.from({ length: 250 }, (_, i) => ({ slide_id: `c${i}`, slide_title: 'Chorus' })) } }],
+  ]);
+  const d = doc();
+  d.data.cues.push({ cue_id: 'c4', cue_type: null, cue_name: 'Long', displayName: '', cue_foreground: { type: 'text', text: OTHER } } as any);
+  const service = toPlannedService('svc1', d, songs, 'T');
+  assert.deepEqual(service.items[1]!.sections, [{ kind: 'chorus', slides: ['b'] }]);
+  assert.equal(service.items[3]!.sections![0]!.slides.length, 200);
+});
+
 test('the song library\'s key is used when the service sets none; no sections leaves the field out', () => {
   const songs = new Map<string, unknown>([[SONG, { name: 'Klints', data: { defaultKey: 'C' } }]]);
   const d = doc();

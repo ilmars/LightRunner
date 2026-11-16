@@ -45,10 +45,14 @@ export function sectionKindOf(title: string): SectionKind | null {
   return wordOf(text) ?? wordOf(text.replace(/[a-z]$/, ''));
 }
 
+/** The longest slide id kept, and how many slides one section keeps at most. */
+const MAX_SLIDE_ID = 64;
+const MAX_SLIDES = 200;
+
 export const SongSection = z.object({
   kind: SectionKind,
   /** Every slide id of the song's library entry that is this kind. */
-  slides: z.array(z.string().min(1).max(64)).max(200),
+  slides: z.array(z.string().min(1).max(MAX_SLIDE_ID)).max(MAX_SLIDES),
 });
 export type SongSection = z.infer<typeof SongSection>;
 
@@ -59,11 +63,12 @@ export function songSections(song: unknown): SongSection[] {
   const found = new Map<SectionKind, string[]>();
   for (const slide of Array.isArray(slides) ? slides : []) {
     const s = slide && typeof slide === 'object' ? (slide as Record<string, unknown>) : {};
-    if (typeof s.slide_id !== 'string' || typeof s.slide_title !== 'string' || s.slide_id === '') continue;
+    // An id too long to keep is skipped, so one odd song can't stop the whole service loading.
+    if (typeof s.slide_id !== 'string' || typeof s.slide_title !== 'string' || s.slide_id === '' || s.slide_id.length > MAX_SLIDE_ID) continue;
     const kind = sectionKindOf(s.slide_title);
     if (!kind) continue;
     const list = found.get(kind) ?? [];
-    list.push(s.slide_id);
+    if (list.length < MAX_SLIDES) list.push(s.slide_id);
     found.set(kind, list);
   }
   return [...found].map(([kind, ids]) => ({ kind, slides: ids }));

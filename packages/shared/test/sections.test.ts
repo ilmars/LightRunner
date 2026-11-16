@@ -22,6 +22,17 @@ test('a song lists each kind once, in order of first slide, with all its slides'
   ]);
 });
 
+test('slide ids too long to keep are skipped, and each kind keeps at most 200 slides', () => {
+  const long = 'x'.repeat(70);
+  const chorus = Array.from({ length: 250 }, (_, i) => ({ slide_id: `c${i}`, slide_title: 'Chorus' }));
+  const song = { data: { slides: [{ slide_id: long, slide_title: 'Verse 1' }, { slide_id: 'v2', slide_title: 'Verse 2' }, ...chorus, { slide_id: long, slide_title: 'Bridge' }] } };
+  const sections = songSections(song);
+  assert.deepEqual(sections.map((s) => s.kind), ['verse', 'chorus'], 'a kind with only a too-long id is left out');
+  assert.deepEqual(sections[0]!.slides, ['v2']);
+  assert.equal(sections[1]!.slides.length, 200);
+  assert.equal(sections[1]!.slides[199], 'c199');
+});
+
 test('a song with no named sections, or no slides, has none', () => {
   assert.deepEqual(songSections({ data: { slides: [{ slide_id: 'a', slide_title: 'Slide 1' }, { slide_id: 'b' }] } }), []);
   assert.deepEqual(songSections({}), []);

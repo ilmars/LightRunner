@@ -95,13 +95,12 @@ export function toPlannedService(idOfService: string, doc: unknown, songs: Map<s
     const item: ServiceItem = { key: str(cue.cue_id), kind, name: clean(name) };
     if (songId) {
       item.songId = songId;
-      // The service's own tempo for the song when it sets one, else the song library's.
-      const own = obj(songMeta[str(cue.cue_id)]).tempo;
-      const tempo = inRange(own) ? own : obj(song.data).tempo;
-      if (inRange(tempo)) item.tempo = tempo;
-      // Facts about the song. Only sections' titles and ids are read, never the lyrics.
       const meta = obj(songMeta[str(cue.cue_id)]);
       const data = obj(song.data);
+      // The service's own tempo for the song when it sets one, else the song library's.
+      const tempo = inRange(meta.tempo) ? meta.tempo : data.tempo;
+      if (inRange(tempo)) item.tempo = tempo;
+      // Facts about the song. Only sections' titles and ids are read, never the lyrics.
       const sections = songSections(song);
       if (sections.length) item.sections = sections;
       const songKey = str(meta.key).trim() || str(data.defaultKey).trim();
