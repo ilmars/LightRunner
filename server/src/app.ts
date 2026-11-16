@@ -13,7 +13,7 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
+  BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, clearService, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
   applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isSectionLook, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo, setItemTimeline, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
   BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
@@ -1336,6 +1336,7 @@ export class App {
       case 'editEffect': next = editEffect(before, cmd); break;
       // The result goes through operatorSave like any edit, so keys of looks the load took away are freed. Never touches the stage.
       case 'loadService': next = loadService(before, service!); break;
+      case 'clearService': next = clearService(before); break;
       // Controller keys don't look at the stage either.
       case 'setKey': next = assignKey(before, cmd.key, cmd.does).show; break;
       case 'clearKey': next = clearKey(before, cmd.does); break;
@@ -1357,6 +1358,17 @@ export class App {
     // Groups on stage showing a colour or effect the edit changes carry on as a hidden copy of it, with no fade.
     const kept = live ? keepLitPresets(before, next, live) : null;
     await this.operatorSave(kept?.show ?? next, kept ? { pins: kept.pins } : undefined);
+    // A section whose song is no longer a loaded song (a clear, a deleted song) is let go of, on stage and in a draft.
+    const loaded = (ref: SectionRef) => {
+      try {
+        sectionLookOf(this.show, ref);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (this.stageSection && !loaded(this.stageSection.ref)) this.setStageSection(null);
+    for (const session of this.blind.values()) if (session.section && !loaded(session.section.ref)) session.section = null;
     // Tempo edits of one song within 3 s of each other (tapping along, a held + or −) are one Undo step.
     const at = Date.now();
     const joins = cmd.type === 'itemTempo' && this.tempoEdit !== null && this.tempoEdit.item === cmd.item

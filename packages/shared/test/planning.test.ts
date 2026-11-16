@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept, setItemGroup, setItemTempo, setItemTimeline, saveItem, sectionRememberKey, sectionsOf, sectionLookOf, ensureSectionLook, saveSectionChange,
+  anchorOf, checkReferences, copyLookToItem, addSong, clearService, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept, setItemGroup, setItemTempo, setItemTimeline, saveItem, sectionRememberKey, sectionsOf, sectionLookOf, ensureSectionLook, saveSectionChange,
   serviceRows, toPlannedService, type PlannedService, type ServiceItem, type Show,
 } from '../src/index.ts';
 
@@ -337,9 +337,10 @@ test('deleting a song\'s look forgets it', () => {
   const b = loaded.operator.service!.items[1]!.look!;
   const out = deleteItem(loaded, a);
   assert.equal(out.operator.remembered!['song:song-a'], undefined);
-  assert.equal(out.operator.service!.items[0]!.look, undefined);
+  // The song leaves the service too: no greyed-out row stays behind.
+  assert.deepEqual(out.operator.service!.items.map((i) => i.name), ['B']);
   assert.equal(out.operator.remembered!['song:song-b'], b);
-  assert.equal(out.operator.service!.items[1]!.look, b);
+  assert.equal(out.operator.service!.items[0]!.look, b);
   parseShow(ensurePlanning(out));
 });
 
@@ -470,9 +471,9 @@ test('a deleted anchor moves its muted items up to the next look above', () => {
   const { show, slav, a, b } = october();
   const out = deleteItem(show, a);
   const rows = serviceRows(out);
-  // A is gone: its song item has no look now, and it and the blank follow Slavēšana.
-  assert.deepEqual(rows.map(label), [safeOf(show), 'header', slav, 'item', 'item', b, 'verses', 'header']);
-  assert.deepEqual(rows[3], { kind: 'item', key: 'cue-a-A', name: 'A', itemKind: 'song' });
+  // A is gone with its song item: the blank follows Slavēšana.
+  assert.deepEqual(rows.map(label), [safeOf(show), 'header', slav, 'item', b, 'verses', 'header']);
+  assert.equal(rows.some((r) => r.kind === 'item' && r.name === 'A'), false);
   assert.equal(anchorOf(out, 'cue-b'), slav);
 });
 
@@ -873,4 +874,74 @@ test('only the groups that differ from the sections look are written', () => {
   const out = saveSectionChange(edited, changed, ref, 'song');
   assert.equal(entryOf(out, a, front)!.level ?? 1, 1, 'the song does not get a group the chorus already had as on stage');
   assert.notEqual(entryOf(out, a, back)!.preset, entryOf(loaded, a, back)!.preset);
+});
+
+// ---- Deleting a song, and clearing the planned service ----
+
+test('a deleted song leaves the service: every item with its look, a part header with its row', () => {
+  const { show, a, slav } = october();
+  const again: ServiceItem = { key: 'cue-again', kind: 'song', name: 'A', songId: 'song-a' };
+  const twice = loadService(show, planned([song('a', 'A'), song('b', 'B'), again]));
+  const a2 = twice.operator.service!.items[0]!.look!;
+  const out = deleteItem(twice, a2);
+  assert.deepEqual(out.operator.service!.items.map((i) => i.name), ['B']);
+  assert.equal(serviceRows(out).some((r) => r.kind === 'item'), false);
+  assert.equal(out.operator.remembered!['song:song-a'], undefined);
+  // A header with a look goes with its row.
+  const head = deleteItem(show, show.operator.runningOrder[1]!);
+  assert.equal(head.operator.service!.items.some((i) => i.name === 'Slavēšana'), false);
+  assert.ok(head.operator.service!.items.some((i) => i.look === a));
+  assert.equal(show.operator.runningOrder[1], slav);
+  parseShow(head);
+  // A song loaded again comes back as a new song.
+  const back = loadService(out, planned([song('a', 'A')]));
+  assert.equal(lookOf(back, back.operator.service!.items[0]!.look!).name, 'A');
+  assert.equal(back.operator.remembered!['song:song-a'], back.operator.service!.items[0]!.look);
+  void a2;
+});
+
+test('clearing keeps Basic lights, the kept rows and rows added by hand, in order; the plan leaves', () => {
+  const base = keptRig();
+  const sermon = named(base, 'Sermon');
+  const midweek = named(base, 'Midweek calm');
+  base.operator.remembered = { 'header:Slavēšana': base.operator.quickLooks[0]!.look };
+  const loaded = loadService(base, planned([header('Ievads'), header('Slavēšana'), song('a', 'A'), blank(), song('b', 'B'), verse('Psalmi 1')]));
+  const a = loaded.operator.service!.items[2]!.look!;
+  // A row added by hand sits between the songs.
+  const hand = addSong(loaded, a, stageOf(loaded, a));
+  const out = clearService(hand.show);
+  assert.deepEqual(out.operator.runningOrder, [safeOf(base), sermon, midweek, hand.id]);
+  assert.equal(out.operator.service, undefined);
+  assert.deepEqual(keptOf(out), [sermon, midweek]);
+  assert.deepEqual(serviceRows(out).map(label), out.operator.runningOrder);
+  assert.deepEqual(checkReferences(out), []);
+  parseShow(out);
+});
+
+test('clearing keeps remembered looks (song, part header, section) in the show, and drops one nothing remembers', () => {
+  const rigged = rig();
+  rigged.operator.remembered = { 'header:Slavēšana': rigged.operator.quickLooks[0]!.look };
+  const first = loadService(rigged, planned([header('Slavēšana'), withSections(), song('b', 'B')]));
+  const [, , a, b] = first.operator.runningOrder as [string, string, string, string];
+  const made = ensureSectionLook(first, { song: a, kind: 'chorus' });
+  const loaded = made.show;
+  // A look a plan item has that nothing remembers.
+  delete loaded.operator.remembered!['song:song-b'];
+  const out = clearService(loaded);
+  assert.equal(out.operator.service, undefined);
+  for (const id of [a, made.id, loaded.operator.quickLooks[0]!.look]) assert.ok(out.looks.some((l) => l.id === id), id);
+  assert.ok(!out.operator.runningOrder.includes(a));
+  assert.ok(!out.looks.some((l) => l.id === b), 'an unremembered plan look goes with its row');
+  assert.ok(!out.operator.looks.includes(b));
+  assert.deepEqual(checkReferences(out), []);
+  parseShow(out);
+  // A later load of the same service gives the old looks back.
+  const again = loadService(out, planned([header('Slavēšana'), withSections()]));
+  assert.equal(again.operator.service!.items[1]!.look, a);
+  assert.deepEqual(sectionsOf(again, a), [{ kind: 'verse', look: null }, { kind: 'chorus', look: made.id }]);
+});
+
+test('clearing a show with no loaded service changes nothing', () => {
+  const show = rig();
+  assert.deepEqual(clearService(show), show);
 });

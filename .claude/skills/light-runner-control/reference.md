@@ -52,6 +52,7 @@ Ids come from `get layout`. `fade` is seconds and optional everywhere.
 | store the stage in a song | `{"type":"saveItem","id":"<row id>"}` (replaces it). When that song is the one on stage (or in the draft) with a section, it saves the whole stage into the **section's** look, except the groups a running timeline drives |
 | keep a change made while a section is on stage | `{"type":"saveSection","scope":"section"}` into the section's own look (made from the song's look first), or `"scope":"song"` into the song's look and every section of it that has its own. Only the groups changed since the section started are saved. One Undo step; no PIN. In `prepare` it acts on the draft |
 | rename, move, delete a row | `{"type":"renameItem","id","name"}`, `{"type":"moveItem","id","to":<n, 1 = after Basic lights>}`, `{"type":"deleteItem","id"}` |
+| take the planned service out of the running order | `{"type":"clearService"}`: Basic lights, the kept rows and rows added by hand stay; one Undo step; lights untouched. `deleteItem` on a plan row also removes it from the loaded service |
 | keep a row through a planned-service load | `{"type":"keepItem","id","kept":true}` |
 | change one group of a song, stage untouched | `{"type":"itemGroup","item":"<row id>","group":"<g>","preset":"<id>","level":0..1}` (or `colour` instead of `preset`) |
 | a song's tempo | `{"type":"itemTempo","item","bpm"}` |

@@ -129,6 +129,10 @@ function connect() {
         if (!msg.error) toast(pendingCopy.text, true);
         pendingCopy = null;
       }
+      if (loadSvc.clearRef !== null && msg.ref === loadSvc.clearRef) {
+        loadSvc.clearRef = null;
+        if (!msg.error) toast('The planned service is cleared. Undo takes it back.', true);
+      }
       // Load service's answer: a problem is shown in its panel, not in a toast.
       if (loadResult(msg)) return;
       // Individual lights' answers say what went wrong in plain words (once for the whole drag).
@@ -916,7 +920,7 @@ const planningOn = () => !!layout?.planning?.enabled;
 
 // The panel: the services as the server listed them, the one picked, the Load waiting for its answer, and a counter
 // so an older list that arrives late is dropped.
-const loadSvc = { open: false, type: '', services: [], pick: null, problem: null, waiting: false, ref: null, ask: 0 };
+const loadSvc = { open: false, type: '', services: [], pick: null, problem: null, waiting: false, ref: null, ask: 0, clearing: false, clearRef: null };
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const LONG_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -985,6 +989,7 @@ function closeLoad() {
   loadSvc.ask++;
   // A Load already sent still loads; the panel just doesn't wait for it.
   loadSvc.ref = null;
+  loadSvc.clearing = false;
   $('loadSvc').hidden = true;
   markEditorOpen();
   renderLoadButton();
@@ -1063,6 +1068,12 @@ function renderLoad() {
     return b;
   });
   $('lsList').replaceChildren(...rows);
+  // Clear the planned service: offered while one is loaded, and asks in place first.
+  const loaded = !!layout?.service;
+  if (!loaded) loadSvc.clearing = false;
+  $('lsClear').hidden = !loaded;
+  $('lsClearOpen').hidden = loadSvc.clearing;
+  $('lsClearAsk').hidden = !loadSvc.clearing;
   const busy = loadSvc.ref !== null;
   $('lsLoad').disabled = !loadSvc.pick || busy;
   $('lsLoad').textContent = busy ? 'Loading …' : 'Load';
@@ -1087,6 +1098,19 @@ function loadResult(msg) {
 $('loadBtn').addEventListener('click', () => (loadSvc.open ? closeLoad() : openLoad()));
 $('lsBack').addEventListener('click', closeLoad);
 $('lsCancel').addEventListener('click', closeLoad);
+$('lsClearOpen').addEventListener('click', () => {
+  loadSvc.clearing = true;
+  renderLoad();
+});
+$('lsClearNo').addEventListener('click', () => {
+  loadSvc.clearing = false;
+  renderLoad();
+});
+$('lsClearYes').addEventListener('click', () => {
+  loadSvc.clearing = false;
+  loadSvc.clearRef = send({ type: 'clearService' });
+  closeLoad();
+});
 $('lsLoad').addEventListener('click', () => {
   if (!loadSvc.pick || loadSvc.ref !== null) return;
   loadSvc.problem = null;

@@ -373,6 +373,34 @@ export function loadService(show: Show, service: PlannedService): Show {
   return out;
 }
 
+/**
+ * Takes the planned service out of the running order: Basic lights, the kept rows and rows added by hand stay, in
+ * order; the songs, parts, slides and pictures that came from the plan leave, and so does the loaded service (its
+ * muted rows, folded verses and date). A plan look that something remembers (a song, a part, a section) stays in the
+ * show, hidden, so a later load brings it back; one nothing remembers goes with its row.
+ */
+export function clearService(show: Show): Show {
+  const out = structuredClone(show);
+  const service = out.operator.service;
+  if (!service) return out;
+  const planned = new Set(service.items.flatMap((i) => (i.look === undefined ? [] : [i.look])));
+  const safe = out.operator.safeLook;
+  const kept = new Set(out.operator.kept ?? []);
+  const leaving = out.operator.runningOrder.filter((id) => planned.has(id) && id !== safe && !kept.has(id));
+  out.operator.runningOrder = out.operator.runningOrder.filter((id) => !leaving.includes(id));
+  delete out.operator.service;
+  const keep = new Set<string>([...Object.values(out.operator.remembered ?? {}), ...out.operator.quickLooks.map((q) => q.look)]);
+  const forNew = out.settings.planning?.newSongLook;
+  if (forNew !== undefined) keep.add(forNew);
+  const dropped = new Set(leaving.filter((id) => !keep.has(id)));
+  if (dropped.size) {
+    out.looks = out.looks.filter((l) => !dropped.has(l.id));
+    out.operator.looks = out.operator.looks.filter((id) => !dropped.has(id));
+    forgetMissing(out);
+  }
+  return out;
+}
+
 /** True when the stage preset is an effect: a live one (`fx:`) or a preset of the show with an effect in it. */
 function isEffect(show: Show, preset: string): boolean {
   if (parseLiveEffect(preset)) return true;
@@ -540,7 +568,10 @@ export function renameItem(show: Show, id: string, name: string): Show {
   return out;
 }
 
-/** Removes an item from the running order, and its look too unless a quick look uses it. */
+/**
+ * Removes an item from the running order, and its look too unless a quick look uses it. A song (or part, slides or
+ * picture) of the loaded service leaves the service with its row: every item that has the look.
+ */
 export function deleteItem(show: Show, id: string): Show {
   if (id === show.operator.safeLook) throw new Error("Basic lights can't be deleted");
   const out = structuredClone(show);
@@ -555,6 +586,7 @@ export function deleteItem(show: Show, id: string): Show {
       if (key.startsWith(`song:${songId}#`)) gone.add(look);
     }
   }
+  if (out.operator.service) out.operator.service.items = out.operator.service.items.filter((i) => i.look !== id);
   if (gone.size) {
     out.looks = out.looks.filter((l) => !gone.has(l.id));
     out.operator.looks = out.operator.looks.filter((x) => !gone.has(x));

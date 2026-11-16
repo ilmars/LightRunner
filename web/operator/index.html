@@ -497,6 +497,15 @@
       </div>
       <div id="lsList" class="ls-list" role="radiogroup" aria-label="Services"></div>
       <p id="lsProblem" class="ls-problem" role="status" hidden></p>
+      <!-- Clear the planned service: only while one is loaded; asks in place before it clears. -->
+      <div id="lsClear" class="ls-clear" hidden>
+        <button id="lsClearOpen" class="ds-btn ds-btn--quiet" type="button">Clear the planned service</button>
+        <div id="lsClearAsk" class="ls-clear-ask" hidden>
+          <p class="ls-note">Removes the planned songs, parts and Bible verses from the running order. Basic lights and kept rows stay. Undo takes it back.</p>
+          <button id="lsClearNo" class="ds-btn ds-btn--quiet" type="button">Cancel</button>
+          <button id="lsClearYes" class="ds-btn ds-btn--quiet" type="button">Clear</button>
+        </div>
+      </div>
       <span class="grow"></span>
       <div class="ls-foot">
         <p class="ls-note">Replaces the songs after Basic lights with this service's items. Basic lights and the kept rows stay. Undo takes it back.</p>

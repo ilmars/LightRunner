@@ -756,3 +756,36 @@ test("the layout gives each loaded song its sections, in order with their own lo
   assert.deepEqual((await layoutOf(rig)).songs, {}, 'Planning off shows plain looks');
   t.close();
 }));
+
+test('clearing the service empties the song rows and the layout; one Undo step brings the service back; the kept rows stay', () => withPlanning(async (rig) => {
+  const { call, tablet } = rig;
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const loaded = await layoutOf(rig);
+  assert.ok(Object.keys(loaded.songs).length > 0);
+  assert.equal(await t.command({ type: 'clearService' }), null);
+  const cleared = await layoutOf(rig);
+  assert.deepEqual(cleared.songs, {});
+  assert.equal(cleared.service, undefined);
+  assert.deepEqual(cleared.runningOrder.map((l: any) => l.name), ['Basic lights', 'Sermon', 'Midweek calm']);
+  assert.equal(await t.command({ type: 'undo' }), null);
+  const back = await layoutOf(rig);
+  assert.deepEqual(back.runningOrder.map((l: any) => l.name), ['Basic lights', 'Sermon', 'Midweek calm', 'Song One', 'Song Two']);
+  assert.deepEqual(back.songs, loaded.songs);
+  assert.deepEqual(back.service, loaded.service);
+  t.close();
+  assert.equal((await call('GET', '/api/layout')).status, 200);
+}));
+
+test('deleting a song in the Edit list takes it out of the loaded service for good', () => withPlanning(async (rig) => {
+  await enable(rig);
+  const t = await rig.tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const one = (await layoutOf(rig)).runningOrder.find((l: any) => l.name === 'Song One').id;
+  assert.equal(await t.command({ type: 'deleteItem', id: one }), null);
+  const after = await layoutOf(rig);
+  assert.equal(after.rows.some((r: any) => r.kind === 'item' && r.name === 'Song One'), false);
+  assert.equal(after.songs[one], undefined);
+  t.close();
+}));

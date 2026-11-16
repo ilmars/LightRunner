@@ -858,3 +858,33 @@ test("a timeline started live during a section takes its groups from the section
   assert.equal(entry(show, own, 'audience').preset, 'aud-blue', "the timeline's colour is not saved into the chorus");
   t.close();
 }, { shape: looseTimeline }));
+
+// ---- Clearing the planned service ----
+
+test('clearing the service drops the section on stage; a slide is then not in the running order; one Undo step brings it back', () => withFollow(async ({ app }) => {
+  await followOn(app);
+  await app.command({ type: 'fadeTime', value: 0 }, 'operator');
+  await app.liveSlide(slide('c2', 'ch1'));
+  await waitFor(() => app.state?.section?.kind === 'chorus' && presetOf(app, 'back-wall') === 'back-amber', 'the chorus');
+  assert.equal(await app.command({ type: 'clearService' }, 'operator'), null);
+  await waitFor(() => app.state?.section === null, 'no section after the clear');
+  // The lights are not touched: the chorus's colours stay.
+  assert.equal(presetOf(app, 'back-wall'), 'back-amber');
+  await app.liveSlide(slide('c2', 'ch2'));
+  await waitFor(() => app.state?.follow?.note?.kind === 'not-in-order', 'not in the running order');
+  assert.equal(app.state!.follow?.on, true);
+  // Undo takes the service back.
+  assert.equal(await app.command({ type: 'undo' }, 'operator'), null);
+  const show = (await (await fetch(`http://127.0.0.1:${app.port}/api/show`)).json()) as Show;
+  assert.ok(show.operator.service, 'the service is back');
+}, { shape: chorusLook }));
+
+test("in Prepare, clearing the service drops the draft's section", () => withFollow(async ({ app, songs, tablet }) => {
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'blindStart' }), null);
+  assert.equal(await t.command({ type: 'section', song: songs.c4!, kind: 'chorus' }), null);
+  await waitFor(() => t.draft()?.section?.kind === 'chorus', "the draft's chorus");
+  assert.equal(await t.command({ type: 'clearService' }), null);
+  await waitFor(() => t.draft() && t.draft().section === null, 'no section in the draft');
+  t.close();
+}));
