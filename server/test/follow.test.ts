@@ -11,7 +11,7 @@ import { WebSocket } from 'ws';
 import { App } from '../src/app.ts';
 import { FakePlanning } from '../src/planning/fake.ts';
 import type { WebSocketLike } from '../src/planning/live.ts';
-import { ensureSectionLook, type LiveSlide, type PlannedService, type Show } from '../../packages/shared/src/index.ts';
+import { ensureSectionLook, sectionsOf, type LiveSlide, type PlannedService, type Show } from '../../packages/shared/src/index.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const seedPath = join(root, 'server/seed/demo-show.json');
@@ -516,3 +516,98 @@ test('Auto-follow starts off, and once switched on it is still on after a restar
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---- Saving a change for a section ----
+
+const looksOf = async (call: Rig['call']) => ((await call('GET', '/api/show')).body as Show);
+const entry = (show: Show, look: string, group: string) => show.looks.find((l) => l.id === look)!.groups.find((e) => e.group === group)!;
+
+/** The chorus of Song One on stage (no look of its own), then its audience level and back wall colour changed by hand. */
+async function changedChorus(app: App, songs: Record<string, string>) {
+  await followOn(app);
+  await app.command({ type: 'fadeTime', value: 0 }, 'operator');
+  await app.liveSlide(slide('c2', 'ch1'));
+  await waitFor(() => app.state?.section?.kind === 'chorus', 'the chorus');
+  assert.equal(await app.command({ type: 'groupLevel', group: 'audience', value: 0.3 }, 'operator'), null);
+  assert.equal(await app.command({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber' }, 'operator'), null);
+  await waitFor(() => app.state?.section?.changed === true && presetOf(app, 'back-wall') === 'back-amber', 'the changes');
+}
+
+test("Save for this section gives the chorus a look of its own with the change; the song's look stays; one Undo step", () => withFollow(async ({ app, songs, call }) => {
+  await changedChorus(app, songs);
+  const before = await looksOf(call);
+  assert.equal(await app.command({ type: 'saveSection', scope: 'section' }, 'operator'), null);
+  const show = await looksOf(call);
+  const own = sectionsOf(show, songs.c2!).find((s) => s.kind === 'chorus')!.look;
+  assert.ok(own, 'the chorus has a look of its own');
+  assert.equal(entry(show, own!, 'audience').level, 0.3);
+  assert.equal(entry(show, own!, 'back-wall').preset, 'back-amber');
+  assert.deepEqual(show.looks.find((l) => l.id === songs.c2)!.groups, before.looks.find((l) => l.id === songs.c2)!.groups, "the song's look is unchanged");
+  assert.equal(sectionsOf(show, songs.c2!).find((s) => s.kind === 'verse')!.look, null);
+  await waitFor(() => app.state?.section?.changed === false, 'no longer changed');
+  // One Undo step takes the saved look back.
+  assert.equal(await app.command({ type: 'undo' }, 'operator'), null);
+  const undone = await looksOf(call);
+  assert.equal(sectionsOf(undone, songs.c2!).find((s) => s.kind === 'chorus')!.look, null);
+  assert.ok(!undone.looks.some((l) => l.id === own));
+}));
+
+test('Save for the whole song writes the song look; the stage then matches it', () => withFollow(async ({ app, songs, call }) => {
+  await changedChorus(app, songs);
+  assert.equal(await app.command({ type: 'saveSection', scope: 'song' }, 'operator'), null);
+  const show = await looksOf(call);
+  assert.equal(entry(show, songs.c2!, 'audience').level, 0.3);
+  assert.equal(entry(show, songs.c2!, 'back-wall').preset, 'back-amber');
+  assert.equal(sectionsOf(show, songs.c2!).find((s) => s.kind === 'chorus')!.look, null, 'the chorus follows the song and has no look of its own');
+  await waitFor(() => app.state?.section?.changed === false, 'no longer changed');
+}));
+
+test('Save for a section with nothing changed writes nothing; with no section on stage it says so', () => withFollow(async ({ app, songs, call }) => {
+  assert.equal(await app.command({ type: 'look', id: songs.c2! }, 'operator'), null);
+  await waitFor(() => app.state?.look === songs.c2, 'the song');
+  assert.equal(await app.command({ type: 'saveSection', scope: 'section' }, 'operator'), 'No section is on stage.');
+  await followOn(app);
+  await app.command({ type: 'fadeTime', value: 0 }, 'operator');
+  await app.liveSlide(slide('c2', 'ch1'));
+  await waitFor(() => app.state?.section?.kind === 'chorus', 'the chorus');
+  const before = await looksOf(call);
+  assert.equal(await app.command({ type: 'saveSection', scope: 'section' }, 'operator'), null);
+  assert.deepEqual(await looksOf(call), before);
+}));
+
+test("Save to the song while its section is on stage saves into the section's own look; another look works as before", () => withFollow(async ({ app, songs, call }) => {
+  await changedChorus(app, songs);
+  const before = await looksOf(call);
+  assert.equal(await app.command({ type: 'saveItem', id: songs.c2! }, 'operator'), null);
+  const show = await looksOf(call);
+  const own = sectionsOf(show, songs.c2!).find((s) => s.kind === 'chorus')!.look!;
+  assert.ok(own);
+  assert.equal(entry(show, own, 'audience').level, 0.3);
+  assert.deepEqual(show.looks.find((l) => l.id === songs.c2)!.groups, before.looks.find((l) => l.id === songs.c2)!.groups, "the song's look is unchanged");
+  assert.equal(show.looks.find((l) => l.id === own)!.tempo, undefined);
+  await waitFor(() => app.state?.section?.changed === false, 'no longer changed');
+  // Another look is saved as today.
+  assert.equal(await app.command({ type: 'saveItem', id: songs.c4! }, 'operator'), null);
+  const after = await looksOf(call);
+  assert.equal(entry(after, songs.c4!, 'audience').level, 0.3);
+}));
+
+test("in Prepare, Save for this section uses the draft's section; a draft Undo clears it", () => withFollow(async ({ app, songs, tablet, call }) => {
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'blindStart' }), null);
+  assert.equal(await t.command({ type: 'saveSection', scope: 'section' }), 'No section is on stage.');
+  assert.equal(await t.command({ type: 'section', song: songs.c4!, kind: 'chorus' }), null);
+  await waitFor(() => t.draft()?.section?.kind === 'chorus', "the draft's chorus");
+  assert.equal(await t.command({ type: 'draft', cmd: { type: 'groupLevel', group: 'audience', value: 0.3 } }), null);
+  await waitFor(() => t.draft()?.section?.changed === true, 'changed in the draft');
+  assert.equal(await t.command({ type: 'saveSection', scope: 'section' }), null);
+  const show = await looksOf(call);
+  const own = sectionsOf(show, songs.c4!).find((s) => s.kind === 'chorus')!.look!;
+  assert.ok(own);
+  assert.equal(entry(show, own, 'audience').level, 0.3);
+  await waitFor(() => t.draft()?.section?.changed === false, "the draft's section matches its look");
+  // Undo in the draft puts back the lights, not a section the lights no longer show.
+  assert.equal(await t.command({ type: 'draft', cmd: { type: 'undo' } }), null);
+  await waitFor(() => t.draft() && t.draft().section === null, "no section in the draft after its Undo");
+  t.close();
+}));

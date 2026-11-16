@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept, setItemGroup, setItemTempo, setItemTimeline, saveItem, sectionRememberKey, sectionsOf, sectionLookOf, ensureSectionLook,
+  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept, setItemGroup, setItemTempo, setItemTimeline, saveItem, sectionRememberKey, sectionsOf, sectionLookOf, ensureSectionLook, saveSectionChange,
   serviceRows, toPlannedService, type PlannedService, type ServiceItem, type Show,
 } from '../src/index.ts';
 
@@ -773,4 +773,75 @@ test("itemGroup and saveItem take a section's own look", () => {
   // A look outside the order that is no section's still can't be changed.
   const other = rig();
   assert.throws(() => setItemGroup(other, other.operator.quickLooks[0]!.look, { group, preset }), /only running-order items can be changed here/);
+});
+
+// ---- Saving a change for a section ----
+
+function changeRig() {
+  const loaded = loadService(rig(), planned([withSections()]));
+  const a = loaded.operator.service!.items[0]!.look!;
+  const entries = lookOf(loaded, a).groups;
+  const stage = { groups: {} as Record<string, string | null>, levels: {} as Record<string, number> };
+  for (const e of entries) {
+    stage.groups[e.group] = e.preset;
+    stage.levels[e.group] = e.level ?? 1;
+  }
+  const [front, back] = entries.filter((e) => loaded.presets.filter((p) => p.group === e.group).length >= 2);
+  assert.ok(front && back, 'the rig has two groups with a choice of presets');
+  const other = loaded.presets.find((p) => p.group === back!.group && p.id !== back!.preset)!.id;
+  const changed = { groups: { ...stage.groups, [back!.group]: other }, levels: { ...stage.levels, [front!.group]: 0.4 } };
+  return { loaded, a, stage, changed, front: front!.group, back: back!.group, other };
+}
+const entryOf = (s: Show, look: string, group: string) => lookOf(s, look).groups.find((e) => e.group === group);
+
+test("saving a change for the section gives the chorus its own look; the song's look stays", () => {
+  const { loaded, a, changed, front, back, other } = changeRig();
+  const ref = { song: a, kind: 'chorus' as const };
+  const out = saveSectionChange(loaded, changed, ref, 'section');
+  const own = sectionLookOf(out, ref);
+  assert.notEqual(own, a);
+  assert.equal(entryOf(out, own, front)!.level, 0.4);
+  assert.equal(entryOf(out, own, back)!.preset, other);
+  assert.deepEqual(lookOf(out, own).groups.map((e) => e.group), lookOf(loaded, a).groups.map((e) => e.group), "the song's other groups come with it");
+  assert.deepEqual(lookOf(out, a).groups, lookOf(loaded, a).groups, "the song's look is unchanged");
+  assert.equal(sectionLookOf(out, { song: a, kind: 'verse' }), a);
+  assert.equal(lookOf(out, own).tempo, undefined);
+  parseShow(out);
+});
+
+test('saving a change for the whole song writes the song and every section look it has, not the sections that follow it', () => {
+  const { loaded, a, changed, front, back, other } = changeRig();
+  const ref = { song: a, kind: 'chorus' as const };
+  // The chorus has its own look; the verse has none.
+  const withOwn = ensureSectionLook(loaded, ref);
+  const out = saveSectionChange(withOwn.show, changed, ref, 'song');
+  for (const id of [a, withOwn.id]) {
+    assert.equal(entryOf(out, id, front)!.level, 0.4, id);
+    assert.equal(entryOf(out, id, back)!.preset, other, id);
+  }
+  assert.equal(sectionsOf(out, a).find((s) => s.kind === 'verse')!.look, null, 'the verse has no look of its own, and still has none');
+  // With no own look at all, only the song's look changes.
+  const plain = saveSectionChange(loaded, changed, ref, 'song');
+  assert.equal(entryOf(plain, a, front)!.level, 0.4);
+  assert.equal(sectionLookOf(plain, ref), a);
+  parseShow(out);
+});
+
+test("saving a change that matches the section's look writes nothing", () => {
+  const { loaded, a, stage } = changeRig();
+  const ref = { song: a, kind: 'chorus' as const };
+  for (const scope of ['section', 'song'] as const) assert.deepEqual(saveSectionChange(loaded, stage, ref, scope), loaded);
+  const own = ensureSectionLook(loaded, ref);
+  assert.deepEqual(saveSectionChange(own.show, stage, ref, 'section'), own.show);
+});
+
+test('only the groups that differ from the sections look are written', () => {
+  const { loaded, a, changed, front, back } = changeRig();
+  const ref = { song: a, kind: 'chorus' as const };
+  const own = ensureSectionLook(loaded, ref);
+  // The chorus already has the front lights at 0.4, as the stage has them: only the other group is written.
+  const edited = setItemGroup(own.show, own.id, { group: front, level: 0.4 });
+  const out = saveSectionChange(edited, changed, ref, 'song');
+  assert.equal(entryOf(out, a, front)!.level ?? 1, 1, 'the song does not get a group the chorus already had as on stage');
+  assert.notEqual(entryOf(out, a, back)!.preset, entryOf(loaded, a, back)!.preset);
 });

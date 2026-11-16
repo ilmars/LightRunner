@@ -474,6 +474,37 @@ export function ensureSectionLook(show: Show, ref: SectionRef): { show: Show; id
   return { show: out, id };
 }
 
+/**
+ * Saves what the stage shows differently from a section's look (its own, else the song's): only the groups whose
+ * preset or level differ, or that the look doesn't list. `section`: into the section's own look (made first).
+ * `song`: into the song's look and every own look its sections have; a section without one follows the song.
+ * `only`: just these groups (those the section sets, not the ones a timeline drives). Nothing differs: the show as it is.
+ */
+export function saveSectionChange(show: Show, stage: Stage, ref: SectionRef, scope: 'section' | 'song', only?: string[]): Show {
+  const current = lookIn(show, sectionLookOf(show, ref));
+  const changed = Object.entries(stage.groups).filter(([group, preset]) => {
+    if (!preset || (only && !only.includes(group))) return false;
+    if (show.groups.find((g) => g.id === group)?.kind === 'smoke') return false;
+    const had = current.groups.find((e) => e.group === group);
+    return !had || had.preset !== preset || Math.abs((had.level ?? 1) - (stage.levels[group] ?? 1)) > 1e-9;
+  }).map(([group]) => group);
+  if (changed.length === 0) return show;
+  let out = structuredClone(show);
+  const targets: string[] = [];
+  if (scope === 'section') {
+    const made = ensureSectionLook(out, ref);
+    out = made.show;
+    targets.push(made.id);
+  } else {
+    targets.push(ref.song);
+    for (const s of sectionsOf(out, ref.song)) if (s.look !== null && !targets.includes(s.look)) targets.push(s.look);
+  }
+  // The entries are made once, so a colour picked by hand becomes one preset all the looks share.
+  const entries = entriesFor(out, stage, changed);
+  for (const id of targets) for (const entry of entries) putEntry(out, lookIn(out, id), { ...entry });
+  return out;
+}
+
 /** A new "Song N" holding the stage, placed right after `afterId` (or last). */
 export function addSong(show: Show, afterId: string, stage: Stage): { show: Show; id: string } {
   const out = structuredClone(show);

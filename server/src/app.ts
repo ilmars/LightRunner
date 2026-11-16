@@ -18,7 +18,7 @@ import {
   BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
   pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
-  drivenGroups, sectionLookOf, type FollowStart, type LiveSlide, type SectionRef,
+  drivenGroups, ensureSectionLook, saveSectionChange, sectionLookOf, type FollowStart, type LiveSlide, type SectionRef,
 } from '../../packages/shared/src/index.ts';
 import { effectFrames, settledVisual, type StageClock } from '../../packages/engine/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
@@ -1112,6 +1112,8 @@ export class App {
         // A whole look (or a quick look) in the draft replaces its section, as on the stage.
         const whole = cmd.cmd.type === 'look' || cmd.cmd.type === 'quickLook' || cmd.cmd.type === 'safe' || cmd.cmd.type === 'blackout' || cmd.cmd.type === 'backToLook';
         if (whole && !error) session.section = null;
+        // A draft Undo puts back the lights it had, which no section is known for: Go would carry a stale one live.
+        if (cmd.cmd.type === 'undo' && !error) session.section = null;
         this.sendDraft(tablet);
         return done(this.blind.get(tablet) === session ? error : BLIND_PROBLEM);
       }
@@ -1218,7 +1220,7 @@ export class App {
   private async editShow(cmd: ShowEdit, draft?: BlindSession): Promise<void> {
     // The service is fetched before anything is read or replaced below, so no other edit can slip in while it is on its way.
     const service = cmd.type === 'loadService' ? await this.fetchService(cmd.id) : null;
-    const usesStage = cmd.type === 'saveItem' || cmd.type === 'saveServiceItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook' || (cmd.type === 'editQuickLook' && !!cmd.fromStage);
+    const usesStage = cmd.type === 'saveItem' || cmd.type === 'saveSection' || cmd.type === 'saveServiceItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook' || (cmd.type === 'editQuickLook' && !!cmd.fromStage);
     // Deleting a colour only looks at the stage to keep a lit colour; it is fine during Blackout.
     const stage = usesStage && draft ? draft.engine.runtime() : usesStage || cmd.type === 'deleteColour' ? await this.stage() : null;
     // In Prepare an edit never changes the lights: what the stage shows now (each group, and Blackout's memory), taken
@@ -1240,8 +1242,25 @@ export class App {
       case 'saveItem':
         // Quick looks are made with Save stage as quick look, never overwritten by Save.
         if (!before.operator.runningOrder.includes(cmd.id) && !isSectionLook(before, cmd.id)) throw new Error('only running-order items can be saved');
-        next = saveItem(before, cmd.id, stage!);
+        {
+          // With a section of the song on stage (in the draft, the draft's), Save to the song saves into that section's own look.
+          const onStage = draft ? draft.section : this.stageSection;
+          if (onStage && onStage.ref.song === cmd.id) {
+            const made = ensureSectionLook(before, onStage.ref);
+            next = saveItem(made.show, made.id, stage!);
+          } else {
+            next = saveItem(before, cmd.id, stage!);
+          }
+        }
         break;
+      case 'saveSection': {
+        const onStage = draft ? draft.section : this.stageSection;
+        if (!onStage) throw new Error('No section is on stage.');
+        next = saveSectionChange(before, stage!, onStage.ref, cmd.scope, onStage.groups);
+        // Nothing differs from the look: nothing to save, and no Undo step.
+        if (next === before) return;
+        break;
+      }
       // Save to a header, slides or picture of the loaded service: its look is made from the stage (or the draft), like Save.
       case 'saveServiceItem': next = saveServiceItem(before, cmd.key, stage!); break;
       case 'addSong': next = addSong(before, cmd.after, stage!).show; break;

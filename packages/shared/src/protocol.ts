@@ -131,6 +131,8 @@ export const Command = z.discriminatedUnion('type', [
   // Edits to the show from the operator page. The server handles these itself; the engine never sees them.
   /** Store the stage (where it is going) in a running-order item. */
   z.object({ type: z.literal('saveItem'), id }),
+  /** The change on the stage (or in the draft) for the song's section on it: into the section's own look, or the song's. One Undo step. */
+  z.object({ type: z.literal('saveSection'), scope: z.enum(['section', 'song']) }),
   /** A new song holding the stage, right after `after`. */
   z.object({ type: z.literal('addSong'), after: id }),
   z.object({ type: z.literal('renameItem'), id, name: z.string() }),
@@ -220,7 +222,7 @@ export const Command = z.discriminatedUnion('type', [
 export type Command = z.infer<typeof Command>;
 
 const SHOW_EDITS = [
-  'saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemTimeline', 'itemQuickLook',
+  'saveItem', 'saveSection', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemTimeline', 'itemQuickLook',
   'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'loadService', 'saveServiceItem', 'itemCopyLook', 'keepItem', 'setKey', 'clearKey', 'resetKeys',
 ] as const;
 /** Commands that change the show rather than the stage. */
