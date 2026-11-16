@@ -81,6 +81,19 @@ Songs, colours, quick looks and effects are made on the operator page; the fixtu
 - **Tempo** for effects: tap **Tap** in time with the music, or type the number in the Tempo menu.
 - **A timeline** (a recording with the lights laid out along it, such as the Christmas intro): see "A timeline at a service" below. While one runs, the top bar of the operator page has a second line, "Timeline · <name> 1:23 / 4:12" (or "paused"), with a quiet **Stop**.
 
+### Sections and Auto-follow
+
+**Sections.** When the running order comes from the planning service, each song also comes with its sections: verse, pre-chorus, chorus, bridge, tag, intro, outro and interlude, read from the titles of its slides. Under the song on stage you see them as smaller rows, and under them a quiet line of facts: key, tempo and time signature ("G · 72 bpm · 6/8"). A tap on a section row changes the colours and levels to that section's look. The tempo and a running timeline carry on. A section plays the song's look until someone saves a change for it, and then it has its own look, remembered for the next service with that song. **Next ▸** goes from song to song and skips sections. A song with no sections has no rows.
+
+**Saving a change for a section.** While a section is on stage, change a group's colour or level as usual. A quiet bar appears above the groups: **Save this change for: This section · The whole song**. **This section** keeps the change for that section only. **The whole song** keeps it for the song and for every section of it that has its own look. If you tap neither, nothing is saved: the change lasts until the next section or song replaces it, and the bar goes. Both saves can be taken back with **Undo**. (Holding **Save to Chorus · <song>** saves the whole stage into the section. The bar isn't on the phone.)
+
+**Auto-follow.** With Auto-follow on, the lights follow the presentation app by themselves: when the presenter moves to a new song, the song's look starts; when they click to the chorus, the chorus's look starts; a new part of the service (the sermon, say) starts its look. Every change fades as a tap would. A Bible verse, a slide with no section and an item that isn't in the running order change nothing.
+
+- **It starts off.** It only shows while Planning is on. The pill after the name in the top bar is the switch: tap it. It says **○ Auto-follow off** while off, and **● Auto-follow · Chorus** (the section it follows) while on. Switching it on starts what the presenter has on screen at that moment.
+- **A tap by hand pauses it.** Starting anything yourself (a song or section row, a quick look, **Basic lights**, **Next ▸**, **Blackout**, **Go ▸**, a timeline, a controller key) switches Auto-follow off, so what you chose stays until someone switches it on again; the pill says so on every tablet. **Master**, **Flash**, **Undo**, **Fade**, the tempo, a group's colour or level and **Back to saved** do not pause it. Switching Planning off pauses it too.
+- **If the presentation app can't be reached** (no internet, the login has run out, the app isn't open) the pill says why, in a few words, and everything else works by hand as always.
+- **Never in Prepare.** A draft you are preparing is left alone; Auto-follow acts on the real stage.
+
 ### A timeline at a service
 
 A timeline is made in [setting-up-a-show.md](setting-up-a-show.md) (step 10). The lighting lead starts it, not the volunteers.

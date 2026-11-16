@@ -229,6 +229,18 @@ What a song's look is: a song remembers its look, so a song sung again comes bac
 
 Parts of the service (such as the welcome or the sermon), slides and pictures can have a look too: in **Prepare**, tap the row, set the draft as you want it and hold **Save to <name>**. Light Runner remembers it by name for the next service. Bible verses and blanks cannot have one of their own: tapping or reaching a verse or a blank leaves the lights as they are.
 
+**Sections and song facts.** A loaded song also comes with its sections (verse, pre-chorus, chorus, bridge, tag, intro, outro, interlude, from the titles of its slides) and its facts: key, tempo, time signature, artist and the notes written for it in the plan. Words are not kept. A song with no sections works as before, with one look. A section plays its song's look until you save a change for it.
+
+**Making a section's look in Prepare.**
+
+1. Tap **Prepare**. Under the song, tap the section's row: it is now the one being prepared, with the song's look as its starting point.
+2. Change the groups you want different for that section (colours, levels, effects). The tempo and a timeline stay the song's: a section changes colours and levels only.
+3. Hold **Save to Chorus · <song>** (named for the section). The section now has its own look, kept for the next service with that song. Tap **Live** to throw the draft away, or **Go ▸** to put it on the lights.
+
+On the stage itself the same is quicker: tap the section, change a group, and answer **Save this change for: This section · The whole song** in the bar that shows above the groups. Deleting a song in **Edit list** deletes its section looks too.
+
+**Auto-follow** is the pill after the name in the top bar (only while Planning is on). It starts off; tap it to let the lights follow the presentation app, and see [the service guide](running-a-service.md) for what pauses it. Try it at rehearsal before a Sunday depends on it. If you want an assistant to plan the lights for the whole service, ask it to plan them: it builds each song and section in Prepare and puts nothing on stage.
+
 ## 12. Check before Sunday
 
 1. Switch Lightkey's output off, then **Send DMX** on in Settings.
