@@ -8,7 +8,7 @@
 //
 // Nothing here logs the login or the machine id, and nothing throws out of a socket handler.
 
-import { parseSlideId, type LiveSlide } from '../../../packages/shared/src/index.ts';
+import { parseSlideId, type LiveSlide, type LiveStatus } from '../../../packages/shared/src/index.ts';
 import { PlanningError, type Planning } from './index.ts';
 
 /** The small part of the global WebSocket this uses. */
@@ -21,13 +21,7 @@ export interface WebSocketLike {
   onerror: ((ev?: any) => void) | null;
 }
 
-export type LiveStatus = {
-  state: 'connecting' | 'waiting' | 'open' | 'closed';
-  /** Plain words for a person when something is wrong, else null. */
-  problem: string | null;
-  /** The name of the computer the slides come from. */
-  presenter: string | null;
-};
+export type { LiveStatus };
 
 type Options = {
   planning: Planning;

@@ -4,6 +4,7 @@
 
 import { Engine, type StageClock } from '../../packages/engine/src/index.ts';
 import type { LiveState, RuntimeState, Show, StageCommand, TimelineStatus } from '../../packages/shared/src/index.ts';
+import type { SectionOnStage } from './follow.ts';
 
 export const REAL_STAGE_ONLY = 'That works on the real stage only.';
 export const BLIND_OFF = 'Prepare is off.';
@@ -21,6 +22,8 @@ const STATE_EVERY = 0.1;
 
 export class BlindSession {
   readonly engine: Engine;
+  /** The song's section in the draft (the server sets it), or null. */
+  section: SectionOnStage | null = null;
   private lastStateJson = '';
   private lastStateAt = -Infinity;
   private stateDue = true;
@@ -69,9 +72,13 @@ export class BlindSession {
   /**
    * The draft's state to send the tablet, or null when nothing changed (or it isn't time yet).
    * What stays live (output, Master, speed, Fade, Flash, manual control and smoke) is copied from the live state.
-   * `timeline`: the Prepare timeline running in this draft (the live one is never shown here).
+   * `timeline`: the Prepare timeline running in this draft (the live one is never shown here). `extra`: what the
+   * server adds from the draft's own state (its section) and from the stage (Auto-follow).
    */
-  state(now: number, live: LiveState | null, isSmoke: (group: string) => boolean, timeline: TimelineStatus | null = null): LiveState | null {
+  state(
+    now: number, live: LiveState | null, isSmoke: (group: string) => boolean, timeline: TimelineStatus | null = null,
+    extra?: (own: LiveState, session: BlindSession) => Partial<LiveState>,
+  ): LiveState | null {
     if (!this.stateDue && now - this.lastStateAt < STATE_EVERY) return null;
     const own = this.engine.liveState(now, live?.output ?? 'off');
     const state: LiveState = live ? {
@@ -88,6 +95,7 @@ export class BlindSession {
       outputProblemKind: live.outputProblemKind,
       timeline,
     } : { ...own, timeline };
+    if (extra) Object.assign(state, extra(state, this));
     this.stateDue = false;
     this.lastStateAt = now;
     const json = JSON.stringify(state);

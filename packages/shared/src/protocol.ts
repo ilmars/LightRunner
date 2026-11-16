@@ -3,6 +3,9 @@
 
 import { z } from 'zod';
 import { ControlKey, EffectLayer, KeyTarget, PaletteColour, QuickTab } from './schema.ts';
+import { SectionKind } from './sections.ts';
+import type { FollowNote, LiveStatus } from './follow.ts';
+import type { SectionRef } from './planning.ts';
 
 const id = z.string().min(1).max(64);
 /** A #rrggbb colour. */
@@ -191,6 +194,13 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('itemCopyLook'), item: id, from: id }),
   /** Mark a running-order item kept (a load never replaces it) or not. */
   z.object({ type: z.literal('keepItem'), id, kept: z.boolean() }),
+  /**
+   * Start a song's section (`song`: the song's look), as Auto-follow does: its colours and levels only, after the song
+   * itself when another look is on stage. It pauses Auto-follow. In Prepare it acts on the tablet's draft.
+   */
+  z.object({ type: z.literal('section'), song: id, kind: SectionKind }),
+  /** Auto-follow on or off (one switch for all tablets; not an Undo step). On starts what is on screen now. */
+  z.object({ type: z.literal('autoFollow'), on: z.boolean() }),
   // Controller keys (the server's learn sends setKey once a key is pressed): one key, one job.
   /** Give `does` this key; a key that did something else moves to it. */
   z.object({ type: z.literal('setKey'), key: ControlKey, does: KeyTarget }),
@@ -357,6 +367,13 @@ export interface LiveState {
    * state has that page's own Prepare timeline here instead.
    */
   timeline?: TimelineStatus | null;
+  /**
+   * The song's section on stage, or null. `changed`: one of the groups it set runs another colour or level than the
+   * section's look says. Set by the server; a Prepare draft's state has the draft's own section.
+   */
+  section?: (SectionRef & { changed: boolean }) | null;
+  /** Auto-follow: whether it is on, the live connection and what it last did. Set by the server; null while Planning is off. */
+  follow?: { on: boolean; live: LiveStatus; note: FollowNote | null } | null;
 }
 
 /** What is saved to disk so a restart restores the stage as it was. */
@@ -374,6 +391,8 @@ export interface RuntimeState {
   beforeBlackout?: Record<string, string | null>;
   /** The live effects (`fx:` ids) that `groups` or `beforeBlackout` name, so a restart runs the same effect. */
   effects?: Record<string, EffectLayer>;
+  /** Auto-follow is on (the server's, not the engine's). Absent: off, which is how it starts everywhere. */
+  autoFollow?: boolean;
 }
 
 export const SAFE = 'safe';

@@ -26,6 +26,15 @@ export function parseSlideId(id: string): { cue: string; slide: string | null } 
   return null;
 }
 
+/** How the live connection to the presentation app is doing. */
+export type LiveStatus = {
+  state: 'connecting' | 'waiting' | 'open' | 'closed';
+  /** Plain words for a person when something is wrong, else null. */
+  problem: string | null;
+  /** The name of the computer the slides come from. */
+  presenter: string | null;
+};
+
 /** What is on the real stage now: the look and, when it is a song's section, which one. */
 export interface OnStage {
   look: string | null;
