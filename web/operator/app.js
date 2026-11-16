@@ -6203,7 +6203,8 @@ const NO_VISUAL = new Uint8Array(0);
 // From above or from the audience: one choice per browser, the switch on the picture itself.
 const stageView = stageViewSwitch($('stageWrap'), () => drawStage());
 
-// Taller or shorter by the grip under it: from its own 124 px up to what leaves the running order three rows.
+// Taller or shorter by the grip under it: from 124 px (its own size upright; 200 px in landscape) up to what leaves
+// the running order three rows.
 const STAGE_MIN_H = 124;
 const ORDER_ROWS_LEFT = 3;
 /**
