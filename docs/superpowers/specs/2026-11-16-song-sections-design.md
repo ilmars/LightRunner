@@ -163,7 +163,7 @@ Record these in DECISIONS.
 ## Constraints
 
 - Every change is a Command through `App.command()`, the server is the only source of truth, and pages only display state: Auto-follow on/off, a section tap, the two saves.
-- The engine stays pure. The live connection (WebSocket, the channel's sign-in over the planning API, pings, joining chunked messages, reconnecting) lives in `server/planning/`, never blocks a frame or a command, and uses Node 24's own `WebSocket` and `fetch` (no new dependencies). `tools/worshiptools-live.ts` already does all of it and is the starting point.
+- The engine stays pure. The live connection (WebSocket, the channel's sign-in over the planning API, pings, joining chunked messages, reconnecting) lives in `server/planning/`, never blocks a frame or a command, and uses Node 24's own `WebSocket` and `fetch` (no new dependencies). The live-following script in `tools/` already does all of it and is the starting point.
 - Matching a live message to an item and a section, and choosing what to start, is a pure function in `packages/shared` with unit tests; the server tests use a fake live connection fed from recorded messages (the research recording, kept outside the repo, with slide text removed). No network in `npm test`.
 - Section looks and their remembered keys are part of the show (they travel with export and backups); the live connection and the login are not. `checkReferences` stays valid; Basic lights and the kept rows stay as they are.
 - New engine behaviour (if any) gets a test in `packages/engine/test`, and `npm run jump-check` passes (a section change is a look change, so it must fade like one).

@@ -233,7 +233,7 @@ Parts of the service (such as the welcome or the sermon), slides and pictures ca
 
 **Making a section's look in Prepare.**
 
-1. Tap **Prepare**. Under the song, tap the section's row: it is now the one being prepared, with the song's look as its starting point.
+1. Tap **Prepare**, then tap the song: its section rows show under it (they show only under the song being prepared or the one on stage). Tap the section's row: it is now the one being prepared, with the song's look as its starting point.
 2. Change the groups you want different for that section (colours, levels, effects). The tempo and a timeline stay the song's: a section changes colours and levels only.
 3. Hold **Save to Chorus · <song>** (named for the section). The section now has its own look, kept for the next service with that song. Tap **Live** to throw the draft away, or **Go ▸** to put it on the lights.
 

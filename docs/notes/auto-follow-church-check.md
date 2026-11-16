@@ -30,7 +30,7 @@ The pill should name the song and the section while on ("● Auto-follow · Chor
 
 ## 2. A tap by hand pauses it
 
-With Auto-follow on, tap a song row on the iPad. The pill should say "○ Auto-follow off" on every tablet, and the next slide in the presentation app should change nothing. Switch it on again and it should start what is on screen. Check that **Master**, **Flash**, **Undo** and a group's colour or level do **not** pause it, and that Blackout, Next and a quick look do.
+With Auto-follow on, tap a song row on the iPad. The pill should say "○ Auto-follow off" on every tablet, and the next slide in the presentation app should change nothing. Switch it on again and it should start what is on screen. Switch Auto-follow on with the presentation app closed: nothing should change. Check that **Master**, **Flash**, **Undo** and a group's colour or level do **not** pause it, and that Blackout, Next and a quick look do.
 
 ## 3. What the presentation app sends (these are not known yet)
 

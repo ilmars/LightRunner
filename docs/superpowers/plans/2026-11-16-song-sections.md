@@ -16,7 +16,7 @@
 - The engine stays pure; timers, sockets and files live in `server/`. New engine behaviour gets a test in `packages/engine/test`.
 - Every input becomes a `Command` (`packages/shared/src/protocol.ts`) through `App.command()`; pages only display state.
 - No new dependencies: Node 24's `WebSocket` and `fetch`.
-- No network in `npm test`; server tests use `FakePlanning` and a fake live socket. Never use `data/worshiptools-login.json` or any planning login on this PC: a second copy of the login can log the church Mac out.
+- No network in `npm test`; server tests use `FakePlanning` and a fake live socket. Never use the older tools' login file in `data/` or any planning login on this PC: a second copy of the login can log the church Mac out.
 - No lyrics are stored anywhere (show, logs, fixtures); chords as chord names only.
 - Docs (STATUS, DECISIONS, guides, specs, plans) never name the planning service or the presentation app; code, comments and pages may.
 - UI: design-system tokens and `ds-` components, dark, quiet, 44 px targets, iPad 1080 × 810; plain words, sentence case.
@@ -153,18 +153,18 @@ In `planning.test.ts`: `toPlannedService` gives a song item `sections` (left out
 - Consumes: `parseSlideId`, `LiveSlide` (Task 3).
 - Produces:
   - `Planning.liveKeys(account: string): Promise<{ key: string; cluster: string }>` (GET `/account/{account}/pusher`)
-  - `Planning.liveAuth(account: string, socketId: string, channel: string): Promise<object>` (POST, the form `tools/worshiptools-live.ts` sends, with `client: 'light-runner'`)
+  - `Planning.liveAuth(account: string, socketId: string, channel: string): Promise<object>` (POST, the form the live-following script in `tools/` sends, with `client: 'light-runner'`)
   - `LiveStatus = { state: 'connecting' | 'waiting' | 'open' | 'closed'; problem: string | null; presenter: string | null }`
   - `class PresenterLive { constructor(opts: { planning: Planning; account: string; open?: (url: string) => WebSocketLike; onSlide: (s: LiveSlide) => void; onStatus: (s: LiveStatus) => void; log: (line: string) => void }); start(): void; stop(): void }`
 
 - [ ] **Step 1: Write the failing tests** with a fake socket (`send`, `close`; the test calls `onmessage`/`onclose`), using `mock.timers`:
   - connects to `wss://ws-{cluster}.pusher.com/app/{key}?protocol=7&client=js&version=8.4.0&flash=false` and subscribes to `presence-{account}` with `liveAuth`'s answer;
-  - a member with `client: 'weDesktop'` → subscribes to its `presence-` and `private-` channels (both the bare id and the `{account}.{id}` shapes) and, once the private one succeeds, sends `client-command {action:'activate'}`; `onStatus` says `open` with the computer's name;
+  - a member with the presentation app's member type as its `client` → subscribes to its `presence-` and `private-` channels (both the bare id and the `{account}.{id}` shapes) and, once the private one succeeds, sends `client-command {action:'activate'}`; `onStatus` says `open` with the computer's name;
   - a `client-event` in three chunks → one `onSlide` with `{service: cuelist.id, cue, slide, name: current_cue.name}`; a blank slide gives `slide: null`; the same `current_slide.id` again → no second `onSlide`;
   - `pusher:ping` → `pusher:pong`; `member_removed` → `waiting`;
   - a close → `closed` and retries after 1, 2, 4 … up to 60 s; `stop()` closes and never retries;
   - a message that isn't JSON, or chunks that never complete, is ignored without throwing.
-- [ ] **Step 2: Run; expect FAIL. Step 3: implement from `tools/worshiptools-live.ts`; follow the first presentation computer that joins and log any other. Never throw out of a socket handler. Step 4: run; expect PASS.**
+- [ ] **Step 2: Run; expect FAIL. Step 3: implement from the live-following script in `tools/`; follow the first presentation computer that joins and log any other. Never throw out of a socket handler. Step 4: run; expect PASS.**
 - [ ] **Step 5: Commit** "Planning: listen to the presentation app's slides on the server".
 
 ### Task 5: Auto-follow and sections on stage
