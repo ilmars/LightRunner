@@ -23,7 +23,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import WebSocket from 'ws';
-import { addressProblems, checkReferences, findProfile, isShowEdit, parseShow, Command } from '../../../../packages/shared/src/index.ts';
+import { addressProblems, checkReferences, findProfile, isShowEdit, parseShow, Command, StageCommand } from '../../../../packages/shared/src/index.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -180,8 +180,8 @@ try {
       await sendAll(commands(rest));
       break;
     case 'prepare': {
-      // Stage commands go to the draft; show edits (Save, Add song, Save as quick look, ...) store the draft.
-      const list = commands(rest).map((cmd): Command => (isShowEdit(cmd) || cmd.type.startsWith('blind') || cmd.type === 'draft' ? cmd : { type: 'draft', cmd } as Command));
+      // Stage commands go to the draft; commands that are neither (section, saveSection) go as they are, the server sends them to the draft; show edits (Save, Add song, Save as quick look, ...) store the draft.
+      const list = commands(rest).map((cmd): Command => (isShowEdit(cmd) || cmd.type.startsWith('blind') || cmd.type === 'draft' ? cmd : StageCommand.safeParse(cmd).success ? { type: 'draft', cmd } as Command : cmd));
       await sendAll([{ type: 'blindStart' }, ...list, { type: values.go ? 'blindGo' : 'blindEnd' }]);
       break;
     }
