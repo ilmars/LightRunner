@@ -5,8 +5,10 @@
 import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, liveEffectId, livePresetId, parseLiveEffect, parseLivePreset } from './protocol.ts';
 import { effectKey, isEffectPreset, resolveColour } from './schema.ts';
 import { followQuickLook } from './keys.ts';
-import { anchorOf, rememberKey } from './planning.ts';
-import type { PlannedService } from './planning.ts';
+import { anchorOf, rememberKey, sectionRememberKey } from './planning.ts';
+import type { PlannedService, SectionRef } from './planning.ts';
+import { SECTION_NAMES } from './sections.ts';
+import type { SectionKind } from './sections.ts';
 import type { EffectLayer, Layer, Look, LookEntry, Preset, QuickLook, QuickTab, Show } from './schema.ts';
 
 /** Where the stage is going: preset ids (possibly live ones) and level targets, as in RuntimeState. */
@@ -240,7 +242,10 @@ function forgetMissing(show: Show): void {
     for (const [key, look] of Object.entries(op.remembered)) if (!exists.has(look)) delete op.remembered[key];
   }
   if (op.kept) op.kept = op.kept.filter((look) => exists.has(look));
-  for (const item of op.service?.items ?? []) if (item.look !== undefined && !exists.has(item.look)) delete item.look;
+  for (const item of op.service?.items ?? []) {
+    if (item.look !== undefined && !exists.has(item.look)) delete item.look;
+    for (const section of item.sections ?? []) if (section.look !== undefined && !exists.has(section.look)) delete section.look;
+  }
   const planning = show.settings.planning;
   if (planning?.newSongLook !== undefined && !exists.has(planning.newSongLook)) delete planning.newSongLook;
 }
@@ -338,6 +343,12 @@ export function loadService(show: Show, service: PlannedService): Show {
     const item = structuredClone(planned);
     delete item.look;
     const key = rememberKey(item);
+    // A section has a look of its own only when someone saved one for it (and it is still there); a load makes none.
+    for (const section of item.sections ?? []) {
+      const own = item.songId === undefined ? undefined : remembered[sectionRememberKey(item.songId, section.kind)];
+      if (own !== undefined && out.looks.some((l) => l.id === own)) section.look = own;
+      else delete section.look;
+    }
     let id = key === null ? undefined : remembered[key];
     if (id !== undefined) {
       lookIn(out, id).name = planLookName(item.name, lookIn(out, id).name);
@@ -418,6 +429,50 @@ export function saveServiceItem(show: Show, key: string, stage: Stage): Show {
   return out;
 }
 
+// ---- A song's sections ----
+
+/** The loaded service's song whose look is `songLook`. */
+function songItem(show: Show, songLook: string) {
+  return show.operator.service?.items.find((i) => i.kind === 'song' && i.look === songLook && i.songId !== undefined);
+}
+
+/** The sections of a loaded song, each with its own look or null; none for a look that is not a loaded song. */
+export function sectionsOf(show: Show, songLook: string): { kind: SectionKind; look: string | null }[] {
+  const item = songItem(show, songLook);
+  return (item?.sections ?? []).map((s) => ({ kind: s.kind, look: s.look ?? null }));
+}
+
+function sectionIn(show: Show, ref: SectionRef) {
+  const item = songItem(show, ref.song);
+  if (!item) throw new Error("That isn't a song of the loaded service.");
+  const section = item.sections?.find((s) => s.kind === ref.kind);
+  if (!section) throw new Error(`${item.name} has no ${SECTION_NAMES[ref.kind].toLowerCase()}.`);
+  return { item, section };
+}
+
+/** The look a section plays: its own when it has one, else the song's. */
+export function sectionLookOf(show: Show, ref: SectionRef): string {
+  return sectionIn(show, ref).section.look ?? ref.song;
+}
+
+/**
+ * A section's own look: the one it has, else a new one made from the song's colours and levels (no tempo, no
+ * timeline), named "<song> · Chorus" and remembered for the next load. It is never a row of the running order.
+ */
+export function ensureSectionLook(show: Show, ref: SectionRef): { show: Show; id: string } {
+  const out = structuredClone(show);
+  const { item, section } = sectionIn(out, ref);
+  if (section.look !== undefined) return { show: out, id: section.look };
+  const song = lookIn(out, ref.song);
+  const id = addLook(out, planLookName(`${song.name} · ${SECTION_NAMES[ref.kind]}`, SECTION_NAMES[ref.kind]), structuredClone(song.groups));
+  (out.operator.remembered ??= {})[sectionRememberKey(item.songId!, ref.kind)] = id;
+  // A song planned twice shows the same sections twice.
+  for (const same of out.operator.service!.items) {
+    if (same.look === ref.song) for (const s of same.sections ?? []) if (s.kind === ref.kind) s.look = id;
+  }
+  return { show: out, id };
+}
+
 /** A new "Song N" holding the stage, placed right after `afterId` (or last). */
 export function addSong(show: Show, afterId: string, stage: Stage): { show: Show; id: string } {
   const out = structuredClone(show);
@@ -450,9 +505,18 @@ export function deleteItem(show: Show, id: string): Show {
   const out = structuredClone(show);
   inOrder(out, id);
   out.operator.runningOrder = out.operator.runningOrder.filter((x) => x !== id);
-  if (!out.operator.quickLooks.some((q) => q.look === id)) {
-    out.looks = out.looks.filter((l) => l.id !== id);
-    out.operator.looks = out.operator.looks.filter((x) => x !== id);
+  const gone = new Set<string>();
+  if (!out.operator.quickLooks.some((q) => q.look === id)) gone.add(id);
+  // A song's sections' own looks go with the song (they are only ever reached through it).
+  const songId = out.operator.service?.items.find((i) => i.look === id)?.songId;
+  if (songId !== undefined) {
+    for (const [key, look] of Object.entries(out.operator.remembered ?? {})) {
+      if (key.startsWith(`song:${songId}#`)) gone.add(look);
+    }
+  }
+  if (gone.size) {
+    out.looks = out.looks.filter((l) => !gone.has(l.id));
+    out.operator.looks = out.operator.looks.filter((x) => !gone.has(x));
     // A song's look that was remembered for the planned service is forgotten with it.
     forgetMissing(out);
   }
@@ -596,9 +660,14 @@ export interface ItemGroupEdit {
   level?: number;
 }
 
-/** The item's look, if it is in the running order. Only those can be changed from the operator page. */
+/** True when the look is a section's own look in the loaded service. */
+export function isSectionLook(show: Show, id: string): boolean {
+  return !!show.operator.service?.items.some((i) => i.sections?.some((s) => s.look === id));
+}
+
+/** The item's look, if it is in the running order or is a section's own look. Only those can be changed from the operator page. */
 function itemLook(show: Show, itemId: string): Look {
-  if (!show.operator.runningOrder.includes(itemId)) throw new Error('only running-order items can be changed here');
+  if (!show.operator.runningOrder.includes(itemId) && !isSectionLook(show, itemId)) throw new Error('only running-order items can be changed here');
   return lookIn(show, itemId);
 }
 

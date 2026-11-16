@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { Show } from './schema.ts';
 import { SongSection, songSections } from './sections.ts';
+import type { SectionKind } from './sections.ts';
 
 const id = z.string().regex(/^[a-z0-9][a-z0-9-]*$/, 'ids are lowercase letters, digits and dashes');
 
@@ -145,6 +146,17 @@ export function rememberKey(item: ServiceItem): string | null {
     default:
       return null;
   }
+}
+
+/** What a song's own look for one section is remembered against. */
+export function sectionRememberKey(songId: string, kind: SectionKind): string {
+  return `song:${songId}#${kind}`;
+}
+
+/** A section of a loaded song: `song` is the song's look id. */
+export interface SectionRef {
+  song: string;
+  kind: SectionKind;
 }
 
 // ---- The rows the running order shows ----

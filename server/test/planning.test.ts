@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import { App } from '../src/app.ts';
 import { FakePlanning } from '../src/planning/fake.ts';
+import { ensureSectionLook } from '../../packages/shared/src/index.ts';
 import type { PlannedService } from '../../packages/shared/src/index.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -688,3 +689,35 @@ test('FakePlanning.fromFile reads the planning-fake.json fixture the pages are c
   const coming = await fake.services('account-1', 'type-riga-sunday', new Date('2026-10-20T12:00:00'));
   assert.deepEqual(coming.map((s) => s.start.slice(0, 10)), ['2026-10-25', '2026-11-08', '2026-10-18']);
 });
+
+test("saveItem on a section's own look is one Undo step and leaves the song alone; other looks outside the order are refused", () => withPlanning(async (rig) => {
+  const { app, tablet } = rig;
+  rig.fake.plannedServices[0]!.items[1]!.sections = [{ kind: 'verse', slides: ['a'] }, { kind: 'chorus', slides: ['b'] }];
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const loaded = await showOf(rig);
+  const song = (await orderOf(rig))[3]!;
+  // Someone gave the chorus a look of its own (nothing makes one from the pages yet).
+  const made = ensureSectionLook(loaded, { song, kind: 'chorus' });
+  await app.setShow(made.show);
+  const own = made.id;
+  assert.ok(!(await orderOf(rig)).includes(own));
+  const before = await showOf(rig);
+
+  assert.equal(await t.command({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.command({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 }), null);
+  await waitFor(() => app.state?.groups['back-wall']?.preset === 'back-amber', 'amber on stage');
+  assert.equal(await t.command({ type: 'saveItem', id: own }), null);
+  const show = await showOf(rig);
+  assert.equal(entry(lookIn(show, own), 'back-wall').preset, 'back-amber');
+  assert.deepEqual(lookIn(show, song), lookIn(before, song), "the song's look is untouched");
+
+  assert.equal(await t.command({ type: 'undo' }), null);
+  assert.deepEqual(lookIn(await showOf(rig), own), lookIn(before, own), 'one Undo step');
+
+  const quick = loaded.operator.quickLooks.at(-1).look as string;
+  assert.equal(await t.command({ type: 'saveItem', id: quick }), 'only running-order items can be saved');
+  assert.equal(await t.command({ type: 'itemGroup', item: own, group: 'back-wall', preset: 'back-amber' }), null);
+  t.close();
+}));

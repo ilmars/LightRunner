@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept,
+  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept, setItemGroup, saveItem, sectionRememberKey, sectionsOf, sectionLookOf, ensureSectionLook,
   serviceRows, toPlannedService, type PlannedService, type ServiceItem, type Show,
 } from '../src/index.ts';
 
@@ -701,4 +701,71 @@ test('deleting a kept row forgets it', () => {
   const out = deleteItem(show, named(show, 'Sermon'));
   assert.deepEqual(out.operator.kept, [named(show, 'Midweek calm')]);
   assert.deepEqual(checkReferences(out), []);
+});
+
+// ---- Section looks ----
+
+const withSections = (): ServiceItem => ({ ...song('a', 'A'), sections: [{ kind: 'verse', slides: ['s1'] }, { kind: 'chorus', slides: ['s2'] }] });
+
+test("a loaded song's sections have no looks of their own", () => {
+  const out = loadService(rig(), planned([withSections()]));
+  const a = out.operator.service!.items[0]!.look!;
+  assert.deepEqual(sectionsOf(out, a), [{ kind: 'verse', look: null }, { kind: 'chorus', look: null }]);
+  assert.equal(sectionLookOf(out, { song: a, kind: 'chorus' }), a);
+  assert.ok(!out.looks.some((l) => l.name.includes('·')), 'a load makes no section looks');
+  assert.deepEqual(sectionsOf(out, safeOf(out)), []);
+  assert.throws(() => sectionLookOf(out, { song: safeOf(out), kind: 'chorus' }));
+});
+
+test("a section's own look comes back next week", () => {
+  const loaded = loadService(rig(), planned([withSections()]));
+  const a = loaded.operator.service!.items[0]!.look!;
+  const before = structuredClone(loaded);
+  const { show, id } = ensureSectionLook(loaded, { song: a, kind: 'chorus' });
+  assert.deepEqual(loaded, before, 'the input is never changed');
+  const own = lookOf(show, id);
+  assert.equal(own.name, 'A · Chorus');
+  assert.ok(!show.operator.runningOrder.includes(id));
+  assert.deepEqual(own.groups, lookOf(show, a).groups);
+  assert.equal(own.tempo, undefined);
+  assert.equal(own.timeline, undefined);
+  assert.equal(sectionRememberKey('song-a', 'chorus'), 'song:song-a#chorus');
+  assert.equal(show.operator.remembered![sectionRememberKey('song-a', 'chorus')], id);
+  assert.equal(sectionLookOf(show, { song: a, kind: 'chorus' }), id);
+  assert.equal(sectionLookOf(show, { song: a, kind: 'verse' }), a);
+  assert.equal(ensureSectionLook(show, { song: a, kind: 'chorus' }).id, id, 'asking again makes no second look');
+  assert.throws(() => ensureSectionLook(show, { song: a, kind: 'bridge' }));
+
+  const again = loadService(show, planned([withSections()], 'svc2'));
+  const a2 = again.operator.service!.items[0]!.look!;
+  assert.deepEqual(sectionsOf(again, a2), [{ kind: 'verse', look: null }, { kind: 'chorus', look: id }]);
+  assert.ok(again.looks.some((l) => l.id === id));
+  parseShow(again);
+});
+
+test('deleting the song deletes its section looks', () => {
+  const loaded = loadService(rig(), planned([withSections(), song('b', 'B')]));
+  const [a, b] = loaded.operator.service!.items.map((i) => i.look!) as [string, string];
+  const { show, id } = ensureSectionLook(loaded, { song: a, kind: 'chorus' });
+  const out = deleteItem(show, a);
+  assert.ok(!out.looks.some((l) => l.id === id));
+  assert.equal(out.operator.remembered![sectionRememberKey('song-a', 'chorus')], undefined);
+  assert.equal(out.operator.remembered!['song:song-b'], b);
+  parseShow(out);
+});
+
+test("itemGroup and saveItem take a section's own look", () => {
+  const loaded = loadService(rig(), planned([withSections()]));
+  const a = loaded.operator.service!.items[0]!.look!;
+  const { show, id } = ensureSectionLook(loaded, { song: a, kind: 'chorus' });
+  const group = show.groups.find((g) => g.kind !== 'smoke')!.id;
+  const preset = show.presets.find((p) => p.group === group && !p.custom)!.id;
+  const edited = setItemGroup(show, id, { group, preset, level: 0.5 });
+  assert.equal(lookOf(edited, id).groups.find((e) => e.group === group)!.level, 0.5);
+  const saved = saveItem(show, id, { groups: { [group]: preset }, levels: { [group]: 0.25 } });
+  assert.equal(lookOf(saved, id).groups.find((e) => e.group === group)!.level, 0.25);
+  assert.deepEqual(lookOf(saved, a).groups, lookOf(show, a).groups, "the song's look is untouched");
+  // A look outside the order that is no section's still can't be changed.
+  const other = rig();
+  assert.throws(() => setItemGroup(other, other.operator.quickLooks[0]!.look, { group, preset }), /only running-order items can be changed here/);
 });
