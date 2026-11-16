@@ -17,6 +17,12 @@ export interface Planning {
   serviceTypes(account: string): Promise<{ id: string; name: string }[]>;
   services(account: string, type: string, now: Date): Promise<ServiceSummary[]>;
   service(account: string, id: string): Promise<PlannedService>;
+  /** The key and cluster of the live (Pusher) connection that carries the presentation app's slides. */
+  liveKeys(account: string): Promise<{ key: string; cluster: string }>;
+  /** The answer that lets the live connection join a channel (`socketId` is the connection's own id). */
+  liveAuth(account: string, socketId: string, channel: string): Promise<object>;
+  /** A stable id for this computer, sent to the presentation app. Never logged. */
+  machineId(): string;
 }
 
 /** The real thing: the login is kept in `<dataDir>/planning-login.json`, owner-only. */

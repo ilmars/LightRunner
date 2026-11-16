@@ -20,6 +20,8 @@ const MAX_SERVICES = 8;
 const FALLBACK_SCAN = 100;
 const BATCH = 100;
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** What the live connection asks the presentation app to send. */
+const LIVE_EVENTS = 'cuelist,event,slides,error,media-progress,countdown,stage-display';
 /** What a cookie value may hold: printable characters, no spaces or semicolons. */
 const COOKIE_VALUE = /^[\x21-\x3a\x3c-\x7e]+$/;
 
@@ -173,6 +175,37 @@ export class PlanningClient {
       for (const r of found) if (r.found) songs.set(String(r.found.name).split('/').pop()!, fromFirestore(r.found));
     }
     return toPlannedService(id, plain, songs, typeName);
+  }
+
+  /** The live connection's key and cluster. */
+  async liveKeys(account: string): Promise<{ key: string; cluster: string }> {
+    const keys = await this.api(`/account/${check(account)}/pusher`);
+    if (typeof keys?.APP_KEY !== 'string' || typeof keys.CLUSTER !== 'string') throw new PlanningError(UNEXPECTED);
+    return { key: keys.APP_KEY, cluster: keys.CLUSTER };
+  }
+
+  /** Joins a live channel: the same form the planning service's own stage display sends. */
+  async liveAuth(account: string, socketId: string, channel: string): Promise<object> {
+    const form = new FormData();
+    const fields = {
+      socket_id: socketId,
+      channel_name: channel,
+      machineId: this.machineId(),
+      machineOS: 'Web',
+      machineArch: process.arch,
+      machineName: 'Light Runner',
+      client: 'light-runner',
+      events: LIVE_EVENTS,
+    };
+    for (const [k, v] of Object.entries(fields)) form.append(k, v);
+    const auth = await this.api(`/account/${check(account)}/pusher`, { method: 'POST', body: form });
+    try {
+      const answer = typeof auth === 'string' ? JSON.parse(auth) : auth;
+      if (answer && typeof answer === 'object') return answer;
+    } catch {
+      // falls through to the error below
+    }
+    throw new PlanningError(UNEXPECTED);
   }
 
   // ---- Login file ----

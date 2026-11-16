@@ -80,6 +80,20 @@ export class FakePlanning implements Planning {
     return planned;
   }
 
+  async liveKeys(account: string): Promise<{ key: string; cluster: string }> {
+    this.called('liveKeys', account);
+    return { key: 'test-key', cluster: 'test' };
+  }
+
+  async liveAuth(account: string, socketId: string, channel: string): Promise<object> {
+    this.called('liveAuth', account, socketId, channel);
+    return { auth: 'test' };
+  }
+
+  machineId(): string {
+    return 'test-machine';
+  }
+
   private called(name: string, ...args: string[]): void {
     this.calls.push([name, ...args].join(' '));
     if (this.failWith !== undefined) throw new PlanningError(this.failWith);
