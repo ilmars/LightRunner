@@ -218,7 +218,7 @@ test('a close says closed and tries again after 1, 2, 4 ... up to 60 seconds', a
   t.live.stop();
 });
 
-test('the wait starts over after a connection has been established', async () => {
+test('the wait starts over only after a connection has stayed up a minute with the account channel joined', async () => {
   const t = setup();
   t.live.start();
   await settle();
@@ -228,12 +228,141 @@ test('the wait starts over after a connection has been established', async () =>
   t.sockets[1]!.onclose!();
   mock.timers.tick(2000);
   await settle();
-  t.sockets[2]!.receive('pusher:connection_established', { socket_id: '1.2' });
+  const ws = t.sockets[2]!;
+  ws.receive('pusher:connection_established', { socket_id: '1.2' });
   await settle();
-  t.sockets[2]!.onclose!();
+  ws.receive('pusher_internal:subscription_succeeded', { presence: { hash: {} } }, `presence-${ACCOUNT}`);
+  mock.timers.tick(60_000);
+  ws.onclose!();
   mock.timers.tick(1000);
   await settle();
   assert.equal(t.sockets.length, 4);
+  t.live.stop();
+});
+
+test('failures right after the handshake keep backing off', async () => {
+  const t = setup();
+  t.live.start();
+  await settle();
+  for (const [n, wait] of [1, 2, 4, 8].entries()) {
+    const ws = t.sockets[n]!;
+    ws.receive('pusher:connection_established', { socket_id: '1.2' });
+    await settle();
+    ws.onclose!();
+    mock.timers.tick(wait * 1000 - 1);
+    await settle();
+    assert.equal(t.sockets.length, n + 1, `not yet after ${wait} s`);
+    mock.timers.tick(1);
+    await settle();
+    assert.equal(t.sockets.length, n + 2);
+  }
+  t.live.stop();
+});
+
+test('a channel that cannot be joined backs off 1, 2, 4 seconds', async () => {
+  const t = setup();
+  t.live.start();
+  await settle();
+  let n = 0;
+  for (const wait of [1, 2, 4]) {
+    const ws = t.sockets[n]!;
+    ws.receive('pusher:connection_established', { socket_id: '1.2' });
+    await settle();
+    t.planning.failWith = 'The planning login has run out. Paste a new one in Settings.';
+    ws.receive('pusher_internal:subscription_succeeded', { presence: { hash: { [PRESENTER]: { client: 'weDesktop', machineName: 'Stage Mac' } } } }, `presence-${ACCOUNT}`);
+    await settle();
+    assert.equal(ws.closed, true);
+    t.planning.failWith = undefined;
+    mock.timers.tick(wait * 1000 - 1);
+    await settle();
+    assert.equal(t.sockets.length, n + 1);
+    mock.timers.tick(1);
+    await settle();
+    n++;
+    assert.equal(t.sockets.length, n + 1);
+  }
+  t.live.stop();
+});
+
+test('a connection that goes quiet after a ping is closed and retried', async () => {
+  const t = setup();
+  const ws = await openedPresenter(t);
+  mock.timers.tick(120_000); // the ping goes out
+  assert.deepEqual(ws.sent.at(-1), { event: 'pusher:ping', data: {} });
+  mock.timers.tick(29_000);
+  assert.equal(ws.closed, false);
+  mock.timers.tick(1000);
+  assert.equal(ws.closed, true);
+  assert.equal(t.statuses.at(-1)!.state, 'closed');
+  mock.timers.tick(1000);
+  await settle();
+  assert.equal(t.sockets.length, 2);
+  t.live.stop();
+});
+
+test('any traffic after a ping keeps the connection', async () => {
+  const t = setup();
+  const ws = await openedPresenter(t);
+  mock.timers.tick(120_000);
+  mock.timers.tick(20_000);
+  ws.receive('client-slides', { slides: [] }, `private-${CHANNEL}`);
+  mock.timers.tick(60_000);
+  assert.equal(ws.closed, false);
+  assert.equal(t.statuses.at(-1)!.state, 'open');
+  t.live.stop();
+});
+
+test('open waits for the private channel; a refused channel says so in plain words', async () => {
+  const t = setup();
+  t.live.start();
+  await settle();
+  const ws = t.sockets[0]!;
+  ws.receive('pusher:connection_established', { socket_id: '1.2' });
+  await settle();
+  ws.receive('pusher_internal:subscription_succeeded', { presence: { hash: { [PRESENTER]: { client: 'weDesktop', machineName: 'Stage Mac' } } } }, `presence-${ACCOUNT}`);
+  await settle();
+  assert.notEqual(t.statuses.at(-1)!.state, 'open');
+  ws.receive('pusher:subscription_error', { type: 'AuthError' }, `private-${CHANNEL}`);
+  assert.equal(t.statuses.at(-1)!.state, 'waiting');
+  assert.match(t.statuses.at(-1)!.problem!, /channel/);
+  t.live.stop();
+});
+
+test('stop says closed; stop then start while the keys are pending opens one socket', async () => {
+  const t = setup();
+  t.live.start();
+  await settle();
+  t.live.stop();
+  assert.deepEqual(t.statuses.at(-1), { state: 'closed', problem: null, presenter: null });
+
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const original = t.planning.liveKeys.bind(t.planning);
+  t.planning.liveKeys = async (account: string) => {
+    await gate;
+    return original(account);
+  };
+  const before = t.sockets.length;
+  t.live.start();
+  t.live.stop();
+  t.live.start();
+  release();
+  await settle();
+  assert.equal(t.sockets.length, before + 1);
+  t.live.stop();
+});
+
+test('the machine id is asked for once', async () => {
+  const t = setup();
+  let asked = 0;
+  t.planning.machineId = () => {
+    asked++;
+    return 'm1';
+  };
+  const ws = await openedPresenter(t);
+  await settle();
+  ws.receive('pusher_internal:subscription_succeeded', {}, `private-${CHANNEL}`);
+  assert.equal(asked, 1);
   t.live.stop();
 });
 

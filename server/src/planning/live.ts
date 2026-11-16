@@ -42,6 +42,10 @@ const MAX_WAIT_S = 60;
 /** Unfinished messages kept at most; the oldest go first. */
 const MAX_PENDING_CHUNKS = 50;
 const DEFAULT_ACTIVITY_S = 120;
+/** How long a connection must stay up (account channel joined) before the retry wait starts over. */
+const STABLE_MS = 60_000;
+/** How long after a ping anything may take to arrive before the connection counts as dead. */
+const PONG_MS = 30_000;
 const NO_CONNECTION = 'No internet connection.';
 const FAILED = 'The connection to the presentation app failed.';
 
@@ -53,6 +57,11 @@ export class PresenterLive {
   private retries = 0;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private pingTimer: ReturnType<typeof setInterval> | undefined;
+  private pongTimer: ReturnType<typeof setTimeout> | undefined;
+  private stableTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Counts starts, so a connect that was still pending when stop() came cannot open a socket. */
+  private generation = 0;
+  private machineId: string | undefined;
   private socketId = '';
   private presenter: { id: string; name: string } | undefined;
   private lastSlide: string | undefined;
@@ -68,11 +77,13 @@ export class PresenterLive {
     if (!this.stopped) return;
     this.stopped = false;
     this.retries = 0;
+    this.generation++;
     this.connect();
   }
 
   stop(): void {
     this.stopped = true;
+    this.generation++;
     clearTimeout(this.retryTimer);
     this.retryTimer = undefined;
     const socket = this.socket;
@@ -85,6 +96,7 @@ export class PresenterLive {
         // already closed
       }
     }
+    this.setStatus({ state: 'closed', problem: null, presenter: null });
   }
 
   // ---- Connecting ----
@@ -92,18 +104,19 @@ export class PresenterLive {
   private connect(): void {
     this.retryTimer = undefined;
     this.setStatus({ state: 'connecting', problem: null, presenter: null });
+    const generation = this.generation;
     this.opts.planning
       .liveKeys(this.opts.account)
       .then(({ key, cluster }) => {
-        if (this.stopped) return;
+        if (this.stopped || generation !== this.generation) return;
         const socket = this.openSocket(`wss://ws-${cluster}.pusher.com/app/${key}?protocol=7&client=js&version=8.4.0&flash=false`);
         this.socket = socket;
         socket.onopen = () => {};
         socket.onmessage = (msg) => this.safely(() => this.onMessage(socket, msg.data));
-        socket.onerror = () => this.opts.log('Live connection: a socket error.');
+        socket.onerror = () => this.safely(() => this.opts.log('Live connection: a socket error.'));
         socket.onclose = () => this.safely(() => this.closed(socket));
       })
-      .catch((err) => this.safely(() => this.failed(err)));
+      .catch((err) => this.safely(() => (generation === this.generation ? this.failed(err) : undefined)));
   }
 
   /** A connection that could not be made: say why and try again later. */
@@ -147,7 +160,9 @@ export class PresenterLive {
   /** Forget what belongs to one connection. */
   private reset(): void {
     clearInterval(this.pingTimer);
-    this.pingTimer = undefined;
+    clearTimeout(this.pongTimer);
+    clearTimeout(this.stableTimer);
+    this.pingTimer = this.pongTimer = this.stableTimer = undefined;
     this.socket = undefined;
     this.socketId = '';
     this.presenter = undefined;
@@ -159,6 +174,9 @@ export class PresenterLive {
 
   private onMessage(socket: WebSocketLike, raw: unknown): void {
     if (socket !== this.socket) return;
+    // Anything that arrives shows the connection is alive.
+    clearTimeout(this.pongTimer);
+    this.pongTimer = undefined;
     const m = parseJson(raw);
     if (!isRecord(m) || typeof m.event !== 'string') return;
     const event = m.event;
@@ -169,11 +187,10 @@ export class PresenterLive {
     switch (event) {
       case 'pusher:connection_established': {
         if (!isRecord(data) || typeof data.socket_id !== 'string') return;
-        this.retries = 0;
         this.socketId = data.socket_id;
         const seconds = typeof data.activity_timeout === 'number' && data.activity_timeout > 0 ? data.activity_timeout : DEFAULT_ACTIVITY_S;
         clearInterval(this.pingTimer);
-        this.pingTimer = setInterval(() => this.safely(() => this.send(socket, 'pusher:ping', {})), seconds * 1000);
+        this.pingTimer = setInterval(() => this.safely(() => this.ping(socket)), seconds * 1000);
         this.pingTimer.unref?.();
         this.subscribe(socket, `presence-${account}`);
         return;
@@ -188,10 +205,19 @@ export class PresenterLive {
         if (channel === `presence-${account}`) {
           const hash = isRecord(data) && isRecord(data.presence) && isRecord(data.presence.hash) ? data.presence.hash : {};
           for (const [id, info] of Object.entries(hash)) this.joined(socket, id, info);
+          // The wait starts over only for a connection that has stayed up, so a fault right after the handshake backs off.
+          clearTimeout(this.stableTimer);
+          this.stableTimer = setTimeout(() => this.safely(() => (this.retries = 0)), STABLE_MS);
+          this.stableTimer.unref?.();
           if (!this.presenter) this.setStatus({ state: 'waiting', problem: null, presenter: null });
         } else if (this.presenter && channel === `private-${this.channelOf(this.presenter.id)}`) {
-          this.send(socket, 'client-command', { action: 'activate', machineId: this.opts.planning.machineId() }, channel);
+          this.setStatus({ state: 'open', problem: null, presenter: this.presenter.name });
+          this.send(socket, 'client-command', { action: 'activate', machineId: this.machineIdOnce() }, channel);
         }
+        return;
+      case 'pusher:subscription_error':
+        this.opts.log(`Live connection: could not join ${channel || 'a channel'}.`);
+        if (this.presenter) this.setStatus({ state: 'waiting', problem: "Can't join the presentation app's channel.", presenter: null });
         return;
       case 'pusher_internal:member_added':
         if (channel === `presence-${account}` && isRecord(data) && typeof data.user_id === 'string') this.joined(socket, data.user_id, data.user_info);
@@ -216,7 +242,7 @@ export class PresenterLive {
     }
     this.presenter = { id, name };
     this.opts.log(`Presentation app open on ${name}.`);
-    this.setStatus({ state: 'open', problem: null, presenter: name });
+    this.setStatus({ state: 'waiting', problem: null, presenter: null });
     // Its channels are named "{account}.{id}", whichever shape the member id has.
     this.subscribe(socket, `presence-${this.channelOf(id)}`);
     this.subscribe(socket, `private-${this.channelOf(id)}`);
@@ -274,6 +300,20 @@ export class PresenterLive {
   /** A presentation computer's channel name: its member id, with the account in front when the id doesn't carry it. */
   private channelOf(id: string): string {
     return id.includes('.') ? id : `${this.opts.account}.${id}`;
+  }
+
+  /** Asks the other end for a sign of life; if nothing at all comes back soon, the connection is given up. */
+  private ping(socket: WebSocketLike): void {
+    this.send(socket, 'pusher:ping', {});
+    if (this.pongTimer) return;
+    this.pongTimer = setTimeout(() => this.safely(() => this.drop(socket, new TypeError('no answer'))), PONG_MS);
+    this.pongTimer.unref?.();
+  }
+
+  /** The id is asked for once per PresenterLive: it is kept in a file that should not be read again and again. */
+  private machineIdOnce(): string {
+    this.machineId ??= this.opts.planning.machineId();
+    return this.machineId;
   }
 
   private send(socket: WebSocketLike, event: string, data: unknown, channel?: string): void {

@@ -59,6 +59,7 @@ export class PlanningClient {
   private tokenExpires = 0;
   private firestoreSession: Promise<Firestore> | undefined;
   private firestoreExpires = 0;
+  private memoryMachineId: string | undefined;
 
   constructor({ loginFile, fetch: fetchFn = fetch, log = () => {}, timeoutMs = TIMEOUT_MS }: { loginFile: string; fetch?: typeof fetch; log?: (line: string) => void; timeoutMs?: number }) {
     this.loginFile = loginFile;
@@ -88,10 +89,13 @@ export class PlanningClient {
 
   /** A stable id for this computer, the way the planning service's own apps keep one. */
   machineId(): string {
-    const login = this.readLogin();
+    if (this.memoryMachineId) return this.memoryMachineId;
+    const { login, readable } = this.readLoginChecked();
     if (login.machineId) return login.machineId;
     const machineId = newMachineId();
-    this.writeLogin({ ...login, machineId });
+    // A file that could not be read is not rewritten: that could wipe the saved login. The id then lives in memory only.
+    if (!readable) this.memoryMachineId = machineId;
+    else this.writeLogin({ ...login, machineId });
     return machineId;
   }
 
@@ -211,11 +215,22 @@ export class PlanningClient {
   // ---- Login file ----
 
   private readLogin(): Login {
+    return this.readLoginChecked().login;
+  }
+
+  /** `readable` is false when the file exists but could not be read or understood (a missing file is fine). */
+  private readLoginChecked(): { login: Login; readable: boolean } {
+    let text: string;
     try {
-      const login = JSON.parse(readFileSync(this.loginFile, 'utf8'));
-      return login && typeof login === 'object' ? login : {};
+      text = readFileSync(this.loginFile, 'utf8');
+    } catch (err) {
+      return { login: {}, readable: (err as NodeJS.ErrnoException)?.code === 'ENOENT' };
+    }
+    try {
+      const login = JSON.parse(text);
+      return login && typeof login === 'object' ? { login, readable: true } : { login: {}, readable: false };
     } catch {
-      return {};
+      return { login: {}, readable: false };
     }
   }
 
