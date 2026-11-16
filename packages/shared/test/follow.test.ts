@@ -151,3 +151,42 @@ test('slide ids are read for a song slide and a blank, and junk is null', () => 
   assert.equal(parseSlideId(`${cue}-${slide}-slide-x`), null);
   assert.equal(parseSlideId(`${cue}-notauuid-slide-1`), null);
 });
+
+test('a section slide of a new item, another song, names that song and its cue', () => {
+  const songB: ServiceItem = { key: C(9), kind: 'song', name: 'Cits', songId: 'song-b', sections: [{ kind: 'chorus', slides: [SLIDE(5)] }] };
+  const show = loadService(rigShow(), { ...planned, items: [...items, songB] });
+  const a = show.operator.service!.items[1]!.look!;
+  const b = show.operator.service!.items[8]!.look!;
+  const d = followDecision(show, live(C(9), SLIDE(5)), { cue: C(2), part: C(1) }, { look: a, section: { song: a, kind: 'chorus' } });
+  assert.deepEqual(d.start, { kind: 'section', ref: { song: b, kind: 'chorus' }, look: b });
+  assert.equal(d.place.cue, C(9));
+});
+
+test('a target already on stage starts nothing, even with no last place', () => {
+  const { show, a, chorus, sermon } = built();
+  const on: OnStage = { look: chorus, section: { song: a, kind: 'chorus' } };
+  assert.equal(followDecision(show, live(C(2), SLIDE(3)), null, on).start, null);
+  assert.equal(followDecision(show, live(C(2), null), null, { look: a, section: null }).start, null);
+  assert.equal(followDecision(show, live(C(6), null), null, { look: sermon, section: null }).start, null);
+});
+
+test('the same kind of section of another song on stage still starts', () => {
+  const { show, a, chorus } = built();
+  const d = followDecision(show, live(C(2), SLIDE(3)), { cue: C(2), part: C(1) }, { look: 'other', section: { song: 'other', kind: 'chorus' } });
+  assert.deepEqual(d.start, { kind: 'section', ref: { song: a, kind: 'chorus' }, look: chorus });
+});
+
+test('the first item of the service has no header above it', () => {
+  const { show } = built();
+  show.operator.service!.items.shift();
+  const d = followDecision(show, live(C(2), null), null, nothing);
+  assert.equal(d.place.part, null);
+  assert.equal(d.start?.kind, 'item');
+});
+
+test('a slide in a section of the second item of the same song starts that section', () => {
+  const { show, a, chorus } = built();
+  const d = followDecision(show, live(C(4), SLIDE(3)), { cue: C(3), part: C(1) }, { look: a, section: null });
+  assert.deepEqual(d.start, { kind: 'section', ref: { song: a, kind: 'chorus' }, look: chorus });
+  assert.equal(d.place.cue, C(4));
+});

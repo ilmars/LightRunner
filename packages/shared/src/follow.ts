@@ -14,8 +14,8 @@ export interface LiveSlide {
 }
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-const SONG_SLIDE = new RegExp(`^(${UUID})-(${UUID})-slide-\\d+$`);
-const BLANK_SLIDE = new RegExp(`^(${UUID})-blank-[^-]+-slide-\\d+$`);
+const SONG_SLIDE = new RegExp(`^(${UUID})-(${UUID})-slide-\\d+$`, 'i');
+const BLANK_SLIDE = new RegExp(`^(${UUID})-blank-[^-]+-slide-\\d+$`, 'i');
 
 /** Reads `{cue}-{slide}-slide-{n}` and a song's Blank slide `{cue}-blank-{x}-slide-{n}`; anything else is null. */
 export function parseSlideId(id: string): { cue: string; slide: string | null } | null {
@@ -38,6 +38,10 @@ export interface FollowPlace {
   part: string | null;
 }
 
+/**
+ * What to start. A section start says WHICH section: when its song is not the song on stage (another item, or
+ * another song), whoever acts on it starts the song first, as a tap would, then the section's colours and levels.
+ */
 export type FollowStart =
   | { kind: 'item'; look: string }
   /** `look` is what the section plays: its own, else the song's. */
@@ -79,14 +83,15 @@ export function followDecision(
 
   const newItem = last === null || last.cue !== item.key;
   const newPart = last === null || last.part !== part;
-  const section = item.kind === 'song' && live.slide !== null ? item.sections?.find((s) => s.slides.includes(live.slide!)) : undefined;
+  const slideId = live.slide;
+  const section = item.kind === 'song' && slideId !== null ? item.sections?.find((s) => s.slides.includes(slideId)) : undefined;
   const done = (start: FollowStart | null, kind: FollowNote['kind'], kindOfSection: SectionKind | null = null) =>
     ({ start, place, note: { item: item.name, section: kindOfSection, kind } });
 
   // A slide of a section: its look, unless that section is already on stage.
   if (section && item.look !== undefined) {
     const ref: SectionRef = { song: item.look, kind: section.kind };
-    if (!newItem && onStage.section?.song === ref.song && onStage.section.kind === ref.kind) return done(null, 'nothing', section.kind);
+    if (onStage.section?.song === ref.song && onStage.section.kind === ref.kind) return done(null, 'nothing', section.kind);
     try {
       return done({ kind: 'section', ref, look: sectionLookOf(show, ref) }, 'look', section.kind);
     } catch {
@@ -97,13 +102,16 @@ export function followDecision(
 
   // A song's Blank slide starts the song's look again (also when a section is on stage).
   if (item.kind === 'song' && live.slide === null && item.look !== undefined) {
-    if (!newItem && onStage.look === item.look && onStage.section === null) return done(null, 'nothing');
+    if (onStage.look === item.look && onStage.section === null) return done(null, 'nothing');
     return done({ kind: 'item', look: item.look }, 'look');
   }
 
   if (newItem) {
-    if (item.look !== undefined) return done({ kind: 'item', look: item.look }, 'look');
-    if (newPart && header?.look !== undefined) return done({ kind: 'item', look: header.look }, 'look');
+    const target = item.look ?? (newPart ? header?.look : undefined);
+    if (target !== undefined) {
+      if (onStage.look === target && onStage.section === null) return done(null, 'nothing');
+      return done({ kind: 'item', look: target }, 'look');
+    }
   }
   return done(null, item.kind === 'verse' ? 'verse' : 'nothing');
 }
