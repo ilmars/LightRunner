@@ -65,8 +65,11 @@ const ONE_OR_MANY = { message: 'give a target or a list of targets', path: ['tar
 /** Commands the engine runs (a Blind draft runs them too). */
 const STAGE_COMMANDS = [
   z.object({ type: z.literal('look'), id, fade }),
-  /** Set only the groups a look lists, leaving the current look and the other groups alone. */
-  z.object({ type: z.literal('quickLook'), id, fade }),
+  /**
+   * Set only the groups a look lists, leaving the current look, the tempo and the other groups alone. `only`: just
+   * these of the look's groups (a song's section, which leaves the groups a running timeline drives to it).
+   */
+  z.object({ type: z.literal('quickLook'), id, fade, only: z.array(id).max(64).optional() }),
   z.object({ type: z.literal('groupPreset'), group: id, preset: id, fade }),
   /**
    * Any colour: run this exact colour (with optional white, amber and UV) on a group, as a live preset.
