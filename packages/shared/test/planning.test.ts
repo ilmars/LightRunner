@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept, setItemGroup, saveItem, sectionRememberKey, sectionsOf, sectionLookOf, ensureSectionLook,
+  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept, setItemGroup, setItemTempo, setItemTimeline, saveItem, sectionRememberKey, sectionsOf, sectionLookOf, ensureSectionLook,
   serviceRows, toPlannedService, type PlannedService, type ServiceItem, type Show,
 } from '../src/index.ts';
 
@@ -762,7 +762,12 @@ test("itemGroup and saveItem take a section's own look", () => {
   const preset = show.presets.find((p) => p.group === group && !p.custom)!.id;
   const edited = setItemGroup(show, id, { group, preset, level: 0.5 });
   assert.equal(lookOf(edited, id).groups.find((e) => e.group === group)!.level, 0.5);
-  const saved = saveItem(show, id, { groups: { [group]: preset }, levels: { [group]: 0.25 } });
+  const saved = saveItem(show, id, { groups: { [group]: preset }, levels: { [group]: 0.25 }, tempo: 120 });
+  assert.equal(lookOf(saved, id).tempo, undefined, 'a section keeps no tempo');
+  assert.equal(lookOf(saveItem(show, a, { groups: { [group]: preset }, levels: {}, tempo: 120 }), a).tempo, 120, 'the song does');
+  assert.throws(() => setItemTempo(show, id, 120), /no tempo or timeline/);
+  assert.throws(() => setItemTimeline(show, id, null), /no tempo or timeline/);
+  assert.throws(() => copyLookToItem(show, id, a), /only running-order items/);
   assert.equal(lookOf(saved, id).groups.find((e) => e.group === group)!.level, 0.25);
   assert.deepEqual(lookOf(saved, a).groups, lookOf(show, a).groups, "the song's look is untouched");
   // A look outside the order that is no section's still can't be changed.

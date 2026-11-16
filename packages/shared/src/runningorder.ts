@@ -399,7 +399,8 @@ export function saveItem(show: Show, lookId: string, stage: Stage): Show {
   } else {
     target.groups = entriesFor(out, stage);
   }
-  if (stage.tempo !== undefined) target.tempo = stage.tempo;
+  // The tempo belongs to the song: a section's own look keeps colours and levels only.
+  if (stage.tempo !== undefined && !isSectionLook(out, lookId)) target.tempo = stage.tempo;
   return out;
 }
 
@@ -665,9 +666,9 @@ export function isSectionLook(show: Show, id: string): boolean {
   return !!show.operator.service?.items.some((i) => i.sections?.some((s) => s.look === id));
 }
 
-/** The item's look, if it is in the running order or is a section's own look. Only those can be changed from the operator page. */
-function itemLook(show: Show, itemId: string): Look {
-  if (!show.operator.runningOrder.includes(itemId) && !isSectionLook(show, itemId)) throw new Error('only running-order items can be changed here');
+/** The item's look, if it is in the running order. Only those can be changed from the operator page; a section's own look too when `section` says so (colours and levels only). */
+function itemLook(show: Show, itemId: string, section = false): Look {
+  if (!show.operator.runningOrder.includes(itemId) && !(section && isSectionLook(show, itemId))) throw new Error('only running-order items can be changed here');
   return lookIn(show, itemId);
 }
 
@@ -687,7 +688,7 @@ function putEntry(show: Show, target: Look, entry: LookEntry): void {
  */
 export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): Show {
   const out = structuredClone(show);
-  const target = itemLook(out, itemId);
+  const target = itemLook(out, itemId, true);
   const group = out.groups.find((g) => g.id === edit.group);
   if (!group) throw new Error(`the show has no group "${edit.group}"`);
   if (group.kind === 'smoke') throw new Error("smoke machines aren't part of a song");
@@ -725,10 +726,13 @@ export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): S
   return out;
 }
 
+const NO_TEMPO = 'A part of a song has no tempo or timeline of its own.';
+
 /** Sets a running-order item's tempo (beats per minute), without touching the stage. */
 export function setItemTempo(show: Show, itemId: string, bpm: number): Show {
   if (!(bpm >= MIN_TEMPO && bpm <= MAX_TEMPO)) throw new Error(`the tempo is ${MIN_TEMPO} to ${MAX_TEMPO} beats per minute`);
   const out = structuredClone(show);
+  if (isSectionLook(out, itemId)) throw new Error(NO_TEMPO);
   itemLook(out, itemId).tempo = bpm;
   return out;
 }
@@ -737,6 +741,7 @@ export function setItemTempo(show: Show, itemId: string, bpm: number): Show {
 export function setItemTimeline(show: Show, itemId: string, timelineId: string | null): Show {
   const out = structuredClone(show);
   if (itemId === out.operator.safeLook) throw new Error('Basic lights never runs a timeline.');
+  if (isSectionLook(out, itemId)) throw new Error(NO_TEMPO);
   const target = itemLook(out, itemId);
   if (timelineId === null) delete target.timeline;
   else if (!out.timelines.some((t) => t.id === timelineId)) throw new Error(`There is no timeline "${timelineId}" in the show.`);
