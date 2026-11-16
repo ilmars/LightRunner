@@ -49,6 +49,23 @@ class FakeSocket implements WebSocketLike {
   close(): void {
     this.closed = true;
   }
+  /** What Pusher sends: the data is a JSON string. */
+  receive(event: string, data: unknown, channel?: string): void {
+    this.onmessage!({ data: JSON.stringify({ event, ...(channel ? { channel } : {}), data: JSON.stringify(data) }) });
+  }
+}
+
+const PRESENTER = 'ABC123';
+
+/** The live connection's newest socket goes through Pusher's handshake and a presentation computer joins: the state is open. */
+async function presenterOpen(app: App, sockets: FakeSocket[]): Promise<FakeSocket> {
+  const ws = await waitFor(() => sockets.at(-1)?.onmessage && sockets.at(-1), 'a live socket');
+  ws.receive('pusher:connection_established', { socket_id: '1.2', activity_timeout: 120 });
+  ws.receive('pusher_internal:subscription_succeeded', { presence: { hash: { [PRESENTER]: { client: 'weDesktop', machineName: 'Stage Mac' } } } }, 'presence-acc1');
+  await sleep(20);
+  ws.receive('pusher_internal:subscription_succeeded', {}, `private-acc1.${PRESENTER}`);
+  await waitFor(() => app.state?.follow?.live.state === 'open', 'the presentation app open');
+  return ws;
 }
 
 interface Tablet {
@@ -280,7 +297,8 @@ test('the section command does the same as following, and pauses Auto-follow', (
   assert.match((await app.command({ type: 'section', song: 'worship', kind: 'chorus' }, 'operator'))!, /isn't a song/);
 }, { shape: withTimeline }));
 
-test('Auto-follow switched off follows nothing; switched on, the slide on screen now starts at once', () => withFollow(async ({ app, songs }) => {
+test('Auto-follow switched off follows nothing; switched on, the slide on screen now starts at once', () => withFollow(async ({ app, songs, sockets }) => {
+  await presenterOpen(app, sockets);
   await followOn(app);
   assert.equal(await app.command({ type: 'autoFollow', on: false }, 'operator'), null);
   await waitFor(() => app.state?.follow?.on === false, 'off');
@@ -474,6 +492,32 @@ test('a timeline started live from the Timeline page pauses Auto-follow', () => 
 }, { shape: withTimeline }));
 
 // ---- The connection and the switch ----
+
+for (const [how, away] of [
+  ['the presentation computer leaves', (ws: FakeSocket) => ws.receive('pusher_internal:member_removed', { user_id: PRESENTER }, 'presence-acc1')],
+  ['the connection closes', (ws: FakeSocket) => ws.onclose!()],
+] as const) {
+  test(`switching on after ${how} starts nothing, not the slide it last showed`, () => withFollow(async ({ app, songs, sockets }) => {
+    const ws = await presenterOpen(app, sockets);
+    await app.liveSlide(slide('c4', null, 'Song Two'));
+    away(ws);
+    await waitFor(() => app.state?.follow?.live.state !== 'open', 'no longer open');
+    const before = app.state!.look;
+    assert.notEqual(before, songs.c4);
+    await followOn(app);
+    await sleep(60);
+    assert.equal(app.state!.look, before, 'nothing started');
+  }));
+}
+
+test('switching on before the presentation app is open starts nothing', () => withFollow(async ({ app, songs }) => {
+  await app.liveSlide(slide('c4', null, 'Song Two'));
+  const before = app.state!.look;
+  await followOn(app);
+  await sleep(60);
+  assert.equal(app.state!.look, before);
+  assert.notEqual(before, songs.c4);
+}));
 
 test('Planning off: no follow state, the connection stops and Auto-follow pauses; on again, it connects', () => withFollow(async ({ app, call, sockets }) => {
   await waitFor(() => sockets.length === 1, 'a live connection');

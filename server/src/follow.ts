@@ -38,9 +38,9 @@ export class Follow {
   private onNow = false;
   private live: LiveStatus = CLOSED;
   private note: FollowNote | null = null;
-  /** The last slide the presentation app showed (followed or not). */
+  /** The last slide the presentation app showed (followed or not), forgotten when the connection is no longer open. */
   private lastSlide: LiveSlide | null = null;
-  /** Where the last followed slide stood. */
+  /** Where the last followed slide stood, forgotten with the slide. */
   private place: FollowPlace | null = null;
   private presenter: PresenterLive | null = null;
   /** What the connection was made for, so a settings save that changes nothing leaves it be. */
@@ -69,7 +69,10 @@ export class Follow {
     this.onNow = on;
   }
 
-  /** The switch from a page. On starts what is on screen now, as the director's own tap would. */
+  /**
+   * The switch from a page. On starts what is on screen now, as the director's own tap would: only while the
+   * presentation app is open (it sends its whole state again when it opens, so nothing is missed).
+   */
   setOn(on: boolean): Promise<void> {
     if (on === this.onNow) return this.busy;
     this.onNow = on;
@@ -77,7 +80,7 @@ export class Follow {
     this.host.saveOn(on);
     this.host.changed();
     const slide = this.lastSlide;
-    if (!on || !slide) return this.busy;
+    if (!on || !slide || this.live.state !== 'open') return this.busy;
     return this.queue(() => this.follow(slide, true));
   }
 
@@ -192,6 +195,11 @@ export class Follow {
   }
 
   private setLive(status: LiveStatus): void {
+    // What the presentation app showed is no longer on screen once it has gone (or the connection has).
+    if (status.state !== 'open') {
+      this.lastSlide = null;
+      this.place = null;
+    }
     const was = this.live;
     if (was.state === status.state && was.problem === status.problem && was.presenter === status.presenter) return;
     this.live = { ...status };
