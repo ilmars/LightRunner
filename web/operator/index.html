@@ -40,6 +40,8 @@
         <span id="smokeNote" class="q" hidden></span>
       </span>
     </div>
+    <!-- Auto-follow (only while Planning is on): what it follows, or that it is off; a tap switches it on or off. -->
+    <button id="followPill" class="follow-pill" type="button" aria-pressed="false" hidden></button>
     <!-- A timeline is running (started on the Timeline page): its name and where it is, and a quiet Stop. -->
     <div id="tlNote" class="tl-note" hidden>
       <span class="tl-text"><span class="tl-label">Timeline ·</span><span id="tlName" class="tl-name"></span><span id="tlPos" class="tl-pos"></span></span>
@@ -177,6 +179,12 @@
         <button id="manualBtn" class="hbtn" hidden>Individual lights</button>
         <button id="backBtn" class="hbtn" hidden>Back to saved</button>
         <button id="saveBtn" class="save" hidden><span class="fill"></span><span class="label"></span></button>
+      </div>
+      <!-- A group changed while a song's section is on stage: keep the change for the section or the whole song. Not on the phone. -->
+      <div id="sectionBar" class="section-bar" role="group" aria-label="Save this change" hidden>
+        <span class="sb-text">Save this change for:</span>
+        <button id="sbSection" class="ds-btn ds-btn--quiet sb-btn" type="button">This section</button>
+        <button id="sbSong" class="ds-btn ds-btn--quiet sb-btn" type="button">The whole song</button>
       </div>
       <div id="groupRows" class="rows"></div>
       <!-- The colour picker: replaces the Groups panel (Quick looks stay). No Edit mode: Edit this colour and ＋ New colour

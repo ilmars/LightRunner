@@ -721,3 +721,38 @@ test("saveItem on a section's own look is one Undo step and leaves the song alon
   assert.equal(await t.command({ type: 'itemGroup', item: own, group: 'back-wall', preset: 'back-amber' }), null);
   t.close();
 }));
+
+test("the layout gives each loaded song its sections, in order with their own looks, and its facts", () => withPlanning(async (rig) => {
+  const { app } = rig;
+  Object.assign(rig.fake.plannedServices[0]!.items[1]!, {
+    sections: [{ kind: 'verse', slides: ['a'] }, { kind: 'chorus', slides: ['b', 'c'] }, { kind: 'bridge', slides: ['d'] }],
+    songKey: 'G', timeSignature: '6/8', artist: 'Someone', notes: 'slow start',
+  });
+  await enable(rig);
+  assert.deepEqual((await layoutOf(rig)).songs, {}, 'no service, no songs');
+  const t = await rig.tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const order = await orderOf(rig);
+  const [one, two] = [order[3]!, order[4]!];
+  let songs = (await layoutOf(rig)).songs;
+  assert.deepEqual(Object.keys(songs).sort(), [one, two].sort());
+  assert.deepEqual(songs[one], {
+    sections: [{ kind: 'verse', name: 'Verse', look: null }, { kind: 'chorus', name: 'Chorus', look: null }, { kind: 'bridge', name: 'Bridge', look: null }],
+    key: 'G', tempo: 90, timeSignature: '6/8', artist: 'Someone', notes: 'slow start', chords: null,
+  });
+  assert.deepEqual(songs[two], { sections: [], key: null, tempo: null, timeSignature: null, artist: null, notes: null, chords: null });
+
+  const made = ensureSectionLook(await showOf(rig), { song: one, kind: 'chorus' });
+  await app.setShow(made.show);
+  const layout = await layoutOf(rig);
+  songs = layout.songs;
+  assert.deepEqual(songs[one].sections.map((s: any) => s.look), [null, made.id, null]);
+  const own = layout.looks.find((l: any) => l.id === made.id);
+  assert.ok(own, 'the section look is in the looks');
+  assert.equal(own.name, 'Song One · Chorus');
+  assert.ok(!layout.runningOrder.some((l: any) => l.id === made.id), 'never a row');
+
+  await rig.call('PUT', '/api/settings', { planning: { enabled: false } });
+  assert.deepEqual((await layoutOf(rig)).songs, {}, 'Planning off shows plain looks');
+  t.close();
+}));

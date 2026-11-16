@@ -396,7 +396,9 @@ function buildPlainRows(order) {
         tag.hidden = true;
         return;
       }
-      orderRows.push({ item, button: b, tag, part: row.header });
+      const more = songMore(item);
+      orderRows.push({ item, button: b, tag, part: row.header, more });
+      if (more) nodes.push(more.el);
       if (isBasic(item) && n < rows.length - 1) nodes.push(el('div', 'sep'));
       return;
     }
@@ -416,6 +418,67 @@ function buildPlainRows(order) {
   // The item being prepared went (saved to, or the service changed).
   if (prep.target && !mutedRows.some((m) => m.key === prep.target)) prep.target = null;
   replaceRows(nodes);
+}
+
+/** A look of the layout by id (a song, a section's own look), or undefined. */
+const layoutLook = (id) => layout?.looks.find((l) => l.id === id) ?? layout?.runningOrder.find((l) => l.id === id);
+
+/** A loaded song's facts for the quiet line under it: "G · 72 bpm · 6/8", the parts it has. */
+function factsText(song) {
+  return [song.key, song.tempo !== null ? `${song.tempo} bpm` : null, song.timeSignature].filter(Boolean).join(' · ');
+}
+
+/**
+ * Under a loaded song: its facts line and its sections as smaller rows, shown only while the song is on stage (in
+ * Prepare, while it is being prepared). Each section has its own look's dots, or hollow dots while it plays the
+ * song's look. A tap starts it (in Prepare, in the draft). Sections are never running-order items: Next passes them by.
+ * Returns { el, sections: [{ kind, name, button, tag }] }, or null for a song with neither.
+ */
+function songMore(item) {
+  const song = layout.songs?.[item.id];
+  if (!song) return null;
+  const facts = factsText(song);
+  if (!facts && !song.sections.length) return null;
+  const box = el('div', 'song-more');
+  box.hidden = true;
+  if (facts) box.append(el('p', 'song-facts', facts));
+  const sections = song.sections.map((s) => {
+    const b = el('button', 'item item--section');
+    const own = s.look !== null ? layoutLook(s.look) : undefined;
+    let dots;
+    if (own) dots = itemDots(own);
+    else {
+      dots = el('span', 'dots');
+      for (let g = lightGroups().length; g > 0; g--) dots.append(el('i', 'hollow'));
+    }
+    const tag = el('span', 'tag');
+    tag.hidden = true;
+    b.append(dots, el('span', 'name', s.name), tag);
+    b.setAttribute('aria-label', `${s.name} of ${item.name}${own ? '' : ", plays the song's look"}`);
+    b.addEventListener('click', () => startSection(item, s.kind));
+    box.append(b);
+    return { kind: s.kind, name: s.name, button: b, tag };
+  });
+  return { el: box, sections };
+}
+
+/** Starts a song's section (in Prepare, in the draft: it becomes what is being prepared). A tap by hand pauses Auto-follow. */
+function startSection(item, kind) {
+  if (prep.target) {
+    prep.target = null;
+    render();
+  }
+  // Not wrapped for the draft: the server puts a section into this tablet's draft itself while it has one.
+  send({ type: 'section', song: item.id, kind });
+}
+
+/** The name of a section of a loaded song ("Chorus"). */
+const sectionName = (ref) => layout?.songs?.[ref.song]?.sections.find((s) => s.kind === ref.kind)?.name ?? ref.kind;
+
+/** The song's section on the stage the page works on, when it is the song `id` (null otherwise). */
+function sectionOf(id, s = shownState()) {
+  const section = s?.section ?? null;
+  return section && section.song === id ? section : null;
 }
 
 /**
@@ -1569,6 +1632,57 @@ function problemWords(s) {
   };
 }
 
+// ---- The Auto-follow pill: the switch for following the presentation app (only while Planning is on) ----
+
+/**
+ * What the pill says, as parts: [text, bold?]. On: what it follows ("● Auto-follow · Uz Krustu · Chorus"). Off
+ * (switched off, or paused by a tap): short, so the name on stage keeps its room. On but the presentation app isn't
+ * reachable: the plain reason.
+ */
+function followWords(follow) {
+  if (!follow.on) return [['○ Auto-follow off']];
+  const { live, note } = follow;
+  if (live.state !== 'open') return [[`○ ${live.problem ? live.problem.replace(/\.$/, '') : 'Presenter not open'}`]];
+  if (!note) return [['● Auto-follow']];
+  if (note.kind === 'not-in-order') return [['● Auto-follow · Presenter is on '], [note.item, true], [' · not in the running order']];
+  const after = note.section ? layoutSectionName(note.section) : note.kind === 'verse' ? 'verse' : '';
+  // The item that is on stage is already named just before the pill: only its section, so "Chorus" keeps its room.
+  if (state.look && note.item === lookName(state.look)) return after ? [['● Auto-follow · '], [after, true]] : [['● Auto-follow']];
+  return [['● Auto-follow · '], [note.item, true], [after ? ` · ${after}` : '']];
+}
+
+/** A section kind's name as the layout gives it ("Pre-chorus"). */
+function layoutSectionName(kind) {
+  for (const song of Object.values(layout?.songs ?? {})) {
+    const s = song.sections.find((x) => x.kind === kind);
+    if (s) return s.name;
+  }
+  return kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
+function renderFollow() {
+  const pill = $('followPill');
+  const follow = state.follow ?? null;
+  pill.hidden = !follow;
+  if (!follow) return;
+  const parts = followWords(follow);
+  const said = parts.map(([text]) => text).join('');
+  // The dot on its own, so it can carry the quiet blue while following.
+  const [first] = parts[0];
+  pill.replaceChildren(el('span', 'fp-dot', first.slice(0, 1)), document.createTextNode(first.slice(1)),
+    ...parts.slice(1).map(([text, bold]) => (bold ? el('b', null, text) : document.createTextNode(text))));
+  pill.classList.toggle('on', follow.on);
+  pill.classList.toggle('away', follow.on && follow.live.state !== 'open');
+  pill.setAttribute('aria-pressed', String(follow.on));
+  pill.setAttribute('aria-label', `${said.replace(/^[●○] /, '')}. ${follow.on ? 'Tap to switch Auto-follow off' : 'Tap to switch Auto-follow on'}`);
+  pill.title = follow.on ? 'The lights follow the presentation app. Tap to switch it off.' : 'Tap to let the lights follow the presentation app.';
+}
+
+// A tap is the switch. Switching on starts what the presentation app shows now.
+$('followPill').addEventListener('click', () => {
+  if (state?.follow) send({ type: 'autoFollow', on: !state.follow.on });
+});
+
 /** "Name · phone" from Settings > Who to call, or '' when nobody is set. */
 const contactText = () => [layout?.contact?.name, layout?.contact?.phone].filter(Boolean).join(' · ');
 
@@ -1591,7 +1705,8 @@ function render() {
   const from = previousLook ? lookName(previousLook) : null;
   const onStage = fading && from && from !== name ? `${from} → ${name}` : name;
   $('nowName').textContent = onStage;
-  $('nowChanged').hidden = !state.lookChanged || blackedOut;
+  $('nowChanged').hidden = !stageChanged(state) || blackedOut;
+  renderFollow();
   // In Prepare: what is being prepared (the draft's item), over what the real stage runs. Blackout has its own head.
   $('liveHead').hidden = prep.on || blackedOut;
   $('blackHead').hidden = prep.on || !blackedOut;
@@ -1668,13 +1783,33 @@ function render() {
     row.button.classList.toggle('prep', active && prep.on);
     row.button.classList.toggle('live', staged);
     row.button.setAttribute('aria-current', active ? 'true' : 'false');
-    const changed = active && !prep.on && !blackedOut && shownStage.lookChanged;
+    // While one of the song's sections is on stage, the section's row carries the mark.
+    const inSection = active && !!sectionOf(row.item.id, shownStage);
+    const changed = active && !prep.on && !blackedOut && !inSection && shownStage.lookChanged;
     const isNext = !editing && !prep.on && !active && !!next && row.item.id === next.id;
-    const tag = active && prep.on ? 'preparing' : staged ? 'on stage' : changed ? '● changed' : isNext ? 'next'
+    const tag = inSection ? '' : active && prep.on ? 'preparing' : staged ? 'on stage' : changed ? '● changed' : isNext ? 'next'
       : isBasic(row.item) && !active ? 'safe look' : isKept(row.item) && !active ? 'kept' : row.part && !active ? 'look' : '';
     row.tag.textContent = tag;
     row.tag.hidden = !tag;
     row.tag.classList.toggle('changed-tag', changed);
+    // The song's facts and sections show under it while it is on stage (in Prepare, while it is being prepared).
+    if (row.more) {
+      // (Blackout is on no row, so it shows none.)
+      row.more.el.hidden = !active;
+      const mine = sectionOf(row.item.id, shownStage);
+      const real = prep.on ? sectionOf(row.item.id, state) : null;
+      for (const s of row.more.sections) {
+        const here = !!mine && mine.kind === s.kind;
+        const staged = !here && !!real && real.kind === s.kind;
+        s.button.classList.toggle('on', here && !prep.on);
+        s.button.classList.toggle('prep', here && prep.on);
+        s.button.classList.toggle('live', staged);
+        s.button.setAttribute('aria-current', here ? 'true' : 'false');
+        const word = here ? (prep.on ? 'preparing' : 'on stage') : staged ? 'on stage' : '';
+        s.tag.textContent = word;
+        s.tag.hidden = !word;
+      }
+    }
   });
   for (const m of mutedRows) {
     const preparing = m === target;
@@ -1684,10 +1819,15 @@ function render() {
     m.tag.hidden = !tag;
   }
   // Keep what is on stage (in Prepare, what is being prepared) in view when it changes (and when editing ends).
+  // A song with its sections open: the song, and the section on stage under it.
   const onId = on >= 0 ? layout.runningOrder[on].id : null;
-  if (!editing && orderRows.length && onId !== revealedId) {
-    revealedId = onId;
-    if (onId) reveal(orderRows[on].button);
+  const onSection = onId ? sectionOf(onId, shownStage) : null;
+  const onKey = onId && onSection ? `${onId}#${onSection.kind}` : onId;
+  if (!editing && orderRows.length && onKey !== revealedId) {
+    revealedId = onKey;
+    const row = onId ? orderRows[on] : null;
+    if (row) reveal(row.more?.sections.find((s) => s.kind === onSection?.kind)?.button ?? row.more?.el ?? row.button);
+    if (row) reveal(row.button);
   }
 
   // Bottom bar.
@@ -1894,6 +2034,12 @@ function throttle(sendValue) {
   };
 }
 
+/**
+ * The stage differs from what is saved: with a song's section on it, from the section's look (a section plays its
+ * own colours over the song's, which is no change); otherwise from the look on stage.
+ */
+const stageChanged = (s) => (s?.section ? s.section.changed : !!s?.lookChanged);
+
 /** The running-order item on stage, or null (Blackout, nothing yet, or a look that isn't in the order). */
 function stageItem() {
   const k = stageIndex();
@@ -2050,10 +2196,13 @@ function renderDetails() {
   const target = prepTarget();
   $('dSub').textContent = prep.on ? `${target ? target.name : item ? item.name : lookName(shownState().look)} · draft` : 'drag to dim';
   // Without an item on stage there is nothing to save into or go back to.
-  const changed = !!item && shownState().lookChanged;
+  const changed = !!item && stageChanged(shownState());
   $('backBtn').hidden = !changed;
   $('saveBtn').hidden = !item && !target;
   $('saveBtn').classList.toggle('dirty', changed && !prep.on);
+  // A section of the song on stage was changed: save it for the section or the whole song (or not at all).
+  const section = item && !target ? sectionOf(item.id) : null;
+  $('sectionBar').hidden = !section?.changed;
   // Individual lights: only when operators have manual control; faded in Prepare (manual control is live only).
   $('manualBtn').hidden = !layout.manualForOperators;
   $('manualBtn').classList.toggle('unavail', prep.on);
@@ -2062,7 +2211,7 @@ function renderDetails() {
   // Not while a header or slides row is the Prepare target: the draft is going there, not to the song on stage.
   if (item && !target) $('backBtn').setAttribute('aria-label', `Back to ${item.name} as saved`);
   else $('backBtn').removeAttribute('aria-label');
-  if (item || target) $('saveBtn').querySelector('.label').replaceChildren(el('span', null, `Save to ${(target ?? item).name}`), el('small', null, 'hold'));
+  if (item || target) $('saveBtn').querySelector('.label').replaceChildren(el('span', null, `Save to ${saveName(item, target)}`), el('small', null, 'hold'));
   const now = performance.now();
   for (const row of detailRows) {
     if (row.smoke) {
@@ -2125,11 +2274,30 @@ saveBtn.addEventListener('pointerdown', (ev) => {
     // Only if the same item is still on stage, in the same Live or Prepare session; for Basic lights the id is the safe look's.
     const now = stageItem();
     if (!t && now && now.id === saveFor) {
+      // With a section of the song on stage, the server saves into the section's own look.
       const sent = send({ type: 'saveItem', id: now.id });
-      if (sent !== null) itemSave = { ref: sent, name: now.name };
+      if (sent !== null) itemSave = { ref: sent, name: saveName(now, null) };
     }
   }, 1000);
 });
+
+/** What Save keeps the stage in: the row being prepared, else the item on stage ("Chorus · Uz Krustu" while its section is on). */
+function saveName(item, target) {
+  if (target) return target.name;
+  const section = sectionOf(item.id);
+  return section ? `${sectionName(section)} · ${item.name}` : item.name;
+}
+
+// The save bar: the change made while a section is on stage, for this section or the whole song.
+for (const [id, scope] of [['sbSection', 'section'], ['sbSong', 'song']]) {
+  $(id).addEventListener('click', () => {
+    const item = stageItem();
+    const section = item ? sectionOf(item.id) : null;
+    if (!section?.changed) return;
+    const sent = send({ type: 'saveSection', scope });
+    if (sent !== null) itemSave = { ref: sent, name: scope === 'section' ? `${sectionName(section)} · ${item.name}` : item.name };
+  });
+}
 const stopSave = () => {
   clearTimeout(saveTimer);
   saveBtn.classList.remove('holding');
