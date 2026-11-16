@@ -183,6 +183,8 @@ export class App {
    * before an operator edit, or 'stage' for a step the engine keeps itself.
    */
   private undoLog: (Show | 'stage')[] = [];
+  /** For each 'stage' step in undoLog, in the same order: the song's section on stage before it, which its Undo brings back. */
+  private sectionSteps: (SectionOnStage | null)[] = [];
   /** The last itemTempo edit, so a run of them joins one Undo step: its song, when, and the Undo entry it made. */
   private tempoEdit: { item: string; at: number; step: Show | 'stage' } | null = null;
   /**
@@ -632,6 +634,7 @@ export class App {
       this.pending.clear();
       // The new engine starts with no Undo steps of its own; the show's are kept.
       this.undoLog = this.undoLog.filter((step) => step !== 'stage');
+      this.sectionSteps = [];
       this.workerRestarted = true;
       setTimeout(() => this.startWorker(), 200);
     });
@@ -766,8 +769,8 @@ export class App {
     const whole = cmd.type === 'look' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook';
     if (whole) this.stopLiveTimeline();
     const reply = await this.stageCommand(cmd);
-    // They replace a song's section with a whole look.
-    if (whole && !reply.error) this.setStageSection(null);
+    // They replace a song's section with a whole look; a quick look by hand is no longer the section either.
+    if ((whole || cmd.type === 'quickLook') && !reply.error) this.setStageSection(null);
     // A song with a timeline starts it, lights only, once its look is on the stage.
     if (cmd.type === 'look' && !reply.error) this.startSongTimeline(cmd.id);
     return reply;
@@ -787,14 +790,15 @@ export class App {
     const reply = await this.stageCommand({ type: 'look', id: start.look });
     if (reply.error) return reply.error;
     this.setStageSection(null);
-    this.startSongTimeline(start.look);
+    // A tap while the song was starting: its timeline gives way to it.
+    if (this.follow.on) this.startSongTimeline(start.look);
     return null;
   }
 
   /**
    * A song's section on the real stage: its colours and levels on the song's groups, except those a running timeline
    * drives; the tempo and the timeline carry on. When another look is on stage, the song starts first, as a tap would.
-   * `wanted`: asked again once the song has started; when it says no, the section is not started.
+   * `wanted`: asked again after each wait (for the stage, for the song's start); when it says no, nothing more starts.
    */
   private async startSection(ref: SectionRef, wanted: () => boolean = () => true): Promise<string | null> {
     let look: string;
@@ -804,14 +808,18 @@ export class App {
       return (err as Error).message;
     }
     const driven = new Set<string>();
+    const onStage = (await this.stage()).look;
+    // A tap during that wait has the last word (and may have stopped or started a timeline).
+    if (!wanted()) return null;
     const live = this.liveTimeline?.runner.state;
-    if ((await this.stage()).look !== ref.song) {
+    if (onStage !== ref.song) {
       this.stopLiveTimeline();
       const reply = await this.stageCommand({ type: 'look', id: ref.song });
       if (reply.error) return reply.error;
       this.setStageSection(null);
-      this.startSongTimeline(ref.song);
+      // A tap while the song was starting: its timeline and the section give way to it.
       if (!wanted()) return null;
+      this.startSongTimeline(ref.song);
       // The song's timeline is on its way: its groups are its own from the start.
       for (const g of this.timelineGroups(this.show.looks.find((l) => l.id === ref.song)?.timeline)) driven.add(g);
     } else {
@@ -892,7 +900,11 @@ export class App {
   /** The live connection runs while Planning is on (and a login is kept); `restart` connects again (a new login). */
   private liveFits(restart = false): void {
     if (this.stopping) return;
-    if (!this.planningOn()) this.follow.fits(null);
+    if (!this.planningOn()) {
+      // Planning off pauses Auto-follow: it is off when Planning comes back on.
+      this.follow.pause();
+      this.follow.fits(null);
+    }
     else if (!this.planning.loggedIn()) this.follow.fits({ problem: 'Not logged in to the planning service. Paste a login in Settings.' });
     else this.follow.fits({ account: this.show.settings.planning?.account }, restart);
   }
@@ -910,6 +922,7 @@ export class App {
 
   /** Run a command on the live stage (Undo of a show edit puts the show back instead). */
   private async stageCommand(cmd: StageCommand, opts?: { quiet?: boolean }): Promise<{ error: string | null; recorded: boolean }> {
+    let sectionBack: SectionOnStage | null = null;
     if (cmd.type === 'undo') {
       const last = this.undoLog.at(-1);
       if (last && last !== 'stage') {
@@ -931,10 +944,17 @@ export class App {
         return { error: null, recorded: false };
       }
       // A stage step (or an empty list, after a restart) is the engine's to undo.
-      if (last) this.undoLog.pop();
+      if (last) {
+        this.undoLog.pop();
+        sectionBack = this.sectionSteps.pop() ?? null;
+      }
     }
+    // The section on stage before this command: a stage Undo step brings it back with the lights.
+    const sectionBefore = this.stageSection && { ref: { ...this.stageSection.ref }, groups: [...this.stageSection.groups] };
     const reply = await this.request<{ error: string | null; recorded?: boolean }>((id) => ({ type: 'command', id, cmd, ...(opts?.quiet ? { quiet: true } : {}) }));
-    if (reply.recorded) this.remember('stage');
+    if (reply.recorded) this.remember('stage', sectionBefore);
+    // An empty list (after a restart) keeps no section: none was on stage then.
+    if (cmd.type === 'undo' && !reply.error) this.setStageSection(sectionBack && { ...sectionBack, fresh: false });
     // A stage Undo while a live timeline runs: it keeps running and sends its whole state again (over the seek fade),
     // so the Undo can't leave the stage between what the timeline says and what was there before.
     if (cmd.type === 'undo' && !reply.error) this.liveTimeline?.runner.resync();
@@ -1029,9 +1049,11 @@ export class App {
     if (changed && this.layout) this.refreshLayout();
   }
 
-  private remember(step: Show | 'stage'): void {
+  /** `section`: for a stage step, the section on stage before it. */
+  private remember(step: Show | 'stage', section: SectionOnStage | null = null): void {
     this.undoLog.push(step);
-    if (this.undoLog.length > UNDO_KEPT) this.undoLog.shift();
+    if (step === 'stage') this.sectionSteps.push(section);
+    if (this.undoLog.length > UNDO_KEPT && this.undoLog.shift() === 'stage') this.sectionSteps.shift();
   }
 
   // ---- Blind: a draft of the stage per tablet ----
@@ -1087,8 +1109,8 @@ export class App {
         } catch (err) {
           return done(this.draftProblem(tablet, err));
         }
-        // A whole look in the draft replaces its section, as on the stage.
-        const whole = cmd.cmd.type === 'look' || cmd.cmd.type === 'safe' || cmd.cmd.type === 'blackout' || cmd.cmd.type === 'backToLook';
+        // A whole look (or a quick look) in the draft replaces its section, as on the stage.
+        const whole = cmd.cmd.type === 'look' || cmd.cmd.type === 'quickLook' || cmd.cmd.type === 'safe' || cmd.cmd.type === 'blackout' || cmd.cmd.type === 'backToLook';
         if (whole && !error) session.section = null;
         this.sendDraft(tablet);
         return done(this.blind.get(tablet) === session ? error : BLIND_PROBLEM);
@@ -1105,8 +1127,10 @@ export class App {
         this.follow.pause();
         this.stopLiveTimeline();
         // The live engine fades with its own Fade setting (each look's own when it is Auto), as for looks.
+        // The draft's section goes on stage with it.
+        const section = session.section;
         const reply = await this.stageCommand({ type: 'applyStage', stage });
-        if (!reply.error) this.setStageSection(null);
+        if (!reply.error) this.setStageSection(section && { ref: { ...section.ref }, groups: [...section.groups], fresh: false });
         if (!reply.error && this.blind.get(tablet) === session) this.dropDraft(tablet);
         return reply;
       }

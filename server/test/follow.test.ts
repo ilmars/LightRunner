@@ -53,6 +53,8 @@ class FakeSocket implements WebSocketLike {
 
 interface Tablet {
   command: (cmd: unknown) => Promise<string | null>;
+  /** Sends any message with a ref (a timeline Start) and gives the error of its result, or null. */
+  send: (msg: Record<string, unknown>) => Promise<string | null>;
   /** The last draft state this tablet was sent. */
   draft: () => any;
   close: () => void;
@@ -112,7 +114,7 @@ async function withFollow(fn: (rig: Rig) => Promise<void>, opts: { dir?: string;
       });
       await new Promise((r) => socket.once('open', r));
       let ref = 0;
-      const command = (cmd: unknown) => new Promise<string | null>((resolve) => {
+      const send = (message: Record<string, unknown>) => new Promise<string | null>((resolve) => {
         const mine = ++ref;
         socket.on('message', function on(data, binary) {
           if (binary) return;
@@ -122,9 +124,10 @@ async function withFollow(fn: (rig: Rig) => Promise<void>, opts: { dir?: string;
             resolve(msg.error);
           }
         });
-        socket.send(JSON.stringify({ type: 'command', ref: mine, cmd }));
+        socket.send(JSON.stringify({ ...message, ref: mine }));
       });
-      return { command, draft: () => draft, close: () => socket.close() };
+      const command = (cmd: unknown) => send({ type: 'command', cmd });
+      return { command, send, draft: () => draft, close: () => socket.close() };
     };
     const songs: Record<string, string> = {};
     if (opts.load !== false) {
@@ -353,6 +356,12 @@ test("a tablet preparing doesn't pause Auto-follow, and a followed slide leaves 
   assert.equal(app.state!.look, songs.c2, 'the stage is untouched');
   assert.deepEqual(app.state!.section, { song: songs.c2, kind: 'chorus', changed: false });
   assert.equal(app.state!.follow?.on, true);
+
+  // Go: the draft's section is the section on stage.
+  assert.equal(await t.command({ type: 'blindGo' }), null);
+  await waitFor(() => app.state?.look === songs.c4 && app.state.section?.song === songs.c4, "Song Two's chorus on stage");
+  assert.deepEqual(app.state!.section, { song: songs.c4, kind: 'chorus', changed: false });
+  assert.equal(app.state!.follow?.on, false, 'Go pauses Auto-follow');
   t.close();
 }, { shape: chorusLook }));
 
@@ -371,12 +380,104 @@ test("a section's changed turns true when one of its groups is changed, and fals
   // A song by hand clears the section.
   assert.equal(await app.command({ type: 'look', id: songs.c4! }, 'operator'), null);
   await waitFor(() => app.state?.section === null, 'no section');
+  // So does a quick look by hand.
+  assert.equal(await app.command({ type: 'section', song: songs.c2!, kind: 'chorus' }, 'operator'), null);
+  await waitFor(() => app.state?.section?.kind === 'chorus', 'the chorus by hand');
+  assert.equal(await app.command({ type: 'quickLook', id: 'prayer' }, 'operator'), null);
+  await waitFor(() => app.state?.section === null, 'no section after a quick look');
 }, { shape: chorusLook }));
+
+/** Runs `tap` while the follower waits for the stage the second time (the first is followDecision's, the second the section start's). */
+function tapDuringSectionStart(app: App, tap: () => Promise<unknown>): void {
+  const inside = app as any;
+  const stage = inside.stage.bind(inside);
+  let calls = 0;
+  inside.stage = async () => {
+    const runtime = await stage();
+    if (++calls === 2) {
+      inside.stage = stage;
+      await tap();
+    }
+    return runtime;
+  };
+}
+
+test('a tap while a section is starting wins: the song already on stage', () => withFollow(async ({ app, songs }) => {
+  await followOn(app);
+  await app.command({ type: 'fadeTime', value: 0 }, 'operator');
+  await app.liveSlide(slide('c2', null));
+  await waitFor(() => app.state?.look === songs.c2, 'Song One');
+  tapDuringSectionStart(app, () => app.command({ type: 'blackout' }, 'operator'));
+  await app.liveSlide(slide('c2', 'ch1'));
+  await waitFor(() => app.state?.look === 'blackout', 'Blackout');
+  await sleep(100);
+  assert.equal(app.state!.section, null);
+  assert.equal(presetOf(app, 'back-wall'), '__blackout', "the chorus's colours never land on top of Blackout");
+  assert.equal(app.state!.follow?.on, false);
+}, { shape: chorusLook }));
+
+test('a tap while a section is starting wins: another song on stage', () => withFollow(async ({ app, songs }) => {
+  await followOn(app);
+  await app.command({ type: 'fadeTime', value: 0 }, 'operator');
+  await app.liveSlide(slide('c4', null, 'Song Two'));
+  await waitFor(() => app.state?.look === songs.c4, 'Song Two');
+  tapDuringSectionStart(app, () => app.command({ type: 'blackout' }, 'operator'));
+  await app.liveSlide(slide('c2', 'ch1'));
+  await waitFor(() => app.state?.look === 'blackout', 'Blackout');
+  await sleep(150);
+  assert.equal(app.state!.look, 'blackout', 'Song One never starts after the tap');
+  assert.equal(app.state!.timeline, null, "nor does Song One's timeline");
+  assert.equal(app.state!.section, null);
+}, { shape: withTimeline }));
+
+test('Undo brings back the section that was on stage with the lights', () => withFollow(async ({ app, songs }) => {
+  await followOn(app);
+  await app.command({ type: 'fadeTime', value: 0 }, 'operator');
+  await app.liveSlide(slide('c2', 'v1'));
+  await waitFor(() => app.state?.section?.kind === 'verse', 'the verse');
+  await app.liveSlide(slide('c2', 'ch1'));
+  await waitFor(() => app.state?.section?.kind === 'chorus' && presetOf(app, 'back-wall') === 'back-amber', 'the chorus');
+  // Undo of the chorus: the verse again, as it was.
+  assert.equal(await app.command({ type: 'undo' }, 'operator'), null);
+  await waitFor(() => app.state?.section?.kind === 'verse' && presetOf(app, 'back-wall') === 'back-purple', 'the verse back');
+  await sleep(60);
+  assert.deepEqual(app.state!.section, { song: songs.c2, kind: 'verse', changed: false });
+  assert.equal(app.state!.follow?.on, true, 'Undo does not pause Auto-follow');
+  // The verse is what is on stage now, so a chorus slide starts the chorus again.
+  await app.liveSlide(slide('c2', 'ch2'));
+  await waitFor(() => app.state?.section?.kind === 'chorus' && presetOf(app, 'back-wall') === 'back-amber', 'the chorus again');
+}, { shape: chorusLook }));
+
+test('Undo of a section that started its song: one step back is the song, two the section before', () => withFollow(async ({ app, songs }) => {
+  await followOn(app);
+  await app.command({ type: 'fadeTime', value: 0 }, 'operator');
+  await app.liveSlide(slide('c4', 'x1', 'Song Two'));
+  await waitFor(() => app.state?.look === songs.c4 && app.state.section?.kind === 'chorus', "Song Two's chorus");
+  await app.liveSlide(slide('c2', 'ch1'));
+  await waitFor(() => app.state?.look === songs.c2 && app.state.section?.song === songs.c2, "Song One's chorus");
+  assert.equal(await app.command({ type: 'undo' }, 'operator'), null);
+  await waitFor(() => app.state?.section === null && presetOf(app, 'back-wall') === 'back-purple', 'Song One without a section');
+  assert.equal(app.state!.look, songs.c2);
+  assert.equal(await app.command({ type: 'undo' }, 'operator'), null);
+  await waitFor(() => app.state?.look === songs.c4 && app.state.section?.song === songs.c4, "Song Two's chorus back");
+  await sleep(60);
+  assert.deepEqual(app.state!.section, { song: songs.c4, kind: 'chorus', changed: false });
+}, { shape: chorusLook }));
+
+test('a timeline started live from the Timeline page pauses Auto-follow', () => withFollow(async ({ app, tablet }) => {
+  await followOn(app);
+  const t = await tablet();
+  assert.equal(await t.send({ type: 'timelineStart', id: 'song-one-tl', at: 0 }), null);
+  await waitFor(() => app.state?.timeline?.id === 'song-one-tl', 'the timeline running');
+  assert.equal(app.state!.follow?.on, false);
+  t.close();
+}, { shape: withTimeline }));
 
 // ---- The connection and the switch ----
 
-test('Planning off: no follow state and the connection stops; on again, it starts', () => withFollow(async ({ app, call, sockets }) => {
+test('Planning off: no follow state, the connection stops and Auto-follow pauses; on again, it connects', () => withFollow(async ({ app, call, sockets }) => {
   await waitFor(() => sockets.length === 1, 'a live connection');
+  await followOn(app);
   assert.ok(app.state!.follow);
   assert.equal(app.state!.follow!.live.state, 'connecting');
   assert.equal((await call('PUT', '/api/settings', { planning: { enabled: false } })).status, 200);
@@ -385,6 +486,7 @@ test('Planning off: no follow state and the connection stops; on again, it start
   assert.equal((await call('PUT', '/api/settings', { planning: { enabled: true, account: 'acc1', serviceType: 'type1' } })).status, 200);
   await waitFor(() => sockets.length === 2, 'a new live connection');
   await waitFor(() => app.state?.follow?.live.state === 'connecting', 'connecting');
+  assert.equal(app.state!.follow!.on, false, 'Auto-follow is off when Planning comes back on');
 }));
 
 test('Planning on but no account to be found: the follow state says so', () => withFollow(async ({ app, call, fake, sockets }) => {
