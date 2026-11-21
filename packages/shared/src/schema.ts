@@ -384,6 +384,26 @@ export const PlanningSettings = z.object({
 });
 export type PlanningSettings = z.infer<typeof PlanningSettings>;
 
+/** One standard song (Settings › Standard songs): its name, its colour, and the white of the groups that light faces. */
+export const StandardSong = z.object({
+  name: z.string().trim().min(1, 'Each song needs a name.').max(40, 'A song name is at most 40 characters.'),
+  /** A colour chosen by name uses each group's own colour with that name, and `hex` where a group has none; an Any colour has only `hex`. */
+  colour: z.object({
+    name: z.string().trim().min(1).max(40).optional(),
+    hex: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A song colour is #rrggbb.'),
+  }),
+  faces: z.enum(['warm', 'cool']),
+});
+export type StandardSong = z.infer<typeof StandardSong>;
+
+/** Song 1 to Song 5 for "Use the standard songs". Absent in older shows: the starting values (see runningorder.ts). */
+export const StandardSongsSettings = z.object({
+  songs: z.array(StandardSong).length(5, 'There are five standard songs.'),
+  /** The groups that light people's faces: they stay white. Absent = guessed from the group names. */
+  faceGroups: z.array(id).max(256).optional(),
+});
+export type StandardSongsSettings = z.infer<typeof StandardSongsSettings>;
+
 export const Settings = z.object({
   /** The default output: every universe goes here unless a route says otherwise. */
   output: OutputSettings.default({ kind: 'artnet', host: '2.255.255.255' }),
@@ -400,6 +420,8 @@ export const Settings = z.object({
   contact: Contact.transform((c) => (c.name || c.phone ? c : undefined)).optional(),
   /** Absent in older shows: no planning service. */
   planning: PlanningSettings.optional(),
+  /** Absent in older shows: the standard songs start as they always did. */
+  standardSongs: StandardSongsSettings.optional(),
 }).superRefine((s, ctx) => {
   for (const message of routeProblems(s.output, s.routes)) ctx.addIssue({ code: 'custom', message, path: ['routes'] });
 });
@@ -521,6 +543,7 @@ export type Show = z.infer<typeof Show>;
 /** Parse a show and check every reference inside it. Throws with a readable message. */
 export function parseShow(input: unknown): Show {
   const show = Show.parse(input);
+  dropMissingFaceGroups(show);
   const problems = checkReferences(show);
   if (problems.length) throw new Error(`Show has broken references:\n- ${problems.join('\n- ')}`);
   return show;
@@ -577,7 +600,16 @@ export function checkReferences(show: Show): string[] {
   for (const l of show.operator.kept ?? []) if (!looks.has(l)) problems.push(`kept rows list unknown look "${l}"`);
   for (const q of show.operator.quickLooks) if (!looks.has(q.look)) problems.push(`quick looks list unknown look "${q.look}"`);
   if (show.operator.safeLook && !looks.has(show.operator.safeLook)) problems.push(`Safe uses unknown look "${show.operator.safeLook}"`);
+  for (const g of show.settings.standardSongs?.faceGroups ?? []) if (!groups.has(g)) problems.push(`the standard songs light faces with unknown group "${g}"`);
   return problems;
+}
+
+/** Forgets, in place, the face groups of the standard songs that the show no longer has (a group deleted in Patch). */
+export function dropMissingFaceGroups(show: Show): void {
+  const standard = show.settings.standardSongs;
+  if (!standard?.faceGroups) return;
+  const groups = new Set(show.groups.map((g) => g.id));
+  standard.faceGroups = standard.faceGroups.filter((g) => groups.has(g));
 }
 
 /** The show's own profile with this id, else the built-in one. */
