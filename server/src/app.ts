@@ -13,7 +13,7 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, clearService, useStandardSongs, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
+  BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, StandardSongsSettings, applyStandardSettings, standardChoices, standardSettingsOf, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, clearService, useStandardSongs, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
   applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isSectionLook, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo, setItemTimeline, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
   BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
@@ -2030,6 +2030,10 @@ export class App {
       apc: this.apcStatus(),
       /** Loading the service from the planning service. The login is not part of it: it is kept apart and never shown. */
       planning: s.planning ?? { enabled: false },
+      /** Song 1 to Song 5 as they are (the starting values until saved); `faceGroups` only once someone saved them. */
+      standardSongs: { songs: standardSettingsOf(this.show).songs, ...(s.standardSongs?.faceGroups ? { faceGroups: s.standardSongs.faceGroups } : {}) },
+      /** What the Standard songs card offers: the show's colours by name, and the light groups with their face ticks. */
+      standardChoices: standardChoices(this.show),
     };
   }
 
@@ -2519,7 +2523,7 @@ export class App {
 
   /** A copy of the show with the settings form's changes; throws 400 on bad values. */
   private applySettings(body: Record<string, unknown>): Show {
-    const show: Show = structuredClone(this.show);
+    let show: Show = structuredClone(this.show);
     try {
       if (typeof body.showName === 'string' && body.showName.trim()) show.name = body.showName.trim();
       if (body.output !== undefined) {
@@ -2540,6 +2544,15 @@ export class App {
         const planning = PlanningSettings.parse(body.planning);
         if (planning.newSongLook !== undefined && !show.looks.some((l) => l.id === planning.newSongLook)) throw new Error('There is no such look to start new songs from.');
         show.settings.planning = planning;
+      }
+      if (body.standardSongs !== undefined) {
+        // In plain words: the card shows the first problem as it is.
+        const parsed = StandardSongsSettings.safeParse(body.standardSongs);
+        if (!parsed.success) throw new Error(parsed.error.issues[0]!.message);
+        const gone = parsed.data.faceGroups?.find((g) => !show.groups.some((x) => x.id === g));
+        if (gone !== undefined) throw new Error(`The show has no group "${gone}".`);
+        // The songs whose settings changed get looks made from them; nothing on stage changes.
+        show = applyStandardSettings(show, this.show.settings.standardSongs, parsed.data);
       }
       if (typeof body.manualForOperators === 'boolean') show.operator.manualForOperators = body.manualForOperators;
       if (body.universe !== undefined) {

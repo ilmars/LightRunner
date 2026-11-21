@@ -392,7 +392,7 @@ export const StandardSong = z.object({
     name: z.string().trim().min(1).max(40).optional(),
     hex: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A song colour is #rrggbb.'),
   }),
-  faces: z.enum(['warm', 'cool']),
+  faces: z.enum(['warm', 'cool'], 'Faces are warm or cool white.'),
 });
 export type StandardSong = z.infer<typeof StandardSong>;
 
