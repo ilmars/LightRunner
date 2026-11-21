@@ -151,6 +151,151 @@ $('planningSaveLogin').addEventListener('click', async () => {
   button.disabled = false;
 });
 
+// ---- Standard songs ----
+// Song 1 to Song 5: a name, a colour (one of the show's by name, or Any colour) and warm or cool white for faces, then
+// the groups that light faces. Saved with the page's Save; the server rebuilds only the songs that changed.
+
+/** The song whose colour chooser is open (0 to 4), or null. */
+let colourOpen = null;
+const HEX = /^#[0-9a-f]{6}$/i;
+
+/** The face ticks as they are on the page: the ones saved, else the server's guess. A group that only shows white is always ticked. */
+function faceTicks(s) {
+  const groups = s.standardChoices.groups;
+  const chosen = s.standardSongs.faceGroups ? new Set(s.standardSongs.faceGroups) : new Set(groups.filter((g) => g.face).map((g) => g.id));
+  return new Set(groups.filter((g) => g.whiteOnly || chosen.has(g.id)).map((g) => g.id));
+}
+
+function renderSongs() {
+  const s = draft;
+  const box = $('songRows');
+  box.querySelectorAll('.song-row:not(.song-head)').forEach((r) => r.remove());
+  s.standardSongs.songs.forEach((song, i) => box.append(songRow(song, i)));
+
+  const ticks = faceTicks(s);
+  const list = $('faceTicks');
+  list.replaceChildren();
+  for (const g of s.standardChoices.groups) {
+    const input = el('input');
+    input.type = 'checkbox';
+    input.checked = ticks.has(g.id);
+    input.disabled = g.whiteOnly;
+    const chip = el('label', 'face-tick');
+    chip.classList.toggle('on', input.checked);
+    chip.classList.toggle('locked', g.whiteOnly);
+    input.addEventListener('change', () => {
+      const now = faceTicks(draft);
+      if (input.checked) now.add(g.id);
+      else now.delete(g.id);
+      draft.standardSongs.faceGroups = draft.standardChoices.groups.filter((x) => now.has(x.id)).map((x) => x.id);
+      chip.classList.toggle('on', input.checked);
+      markDirty();
+    });
+    chip.append(input, el('span', 'face-tick-mark', '✓'), el('span', null, g.name));
+    if (g.whiteOnly) chip.append(el('small', null, 'only white'));
+    list.append(chip);
+  }
+}
+
+function songRow(song, i) {
+  const row = el('div', 'song-row');
+  const name = el('input', 'ds-field');
+  name.type = 'text';
+  name.maxLength = 40;
+  name.autocomplete = 'off';
+  name.value = song.name;
+  name.setAttribute('aria-label', `Song ${i + 1} name`);
+  name.addEventListener('input', () => { draft.standardSongs.songs[i].name = name.value; markDirty(); });
+
+  const pick = el('div', 'song-colour');
+  const button = el('button', 'ds-field song-colour-btn');
+  button.type = 'button';
+  button.setAttribute('aria-haspopup', 'true');
+  button.setAttribute('aria-expanded', String(colourOpen === i));
+  button.setAttribute('aria-label', `Song ${i + 1} colour`);
+  const swatch = el('span', 'ds-swatch');
+  swatch.style.background = song.colour.hex;
+  button.append(swatch, el('span', 'song-colour-name', song.colour.name ?? 'Any colour'));
+  button.addEventListener('click', () => { colourOpen = colourOpen === i ? null : i; renderSongs(); });
+  pick.append(button);
+  if (colourOpen === i) pick.append(colourMenu(song, i));
+
+  const faces = el('div', 'ds-seg');
+  faces.setAttribute('role', 'radiogroup');
+  faces.setAttribute('aria-label', `Song ${i + 1} faces`);
+  for (const [value, text] of [['warm', 'Warm white'], ['cool', 'Cool white']]) {
+    const b = el('button', null, text);
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(song.faces === value));
+    b.addEventListener('click', () => edit((d) => { d.standardSongs.songs[i].faces = value; }));
+    faces.append(b);
+  }
+  row.append(name, pick, faces);
+  return row;
+}
+
+/** The colour chooser: the show's colours by name, then Any colour (a colour box and a #RRGGBB field). */
+function colourMenu(song, i) {
+  const menu = el('div', 'colour-menu');
+  menu.setAttribute('role', 'menu');
+  const set = (colour) => { colourOpen = null; edit((d) => { d.standardSongs.songs[i].colour = colour; }); };
+  const choices = el('div', 'colour-choices');
+  for (const c of draft.standardChoices.colours) {
+    const b = el('button', 'colour-choice');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.classList.toggle('on', song.colour.name === c.name);
+    const sw = el('span', 'ds-swatch');
+    sw.style.background = c.swatch;
+    b.append(sw, el('span', null, c.name));
+    b.addEventListener('click', () => set({ name: c.name, hex: c.swatch }));
+    choices.append(b);
+  }
+  if (!draft.standardChoices.colours.length) choices.append(el('p', 'hint', 'No group of the show has colours of its own yet.'));
+
+  const any = el('div', 'colour-any');
+  any.classList.toggle('on', song.colour.name === undefined);
+  const box = el('input', 'colour-box');
+  box.type = 'color';
+  box.value = song.colour.hex.toLowerCase();
+  box.setAttribute('aria-label', 'Any colour');
+  box.addEventListener('change', () => set({ hex: box.value }));
+  const field = el('input', 'ds-field colour-hex');
+  field.type = 'text';
+  field.maxLength = 7;
+  field.placeholder = '#RRGGBB';
+  field.autocomplete = 'off';
+  field.spellcheck = false;
+  field.value = song.colour.name === undefined ? song.colour.hex.toUpperCase() : '';
+  field.setAttribute('aria-label', 'Any colour as #RRGGBB');
+  const note = el('p', 'hint colour-note');
+  const typed = () => {
+    const v = field.value.trim();
+    const hex = v.startsWith('#') ? v : `#${v}`;
+    if (HEX.test(hex)) set({ hex: hex.toLowerCase() });
+    else note.textContent = 'Type a colour as #RRGGBB.';
+  };
+  // Enter leaves the field, and leaving it sets the colour (once: the chooser is drawn again after it).
+  field.addEventListener('change', typed);
+  field.addEventListener('keydown', (e) => { if (e.key === 'Enter') field.blur(); });
+  any.append(el('span', 'colour-any-label', 'Any colour'), box, field);
+  menu.append(choices, any, note);
+  return menu;
+}
+
+// The chooser closes with a tap outside it or Escape.
+document.addEventListener('pointerdown', (e) => {
+  if (colourOpen === null || e.target.closest?.('.song-colour')) return;
+  colourOpen = null;
+  renderSongs();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || colourOpen === null) return;
+  colourOpen = null;
+  renderSongs();
+});
+
 // ---- Fixture database (Open Fixture Library) ----
 
 let oflTimer = 0;
@@ -259,6 +404,7 @@ function render() {
   $('oscProblem').textContent = s.osc.enabled ? s.oscProblem ?? '' : '';
 
   renderPlanning();
+  renderSongs();
 
   $('frameRate').value = String(s.frameRate);
   $('gamma').value = String(s.gamma);
@@ -530,7 +676,7 @@ function watch() {
 
 function changedFields() {
   const out = {};
-  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators', 'osc', 'contact', 'planning'];
+  const keys = ['showName', 'output', 'routes', 'frameRate', 'gamma', 'manualForOperators', 'osc', 'contact', 'planning', 'standardSongs'];
   for (const k of keys) if (JSON.stringify(draft[k]) !== JSON.stringify(saved[k])) out[k] = draft[k];
   if (draft.universe !== undefined && draft.universe !== saved.universes[0]) out.universe = draft.universe;
   return out;
@@ -575,7 +721,7 @@ $('frameRate').addEventListener('change', (e) => { draft.frameRate = Number(e.ta
 $('gamma').addEventListener('input', (e) => { draft.gamma = Number(e.target.value); markDirty(); });
 $('showName').addEventListener('input', (e) => { draft.showName = e.target.value; markDirty(); });
 
-$('discard').addEventListener('click', () => { draft = structuredClone(saved); sacnUnicast.clear(); render(); });
+$('discard').addEventListener('click', () => { draft = structuredClone(saved); sacnUnicast.clear(); colourOpen = null; render(); });
 $('save').addEventListener('click', async () => {
   // "One receiver" with no address would save as multicast without a word.
   const noReceiver = draft.routes.find((r) => r.output.kind === 'sacn' && !r.output.host && sacnUnicast.has(r.universe));
