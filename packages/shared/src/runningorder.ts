@@ -430,9 +430,9 @@ const STANDARD_LIGHTS: Record<string, { names: string[]; hex: string }> = {
   teal: { names: ['Tirkīzs', 'Teal', 'Turquoise', 'Cyan'], hex: '#00c8b4' },
   pink: { names: ['Rozā', 'Pink', 'Magenta'], hex: '#ff2d8c' },
   warm: { names: ['Silti balts', 'Warm white', 'Silti 3200K'], hex: '#ffb46b' },
-  cool: { names: ['Vēsi balts', 'Cool white'], hex: '#dcebff' },
+  cool: { names: ['Vēsi balts', 'Cool white', 'Vēsi 6500K'], hex: '#dcebff' },
 };
-/** A colour with one of these in its name counts as warm or cool white when no name above matches. */
+/** A colour with one of these in its name counts as warm or cool white when no name above matches (compared as plain names). */
 const STANDARD_WORDS: Record<string, string[]> = { warm: ['warm', 'silti'], cool: ['cool', 'vēsi'] };
 
 /** The remembered key of standard song `n` (1 to 5). */
@@ -503,21 +503,29 @@ export function standardChoices(show: Show): { colours: { name: string; swatch: 
       colours.push({ name: p.name, swatch: p.swatch ?? swatchOf(show, p) ?? '#ffffff' });
     }
   }
-  return { colours, groups: lights.map((g) => ({ id: g.id, name: g.name, whiteOnly: groupIsWhiteOnly(show, g.id), face: faces.has(g.id) })) };
+  return { colours, groups: lights.map((g) => {
+    const whiteOnly = groupIsWhiteOnly(show, g.id);
+    return { id: g.id, name: g.name, whiteOnly, face: whiteOnly || faces.has(g.id) };
+  }) };
+}
+
+/** The groups that light faces: the ones ticked, and every group that only shows white (it can't take a colour). */
+function faceSet(show: Show, settings: StandardSongsOf): Set<string> {
+  return new Set(show.groups.filter((g) => g.kind !== 'smoke' && (settings.faceGroups.includes(g.id) || groupIsWhiteOnly(show, g.id))).map((g) => g.id));
 }
 
 /**
  * The look entries of standard song `n` (1 to 5): every group of the show, smoke machines left out, at full. A group that
- * only shows white is warm white; a group that lights faces is the song's warm or cool white; every other group takes
- * the song's colour: its own colour of that name, else the song's colour as an Any colour.
+ * lights faces (ticked, or one that only shows white) is the song's warm or cool white; every other group takes the
+ * song's colour: its own colour of that name, else the song's colour as an Any colour.
  */
 function standardEntries(show: Show, n: number, settings: StandardSongsOf): LookEntry[] {
   const song = settings.songs[n - 1]!;
-  const faces = new Set(settings.faceGroups);
+  const faces = faceSet(show, settings);
   const groups: Record<string, string> = {};
   for (const group of show.groups) {
     if (group.kind === 'smoke') continue;
-    const white = groupIsWhiteOnly(show, group.id) ? 'warm' : faces.has(group.id) ? song.faces : undefined;
+    const white = faces.has(group.id) ? song.faces : undefined;
     groups[group.id] = white
       ? standardPreset(show, group.id, white) ?? livePresetId(group.id, STANDARD_LIGHTS[white]!.hex)
       : (song.colour.name === undefined ? undefined : namedPreset(show, group.id, song.colour.name)) ?? livePresetId(group.id, song.colour.hex);
@@ -525,15 +533,19 @@ function standardEntries(show: Show, n: number, settings: StandardSongsOf): Look
   return entriesFor(show, { groups, levels: Object.fromEntries(Object.keys(groups).map((g) => [g, 1])) });
 }
 
-/** A song's settings as one string, to tell whether they changed. */
-const songKey = (s: StandardSong) => JSON.stringify([s.name, s.colour.name ?? null, s.colour.hex.toLowerCase(), s.faces]);
+/**
+ * A song's light as one string, to tell whether it changed: its faces, and its colour by name (the hex then only matters
+ * where a group has no colour of that name, and comes from whichever swatch was picked), or by hex for an Any colour.
+ */
+const lightKey = (s: StandardSong) => JSON.stringify([s.faces, s.colour.name !== undefined ? ['name', s.colour.name] : ['hex', s.colour.hex.toLowerCase()]]);
 
 /**
  * Settings › Standard songs saved: the show with `after` as its settings, and the remembered look of each standard song
- * whose settings changed from `before` rebuilt from them (its groups and its name; its place and tempo stay). A change to
- * the face groups changes all five. A song whose settings didn't change keeps its look exactly, so a change saved on
- * the iPad stays; a song with no look yet is made from the settings the next time the standard songs are used.
- * Nothing on stage changes: a rebuilt song that is on stage shows as changed.
+ * changed from `before`: a new name renames it; a new colour or faces gives it new groups made from the settings (its
+ * place and tempo stay). A change to the face groups gives all five new groups. A song whose settings didn't change keeps
+ * its look exactly, and a new name alone keeps its groups, so a change saved on the iPad stays; a song with no look yet
+ * is made from the settings the next time the standard songs are used. Nothing on stage changes: a rebuilt song that is
+ * on stage shows as changed.
  */
 export function applyStandardSettings(show: Show, before: StandardSongsSettings | undefined, after: StandardSongsSettings | undefined): Show {
   const out = structuredClone(show);
@@ -541,15 +553,15 @@ export function applyStandardSettings(show: Show, before: StandardSongsSettings 
   if (after) out.settings.standardSongs = structuredClone(after);
   else delete out.settings.standardSongs;
   const now = standardSettingsOf(out);
-  const faces = (s: StandardSongsOf) => JSON.stringify([...s.faceGroups].sort());
+  const faces = (s: StandardSongsOf) => JSON.stringify([...faceSet(out, s)].sort());
   const allChanged = faces(was) !== faces(now);
   const remembered = out.operator.remembered ?? {};
   for (let n = 1; n <= 5; n++) {
-    if (!allChanged && songKey(was.songs[n - 1]!) === songKey(now.songs[n - 1]!)) continue;
     const look = out.looks.find((l) => l.id === remembered[standardKey(n)]);
     if (!look) continue;
-    look.groups = standardEntries(out, n, now);
-    look.name = now.songs[n - 1]!.name;
+    const old = was.songs[n - 1]!, song = now.songs[n - 1]!;
+    if (allChanged || lightKey(old) !== lightKey(song)) look.groups = standardEntries(out, n, now);
+    if (old.name !== song.name) look.name = song.name;
   }
   return out;
 }

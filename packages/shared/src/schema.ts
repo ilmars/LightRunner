@@ -384,24 +384,24 @@ export const PlanningSettings = z.object({
 });
 export type PlanningSettings = z.infer<typeof PlanningSettings>;
 
-/** One standard song (Settings › Standard songs): its name, its colour, and the white of the groups that light faces. */
+/** One standard song (Settings › Standard songs): its name, its colour, and the white of the groups that light faces. Every problem in plain words. */
 export const StandardSong = z.object({
-  name: z.string().trim().min(1, 'Each song needs a name.').max(40, 'A song name is at most 40 characters.'),
+  name: z.string('Each song needs a name.').trim().min(1, 'Each song needs a name.').max(40, 'A song name is at most 40 characters.'),
   /** A colour chosen by name uses each group's own colour with that name, and `hex` where a group has none; an Any colour has only `hex`. */
   colour: z.object({
-    name: z.string().trim().min(1).max(40).optional(),
-    hex: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A song colour is #rrggbb.'),
-  }),
+    name: z.string('A colour name is text.').trim().min(1, 'A colour name is needed.').max(40, 'A colour name is at most 40 characters.').optional(),
+    hex: z.string('A song colour is #rrggbb.').regex(/^#[0-9a-fA-F]{6}$/, 'A song colour is #rrggbb.'),
+  }, 'Each song needs a colour.'),
   faces: z.enum(['warm', 'cool'], 'Faces are warm or cool white.'),
-});
+}, 'Each song needs a name, a colour and faces.');
 export type StandardSong = z.infer<typeof StandardSong>;
 
 /** Song 1 to Song 5 for "Use the standard songs". Absent in older shows: the starting values (see runningorder.ts). */
 export const StandardSongsSettings = z.object({
-  songs: z.array(StandardSong).length(5, 'There are five standard songs.'),
+  songs: z.array(StandardSong, 'There are five standard songs.').length(5, 'There are five standard songs.'),
   /** The groups that light people's faces: they stay white. Absent = guessed from the group names. */
-  faceGroups: z.array(id).max(256).optional(),
-});
+  faceGroups: z.array(id, 'The face groups are a list of groups.').max(256, 'There are too many face groups.').optional(),
+}, 'The standard songs are not in the right form.');
 export type StandardSongsSettings = z.infer<typeof StandardSongsSettings>;
 
 export const Settings = z.object({

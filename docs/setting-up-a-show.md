@@ -125,8 +125,8 @@ A song is one saved picture of the stage: every group's colour, level and effect
 **The standard songs.** **Use the standard songs** (in **Edit list**, and in the Load service panel) puts Song 1 to Song 5 in the running order, each in its own colour. What they start with is set in **Settings › Standard songs**:
 
 - Each song has a **name**, a **colour** and **Faces**: warm white or cool white. Tap the colour to choose one of the show's colours by name (each group then uses its own colour with that name), or type an **Any colour** as #RRGGBB.
-- **These groups light people's faces:** a ticked group stays white (the song's warm or cool white); the others take the song's colour. A group that can only show white stays white.
-- Press **Save**. Only the songs you changed get a new look (changing the ticks changes all five). The lights on stage don't change: a song on stage that got a new look shows "● changed" until you start it again.
+- **These groups light people's faces:** a ticked group stays white (the song's warm or cool white); the others take the song's colour. A group that can only show white is always ticked: it follows the song's warm or cool white too.
+- Press **Save**. Only the songs whose colour or faces you changed get a new look; a new name only renames the song. Changing the ticks gives all five a new look, replacing changes saved on the iPad. The lights on stage don't change: a song on stage that got a new look shows "● changed" until you start it again.
 - **The newest change wins.** A change saved on the iPad (**Save to Song 2**) stays until someone changes Song 2 in Settings again, and a change in Settings stays until someone saves a new one on the iPad.
 
 ## 7. Quick looks

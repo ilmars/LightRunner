@@ -979,7 +979,9 @@ test('Song 2 is purple on the background and warm white on the front lights; eve
   assert.deepEqual([one, three, four, five].map((id) => presetOf(out, id!, 'drum-cage').name), ['Zils', 'Oranžs', 'Tirkīzs', 'Rozā']);
   assert.deepEqual([one, three, four, five].map((id) => presetOf(out, id!, 'b8-side-bar').name), ['Zils', 'Oranžs', 'Tirkīzs', 'Rozā']);
   assert.deepEqual([one, four, five].map((id) => presetOf(out, id!, 'key-lights').name), ['Silti balts', 'Vēsi balts', 'Vēsi balts']);
-  assert.equal(presetOf(out, five!, 'front-lights').name, 'Silti 3200K');
+  // The front lights only show white: they light faces, so they follow the song's warm or cool white too.
+  assert.equal(presetOf(out, one!, 'front-lights').name, 'Silti 3200K');
+  assert.equal(presetOf(out, five!, 'front-lights').name, 'Vēsi 6500K');
   for (const id of songsOf(out)) for (const e of lookOf(out, id).groups) assert.equal(e.level ?? 1, 1);
   assert.equal(lookOf(out, one!).groups.length, 5);
 });
@@ -1112,14 +1114,34 @@ test('changing Song 2 in Settings rebuilds Song 2 only; Song 1 keeps the change 
   parseShow(out);
 });
 
-test('a new name in Settings renames the song\'s look', () => {
+test('a new name alone in Settings only renames the song\'s look: a change saved on the iPad stays', () => {
   const once = useStandardSongs(keptRig());
-  const three = songsOf(once)[2]!;
-  const out = applyStandardSettings(once, undefined, changedSong(once, 3, { name: 'Prieks' }));
-  assert.equal(nameOf(out, three), 'Prieks');
-  const colours = (s: Show) => lookOf(s, three).groups.map((e) => presetOf(s, three, e.group).name);
-  assert.deepEqual(colours(out), colours(once));
-  assert.equal(nameOf(out, songsOf(out)[1]!), 'Song 2');
+  const two = songsOf(once)[1]!;
+  const pink = once.presets.find((p) => p.group === 'background' && p.name === 'Rozā')!.id;
+  const stage = stageOf(once, two);
+  const ipad = saveItem(once, two, { ...stage, groups: { ...stage.groups, background: pink } });
+  const out = applyStandardSettings(ipad, undefined, changedSong(ipad, 2, { name: 'Prieks' }));
+  assert.equal(nameOf(out, two), 'Prieks');
+  assert.deepEqual(lookOf(out, two).groups, lookOf(ipad, two).groups);
+  assert.equal(presetOf(out, two, 'background').name, 'Rozā');
+  assert.equal(nameOf(out, songsOf(out)[0]!), 'Song 1');
+  // A new name with a new colour rebuilds the colours too.
+  const both = applyStandardSettings(ipad, undefined, changedSong(ipad, 2, { name: 'Prieks', colour: { name: 'Zils', hex: '#1f4bff' } }));
+  assert.equal(nameOf(both, two), 'Prieks');
+  assert.equal(presetOf(both, two, 'background').name, 'Zils');
+});
+
+test('choosing the same colour by name again is no change, whatever hex comes with it', () => {
+  const once = useStandardSongs(keptRig());
+  const two = songsOf(once)[1]!;
+  const pink = once.presets.find((p) => p.group === 'background' && p.name === 'Rozā')!.id;
+  const stage = stageOf(once, two);
+  const ipad = saveItem(once, two, { ...stage, groups: { ...stage.groups, background: pink } });
+  const out = applyStandardSettings(ipad, undefined, changedSong(ipad, 2, { colour: { name: 'Violets', hex: '#7a00e0' } }));
+  assert.deepEqual(out.looks, ipad.looks);
+  // An Any colour (no name) is compared by its hex.
+  const any = applyStandardSettings(ipad, undefined, changedSong(ipad, 2, { colour: { hex: '#7a00e0' } }));
+  assert.equal(hexOf(presetOf(any, two, 'background')), '#7a00e0');
 });
 
 test('changing which groups light faces rebuilds all five songs', () => {
@@ -1137,13 +1159,19 @@ test('changing which groups light faces rebuilds all five songs', () => {
   assert.deepEqual(same.looks, ipad.looks);
 });
 
-test('a group that only shows white stays white, ticked or not; an unticked group takes the song\'s colour', () => {
+test('a group that only shows white always lights faces, in the song\'s warm or cool white; an unticked group takes the song\'s colour', () => {
   const once = useStandardSongs(keptRig());
   const out = applyStandardSettings(once, undefined, { ...standardSettingsOf(once), faceGroups: [] });
-  const [one, , , four] = songsOf(out);
-  assert.equal(presetOf(out, four!, 'front-lights').name, 'Silti 3200K');
+  const [one, , , four, five] = songsOf(out);
+  assert.equal(presetOf(out, one!, 'front-lights').name, 'Silti 3200K');
+  assert.equal(presetOf(out, four!, 'front-lights').name, 'Vēsi 6500K');
   assert.equal(presetOf(out, one!, 'key-lights').name, 'Zils');
   assert.equal(presetOf(out, four!, 'key-lights').name, 'Tirkīzs');
+  // Song 5 set to warm: the front lights follow it.
+  const warm = applyStandardSettings(out, out.settings.standardSongs, changedSong(out, 5, { faces: 'warm' }));
+  assert.equal(presetOf(warm, five!, 'front-lights').name, 'Silti 3200K');
+  // Ticked or not, the card shows a white-only group as lighting faces.
+  assert.equal(standardChoices(out).groups.find((g) => g.id === 'front-lights')!.face, true);
 });
 
 test('a song with no look yet is not made by Settings; Use the standard songs makes it from the settings', () => {

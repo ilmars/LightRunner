@@ -214,6 +214,13 @@ test('Standard songs: the starting values and the choices, plain words for bad i
     await refused({ songs: songs.map((s: any, i: number) => (i === 1 ? { ...s, colour: { hex: 'blue' } } : s)) }, 'A song colour is #rrggbb.');
     await refused({ songs: songs.map((s: any, i: number) => (i === 1 ? { ...s, name: '  ' } : s)) }, 'Each song needs a name.');
     await refused({ songs, faceGroups: ['no-such-group'] }, 'The show has no group "no-such-group".');
+    // What zod would say in its own words reaches the page in plain ones.
+    await refused({}, 'There are five standard songs.');
+    await refused('Song 1', 'The standard songs are not in the right form.');
+    await refused({ songs: songs.map((s: any, i: number) => (i === 1 ? { ...s, colour: { name: 'x'.repeat(41), hex: '#123456' } } : s)) }, 'A colour name is at most 40 characters.');
+    await refused({ songs: songs.map((s: any, i: number) => (i === 1 ? { name: s.name, faces: s.faces } : s)) }, 'Each song needs a colour.');
+    await refused({ songs: songs.map((s: any, i: number) => (i === 1 ? { name: s.name, colour: s.colour } : s)) }, 'Faces are warm or cool white.');
+    await refused({ songs: songs.map((s: any, i: number) => (i === 1 ? { colour: s.colour, faces: s.faces } : s)) }, 'Each song needs a name.');
     assert.equal((await call('GET', '/api/show')).body.settings.standardSongs, undefined, 'nothing was saved');
 
     // Saved, then a show file naming a group the show doesn't have still opens: that group is dropped.
