@@ -67,6 +67,71 @@
 .ofl-update ul { margin: 6px 0 0; padding-left: 18px; max-height: 220px; overflow: auto; color: var(--ds-muted); font-size: 13px; }
 .ofl-update li .used { color: var(--ds-warn-text); font-weight: 600; margin-left: 6px; }
 
+/* Standard songs: a row per song (its name, its colour, warm or cool white for faces) over the face ticks. On a phone
+   the name takes its own line. */
+/* The rows share their columns (subgrid), so the heads line up with what is under them. */
+.song-rows { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto; column-gap: 14px; }
+.song-row {
+  grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; row-gap: 10px; align-items: center;
+  padding: 6px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+}
+.song-row:last-child { border-bottom: 0; }
+.song-head { padding: 0 0 2px; border-bottom: 0; color: var(--ds-muted); font-size: 13px; }
+@media (max-width: 640px) {
+  .song-rows { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .song-row { padding: 10px 0; }
+  .song-row > .ds-seg { grid-column: 1 / -1; }
+  .song-head { display: none; }
+}
+/* The colour: a button in the field's look, with the colour's swatch and name and a small chevron; it opens the chooser. */
+.song-colour { position: relative; min-width: 0; }
+.song-colour-btn {
+  display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; padding-right: 36px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ds-muted) 50%), linear-gradient(135deg, var(--ds-muted) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+}
+.song-colour-btn .ds-swatch { flex: none; }
+.song-colour-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The chooser: a small glass menu under the button, as the operator page's Fade and Tempo menus are. Over the cards,
+   under the top bar and the save bar (z-index 10 and 12). */
+.colour-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 9; width: min(340px, calc(100vw - 40px));
+  display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: var(--ds-r-tile);
+  background: var(--ds-glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
+}
+/* On a phone the colour is the right-hand column: its chooser opens towards the left. */
+@media (max-width: 640px) { .colour-menu { left: auto; right: 0; } }
+.colour-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; max-height: 268px; overflow: auto; scrollbar-width: thin; }
+.colour-choice {
+  display: flex; align-items: center; gap: 10px; min-height: var(--ds-target); padding: 0 12px; border: 0; border-radius: var(--ds-r-small);
+  background: transparent; color: var(--ds-muted-on); font-size: 14px; text-align: left; cursor: pointer;
+}
+.colour-choice:hover { background: var(--ds-elevated); color: var(--ds-text); }
+.colour-choice.on, .colour-any.on { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-text); }
+.colour-choice .ds-swatch { flex: none; }
+.colour-any { display: flex; align-items: center; gap: 10px; padding: 0 0 0 12px; border-radius: var(--ds-r-small); border-top: 1px solid rgba(148, 163, 184, 0.08); }
+.colour-any-label { flex: 1; color: var(--ds-muted-on); font-size: 14px; white-space: nowrap; }
+.colour-box { flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--ds-r-small); background: transparent; cursor: pointer; }
+.colour-box::-webkit-color-swatch-wrapper { padding: 8px; }
+.colour-box::-webkit-color-swatch { border: 0; border-radius: 6px; opacity: 0.85; }
+.colour-box::-moz-color-swatch { border: 0; border-radius: 6px; opacity: 0.85; }
+.colour-hex { flex: none; width: 108px; text-transform: uppercase; }
+.colour-note:empty { display: none; }
+/* Faces: a tick per light group (as Patch's "Use it for" ticks); a group that only shows white is ticked and can't be changed. */
+.face-ticks { display: flex; flex-wrap: wrap; gap: 6px; }
+.face-tick {
+  position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border-radius: var(--ds-r-pill);
+  background: var(--ds-tile-fill); box-shadow: inset 0 0 0 1px var(--ds-edge); font-size: 14px; color: var(--ds-muted-on); cursor: pointer; user-select: none; -webkit-user-select: none;
+}
+.face-tick input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.face-tick:focus-within { box-shadow: inset 0 0 0 1px var(--ds-accent); }
+.face-tick-mark { width: 12px; font-size: 13px; visibility: hidden; }
+.face-tick small { color: var(--ds-muted); font-size: 12px; }
+.face-tick.on { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-text); }
+.face-tick.on .face-tick-mark { visibility: visible; }
+.face-tick.on.locked { cursor: default; background: var(--ds-tile-fill); box-shadow: inset 0 0 0 1px var(--ds-edge-on); color: var(--ds-muted-on); }
+
 /* Controller keys: the devices beside the APC mini layout, then every action with its key, in two columns
    on a wide screen. A row: the action (and "hold" for the held ones) over its key, Assign a key and Clear. */
 .keys-top { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }

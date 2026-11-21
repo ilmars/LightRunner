@@ -122,6 +122,13 @@ A song is one saved picture of the stage: every group's colour, level and effect
 3. Tap **Edit list** to rename (tap the name and type; Enter finishes), drag **≡** to reorder (Basic lights stays first), or delete with **⊖** and then **Delete** (the second tap). Press **Done** when finished. Tapping a song does nothing while you edit.
 4. Songs have no sections or times of their own. **Fade** in the top bar sets how long changes take: **Auto** (each song's and colour's own), **Instant**, 1, 2, 3, 5 or 10 s. A colour's own fade is its **Fade into it**.
 
+**The standard songs.** **Use the standard songs** (in **Edit list**, and in the Load service panel) puts Song 1 to Song 5 in the running order, each in its own colour. What they start with is set in **Settings › Standard songs**:
+
+- Each song has a **name**, a **colour** and **Faces**: warm white or cool white. Tap the colour to choose one of the show's colours by name (each group then uses its own colour with that name), or type an **Any colour** as #RRGGBB.
+- **These groups light people's faces:** a ticked group stays white (the song's warm or cool white); the others take the song's colour. A group that can only show white is always ticked: it follows the song's warm or cool white too.
+- Press **Save**. Only the songs whose colour or faces you changed get a new look; a new name only renames the song. Changing the ticks gives all five a new look, replacing changes saved on the iPad. The lights on stage don't change: a song on stage that got a new look shows "● changed" until you start it again.
+- **The newest change wins.** A change saved on the iPad (**Save to Song 2**) stays until someone changes Song 2 in Settings again, and a change in Settings stays until someone saves a new one on the iPad.
+
 ## 7. Quick looks
 
 A quick look changes only some groups (say the back wall to turquoise) and leaves the others alone. They sit at the top right, on the **Plain**, **Colours** and **Effects** tabs. The tab only decides where the button is shown.

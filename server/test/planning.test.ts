@@ -809,6 +809,48 @@ test('using the standard songs is one Undo step that brings the planned service 
   t.close();
 }));
 
+test('Settings › Standard songs rebuilds only the songs changed there, the newest change wins, and the lights do not move', () => withPlanning(async (rig) => {
+  const { tablet, call } = rig;
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'standardSongs' }), null);
+  const remembered = (await showOf(rig)).operator.remembered;
+  const [one, two, three] = [1, 2, 3].map((n) => remembered[`standard:${n}`] as string);
+  const settings = (await call('GET', '/api/settings')).body;
+  assert.deepEqual(settings.standardSongs.songs.map((s: any) => s.name), ['Song 1', 'Song 2', 'Song 3', 'Song 4', 'Song 5']);
+  const backWall = (show: any, look: string) => show.presets.find((p: any) => p.id === entry(lookIn(show, look), 'back-wall').preset);
+
+  // Song 2 on stage while its settings change.
+  assert.equal(await t.command({ type: 'look', id: two, fade: 0 }), null);
+  await sleep(100);
+  const stage = { look: rig.app.state!.look, ...lights(rig) };
+  const before = await showOf(rig);
+  const backups = (await call('GET', '/api/backups')).body.length;
+  const songs = structuredClone(settings.standardSongs.songs);
+  songs[1] = { ...songs[1], name: 'Slava', colour: { hex: '#123456' } };
+  const r = await call('PUT', '/api/settings', { standardSongs: { songs } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.standardSongs.songs[1].name, 'Slava');
+  assert.equal((await call('GET', '/api/backups')).body.length, backups + 1, 'one save, with a backup');
+  const after = await showOf(rig);
+  assert.equal(lookIn(after, two).name, 'Slava');
+  assert.equal(backWall(after, two).layers[0].colour.hex, '#123456');
+  for (const id of [one, three]) assert.deepEqual(lookIn(after, id), lookIn(before, id));
+  assert.deepEqual({ look: rig.app.state!.look, ...lights(rig) }, stage, 'Settings never moves the lights');
+
+  // Song 2 changed on the iPad and saved to it; then only Song 3 changes in Settings: Song 2 keeps the iPad change.
+  assert.equal(await t.command({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 }), null);
+  assert.equal(await t.command({ type: 'saveItem', id: two }), null);
+  songs[2] = { ...songs[2], faces: 'cool' };
+  assert.equal((await call('PUT', '/api/settings', { standardSongs: { songs } })).status, 200);
+  assert.equal(entry(lookIn(await showOf(rig), two), 'back-wall').preset, 'back-amber');
+
+  // Song 2 changed in Settings again: the newest change wins.
+  songs[1] = { ...songs[1], colour: { name: 'Purple', hex: '#7a2bff' } };
+  assert.equal((await call('PUT', '/api/settings', { standardSongs: { songs } })).status, 200);
+  assert.equal(backWall(await showOf(rig), two).name, 'Purple');
+  t.close();
+}));
+
 test('clearing with no service loaded makes no Undo step', () => withPlanning(async (rig) => {
   const { app, tablet } = rig;
   await enable(rig);

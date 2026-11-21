@@ -193,6 +193,46 @@ test('Who to call survives a Patch save and an export and import, and blank fiel
   });
 });
 
+test('Standard songs: the starting values and the choices, plain words for bad input, and face groups that are gone are dropped', async () => {
+  await withApp(async (call) => {
+    // An older show has none saved: the starting values, the show's colours and its light groups with their guessed ticks.
+    const view = (await call('GET', '/api/settings')).body;
+    assert.deepEqual(view.standardSongs.songs.map((s: any) => [s.name, s.colour.hex, s.faces]), [
+      ['Song 1', '#1f4bff', 'warm'], ['Song 2', '#8c00ff', 'warm'], ['Song 3', '#ff6a00', 'warm'], ['Song 4', '#00c8b4', 'cool'], ['Song 5', '#ff2d8c', 'cool'],
+    ]);
+    assert.equal(view.standardSongs.faceGroups, undefined, 'not saved yet: guessed');
+    assert.ok(view.standardChoices.colours.some((c: any) => c.name === 'Deep blue' && /^#[0-9a-f]{6}$/i.test(c.swatch)));
+    assert.deepEqual(view.standardChoices.groups.map((g: any) => [g.id, g.face]), [['front-wash', true], ['back-wall', false], ['audience', false], ['pulpit', false]]);
+
+    const songs = view.standardSongs.songs;
+    const refused = async (standardSongs: unknown, words: string) => {
+      const r = await call('PUT', '/api/settings', { standardSongs });
+      assert.equal(r.status, 400, JSON.stringify(r.body));
+      assert.equal(r.body.error, words);
+    };
+    await refused({ songs: songs.slice(0, 4) }, 'There are five standard songs.');
+    await refused({ songs: songs.map((s: any, i: number) => (i === 1 ? { ...s, colour: { hex: 'blue' } } : s)) }, 'A song colour is #rrggbb.');
+    await refused({ songs: songs.map((s: any, i: number) => (i === 1 ? { ...s, name: '  ' } : s)) }, 'Each song needs a name.');
+    await refused({ songs, faceGroups: ['no-such-group'] }, 'The show has no group "no-such-group".');
+    // What zod would say in its own words reaches the page in plain ones.
+    await refused({}, 'There are five standard songs.');
+    await refused('Song 1', 'The standard songs are not in the right form.');
+    await refused({ songs: songs.map((s: any, i: number) => (i === 1 ? { ...s, colour: { name: 'x'.repeat(41), hex: '#123456' } } : s)) }, 'A colour name is at most 40 characters.');
+    await refused({ songs: songs.map((s: any, i: number) => (i === 1 ? { name: s.name, faces: s.faces } : s)) }, 'Each song needs a colour.');
+    await refused({ songs: songs.map((s: any, i: number) => (i === 1 ? { name: s.name, colour: s.colour } : s)) }, 'Faces are warm or cool white.');
+    await refused({ songs: songs.map((s: any, i: number) => (i === 1 ? { colour: s.colour, faces: s.faces } : s)) }, 'Each song needs a name.');
+    assert.equal((await call('GET', '/api/show')).body.settings.standardSongs, undefined, 'nothing was saved');
+
+    // Saved, then a show file naming a group the show doesn't have still opens: that group is dropped.
+    assert.equal((await call('PUT', '/api/settings', { standardSongs: { songs, faceGroups: ['front-wash', 'pulpit'] } })).status, 200);
+    assert.deepEqual((await call('GET', '/api/settings')).body.standardSongs.faceGroups, ['front-wash', 'pulpit']);
+    const show = (await call('GET', '/api/show')).body;
+    show.settings.standardSongs.faceGroups = ['gone', 'pulpit'];
+    assert.equal((await call('PUT', '/api/show', show)).status, 200);
+    assert.deepEqual((await call('GET', '/api/settings')).body.standardSongs.faceGroups, ['pulpit']);
+  });
+});
+
 async function receiver(): Promise<{ socket: Socket; port: number; universes: Set<number> }> {
   const socket = createSocket('udp4');
   await new Promise<void>((r) => socket.bind(0, '127.0.0.1', r));
