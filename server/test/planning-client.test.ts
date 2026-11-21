@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PlanningClient, PlanningError } from '../src/planning/client.ts';
@@ -55,6 +55,10 @@ function fakePlanning(options: { cuelists?: ReturnType<typeof cuelist>[]; cues?:
     /** Makes every query answer with this status. */
     queryStatus: 0,
     queries: [] as any[],
+    /** What GET .../pusher answers, and the forms POST .../pusher received. */
+    pusher: { APP_KEY: 'made-up-app-key', CLUSTER: 'made-up-cluster' } as unknown,
+    pusherAuth: { auth: 'made-up-auth' } as unknown,
+    pusherPosts: [] as Record<string, string>[],
     cuelists: options.cuelists ?? [],
   };
   const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -88,6 +92,13 @@ function fakePlanning(options: { cuelists?: ReturnType<typeof cuelist>[]; cues?:
           { id: TYPE, name: 'Riga Sunday' },
           { id: OTHER_TYPE, name: 'Old type', archived: true },
         ]);
+      }
+      if (path === `/account/${ACCOUNT}/pusher`) {
+        if (init?.method !== 'POST') return json(state.pusher);
+        const posted: Record<string, string> = {};
+        (init.body as FormData).forEach((v, k) => (posted[k] = String(v)));
+        state.pusherPosts.push(posted);
+        return json(state.pusherAuth);
       }
       return new Response('not found', { status: 404 });
     }
@@ -343,3 +354,55 @@ test('an answer without what is needed says so instead of failing oddly', withCl
   }
   assert.equal((await client.service(ACCOUNT, 'svc-1')).id, 'svc-1');
 }, { cuelists: [cuelist('svc-1', '2026-10-25T08:00:00')] }));
+
+test('liveKeys reads the key and cluster; a bad answer is the unexpected-answer error', withClient(async (client, _file, fake) => {
+  await client.setLogin(COOKIE);
+  assert.deepEqual(await client.liveKeys(ACCOUNT), { key: 'made-up-app-key', cluster: 'made-up-cluster' });
+  fake.state.pusher = { APP_KEY: 5 };
+  await assert.rejects(client.liveKeys(ACCOUNT), (e) => e instanceof PlanningError && /unexpected/.test(e.message));
+  fake.state.pusher = null;
+  await assert.rejects(client.liveKeys(ACCOUNT), PlanningError);
+}));
+
+test('liveAuth posts the form the stage display sends and keeps the machine id stable', withClient(async (client, loginFile, fake) => {
+  await client.setLogin(COOKIE);
+  const before = JSON.parse(readFileSync(loginFile, 'utf8'));
+  assert.deepEqual(await client.liveAuth(ACCOUNT, '1.2', `presence-${ACCOUNT}`), { auth: 'made-up-auth' });
+  // an answer that is a JSON string is read too
+  fake.state.pusherAuth = JSON.stringify({ auth: 'in-a-string' });
+  assert.deepEqual(await client.liveAuth(ACCOUNT, '1.3', `private-${ACCOUNT}.X`), { auth: 'in-a-string' });
+  const [first, second] = fake.state.pusherPosts;
+  assert.deepEqual(Object.keys(first!).sort(), ['channel_name', 'client', 'events', 'machineArch', 'machineId', 'machineName', 'machineOS', 'socket_id']);
+  assert.equal(first!.socket_id, '1.2');
+  assert.equal(first!.channel_name, `presence-${ACCOUNT}`);
+  assert.equal(first!.client, 'light-runner');
+  assert.equal(first!.machineName, 'Light Runner');
+  assert.equal(first!.machineOS, 'Web');
+  assert.equal(first!.events, 'cuelist,event,slides,error,media-progress,countdown,stage-display');
+  assert.equal(first!.machineId, before.machineId);
+  assert.equal(second!.machineId, before.machineId);
+  // the login file keeps its refresh cookie
+  assert.deepEqual(JSON.parse(readFileSync(loginFile, 'utf8')), before);
+  fake.state.pusherAuth = 'not json {';
+  await assert.rejects(client.liveAuth(ACCOUNT, '1.4', 'x'), (e) => e instanceof PlanningError && /unexpected/.test(e.message));
+  fake.state.pusherAuth = null;
+  await assert.rejects(client.liveAuth(ACCOUNT, '1.4', 'x'), PlanningError);
+}));
+
+test('machineId makes and keeps an id when there is no login file yet', withClient(async (client, loginFile) => {
+  const id = client.machineId();
+  assert.equal(JSON.parse(readFileSync(loginFile, 'utf8')).machineId, id);
+  assert.equal(client.machineId(), id);
+}));
+
+test('machineId never overwrites a login file it could not read', withClient(async (client, loginFile) => {
+  await client.setLogin(COOKIE);
+  const text = readFileSync(loginFile, 'utf8');
+  // a file that cannot be understood stands in for a passing read error
+  writeFileSync(loginFile, text.slice(0, -5));
+  const damaged = readFileSync(loginFile, 'utf8');
+  const id = client.machineId();
+  assert.match(id, /^[A-Z0-9]{4,}$/);
+  assert.equal(client.machineId(), id);
+  assert.equal(readFileSync(loginFile, 'utf8'), damaged);
+}));

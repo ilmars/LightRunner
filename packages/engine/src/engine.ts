@@ -776,7 +776,7 @@ export class Engine {
     switch (cmd.type) {
       case 'undo': return this.undo(now);
       case 'look': return this.goLook(cmd.id, cmd.fade, now);
-      case 'quickLook': return this.quickLook(cmd.id, cmd.fade, now);
+      case 'quickLook': return this.quickLook(cmd.id, cmd.fade, now, cmd.only);
       case 'groupPreset': {
         const group = this.groups.get(cmd.group);
         const preset = this.presets.get(cmd.preset);
@@ -874,11 +874,12 @@ export class Engine {
     return null;
   }
 
-  /** Like a look, but only for the groups it lists; the current look stays. */
-  private quickLook(id: string, fade: number | undefined, now: number): string | null {
+  /** Like a look, but only for the groups it lists (and of those, only the ones in `only`, when given); the current look and the tempo stay. */
+  private quickLook(id: string, fade: number | undefined, now: number, only?: readonly string[]): string | null {
     const look = this.looks.get(id);
     if (!look) return `unknown look "${id}"`;
-    this.applyEntries(look.groups, fade, now);
+    const entries = only ? look.groups.filter((e) => only.includes(e.group)) : look.groups;
+    this.applyEntries(entries, fade, now);
     return null;
   }
 

@@ -23,7 +23,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import WebSocket from 'ws';
-import { addressProblems, checkReferences, findProfile, isShowEdit, parseShow, Command } from '../../../../packages/shared/src/index.ts';
+import { addressProblems, checkReferences, findProfile, isShowEdit, parseShow, Command, StageCommand } from '../../../../packages/shared/src/index.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -180,8 +180,12 @@ try {
       await sendAll(commands(rest));
       break;
     case 'prepare': {
-      // Stage commands go to the draft; show edits (Save, Add song, Save as quick look, ...) store the draft.
-      const list = commands(rest).map((cmd): Command => (isShowEdit(cmd) || cmd.type.startsWith('blind') || cmd.type === 'draft' ? cmd : { type: 'draft', cmd } as Command));
+      // Stage commands go to the draft; section goes as it is (the server sends it to the draft); anything else live-only is refused; show edits (Save, Add song, Save as quick look, ...) store the draft.
+      const list = commands(rest).map((cmd): Command => {
+        if (isShowEdit(cmd) || cmd.type.startsWith('blind') || cmd.type === 'draft' || cmd.type === 'section') return cmd;
+        if (StageCommand.safeParse(cmd).success) return { type: 'draft', cmd } as Command;
+        throw new Error(`${cmd.type} can't be part of prepare: it changes the live stage. Ask first, then use send.`);
+      });
       await sendAll([{ type: 'blindStart' }, ...list, { type: values.go ? 'blindGo' : 'blindEnd' }]);
       break;
     }

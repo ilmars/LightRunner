@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { changesBetween, followAt, mergeClock, parseShow, stateAt, type Show, type Timeline, TimelineBlock } from '../src/index.ts';
+import { changesBetween, drivenGroups, followAt, mergeClock, parseShow, stateAt, type Show, type Timeline, TimelineBlock } from '../src/index.ts';
 
 const rigJson = () => JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8'));
 const rig = (): Show => parseShow(rigJson());
@@ -363,4 +363,20 @@ test('mergeClock: ease a little when close, more when further, jump when far', (
   assert.deepEqual(m, { pos: 4, jumped: true });
   m = mergeClock(10, 30);
   assert.deepEqual(m, { pos: 30, jumped: true });
+});
+
+test('the groups a timeline drives: its own layers with blocks, and every group a Whole stage block does something to', () => {
+  const show = rig();
+  const first = show.looks[0]!;
+  const two = { ...first, id: 'two', name: 'Two', groups: first.groups.filter((e) => e.group === 'front-lights' || e.group === 'key-lights') };
+  show.looks.push(two);
+  const colour = show.presets.find((p) => p.group === 'drum-cage')!.id;
+  // A group's own layer, and an empty layer that drives nothing.
+  assert.deepEqual([...drivenGroups(timeline([{ group: 'drum-cage', blocks: [block(3, { kind: 'colour', preset: colour, level: 1 })] }, { group: 'background', blocks: [] }]), show)], ['drum-cage']);
+  // A look block on the stage layer drives the groups the look lists.
+  assert.deepEqual([...drivenGroups(timeline([{ group: '*', blocks: [block(0, { kind: 'look', look: 'two' })] }]), show)].sort(), ['front-lights', 'key-lights']);
+  // Dark and Everything full drive every light group.
+  assert.deepEqual([...drivenGroups(timeline([{ group: '*', blocks: [block(0, { kind: 'dark' })] }]), show)].sort(), show.groups.filter((g) => g.kind !== 'smoke').map((g) => g.id).sort());
+  // A block pointing at a colour that is gone drives nothing.
+  assert.deepEqual([...drivenGroups(timeline([{ group: 'drum-cage', blocks: [block(0, { kind: 'colour', preset: 'gone', level: 1 })] }]), show)], []);
 });

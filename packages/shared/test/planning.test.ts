@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  anchorOf, checkReferences, copyLookToItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept,
+  anchorOf, checkReferences, copyLookToItem, addSong, clearService, useStandardSongs, renameItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept, setItemGroup, setItemTempo, setItemTimeline, saveItem, sectionRememberKey, sectionsOf, sectionLookOf, ensureSectionLook, saveSectionChange,
   serviceRows, toPlannedService, type PlannedService, type ServiceItem, type Show,
 } from '../src/index.ts';
 
@@ -65,8 +65,54 @@ test('a planned service keeps the order, names, song ids, the service key and th
   assert.equal(service.start, '2026-10-25T08:00:00');
   assert.deepEqual(service.items.map((i) => i.kind), ['header', 'song', 'verse']);
   assert.equal(service.items[0].name, 'Ievads');
-  assert.deepEqual(service.items[1], { key: 'c2', kind: 'song', name: 'Klints uz mūžiem (Nav tādas klints)', songId: SONG, tempo: 141 });
+  assert.deepEqual(service.items[1], { key: 'c2', kind: 'song', name: 'Klints uz mūžiem (Nav tādas klints)', songId: SONG, tempo: 141, songKey: 'D' });
   assert.equal(service.items[2].name, 'Psalmi 23:3 L1');
+});
+
+test('a song item carries its sections and facts, and never the lyrics', () => {
+  const songs = new Map<string, unknown>([[SONG, {
+    name: 'Klints',
+    data: {
+      defaultKey: 'C', timeSignature: '6/8', text_artist: 'Hillsong',
+      slides: [
+        { slide_id: 'a', slide_title: 'Verse 1a', slide_content: 'SECRET LYRIC ONE' },
+        { slide_id: 'b', slide_title: 'Chorus', slide_content: 'SECRET LYRIC TWO' },
+      ],
+    },
+  }]]);
+  const d = doc();
+  (d.data.songMeta as any).c2 = { key: 'D', notes: 'Slow start' };
+  const item = toPlannedService('svc1', d, songs, 'T').items[1]!;
+  assert.deepEqual(item.sections, [{ kind: 'verse', slides: ['a'] }, { kind: 'chorus', slides: ['b'] }]);
+  assert.equal(item.songKey, 'D');
+  assert.equal(item.timeSignature, '6/8');
+  assert.equal(item.artist, 'Hillsong');
+  assert.equal(item.notes, 'Slow start');
+  assert.equal(JSON.stringify(item).includes('SECRET'), false);
+});
+
+test('a song with a very long slide id or 250 chorus slides does not stop the service loading', () => {
+  const OTHER = '5fc3d2e1-2222-4333-8444-a55566677788';
+  const songs = new Map<string, unknown>([
+    [SONG, { name: 'Klints', data: { slides: [{ slide_id: 'y'.repeat(70), slide_title: 'Verse 1' }, { slide_id: 'b', slide_title: 'Chorus' }] } }],
+    [OTHER, { name: 'Long', data: { slides: Array.from({ length: 250 }, (_, i) => ({ slide_id: `c${i}`, slide_title: 'Chorus' })) } }],
+  ]);
+  const d = doc();
+  d.data.cues.push({ cue_id: 'c4', cue_type: null, cue_name: 'Long', displayName: '', cue_foreground: { type: 'text', text: OTHER } } as any);
+  const service = toPlannedService('svc1', d, songs, 'T');
+  assert.deepEqual(service.items[1]!.sections, [{ kind: 'chorus', slides: ['b'] }]);
+  assert.equal(service.items[3]!.sections![0]!.slides.length, 200);
+});
+
+test('the song library\'s key is used when the service sets none; no sections leaves the field out', () => {
+  const songs = new Map<string, unknown>([[SONG, { name: 'Klints', data: { defaultKey: 'C' } }]]);
+  const d = doc();
+  d.data.songMeta = {} as any;
+  const item = toPlannedService('svc1', d, songs, 'T').items[1]!;
+  assert.equal(item.songKey, 'C');
+  assert.equal('sections' in item, false);
+  assert.equal('notes' in item, false);
+  assert.equal('artist' in item, false);
 });
 
 test('a song tempo outside 40-240 is left out', () => {
@@ -291,9 +337,10 @@ test('deleting a song\'s look forgets it', () => {
   const b = loaded.operator.service!.items[1]!.look!;
   const out = deleteItem(loaded, a);
   assert.equal(out.operator.remembered!['song:song-a'], undefined);
-  assert.equal(out.operator.service!.items[0]!.look, undefined);
+  // The song leaves the service too: no greyed-out row stays behind.
+  assert.deepEqual(out.operator.service!.items.map((i) => i.name), ['B']);
   assert.equal(out.operator.remembered!['song:song-b'], b);
-  assert.equal(out.operator.service!.items[1]!.look, b);
+  assert.equal(out.operator.service!.items[0]!.look, b);
   parseShow(ensurePlanning(out));
 });
 
@@ -424,9 +471,9 @@ test('a deleted anchor moves its muted items up to the next look above', () => {
   const { show, slav, a, b } = october();
   const out = deleteItem(show, a);
   const rows = serviceRows(out);
-  // A is gone: its song item has no look now, and it and the blank follow Slavēšana.
-  assert.deepEqual(rows.map(label), [safeOf(show), 'header', slav, 'item', 'item', b, 'verses', 'header']);
-  assert.deepEqual(rows[3], { kind: 'item', key: 'cue-a-A', name: 'A', itemKind: 'song' });
+  // A is gone with its song item: the blank follows Slavēšana.
+  assert.deepEqual(rows.map(label), [safeOf(show), 'header', slav, 'item', b, 'verses', 'header']);
+  assert.equal(rows.some((r) => r.kind === 'item' && r.name === 'A'), false);
   assert.equal(anchorOf(out, 'cue-b'), slav);
 });
 
@@ -668,4 +715,360 @@ test('deleting a kept row forgets it', () => {
   const out = deleteItem(show, named(show, 'Sermon'));
   assert.deepEqual(out.operator.kept, [named(show, 'Midweek calm')]);
   assert.deepEqual(checkReferences(out), []);
+});
+
+// ---- Section looks ----
+
+const withSections = (): ServiceItem => ({ ...song('a', 'A'), sections: [{ kind: 'verse', slides: ['s1'] }, { kind: 'chorus', slides: ['s2'] }] });
+
+test("a loaded song's sections have no looks of their own", () => {
+  const out = loadService(rig(), planned([withSections()]));
+  const a = out.operator.service!.items[0]!.look!;
+  assert.deepEqual(sectionsOf(out, a), [{ kind: 'verse', look: null }, { kind: 'chorus', look: null }]);
+  assert.equal(sectionLookOf(out, { song: a, kind: 'chorus' }), a);
+  assert.ok(!out.looks.some((l) => l.name.includes('·')), 'a load makes no section looks');
+  assert.deepEqual(sectionsOf(out, safeOf(out)), []);
+  assert.throws(() => sectionLookOf(out, { song: safeOf(out), kind: 'chorus' }));
+});
+
+test("a section's own look comes back next week", () => {
+  const loaded = loadService(rig(), planned([withSections()]));
+  const a = loaded.operator.service!.items[0]!.look!;
+  const before = structuredClone(loaded);
+  const { show, id } = ensureSectionLook(loaded, { song: a, kind: 'chorus' });
+  assert.deepEqual(loaded, before, 'the input is never changed');
+  const own = lookOf(show, id);
+  assert.equal(own.name, 'A · Chorus');
+  assert.ok(!show.operator.runningOrder.includes(id));
+  assert.deepEqual(own.groups, lookOf(show, a).groups);
+  assert.equal(own.tempo, undefined);
+  assert.equal(own.timeline, undefined);
+  assert.equal(sectionRememberKey('song-a', 'chorus'), 'song:song-a#chorus');
+  assert.equal(show.operator.remembered![sectionRememberKey('song-a', 'chorus')], id);
+  assert.equal(sectionLookOf(show, { song: a, kind: 'chorus' }), id);
+  assert.equal(sectionLookOf(show, { song: a, kind: 'verse' }), a);
+  assert.equal(ensureSectionLook(show, { song: a, kind: 'chorus' }).id, id, 'asking again makes no second look');
+  assert.throws(() => ensureSectionLook(show, { song: a, kind: 'bridge' }));
+
+  const again = loadService(show, planned([withSections()], 'svc2'));
+  const a2 = again.operator.service!.items[0]!.look!;
+  assert.deepEqual(sectionsOf(again, a2), [{ kind: 'verse', look: null }, { kind: 'chorus', look: id }]);
+  assert.ok(again.looks.some((l) => l.id === id));
+  parseShow(again);
+});
+
+test("a long song name is shortened in its section looks' names, never the section", () => {
+  let show = loadService(rig(), planned([withSections()]));
+  const a = show.operator.service!.items[0]!.look!;
+  lookOf(show, a).name = 'Jēzu, Tavs Vārds liek tumsai drebēt';
+  const names: string[] = [];
+  for (const kind of ['verse', 'chorus'] as const) {
+    const made = ensureSectionLook(show, { song: a, kind });
+    show = made.show;
+    names.push(lookOf(show, made.id).name);
+  }
+  assert.ok(names[0]!.endsWith(' · Verse'), names[0]);
+  assert.ok(names[1]!.endsWith(' · Chorus'), names[1]);
+  for (const name of names) assert.ok(name.length <= 40 && name.startsWith('Jēzu, Tavs Vārds'), name);
+  parseShow(show);
+});
+
+test('deleting the song deletes its section looks', () => {
+  const loaded = loadService(rig(), planned([withSections(), song('b', 'B')]));
+  const [a, b] = loaded.operator.service!.items.map((i) => i.look!) as [string, string];
+  const { show, id } = ensureSectionLook(loaded, { song: a, kind: 'chorus' });
+  const out = deleteItem(show, a);
+  assert.ok(!out.looks.some((l) => l.id === id));
+  assert.equal(out.operator.remembered![sectionRememberKey('song-a', 'chorus')], undefined);
+  assert.equal(out.operator.remembered!['song:song-b'], b);
+  parseShow(out);
+});
+
+test("itemGroup and saveItem take a section's own look", () => {
+  const loaded = loadService(rig(), planned([withSections()]));
+  const a = loaded.operator.service!.items[0]!.look!;
+  const { show, id } = ensureSectionLook(loaded, { song: a, kind: 'chorus' });
+  const group = show.groups.find((g) => g.kind !== 'smoke')!.id;
+  const preset = show.presets.find((p) => p.group === group && !p.custom)!.id;
+  const edited = setItemGroup(show, id, { group, preset, level: 0.5 });
+  assert.equal(lookOf(edited, id).groups.find((e) => e.group === group)!.level, 0.5);
+  const saved = saveItem(show, id, { groups: { [group]: preset }, levels: { [group]: 0.25 }, tempo: 120 });
+  assert.equal(lookOf(saved, id).tempo, undefined, 'a section keeps no tempo');
+  assert.equal(lookOf(saveItem(show, a, { groups: { [group]: preset }, levels: {}, tempo: 120 }), a).tempo, 120, 'the song does');
+  assert.throws(() => setItemTempo(show, id, 120), /no tempo or timeline/);
+  assert.throws(() => setItemTimeline(show, id, null), /no tempo or timeline/);
+  assert.throws(() => copyLookToItem(show, id, a), /only running-order items/);
+  assert.equal(lookOf(saved, id).groups.find((e) => e.group === group)!.level, 0.25);
+  assert.deepEqual(lookOf(saved, a).groups, lookOf(show, a).groups, "the song's look is untouched");
+  // A look outside the order that is no section's still can't be changed.
+  const other = rig();
+  assert.throws(() => setItemGroup(other, other.operator.quickLooks[0]!.look, { group, preset }), /only running-order items can be changed here/);
+});
+
+// ---- Saving a change for a section ----
+
+function changeRig() {
+  const loaded = loadService(rig(), planned([withSections()]));
+  const a = loaded.operator.service!.items[0]!.look!;
+  const entries = lookOf(loaded, a).groups;
+  const stage = { groups: {} as Record<string, string | null>, levels: {} as Record<string, number> };
+  for (const e of entries) {
+    stage.groups[e.group] = e.preset;
+    stage.levels[e.group] = e.level ?? 1;
+  }
+  const [front, back] = entries.filter((e) => loaded.presets.filter((p) => p.group === e.group).length >= 2);
+  assert.ok(front && back, 'the rig has two groups with a choice of presets');
+  const other = loaded.presets.find((p) => p.group === back!.group && p.id !== back!.preset)!.id;
+  const changed = { groups: { ...stage.groups, [back!.group]: other }, levels: { ...stage.levels, [front!.group]: 0.4 } };
+  return { loaded, a, stage, changed, front: front!.group, back: back!.group, other };
+}
+const entryOf = (s: Show, look: string, group: string) => lookOf(s, look).groups.find((e) => e.group === group);
+
+test("saving a change for the section gives the chorus its own look; the song's look stays", () => {
+  const { loaded, a, changed, front, back, other } = changeRig();
+  const ref = { song: a, kind: 'chorus' as const };
+  const out = saveSectionChange(loaded, changed, ref, 'section');
+  const own = sectionLookOf(out, ref);
+  assert.notEqual(own, a);
+  assert.equal(entryOf(out, own, front)!.level, 0.4);
+  assert.equal(entryOf(out, own, back)!.preset, other);
+  assert.deepEqual(lookOf(out, own).groups.map((e) => e.group), lookOf(loaded, a).groups.map((e) => e.group), "the song's other groups come with it");
+  assert.deepEqual(lookOf(out, a).groups, lookOf(loaded, a).groups, "the song's look is unchanged");
+  assert.equal(sectionLookOf(out, { song: a, kind: 'verse' }), a);
+  assert.equal(lookOf(out, own).tempo, undefined);
+  parseShow(out);
+});
+
+test('saving a change for the whole song writes the song and every section look it has, not the sections that follow it', () => {
+  const { loaded, a, changed, front, back, other } = changeRig();
+  const ref = { song: a, kind: 'chorus' as const };
+  // The chorus has its own look; the verse has none.
+  const withOwn = ensureSectionLook(loaded, ref);
+  const out = saveSectionChange(withOwn.show, changed, ref, 'song');
+  for (const id of [a, withOwn.id]) {
+    assert.equal(entryOf(out, id, front)!.level, 0.4, id);
+    assert.equal(entryOf(out, id, back)!.preset, other, id);
+  }
+  assert.equal(sectionsOf(out, a).find((s) => s.kind === 'verse')!.look, null, 'the verse has no look of its own, and still has none');
+  // With no own look at all, only the song's look changes.
+  const plain = saveSectionChange(loaded, changed, ref, 'song');
+  assert.equal(entryOf(plain, a, front)!.level, 0.4);
+  assert.equal(sectionLookOf(plain, ref), a);
+  parseShow(out);
+});
+
+test("saving a change that matches the section's look writes nothing", () => {
+  const { loaded, a, stage } = changeRig();
+  const ref = { song: a, kind: 'chorus' as const };
+  for (const scope of ['section', 'song'] as const) assert.deepEqual(saveSectionChange(loaded, stage, ref, scope), loaded);
+  const own = ensureSectionLook(loaded, ref);
+  assert.deepEqual(saveSectionChange(own.show, stage, ref, 'section'), own.show);
+});
+
+test('only the groups that differ from the sections look are written', () => {
+  const { loaded, a, changed, front, back } = changeRig();
+  const ref = { song: a, kind: 'chorus' as const };
+  const own = ensureSectionLook(loaded, ref);
+  // The chorus already has the front lights at 0.4, as the stage has them: only the other group is written.
+  const edited = setItemGroup(own.show, own.id, { group: front, level: 0.4 });
+  const out = saveSectionChange(edited, changed, ref, 'song');
+  assert.equal(entryOf(out, a, front)!.level ?? 1, 1, 'the song does not get a group the chorus already had as on stage');
+  assert.notEqual(entryOf(out, a, back)!.preset, entryOf(loaded, a, back)!.preset);
+});
+
+// ---- Deleting a song, and clearing the planned service ----
+
+test('a deleted song leaves the service: every item with its look, a part header with its row', () => {
+  const { show, a, slav } = october();
+  const again: ServiceItem = { key: 'cue-again', kind: 'song', name: 'A', songId: 'song-a' };
+  const twice = loadService(show, planned([song('a', 'A'), song('b', 'B'), again]));
+  const a2 = twice.operator.service!.items[0]!.look!;
+  const out = deleteItem(twice, a2);
+  assert.deepEqual(out.operator.service!.items.map((i) => i.name), ['B']);
+  assert.equal(serviceRows(out).some((r) => r.kind === 'item'), false);
+  assert.equal(out.operator.remembered!['song:song-a'], undefined);
+  // A header with a look goes with its row.
+  const head = deleteItem(show, show.operator.runningOrder[1]!);
+  assert.equal(head.operator.service!.items.some((i) => i.name === 'Slavēšana'), false);
+  assert.ok(head.operator.service!.items.some((i) => i.look === a));
+  assert.equal(show.operator.runningOrder[1], slav);
+  parseShow(head);
+  // A song loaded again comes back as a new song.
+  const back = loadService(out, planned([song('a', 'A')]));
+  assert.equal(lookOf(back, back.operator.service!.items[0]!.look!).name, 'A');
+  assert.equal(back.operator.remembered!['song:song-a'], back.operator.service!.items[0]!.look);
+  void a2;
+});
+
+test('clearing keeps Basic lights, the kept rows and rows added by hand, in order; the plan leaves', () => {
+  const base = keptRig();
+  const sermon = named(base, 'Sermon');
+  const midweek = named(base, 'Midweek calm');
+  base.operator.remembered = { 'header:Slavēšana': base.operator.quickLooks[0]!.look };
+  const loaded = loadService(base, planned([header('Ievads'), header('Slavēšana'), song('a', 'A'), blank(), song('b', 'B'), verse('Psalmi 1')]));
+  const a = loaded.operator.service!.items[2]!.look!;
+  // A row added by hand sits between the songs.
+  const hand = addSong(loaded, a, stageOf(loaded, a));
+  const out = clearService(hand.show);
+  assert.deepEqual(out.operator.runningOrder, [safeOf(base), sermon, midweek, hand.id]);
+  assert.equal(out.operator.service, undefined);
+  assert.deepEqual(keptOf(out), [sermon, midweek]);
+  assert.deepEqual(serviceRows(out).map(label), out.operator.runningOrder);
+  assert.deepEqual(checkReferences(out), []);
+  parseShow(out);
+});
+
+test('clearing keeps remembered looks (song, part header, section) in the show, and drops one nothing remembers', () => {
+  const rigged = rig();
+  rigged.operator.remembered = { 'header:Slavēšana': rigged.operator.quickLooks[0]!.look };
+  const first = loadService(rigged, planned([header('Slavēšana'), withSections(), song('b', 'B')]));
+  const [, , a, b] = first.operator.runningOrder as [string, string, string, string];
+  const made = ensureSectionLook(first, { song: a, kind: 'chorus' });
+  const loaded = made.show;
+  // A look a plan item has that nothing remembers.
+  delete loaded.operator.remembered!['song:song-b'];
+  const out = clearService(loaded);
+  assert.equal(out.operator.service, undefined);
+  for (const id of [a, made.id, loaded.operator.quickLooks[0]!.look]) assert.ok(out.looks.some((l) => l.id === id), id);
+  assert.ok(!out.operator.runningOrder.includes(a));
+  assert.ok(!out.looks.some((l) => l.id === b), 'an unremembered plan look goes with its row');
+  assert.ok(!out.operator.looks.includes(b));
+  assert.deepEqual(checkReferences(out), []);
+  parseShow(out);
+  // A later load of the same service gives the old looks back.
+  const again = loadService(out, planned([header('Slavēšana'), withSections()]));
+  assert.equal(again.operator.service!.items[1]!.look, a);
+  assert.deepEqual(sectionsOf(again, a), [{ kind: 'verse', look: null }, { kind: 'chorus', look: made.id }]);
+});
+
+test('clearing a show with no loaded service changes nothing', () => {
+  const show = rig();
+  assert.deepEqual(clearService(show), show);
+});
+
+// ---- The standard songs ----
+
+const nameOf = (s: Show, id: string) => lookOf(s, id).name;
+const presetOf = (s: Show, lookId: string, group: string) => {
+  const entry = lookOf(s, lookId).groups.find((e) => e.group === group)!;
+  return s.presets.find((p) => p.id === entry.preset)!;
+};
+const songsOf = (s: Show) => [1, 2, 3, 4, 5].map((n) => s.operator.remembered![`standard:${n}`]!);
+
+test('the standard songs take the planned service off and go in after the kept rows, before rows added by hand', () => {
+  const base = keptRig();
+  const loaded = loadService(base, planned([song('a', 'A'), song('b', 'B')]));
+  const a = loaded.operator.service!.items[0]!.look!;
+  const added = addSong(loaded, a, stageOf(loaded, a));
+  const hand = { id: added.id, show: renameItem(added.show, added.id, 'Welcome') };
+  const out = useStandardSongs(hand.show);
+  const songs = songsOf(out);
+  assert.equal(out.operator.service, undefined);
+  assert.deepEqual(out.operator.runningOrder, [safeOf(base), ...keptOf(base), ...songs, hand.id]);
+  assert.deepEqual(songs.map((id) => nameOf(out, id)), ['Song 1', 'Song 2', 'Song 3', 'Song 4', 'Song 5']);
+  assert.deepEqual(checkReferences(out), []);
+  parseShow(out);
+});
+
+test('Song 2 is purple on the background and warm white on the front lights; every song has its colour', () => {
+  const out = useStandardSongs(keptRig());
+  const [one, two, three, four, five] = songsOf(out);
+  assert.equal(presetOf(out, two!, 'background').name, 'Violets');
+  assert.equal(presetOf(out, two!, 'front-lights').name, 'Silti 3200K');
+  assert.equal(presetOf(out, two!, 'key-lights').name, 'Silti balts');
+  assert.deepEqual([one, three, four, five].map((id) => presetOf(out, id!, 'drum-cage').name), ['Zils', 'Oranžs', 'Tirkīzs', 'Rozā']);
+  assert.deepEqual([one, three, four, five].map((id) => presetOf(out, id!, 'b8-side-bar').name), ['Zils', 'Oranžs', 'Tirkīzs', 'Rozā']);
+  assert.deepEqual([one, four, five].map((id) => presetOf(out, id!, 'key-lights').name), ['Silti balts', 'Vēsi balts', 'Vēsi balts']);
+  assert.equal(presetOf(out, five!, 'front-lights').name, 'Silti 3200K');
+  for (const id of songsOf(out)) for (const e of lookOf(out, id).groups) assert.equal(e.level ?? 1, 1);
+  assert.equal(lookOf(out, one!).groups.length, 5);
+});
+
+test('a show with no matching names gets Any colours; a group that only shows white gets warm white', () => {
+  const show = keptRig();
+  // Only the front lights keep their presets, so every other group has nothing to match.
+  show.presets = show.presets.filter((p) => p.group === 'front-lights');
+  const have = new Set(show.presets.map((p) => p.id));
+  for (const l of show.looks) l.groups = l.groups.filter((e) => have.has(e.preset));
+  show.operator.quickLooks = [];
+  const out = useStandardSongs(show);
+  const [one, , , four] = songsOf(out);
+  const hexOf = (p: { layers: any[] }) => p.layers[0].colour.hex;
+  assert.equal(hexOf(presetOf(out, one!, 'background')), '#1f4bff');
+  assert.equal(hexOf(presetOf(out, one!, 'key-lights')), '#ffb46b');
+  assert.equal(hexOf(presetOf(out, four!, 'key-lights')), '#dcebff');
+  assert.equal(hexOf(presetOf(out, four!, 'background')), '#00c8b4');
+  assert.equal(presetOf(out, one!, 'front-lights').name, 'Silti 3200K');
+  assert.equal(presetOf(out, one!, 'background').custom, true);
+  parseShow(out);
+});
+
+test('using the standard songs twice gives one set, and the second time changes nothing', () => {
+  const once = useStandardSongs(keptRig());
+  assert.equal(useStandardSongs(once), once);
+});
+
+test('a standard song the person changed and saved comes back as saved', () => {
+  const once = useStandardSongs(keptRig());
+  const two = songsOf(once)[1]!;
+  const pink = once.presets.find((p) => p.group === 'background' && p.name === 'Rozā')!.id;
+  const changed = setItemGroup(once, two, { group: 'background', preset: pink });
+  // Moved to the end by hand: it still comes back in its place, with its look.
+  const moved = moveItem(changed, two, changed.operator.runningOrder.length - 1);
+  const again = useStandardSongs(moved);
+  assert.deepEqual(songsOf(again), songsOf(once));
+  assert.equal(presetOf(again, two, 'background').name, 'Rozā');
+  assert.deepEqual(again.operator.runningOrder, changed.operator.runningOrder);
+});
+
+test('a hand-added "Song 1" row from the first running order is replaced, and its look goes', () => {
+  const base = keptRig();
+  const old = base.operator.runningOrder.filter((id) => /^Song \d$/.test(nameOf(base, id)));
+  assert.equal(old.length, 5);
+  const out = useStandardSongs(base);
+  assert.equal(out.operator.runningOrder.filter((id) => /^Song \d$/.test(nameOf(out, id))).length, 5);
+  assert.equal(out.looks.filter((l) => l.name === 'Song 1').length, 1);
+  assert.deepEqual(keptOf(out), keptOf(base));
+  assert.deepEqual(checkReferences(out), []);
+  // A row a quick look uses keeps its look in the show.
+  const quick = keptRig();
+  const first = quick.operator.runningOrder.find((id) => nameOf(quick, id) === 'Song 1')!;
+  quick.operator.quickLooks.push({ look: first, tab: 'colours' });
+  const kept = useStandardSongs(quick);
+  assert.ok(kept.looks.some((l) => l.id === first));
+  assert.ok(!kept.operator.runningOrder.includes(first));
+});
+
+test('a kept row named Song 1 stays where it is', () => {
+  const base = keptRig();
+  const song1 = base.operator.runningOrder.find((id) => nameOf(base, id) === 'Song 1')!;
+  base.operator.kept = [...(base.operator.kept ?? []), song1];
+  const out = useStandardSongs(base);
+  assert.ok(keptOf(out).includes(song1));
+  assert.equal(out.operator.runningOrder.filter((id) => nameOf(out, id) === 'Song 1').length, 2);
+});
+
+test('loading a service takes the standard songs off, and using them again brings back the same looks', () => {
+  const once = useStandardSongs(keptRig());
+  const songs = songsOf(once);
+  const loaded = loadService(once, planned([song('a', 'A')]));
+  for (const id of songs) {
+    assert.ok(!loaded.operator.runningOrder.includes(id));
+    assert.ok(loaded.looks.some((l) => l.id === id), 'the look stays: it is remembered');
+  }
+  const back = useStandardSongs(loaded);
+  assert.deepEqual(songsOf(back), songs);
+  assert.equal(back.operator.service, undefined);
+  const at = 1 + keptOf(back).length;
+  assert.deepEqual(back.operator.runningOrder.slice(at, at + 5), songs);
+});
+
+test('a standard song marked Keep is not added twice, and using the songs again changes nothing', () => {
+  const once = useStandardSongs(keptRig());
+  const two = songsOf(once)[1]!;
+  const kept = setKept(once, two, true);
+  const again = useStandardSongs(kept);
+  assert.equal(again, kept);
+  assert.equal(new Set(again.operator.runningOrder).size, again.operator.runningOrder.length);
+  assert.deepEqual(songsOf(again), songsOf(once));
 });

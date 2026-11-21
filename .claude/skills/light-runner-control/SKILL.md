@@ -23,7 +23,8 @@ People may be in the room. Before anything else, `get state`: `output` is `"ok"`
 
 - **Build in Prepare.** Make looks with `prepare`: the commands change a draft, Add song / Save / Save as quick look store the draft, and the stage never moves. This works the same with Send DMX on or off.
 - **Going live is the person's call.** Use `send` for stage commands, or `prepare --go` to fade a draft on, only when they asked for the stage to change now, or said yes when you asked. Undo (`send '{"type":"undo"}'`) takes back the last change.
-- **Ask first** before anything that overwrites or removes their work: `saveItem` over an existing song, `deleteItem`, `deleteColour`, `deleteQuickLook`, removing fixtures or groups, `loadService`.
+- **Ask first** before anything that overwrites or removes their work: `saveItem` over an existing song, `deleteItem`, `deleteColour`, `deleteQuickLook`, removing fixtures or groups, `loadService`, `clearService`, `standardSongs`.
+- **Auto-follow** is the person's switch (it starts what the presentation app shows, and a tap by hand pauses it): send `autoFollow` never without their yes, and never change it as a side effect: read `state.follow` and leave it as it is. A `section` or `look` sent live pauses it too, which is one more reason to build in Prepare.
 - **Never** touch Send DMX or the output settings (Lightkey may be sending), the PIN, backups, or Open a show file; never stop or restart the server. Those are the person's, on the Settings page.
 - **The PIN** is never typed in chat or on a command line. If a programmer route answers "needs the programmer PIN", ask them to set `LIGHT_RUNNER_PIN` in their own terminal before starting you, or to give you a file holding it (`--pin-file`). Operator work (looks, songs, quick looks, colours) needs no PIN.
 
@@ -66,6 +67,32 @@ node .claude/skills/light-runner-control/scripts/lr.ts prepare \
 
 Use a level the person gave as it is. Show the levels you picked, so they can say "a bit brighter".
 
+## Plan the lights for a service
+
+"Plan moody lights for this Sunday's songs, brighter choruses", "light the whole service", "give every song its own look". This builds a look for each song, and for each section of it that should differ, from what is known about the song. Everything is built in Prepare; nothing goes on stage and Auto-follow is not touched.
+
+1. **Read.** `get layout`: `runningOrder` (the rows, in order, with their names) and `songs` (see reference.md: each song's `sections`, `key`, `tempo`, `timeSignature`, `artist`, `notes`, `chords`). `songs` is empty when Planning is off or no service is loaded: say so and ask them to press **Load service** on the operator page; don't load it yourself. Also `get state` and note `follow.on` (you only read it).
+2. **Propose one table** and wait: one row per song, then one per section that should differ from the song's look: **song, section, colours, levels, why**. Use the facts for the why: a slow tempo (under about 80 bpm) and a minor key (for example Am) suit low, warm and few colours; a fast tempo and a bright key suit more colour and higher levels; the notes say where it lifts ("full band from chorus 2": the chorus brighter than the verse); chords are not read yet, so don't claim anything from them. A song with no tempo counts as middling. Rows that are not in `layout.songs` (Vārds, Sermon, Midweek calm, parts and kept rows) are left alone unless the person names them. A section that should look as the song does is left out of the table (it plays the song's look). Sections change colours and levels only, never tempo, so effects speed stays the song's. Say which songs you leave alone (an existing look they may like), and that saving a song's look replaces its old one: where the plan replaces a song's existing look, the table says so (their yes covers it).
+3. **On a yes, build, one song at a time, in one `prepare` call each.** The song's look first, saved to the song; then for each section in the table: `section`, the groups that differ, `saveSection` with scope `section`. For example, a slow song with a brighter chorus:
+
+```bash
+node .claude/skills/light-runner-control/scripts/lr.ts --url http://localhost:8080 prepare \
+  '{"type":"look","id":"uz-krustu"}' \
+  '{"type":"groupPreset","group":"front-lights","preset":"front-lights-silti-3200k"}' '{"type":"groupLevel","group":"front-lights","value":0.25}' \
+  '{"type":"groupLevel","group":"background","value":0.35}' \
+  '{"type":"saveItem","id":"uz-krustu"}' \
+  '{"type":"section","song":"uz-krustu","kind":"chorus"}' \
+  '{"type":"groupLevel","group":"front-lights","value":0.6}' '{"type":"groupLevel","group":"background","value":0.7}' \
+  '{"type":"saveSection","scope":"section"}'
+```
+
+   - `look` starts the song in the draft, so the changes after it are the song's own; `saveItem` stores them (the first `saveItem` of a song is the one place the draft's whole stage becomes the song's look).
+   - `section` puts the draft on that section (its own look, or the song's); then change only the groups that should differ and `saveSection` with `"scope":"section"`: only the groups changed since the section started are saved, each with its new colour and level. Use scope `song` only when they asked for a change to the whole song after its sections exist.
+   - A song's tempo is already set from the service; leave it (`itemTempo` only on their word).
+   - A `prepare` call stops at the first command the server refuses, and what came before it is already kept. Read its output (each command says `ok` or why not). When one is refused, stop and tell the person what was saved and what wasn't. If a section can't be saved, say so; don't improvise another way (no quick looks in its place).
+   - Never add `--go`, `send` or `autoFollow`. `section` belongs inside `prepare` only: sent with `send` it starts the section on the real stage and pauses Auto-follow (`prepare` refuses live-only commands such as `autoFollow`). The call ends by leaving Prepare (`blindEnd`), which throws the draft away: what was saved stays.
+4. **Check.** `get layout` again: each song's `sections[].look` is now an id for the sections you saved, and the song's row has its `entries` and `levels`. Report in a sentence or two what is saved where, and that nothing is on stage. Then ask: "Start the first song, or switch Auto-follow on?". Switching Auto-follow on, starting a song or a section live is theirs to say yes to, one at a time; the pill in the top bar is also their switch. Undo takes back the last change.
+
 ## Patch: lights and groups
 
 Whole-show changes go through a file: `show-get` it into your scratchpad, change it with a short node script, `show-check` it, then `show-put` it.
@@ -81,4 +108,6 @@ Whole-show changes go through a file: `show-get` it into your scratchpad, change
 - Every group at one level. "Moody" has depth: front low, background a little higher.
 - Guessing an address: always `free`, then `show-check`.
 - Saving both a song and a quick look when they asked for one thing.
+- Planning a service without reading `layout.songs` first, or inventing chords: `chords` is null.
+- Saving a section with `saveItem` or `saveSection` before the `section` command: the change would go into the song or the wrong section.
 - Reading `server/src/app.ts` to find the API: it's all in [reference.md](reference.md).

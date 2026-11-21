@@ -134,6 +134,24 @@ export function stateAt(timeline: Timeline, show: Show, t: number): Map<string, 
   return out;
 }
 
+/**
+ * The light groups a timeline drives while it runs: those with a block on their own layer, and those a Whole stage
+ * block does something to (Dark and Everything full: every light group; a look: the groups it lists). Blocks that
+ * point at something gone drive nothing, as in stateAt. A song's section leaves these groups to the timeline.
+ */
+export function drivenGroups(timeline: Timeline, show: Show): Set<string> {
+  const out = new Set<string>();
+  for (const group of show.groups) {
+    if (group.kind === 'smoke') continue;
+    const drives = timeline.layers.some((layer) => {
+      const onStage = layer.group === STAGE_LAYER;
+      return (onStage || layer.group === group.id) && layer.blocks.some((b) => stepFor(b, group.id, onStage, show) !== undefined);
+    });
+    if (drives) out.add(group.id);
+  }
+  return out;
+}
+
 /** The same value, whatever order an object's keys are in. */
 function same(a: unknown, b: unknown): boolean {
   if (a === b) return true;

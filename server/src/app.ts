@@ -13,11 +13,12 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
-  applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo, setItemTimeline, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
+  BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, clearService, useStandardSongs, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
+  applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isSectionLook, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo, setItemTimeline, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
   BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
   pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
+  drivenGroups, ensureSectionLook, saveSectionChange, sectionLookOf, type FollowStart, type LiveSlide, type SectionRef,
 } from '../../packages/shared/src/index.ts';
 import { effectFrames, settledVisual, type StageClock } from '../../packages/engine/src/index.ts';
 import { Sessions, clearedCookie, hashPin, isValidPin, sessionCookie, sessionToken, verifyPin } from './auth.ts';
@@ -31,6 +32,8 @@ import { keyLabel, keyPlace } from './keynames.ts';
 import type { FakeMidi, MidiPorts } from './midi.ts';
 import { operatorLayout, type OperatorLayout } from './layout.ts';
 import { PlanningError, createPlanning, type Planning } from './planning/index.ts';
+import type { WebSocketLike } from './planning/live.ts';
+import { Follow, noSocket, sectionState, type SectionOnStage } from './follow.ts';
 import { VISUAL_EVERY, type FromWorker, type TimingStats, type ToWorker } from './messages.ts';
 import { isLocalAddress, isThisComputer } from './net.ts';
 import { AlreadyRunning, liveMarker, removeMarker, writeMarker } from './marker.ts';
@@ -91,6 +94,11 @@ export interface AppOptions {
   recordingWriter?: (path: string) => import('node:stream').Writable;
   /** The online planning service; tests and `LIGHT_RUNNER_FAKE_PLANNING` give a fake. Without it, the real one, keeping its login in the data folder. */
   planning?: Planning;
+  /**
+   * Test only: how the live connection to the presentation app opens its socket. A `planning` handed in (a fake) gets
+   * a socket that never opens unless this is given too, so tests and LIGHT_RUNNER_FAKE_PLANNING never reach the network.
+   */
+  liveOpen?: (url: string) => WebSocketLike;
 }
 
 export type Role = 'operator' | 'programmer';
@@ -175,6 +183,8 @@ export class App {
    * before an operator edit, or 'stage' for a step the engine keeps itself.
    */
   private undoLog: (Show | 'stage')[] = [];
+  /** For each 'stage' step in undoLog, in the same order: the song's section on stage before it, which its Undo brings back. */
+  private sectionSteps: (SectionOnStage | null)[] = [];
   /** The last itemTempo edit, so a run of them joins one Undo step: its song, when, and the Undo entry it made. */
   private tempoEdit: { item: string; at: number; step: Show | 'stage' } | null = null;
   /**
@@ -253,6 +263,13 @@ export class App {
   private ofl!: OflClient;
   private recordings!: Recordings;
   private readonly planning: Planning;
+  /** Auto-follow: the switch, the live connection to the presentation app and what it last followed. */
+  private readonly follow: Follow;
+  /**
+   * The song's section on the real stage, or null. `fresh` once the engine's state has caught up with its start, so
+   * its `changed` is never worked out from the state before it.
+   */
+  private stageSection: (SectionOnStage & { fresh: boolean }) | null = null;
   /** Files waiting for someone to pick what to take from them. */
   private readonly imports = new Map<string, { show: Show; scope: Scope; at: number }>();
   private readonly nodeWatch = new NodeWatch((problem, otherDesk) => {
@@ -269,6 +286,18 @@ export class App {
     this.saver = new RuntimeSaver(this.store);
     this.ofl = new OflClient(join(opts.dataDir, 'ofl'), opts.fetch);
     this.planning = opts.planning ?? createPlanning(opts.dataDir, this.log);
+    this.follow = new Follow({
+      planning: this.planning,
+      show: () => this.show,
+      onStage: async () => ({ look: (await this.stage()).look, section: this.stageSection?.ref ?? null }),
+      start: (start) => this.followStart(start),
+      changed: () => this.publishState(),
+      saveOn: () => {
+        if (this.latestRuntime) this.saver.save(this.runtimeToSave(this.latestRuntime));
+      },
+      log: this.log,
+      open: opts.liveOpen ?? (opts.planning ? noSocket : undefined),
+    });
     this.recordings = new Recordings(opts.dataDir, { limit: opts.recordingLimit, total: opts.recordingsTotal, writer: opts.recordingWriter });
     this.sessions = new Sessions({ file: join(opts.dataDir, 'sessions.json'), pin: () => this.show?.settings.pinHash });
   }
@@ -312,9 +341,13 @@ export class App {
     if (swept) this.log(`Deleted ${swept} recording${swept === 1 ? '' : 's'} no timeline uses`);
     this.latestRuntime = this.store.loadRuntime();
     if (this.latestRuntime) this.log(`Restoring last state: look "${this.latestRuntime.look ?? 'none'}"`);
+    // Auto-follow starts off unless it was on when the server stopped; nothing starts until a slide comes.
+    this.follow.restore(this.latestRuntime?.autoFollow === true);
+    this.stageSection = this.restoredSection(this.latestRuntime);
     this.startWorker();
     await this.ready;
     this.watchNode();
+    this.liveFits();
 
     this.server = createServer((req, res) => void this.handle(req, res));
     this.wss = new WebSocketServer({ noServer: true });
@@ -357,6 +390,7 @@ export class App {
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.follow.stop();
     // The APC mini's LEDs go out and every controller's port closes.
     this.midi?.stop();
     this.midi = null;
@@ -410,7 +444,9 @@ export class App {
     // A worker problem (an output it can't send to) is never another desk.
     const kind = output !== 'lost' ? null : !state.outputProblem && this.outputProblem && this.otherDeskOnly ? 'other-desk' : 'not-answering';
     const timeline = this.liveTimeline?.runner.state ?? null;
-    const merged: LiveState = { ...state, canUndo, output, outputProblem: problem, outputProblemKind: kind, timeline };
+    const section = this.stageSection ? this.sectionView(this.stageSection, state) : null;
+    const follow = this.planningOn() ? this.follow.view() : null;
+    const merged: LiveState = { ...state, canUndo, output, outputProblem: problem, outputProblemKind: kind, timeline, section, follow };
     this.latestState = merged;
     this.publishedAt = performance.now();
     this.publishedTimeline = timeline ? `${timeline.id}:${timeline.playing}` : '';
@@ -599,6 +635,7 @@ export class App {
       this.pending.clear();
       // The new engine starts with no Undo steps of its own; the show's are kept.
       this.undoLog = this.undoLog.filter((step) => step !== 'stage');
+      this.sectionSteps = [];
       this.workerRestarted = true;
       setTimeout(() => this.startWorker(), 200);
     });
@@ -632,12 +669,14 @@ export class App {
       }
       case 'state':
         this.engineState = msg.state;
+        // This state came after the section's start was answered, so it has the section's colours and levels.
+        if (this.stageSection) this.stageSection.fresh = true;
         this.publishState();
         if (this.layout) markReady();
         break;
       case 'runtime':
         this.latestRuntime = msg.runtime;
-        this.saver.save(msg.runtime);
+        this.saver.save(this.runtimeToSave(msg.runtime));
         break;
       case 'visual':
         for (const ws of this.wss?.clients ?? []) {
@@ -705,13 +744,212 @@ export class App {
       }
       return { error: null, recorded: true };
     }
+    if (cmd.type === 'autoFollow') {
+      if (!this.planningOn()) return { error: 'Auto-follow needs Planning on in Settings.', recorded: false };
+      await this.follow.setOn(cmd.on);
+      return { error: null, recorded: false };
+    }
+    if (cmd.type === 'section') {
+      // In Prepare a section is the tablet's draft's; the real stage and Auto-follow are left alone.
+      const session = tablet ? this.blind.get(tablet) : undefined;
+      if (tablet && session) return { error: this.draftSection(tablet, session, cmd), recorded: false };
+      try {
+        sectionLookOf(this.show, cmd);
+      } catch (err) {
+        return { error: (err as Error).message, recorded: false };
+      }
+      this.follow.pause();
+      const error = await this.startSection(cmd);
+      return { error, recorded: !error };
+    }
+    // Back to saved while a section is on stage: the section's look again, as its start set it; the section stays.
+    const sectionBack = cmd.type === 'backToLook' ? this.sectionBackCommand(this.stageSection) : null;
+    if (sectionBack) {
+      const section = this.stageSection;
+      const reply = await this.stageCommand(sectionBack);
+      // Its changed is worked out again from the state after this.
+      if (!reply.error && section && this.stageSection === section) this.setStageSection({ ...section, fresh: false });
+      return reply;
+    }
+    // Starting something on the real stage by hand (a song, a quick look, Basic lights, Blackout; Next from a device is a
+    // song too) pauses Auto-follow. Prepare's taps came back above, and Auto-follow's own starts never come this way.
+    if (cmd.type === 'look' || cmd.type === 'quickLook' || cmd.type === 'safe' || cmd.type === 'blackout') this.follow.pause();
     // A song, Basic lights, Blackout or Back to saved from anyone (a tablet, a device) stops a live timeline; the
     // timeline's own changes never come this way (they go straight to stageCommand, quiet), and Prepare's taps came back above.
-    if (cmd.type === 'look' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook') this.stopLiveTimeline();
+    const whole = cmd.type === 'look' || cmd.type === 'safe' || cmd.type === 'blackout' || cmd.type === 'backToLook';
+    if (whole) this.stopLiveTimeline();
     const reply = await this.stageCommand(cmd);
+    // They replace a song's section with a whole look; a quick look by hand is no longer the section either.
+    if ((whole || cmd.type === 'quickLook') && !reply.error) this.setStageSection(null);
     // A song with a timeline starts it, lights only, once its look is on the stage.
     if (cmd.type === 'look' && !reply.error) this.startSongTimeline(cmd.id);
     return reply;
+  }
+
+  /** The presentation app shows this slide (from the live connection, or a test): Auto-follow acts on it when on. */
+  liveSlide(s: LiveSlide): Promise<void> {
+    return this.follow.slide(s);
+  }
+
+  /** What Auto-follow starts, on the real stage and without pausing itself. */
+  private async followStart(start: FollowStart): Promise<string | null> {
+    // A tap that came while the song was starting has the last word.
+    if (start.kind === 'section') return this.startSection(start.ref, () => this.follow.on);
+    // An item starts as a tap on its row would.
+    this.stopLiveTimeline();
+    const reply = await this.stageCommand({ type: 'look', id: start.look });
+    if (reply.error) return reply.error;
+    this.setStageSection(null);
+    // A tap while the song was starting: its timeline gives way to it.
+    if (this.follow.on) this.startSongTimeline(start.look);
+    return null;
+  }
+
+  /**
+   * A song's section on the real stage: its colours and levels on the song's groups, except those a running timeline
+   * drives; the tempo and the timeline carry on. When another look is on stage, the song starts first, as a tap would.
+   * `wanted`: asked again after each wait (for the stage, for the song's start); when it says no, nothing more starts.
+   */
+  private async startSection(ref: SectionRef, wanted: () => boolean = () => true): Promise<string | null> {
+    let look: string;
+    try {
+      look = sectionLookOf(this.show, ref);
+    } catch (err) {
+      return (err as Error).message;
+    }
+    const driven = new Set<string>();
+    const onStage = (await this.stage()).look;
+    // A tap during that wait has the last word (and may have stopped or started a timeline).
+    if (!wanted()) return null;
+    const live = this.liveTimeline?.runner.state;
+    if (onStage !== ref.song) {
+      this.stopLiveTimeline();
+      const reply = await this.stageCommand({ type: 'look', id: ref.song });
+      if (reply.error) return reply.error;
+      this.setStageSection(null);
+      // A tap while the song was starting: its timeline and the section give way to it.
+      if (!wanted()) return null;
+      this.startSongTimeline(ref.song);
+      // The song's timeline is on its way: its groups are its own from the start.
+      for (const g of this.timelineGroups(this.show.looks.find((l) => l.id === ref.song)?.timeline)) driven.add(g);
+    } else {
+      for (const g of this.timelineGroups(live?.id)) driven.add(g);
+    }
+    const only = this.sectionGroups(look, driven);
+    const reply = await this.stageCommand({ type: 'quickLook', id: look, only });
+    if (reply.error) return reply.error;
+    this.setStageSection({ ref: { song: ref.song, kind: ref.kind }, groups: only, fresh: false });
+    return null;
+  }
+
+  /**
+   * What Back to saved does while a section is on (on stage or in a draft): the section's look (its own, else the
+   * song's) on the groups the section set, as its start did; the tempo and a running timeline carry on. Null for no
+   * section, or one that can't be found in the show any more (Back to saved is then the song's, as always).
+   */
+  private sectionBackCommand(section: SectionOnStage | null): StageCommand | null {
+    if (!section) return null;
+    try {
+      return { type: 'quickLook', id: sectionLookOf(this.show, section.ref), only: [...section.groups] };
+    } catch {
+      return null;
+    }
+  }
+
+  /** The light groups a look sets for a section: the look's, less smoke and the groups in `driven`. */
+  private sectionGroups(lookId: string, driven: Set<string>): string[] {
+    const look = this.show.looks.find((l) => l.id === lookId);
+    return (look?.groups ?? []).map((e) => e.group).filter((g) => !driven.has(g) && !this.isSmokeGroup(g));
+  }
+
+  /** The groups a timeline of the show drives (none for no timeline, or one that's gone). */
+  private timelineGroups(id: string | null | undefined): Set<string> {
+    const timeline = id ? this.show.timelines.find((t) => t.id === id) : undefined;
+    return timeline ? drivenGroups(timeline, this.show) : new Set();
+  }
+
+  private setStageSection(section: (SectionOnStage & { fresh: boolean }) | null): void {
+    if (section === null && this.stageSection === null) return;
+    this.stageSection = section;
+    // Kept with the stage, so a restart has it too (a section start may change no light, and so no runtime).
+    if (this.latestRuntime) this.saver.save(this.runtimeToSave(this.latestRuntime));
+    this.publishState();
+  }
+
+  /** A section as the pages see it; one whose song has gone from the show is let go of. */
+  private sectionView(section: SectionOnStage & { fresh?: boolean }, state: { groups: LiveState['groups'] }): LiveState['section'] {
+    const view = sectionState(this.show, section, state);
+    if (!view) {
+      if (section === this.stageSection) this.stageSection = null;
+      return null;
+    }
+    return section.fresh === false ? { ...view, changed: false } : view;
+  }
+
+  /** A section in a tablet's draft: the same as on stage, on the draft (its look, then the section; its Prepare timeline's groups left alone). */
+  private draftSection(tablet: WebSocket, session: BlindSession, ref: SectionRef): string | null {
+    let look: string;
+    try {
+      look = sectionLookOf(this.show, ref);
+    } catch (err) {
+      return (err as Error).message;
+    }
+    const now = performance.now() / 1000;
+    const smoke = (g: string) => this.isSmokeGroup(g);
+    try {
+      let driven: Set<string>;
+      if (session.engine.runtime().look !== ref.song) {
+        this.prepareTimelines.get(tablet)?.stop();
+        const error = session.apply({ type: 'look', id: ref.song }, now, smoke);
+        if (error) return error;
+        driven = new Set();
+      } else {
+        driven = this.timelineGroups(this.prepareTimelines.get(tablet)?.id);
+      }
+      const only = this.sectionGroups(look, driven);
+      const error = session.apply({ type: 'quickLook', id: look, only }, now, smoke);
+      if (error) return error;
+      session.section = { ref: { song: ref.song, kind: ref.kind }, groups: only };
+    } catch (err) {
+      return this.draftProblem(tablet, err);
+    }
+    this.sendDraft(tablet);
+    return this.blind.get(tablet) === session ? null : BLIND_PROBLEM;
+  }
+
+  /** The runtime as it is kept on disk: with Auto-follow's switch when it is on (absent is off), and the section on stage. */
+  private runtimeToSave(rt: RuntimeState): RuntimeState {
+    const { autoFollow: _was, section: _section, ...rest } = rt;
+    const out: RuntimeState = this.follow.on ? { ...rest, autoFollow: true } : rest;
+    const section = this.stageSection;
+    if (section) out.section = { song: section.ref.song, kind: section.ref.kind, groups: [...section.groups] };
+    return out;
+  }
+
+  /** The section that was on stage when the server stopped, while its song is still on stage and a loaded song with it. */
+  private restoredSection(rt: RuntimeState | null): (SectionOnStage & { fresh: boolean }) | null {
+    const kept = rt?.section;
+    if (!kept || rt.look !== kept.song) return null;
+    const ref: SectionRef = { song: kept.song, kind: kept.kind };
+    try {
+      sectionLookOf(this.show, ref);
+    } catch {
+      return null;
+    }
+    const groups = Array.isArray(kept.groups) ? kept.groups.filter((g) => typeof g === 'string') : [];
+    return { ref, groups, fresh: true };
+  }
+
+  /** The live connection runs while Planning is on (and a login is kept); `restart` connects again (a new login). */
+  private liveFits(restart = false): void {
+    if (this.stopping) return;
+    if (!this.planningOn()) {
+      // Planning off pauses Auto-follow: it is off when Planning comes back on.
+      this.follow.pause();
+      this.follow.fits(null);
+    }
+    else if (!this.planning.loggedIn()) this.follow.fits({ problem: 'Not logged in to the planning service. Paste a login in Settings.' });
+    else this.follow.fits({ account: this.show.settings.planning?.account }, restart);
   }
 
   /** The timeline a song runs (see Look.timeline), started live with no page: lights only, looping when set to Loop. */
@@ -727,6 +965,7 @@ export class App {
 
   /** Run a command on the live stage (Undo of a show edit puts the show back instead). */
   private async stageCommand(cmd: StageCommand, opts?: { quiet?: boolean }): Promise<{ error: string | null; recorded: boolean }> {
+    let sectionBack: SectionOnStage | null = null;
     if (cmd.type === 'undo') {
       const last = this.undoLog.at(-1);
       if (last && last !== 'stage') {
@@ -748,10 +987,17 @@ export class App {
         return { error: null, recorded: false };
       }
       // A stage step (or an empty list, after a restart) is the engine's to undo.
-      if (last) this.undoLog.pop();
+      if (last) {
+        this.undoLog.pop();
+        sectionBack = this.sectionSteps.pop() ?? null;
+      }
     }
+    // The section on stage before this command: a stage Undo step brings it back with the lights.
+    const sectionBefore = this.stageSection && { ref: { ...this.stageSection.ref }, groups: [...this.stageSection.groups] };
     const reply = await this.request<{ error: string | null; recorded?: boolean }>((id) => ({ type: 'command', id, cmd, ...(opts?.quiet ? { quiet: true } : {}) }));
-    if (reply.recorded) this.remember('stage');
+    if (reply.recorded) this.remember('stage', sectionBefore);
+    // An empty list (after a restart) keeps no section: none was on stage then.
+    if (cmd.type === 'undo' && !reply.error) this.setStageSection(sectionBack && { ...sectionBack, fresh: false });
     // A stage Undo while a live timeline runs: it keeps running and sends its whole state again (over the seek fade),
     // so the Undo can't leave the stage between what the timeline says and what was there before.
     if (cmd.type === 'undo' && !reply.error) this.liveTimeline?.runner.resync();
@@ -846,9 +1092,11 @@ export class App {
     if (changed && this.layout) this.refreshLayout();
   }
 
-  private remember(step: Show | 'stage'): void {
+  /** `section`: for a stage step, the section on stage before it. */
+  private remember(step: Show | 'stage', section: SectionOnStage | null = null): void {
     this.undoLog.push(step);
-    if (this.undoLog.length > UNDO_KEPT) this.undoLog.shift();
+    if (step === 'stage') this.sectionSteps.push(section);
+    if (this.undoLog.length > UNDO_KEPT && this.undoLog.shift() === 'stage') this.sectionSteps.shift();
   }
 
   // ---- Blind: a draft of the stage per tablet ----
@@ -883,6 +1131,8 @@ export class App {
         }
         // A Prepare timeline ran in the draft this one replaces.
         this.prepareTimelines.get(tablet)?.stop();
+        // A copy of the stage has the stage's section too.
+        if (this.stageSection) fresh.section = { ref: { ...this.stageSection.ref }, groups: [...this.stageSection.groups] };
         this.blind.set(tablet, fresh);
         this.blindTimerFits();
         this.sendDraft(tablet);
@@ -896,12 +1146,19 @@ export class App {
         if (!session) return done(BLIND_OFF);
         // A song, Basic lights or Blackout in Prepare stops that page's Prepare timeline, as they stop the live one.
         if (cmd.cmd.type === 'look' || cmd.cmd.type === 'safe' || cmd.cmd.type === 'blackout') this.prepareTimelines.get(tablet)?.stop();
+        // Back to saved in the draft's section puts back the section's look, as on the stage.
+        const sectionBack = cmd.cmd.type === 'backToLook' ? this.sectionBackCommand(session.section) : null;
         let error: string | null;
         try {
-          error = session.apply(cmd.cmd, performance.now() / 1000, (g) => this.isSmokeGroup(g));
+          error = session.apply(sectionBack ?? cmd.cmd, performance.now() / 1000, (g) => this.isSmokeGroup(g));
         } catch (err) {
           return done(this.draftProblem(tablet, err));
         }
+        // A whole look (or a quick look) in the draft replaces its section, as on the stage.
+        const whole = cmd.cmd.type === 'look' || cmd.cmd.type === 'quickLook' || cmd.cmd.type === 'safe' || cmd.cmd.type === 'blackout' || cmd.cmd.type === 'backToLook';
+        if (whole && !sectionBack && !error) session.section = null;
+        // A draft Undo puts back the lights it had, which no section is known for: Go would carry a stale one live.
+        if (cmd.cmd.type === 'undo' && !error) session.section = null;
         this.sendDraft(tablet);
         return done(this.blind.get(tablet) === session ? error : BLIND_PROBLEM);
       }
@@ -913,10 +1170,14 @@ export class App {
         } catch (err) {
           return done(this.draftProblem(tablet, err));
         }
-        // Go is a deliberate change of the whole stage, like a song: it stops a live timeline.
+        // Go is a deliberate change of the whole stage, like a song: it stops a live timeline and pauses Auto-follow.
+        this.follow.pause();
         this.stopLiveTimeline();
         // The live engine fades with its own Fade setting (each look's own when it is Auto), as for looks.
+        // The draft's section goes on stage with it.
+        const section = session.section;
         const reply = await this.stageCommand({ type: 'applyStage', stage });
+        if (!reply.error) this.setStageSection(section && { ref: { ...section.ref }, groups: [...section.groups], fresh: false });
         if (!reply.error && this.blind.get(tablet) === session) this.dropDraft(tablet);
         return reply;
       }
@@ -985,7 +1246,11 @@ export class App {
   private sendDraft(tablet: WebSocket, now = performance.now() / 1000): void {
     let state: LiveState | null | undefined;
     try {
-      state = this.blind.get(tablet)?.state(now, this.latestState, (g) => this.isSmokeGroup(g), this.prepareTimelines.get(tablet)?.state ?? null);
+      // The draft's own section; Auto-follow is the stage's (the pill shows it on every tablet).
+      state = this.blind.get(tablet)?.state(now, this.latestState, (g) => this.isSmokeGroup(g), this.prepareTimelines.get(tablet)?.state ?? null, (own, session) => ({
+        section: session.section ? this.sectionView(session.section, own) : null,
+        follow: this.latestState?.follow ?? null,
+      }));
     } catch (err) {
       this.draftProblem(tablet, err);
       return;
@@ -1000,7 +1265,7 @@ export class App {
   private async editShow(cmd: ShowEdit, draft?: BlindSession): Promise<void> {
     // The service is fetched before anything is read or replaced below, so no other edit can slip in while it is on its way.
     const service = cmd.type === 'loadService' ? await this.fetchService(cmd.id) : null;
-    const usesStage = cmd.type === 'saveItem' || cmd.type === 'saveServiceItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook' || (cmd.type === 'editQuickLook' && !!cmd.fromStage);
+    const usesStage = cmd.type === 'saveItem' || cmd.type === 'saveSection' || cmd.type === 'saveServiceItem' || cmd.type === 'addSong' || cmd.type === 'saveQuickLook' || (cmd.type === 'editQuickLook' && !!cmd.fromStage);
     // Deleting a colour only looks at the stage to keep a lit colour; it is fine during Blackout.
     const stage = usesStage && draft ? draft.engine.runtime() : usesStage || cmd.type === 'deleteColour' ? await this.stage() : null;
     // In Prepare an edit never changes the lights: what the stage shows now (each group, and Blackout's memory), taken
@@ -1021,9 +1286,30 @@ export class App {
     switch (cmd.type) {
       case 'saveItem':
         // Quick looks are made with Save stage as quick look, never overwritten by Save.
-        if (!before.operator.runningOrder.includes(cmd.id)) throw new Error('only running-order items can be saved');
-        next = saveItem(before, cmd.id, stage!);
+        if (!before.operator.runningOrder.includes(cmd.id) && !isSectionLook(before, cmd.id)) throw new Error('only running-order items can be saved');
+        {
+          // With a section of the song on stage (in the draft, the draft's), Save to the song saves into that section's own look.
+          const onStage = draft ? draft.section : this.stageSection;
+          if (onStage && onStage.ref.song === cmd.id) {
+            const made = ensureSectionLook(before, onStage.ref);
+            // The whole stage, except the groups a running timeline drives: the section left those to it, and its look keeps them.
+            const set = new Set(onStage.groups);
+            const driven = new Set(made.show.looks.find((l) => l.id === made.id)!.groups.map((e) => e.group).filter((g) => !set.has(g) && !this.isSmokeGroup(g)));
+            if (!draft) for (const g of this.timelineGroups(this.liveTimeline?.runner.state?.id)) driven.add(g);
+            next = saveItem(made.show, made.id, stage!, [...driven]);
+          } else {
+            next = saveItem(before, cmd.id, stage!);
+          }
+        }
         break;
+      case 'saveSection': {
+        const onStage = draft ? draft.section : this.stageSection;
+        if (!onStage) throw new Error('No section is on stage.');
+        next = saveSectionChange(before, stage!, onStage.ref, cmd.scope, onStage.groups);
+        // Nothing differs from the look: nothing to save, and no Undo step.
+        if (next === before) return;
+        break;
+      }
       // Save to a header, slides or picture of the loaded service: its look is made from the stage (or the draft), like Save.
       case 'saveServiceItem': next = saveServiceItem(before, cmd.key, stage!); break;
       case 'addSong': next = addSong(before, cmd.after, stage!).show; break;
@@ -1050,6 +1336,15 @@ export class App {
       case 'editEffect': next = editEffect(before, cmd); break;
       // The result goes through operatorSave like any edit, so keys of looks the load took away are freed. Never touches the stage.
       case 'loadService': next = loadService(before, service!); break;
+      // Nothing to take off or put back: nothing to save, and no Undo step.
+      case 'clearService':
+        next = clearService(before);
+        if (next === before) return;
+        break;
+      case 'standardSongs':
+        next = useStandardSongs(before);
+        if (next === before) return;
+        break;
       // Controller keys don't look at the stage either.
       case 'setKey': next = assignKey(before, cmd.key, cmd.does).show; break;
       case 'clearKey': next = clearKey(before, cmd.does); break;
@@ -1071,6 +1366,17 @@ export class App {
     // Groups on stage showing a colour or effect the edit changes carry on as a hidden copy of it, with no fade.
     const kept = live ? keepLitPresets(before, next, live) : null;
     await this.operatorSave(kept?.show ?? next, kept ? { pins: kept.pins } : undefined);
+    // A section whose song is no longer a loaded song (a clear, a deleted song) is let go of, on stage and in a draft.
+    const loaded = (ref: SectionRef) => {
+      try {
+        sectionLookOf(this.show, ref);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (this.stageSection && !loaded(this.stageSection.ref)) this.setStageSection(null);
+    for (const session of this.blind.values()) if (session.section && !loaded(session.section.ref)) session.section = null;
     // Tempo edits of one song within 3 s of each other (tapping along, a held + or −) are one Undo step.
     const at = Date.now();
     const joins = cmd.type === 'itemTempo' && this.tempoEdit !== null && this.tempoEdit.item === cmd.item
@@ -1140,6 +1446,8 @@ export class App {
       }
     }
     this.watchNode();
+    // Planning switched on or off, or another account: the live connection follows.
+    this.liveFits();
     await this.syncOsc();
     // The fixtures come from the new show, in its order (as the engine takes them): a show with other
     // fixtures (an import) must not be drawn from the old ones, which would leave the stage view empty.
@@ -1172,7 +1480,10 @@ export class App {
     if (role !== 'programmer') return NOT_PROGRAMMER;
     const timeline = this.show.timelines.find((t) => t.id === msg.id);
     if (!timeline) return `There is no timeline "${msg.id}" in the show.`;
-    return msg.prepare ? this.startPrepareTimeline(ws, timeline, msg.at) : this.startLiveTimeline(ws, timeline, msg.at);
+    if (msg.prepare) return this.startPrepareTimeline(ws, timeline, msg.at);
+    // A timeline started live is a start by hand: it pauses Auto-follow.
+    this.follow.pause();
+    return this.startLiveTimeline(ws, timeline, msg.at);
   }
 
   /**
@@ -1265,6 +1576,13 @@ export class App {
       },
     });
     this.liveTimeline = entry;
+    // The groups it drives are the timeline's now, not the section's: no save bar for them, and This section leaves them out.
+    const section = this.stageSection;
+    if (section) {
+      const driven = drivenGroups(fresh, this.show);
+      const groups = section.groups.filter((g) => !driven.has(g));
+      if (groups.length !== section.groups.length) this.setStageSection({ ...section, groups });
+    }
     this.log(`Timeline "${fresh.name}" started at ${at.toFixed(1)} s`);
     // Started in Blackout, it takes the stage from there: Blackout ends without a light moving (before the timeline's
     // first change), so a look block never brings back the stage from before Blackout and the pages stop showing it.
@@ -2044,6 +2362,8 @@ export class App {
         } catch (err) {
           throw new HttpError(400, this.planningFailure(err));
         }
+        // A new login: the live connection starts again with it (while Planning is on).
+        this.liveFits(true);
         // The Settings switch is a draft until Save, so a login can be saved while Planning is still off; the pickers fill at once.
         json(res, 200, await this.planningView(true));
         return true;

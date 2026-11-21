@@ -3,6 +3,9 @@
 
 import { z } from 'zod';
 import { ControlKey, EffectLayer, KeyTarget, PaletteColour, QuickTab } from './schema.ts';
+import { SectionKind } from './sections.ts';
+import type { FollowNote, LiveStatus } from './follow.ts';
+import type { SectionRef } from './planning.ts';
 
 const id = z.string().min(1).max(64);
 /** A #rrggbb colour. */
@@ -65,8 +68,11 @@ const ONE_OR_MANY = { message: 'give a target or a list of targets', path: ['tar
 /** Commands the engine runs (a Blind draft runs them too). */
 const STAGE_COMMANDS = [
   z.object({ type: z.literal('look'), id, fade }),
-  /** Set only the groups a look lists, leaving the current look and the other groups alone. */
-  z.object({ type: z.literal('quickLook'), id, fade }),
+  /**
+   * Set only the groups a look lists, leaving the current look, the tempo and the other groups alone. `only`: just
+   * these of the look's groups (a song's section, which leaves the groups a running timeline drives to it).
+   */
+  z.object({ type: z.literal('quickLook'), id, fade, only: z.array(id).max(64).optional() }),
   z.object({ type: z.literal('groupPreset'), group: id, preset: id, fade }),
   /**
    * Any colour: run this exact colour (with optional white, amber and UV) on a group, as a live preset.
@@ -125,6 +131,8 @@ export const Command = z.discriminatedUnion('type', [
   // Edits to the show from the operator page. The server handles these itself; the engine never sees them.
   /** Store the stage (where it is going) in a running-order item. */
   z.object({ type: z.literal('saveItem'), id }),
+  /** The change on the stage (or in the draft) for the song's section on it: into the section's own look, or the song's. One Undo step. */
+  z.object({ type: z.literal('saveSection'), scope: z.enum(['section', 'song']) }),
   /** A new song holding the stage, right after `after`. */
   z.object({ type: z.literal('addSong'), after: id }),
   z.object({ type: z.literal('renameItem'), id, name: z.string() }),
@@ -182,12 +190,23 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('editEffect'), preset: id, effect: LiveEffectLayer, name: z.string().optional() }),
   /** Put a service of the planning service into the running order (the server fetches it). One Undo step; the lights are never touched. */
   z.object({ type: z.literal('loadService'), id: z.string().min(1).max(64) }),
+  /** Take the planned service out of the running order: Basic lights, the kept rows and rows added by hand stay. One Undo step; the lights are never touched. */
+  z.object({ type: z.literal('clearService') }),
+  /** Take the planned service off and put Song 1 to Song 5 in the running order, each in its own colour (a look the person saved for one stays). One Undo step; the lights are never touched. */
+  z.object({ type: z.literal('standardSongs') }),
   /** Store the stage (or the tablet's draft) as the look of a loaded service's header, slides or picture, by the item's key; it goes in the running order after the look above it. */
   z.object({ type: z.literal('saveServiceItem'), key: z.string().min(1).max(64) }),
   /** Give a running-order item a copy of another look's groups (and tempo) without touching the stage: "pick another look". */
   z.object({ type: z.literal('itemCopyLook'), item: id, from: id }),
   /** Mark a running-order item kept (a load never replaces it) or not. */
   z.object({ type: z.literal('keepItem'), id, kept: z.boolean() }),
+  /**
+   * Start a song's section (`song`: the song's look), as Auto-follow does: its colours and levels only, after the song
+   * itself when another look is on stage. It pauses Auto-follow. In Prepare it acts on the tablet's draft.
+   */
+  z.object({ type: z.literal('section'), song: id, kind: SectionKind }),
+  /** Auto-follow on or off (one switch for all tablets; not an Undo step). On starts what is on screen now. */
+  z.object({ type: z.literal('autoFollow'), on: z.boolean() }),
   // Controller keys (the server's learn sends setKey once a key is pressed): one key, one job.
   /** Give `does` this key; a key that did something else moves to it. */
   z.object({ type: z.literal('setKey'), key: ControlKey, does: KeyTarget }),
@@ -207,8 +226,8 @@ export const Command = z.discriminatedUnion('type', [
 export type Command = z.infer<typeof Command>;
 
 const SHOW_EDITS = [
-  'saveItem', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemTimeline', 'itemQuickLook',
-  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'loadService', 'saveServiceItem', 'itemCopyLook', 'keepItem', 'setKey', 'clearKey', 'resetKeys',
+  'saveItem', 'saveSection', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemTimeline', 'itemQuickLook',
+  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'loadService', 'clearService', 'standardSongs', 'saveServiceItem', 'itemCopyLook', 'keepItem', 'setKey', 'clearKey', 'resetKeys',
 ] as const;
 /** Commands that change the show rather than the stage. */
 export type ShowEdit = Extract<Command, { type: (typeof SHOW_EDITS)[number] }>;
@@ -354,6 +373,13 @@ export interface LiveState {
    * state has that page's own Prepare timeline here instead.
    */
   timeline?: TimelineStatus | null;
+  /**
+   * The song's section on stage, or null. `changed`: one of the groups it set runs another colour or level than the
+   * section's look says. Set by the server; a Prepare draft's state has the draft's own section.
+   */
+  section?: (SectionRef & { changed: boolean }) | null;
+  /** Auto-follow: whether it is on, the live connection and what it last did. Set by the server; null while Planning is off. */
+  follow?: { on: boolean; live: LiveStatus; note: FollowNote | null } | null;
 }
 
 /** What is saved to disk so a restart restores the stage as it was. */
@@ -371,6 +397,10 @@ export interface RuntimeState {
   beforeBlackout?: Record<string, string | null>;
   /** The live effects (`fx:` ids) that `groups` or `beforeBlackout` name, so a restart runs the same effect. */
   effects?: Record<string, EffectLayer>;
+  /** Auto-follow is on (the server's, not the engine's). Absent: off, which is how it starts everywhere. */
+  autoFollow?: boolean;
+  /** The song's section on stage and the groups it set (the server's, not the engine's). Absent: none. */
+  section?: SectionRef & { groups: string[] };
 }
 
 export const SAFE = 'safe';

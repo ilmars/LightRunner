@@ -4,6 +4,8 @@
 
 import { z } from 'zod';
 import type { Show } from './schema.ts';
+import { SongSection, songSections } from './sections.ts';
+import type { SectionKind } from './sections.ts';
 
 const id = z.string().regex(/^[a-z0-9][a-z0-9-]*$/, 'ids are lowercase letters, digits and dashes');
 
@@ -23,6 +25,14 @@ export const ServiceItem = z.object({
   songId: z.string().min(1).max(64).optional(),
   tempo: z.number().min(MIN_TEMPO).max(MAX_TEMPO).optional(),
   look: id.optional(),
+  /** The song's sections, each with the look it starts. */
+  sections: z.array(SongSection.extend({ look: id.optional() })).max(8).optional(),
+  /** The song's musical key (`key` above is the cue id). */
+  songKey: z.string().max(8).optional(),
+  timeSignature: z.string().max(8).optional(),
+  artist: z.string().max(MAX_NAME).optional(),
+  /** What the service notes for the song. */
+  notes: z.string().max(500).optional(),
 });
 export type ServiceItem = z.infer<typeof ServiceItem>;
 
@@ -85,10 +95,22 @@ export function toPlannedService(idOfService: string, doc: unknown, songs: Map<s
     const item: ServiceItem = { key: str(cue.cue_id), kind, name: clean(name) };
     if (songId) {
       item.songId = songId;
+      const meta = obj(songMeta[str(cue.cue_id)]);
+      const data = obj(song.data);
       // The service's own tempo for the song when it sets one, else the song library's.
-      const own = obj(songMeta[str(cue.cue_id)]).tempo;
-      const tempo = inRange(own) ? own : obj(song.data).tempo;
+      const tempo = inRange(meta.tempo) ? meta.tempo : data.tempo;
       if (inRange(tempo)) item.tempo = tempo;
+      // Facts about the song. Only sections' titles and ids are read, never the lyrics.
+      const sections = songSections(song);
+      if (sections.length) item.sections = sections;
+      const songKey = str(meta.key).trim() || str(data.defaultKey).trim();
+      if (songKey) item.songKey = songKey.slice(0, 8);
+      const timeSignature = str(data.timeSignature).trim();
+      if (timeSignature) item.timeSignature = timeSignature.slice(0, 8);
+      const artist = str(data.text_artist).trim();
+      if (artist) item.artist = artist.slice(0, MAX_NAME);
+      const notes = str(meta.notes).trim();
+      if (notes) item.notes = notes.slice(0, 500);
     }
     return item;
   });
@@ -123,6 +145,17 @@ export function rememberKey(item: ServiceItem): string | null {
     default:
       return null;
   }
+}
+
+/** What a song's own look for one section is remembered against. */
+export function sectionRememberKey(songId: string, kind: SectionKind): string {
+  return `song:${songId}#${kind}`;
+}
+
+/** A section of a loaded song: `song` is the song's look id. */
+export interface SectionRef {
+  song: string;
+  kind: SectionKind;
 }
 
 // ---- The rows the running order shows ----

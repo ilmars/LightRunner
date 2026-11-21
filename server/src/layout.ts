@@ -1,7 +1,7 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
-import { SAFE_LIGHT, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupLightType, groupSegments, keptOf, newSongLookOf, paletteEntryOf, placeOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, serviceRows } from '../../packages/shared/src/index.ts';
-import type { ChannelRole, FixtureShape, GroupKind, Hangs, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, ServiceRow, Show } from '../../packages/shared/src/index.ts';
+import { SAFE_LIGHT, SECTION_NAMES, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupLightType, groupSegments, keptOf, newSongLookOf, paletteEntryOf, placeOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, sectionsOf, serviceRows } from '../../packages/shared/src/index.ts';
+import type { ChannelRole, FixtureShape, GroupKind, Hangs, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, SectionKind, ServiceRow, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 import { keyLabel, keyPlace, keyShort } from './keynames.ts';
 
@@ -160,6 +160,23 @@ export interface OperatorLayout {
    * look (by look id): its place on the controller ("pad 1,3") and its whole name ("APC mini mk2 · pad 1,3").
    */
   keys: { midi: boolean; connected: number; songs: Record<string, KeyName>; quickLooks: Record<string, KeyName> };
+  /**
+   * The loaded service's songs, by song look id: their sections in the order they first appear (each with its own
+   * look, which is in `looks`, or null while it plays the song's), and the facts for planning the lights. Empty
+   * while Planning is off or no service is loaded.
+   */
+  songs: Record<string, OperatorSong>;
+}
+
+export interface OperatorSong {
+  sections: { kind: SectionKind; name: string; look: string | null }[];
+  key: string | null;
+  tempo: number | null;
+  timeSignature: string | null;
+  artist: string | null;
+  notes: string | null;
+  /** Chord names per section, once it is known where the song library keeps them; null until then. */
+  chords: Record<SectionKind, string[]> | null;
 }
 
 export interface KeyName {
@@ -221,10 +238,13 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
 
   // With Planning switched off the show keeps the loaded service, but the running order shows as plain looks.
   const planning = !!show.settings.planning?.enabled;
+  const songs = planning ? songsOf(show) : {};
+  // Section looks are never rows, but the page draws their dots and starts them.
+  const sectionLooks = Object.values(songs).flatMap((s) => s.sections.flatMap((x) => (x.look !== null && !lookIds.includes(x.look) ? [x.look] : [])));
 
   return {
     show: show.name,
-    looks: lookIds.flatMap(describe),
+    looks: [...lookIds, ...sectionLooks].flatMap(describe),
     runningOrder: show.operator.runningOrder.flatMap(describe),
     rows: planning ? serviceRows(show) : show.operator.runningOrder.map((look) => ({ kind: 'look' as const, look, header: false })),
     ...(planning && show.operator.service ? { service: { title: show.operator.service.title, start: show.operator.service.start, place: placeOf(show.operator.service.title) } } : {}),
@@ -276,7 +296,27 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
     manualForOperators: show.operator.manualForOperators,
     contact: show.settings.contact ?? null,
     keys: layoutKeys(show, midi, connected),
+    songs,
   };
+}
+
+/** The loaded service's songs that are rows of the running order (a song planned twice once): sections and facts. */
+function songsOf(show: Show): Record<string, OperatorSong> {
+  const out: Record<string, OperatorSong> = {};
+  const order = new Set(show.operator.runningOrder);
+  for (const item of show.operator.service?.items ?? []) {
+    if (item.kind !== 'song' || item.look === undefined || !order.has(item.look) || Object.hasOwn(out, item.look)) continue;
+    out[item.look] = {
+      sections: sectionsOf(show, item.look).map((s) => ({ kind: s.kind, name: SECTION_NAMES[s.kind], look: s.look })),
+      key: item.songKey ?? null,
+      tempo: item.tempo ?? null,
+      timeSignature: item.timeSignature ?? null,
+      artist: item.artist ?? null,
+      notes: item.notes ?? null,
+      chords: null,
+    };
+  }
+  return out;
 }
 
 function layoutKeys(show: Show, midi: boolean, connected: number): OperatorLayout['keys'] {

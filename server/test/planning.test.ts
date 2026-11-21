@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import { App } from '../src/app.ts';
 import { FakePlanning } from '../src/planning/fake.ts';
+import { ensureSectionLook } from '../../packages/shared/src/index.ts';
 import type { PlannedService } from '../../packages/shared/src/index.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -688,3 +689,143 @@ test('FakePlanning.fromFile reads the planning-fake.json fixture the pages are c
   const coming = await fake.services('account-1', 'type-riga-sunday', new Date('2026-10-20T12:00:00'));
   assert.deepEqual(coming.map((s) => s.start.slice(0, 10)), ['2026-10-25', '2026-11-08', '2026-10-18']);
 });
+
+test("saveItem on a section's own look is one Undo step and leaves the song alone; other looks outside the order are refused", () => withPlanning(async (rig) => {
+  const { app, tablet } = rig;
+  rig.fake.plannedServices[0]!.items[1]!.sections = [{ kind: 'verse', slides: ['a'] }, { kind: 'chorus', slides: ['b'] }];
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const loaded = await showOf(rig);
+  const song = (await orderOf(rig))[3]!;
+  // Someone gave the chorus a look of its own (nothing makes one from the pages yet).
+  const made = ensureSectionLook(loaded, { song, kind: 'chorus' });
+  await app.setShow(made.show);
+  const own = made.id;
+  assert.ok(!(await orderOf(rig)).includes(own));
+  const before = await showOf(rig);
+
+  assert.equal(await t.command({ type: 'look', id: song, fade: 0 }), null);
+  assert.equal(await t.command({ type: 'groupPreset', group: 'back-wall', preset: 'back-amber', fade: 0 }), null);
+  await waitFor(() => app.state?.groups['back-wall']?.preset === 'back-amber', 'amber on stage');
+  assert.equal(await t.command({ type: 'saveItem', id: own }), null);
+  const show = await showOf(rig);
+  assert.equal(entry(lookIn(show, own), 'back-wall').preset, 'back-amber');
+  assert.deepEqual(lookIn(show, song), lookIn(before, song), "the song's look is untouched");
+
+  assert.equal(await t.command({ type: 'undo' }), null);
+  assert.deepEqual(lookIn(await showOf(rig), own), lookIn(before, own), 'one Undo step');
+
+  const quick = loaded.operator.quickLooks.at(-1).look as string;
+  assert.equal(await t.command({ type: 'saveItem', id: quick }), 'only running-order items can be saved');
+  assert.equal(await t.command({ type: 'itemGroup', item: own, group: 'back-wall', preset: 'back-amber' }), null);
+  t.close();
+}));
+
+test("the layout gives each loaded song its sections, in order with their own looks, and its facts", () => withPlanning(async (rig) => {
+  const { app } = rig;
+  Object.assign(rig.fake.plannedServices[0]!.items[1]!, {
+    sections: [{ kind: 'verse', slides: ['a'] }, { kind: 'chorus', slides: ['b', 'c'] }, { kind: 'bridge', slides: ['d'] }],
+    songKey: 'G', timeSignature: '6/8', artist: 'Someone', notes: 'slow start',
+  });
+  await enable(rig);
+  assert.deepEqual((await layoutOf(rig)).songs, {}, 'no service, no songs');
+  const t = await rig.tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const order = await orderOf(rig);
+  const [one, two] = [order[3]!, order[4]!];
+  let songs = (await layoutOf(rig)).songs;
+  assert.deepEqual(Object.keys(songs).sort(), [one, two].sort());
+  assert.deepEqual(songs[one], {
+    sections: [{ kind: 'verse', name: 'Verse', look: null }, { kind: 'chorus', name: 'Chorus', look: null }, { kind: 'bridge', name: 'Bridge', look: null }],
+    key: 'G', tempo: 90, timeSignature: '6/8', artist: 'Someone', notes: 'slow start', chords: null,
+  });
+  assert.deepEqual(songs[two], { sections: [], key: null, tempo: null, timeSignature: null, artist: null, notes: null, chords: null });
+
+  const made = ensureSectionLook(await showOf(rig), { song: one, kind: 'chorus' });
+  await app.setShow(made.show);
+  const layout = await layoutOf(rig);
+  songs = layout.songs;
+  assert.deepEqual(songs[one].sections.map((s: any) => s.look), [null, made.id, null]);
+  const own = layout.looks.find((l: any) => l.id === made.id);
+  assert.ok(own, 'the section look is in the looks');
+  assert.equal(own.name, 'Song One · Chorus');
+  assert.ok(!layout.runningOrder.some((l: any) => l.id === made.id), 'never a row');
+
+  await rig.call('PUT', '/api/settings', { planning: { enabled: false } });
+  assert.deepEqual((await layoutOf(rig)).songs, {}, 'Planning off shows plain looks');
+  t.close();
+}));
+
+test('clearing the service empties the song rows and the layout; one Undo step brings the service back; the kept rows stay', () => withPlanning(async (rig) => {
+  const { call, tablet } = rig;
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const loaded = await layoutOf(rig);
+  assert.ok(Object.keys(loaded.songs).length > 0);
+  assert.equal(await t.command({ type: 'clearService' }), null);
+  const cleared = await layoutOf(rig);
+  assert.deepEqual(cleared.songs, {});
+  assert.equal(cleared.service, undefined);
+  assert.deepEqual(cleared.runningOrder.map((l: any) => l.name), ['Basic lights', 'Sermon', 'Midweek calm']);
+  assert.equal(await t.command({ type: 'undo' }), null);
+  const back = await layoutOf(rig);
+  assert.deepEqual(back.runningOrder.map((l: any) => l.name), ['Basic lights', 'Sermon', 'Midweek calm', 'Song One', 'Song Two']);
+  assert.deepEqual(back.songs, loaded.songs);
+  assert.deepEqual(back.service, loaded.service);
+  t.close();
+  assert.equal((await call('GET', '/api/layout')).status, 200);
+}));
+
+test('using the standard songs is one Undo step that brings the planned service back, and the lights do not change', () => withPlanning(async (rig) => {
+  const { app, tablet } = rig;
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  assert.equal(await t.command({ type: 'look', id: (await orderOf(rig))[1] }), null);
+  await sleep(100);
+  const loaded = await layoutOf(rig);
+  const stage = { look: app.state!.look, ...lights(rig) };
+
+  assert.equal(await t.command({ type: 'standardSongs' }), null);
+  const after = await layoutOf(rig);
+  assert.deepEqual(after.runningOrder.map((l: any) => l.name), ['Basic lights', 'Sermon', 'Midweek calm', 'Song 1', 'Song 2', 'Song 3', 'Song 4', 'Song 5']);
+  assert.equal(after.service, undefined);
+  assert.deepEqual(after.songs, {});
+  assert.deepEqual({ look: app.state!.look, ...lights(rig) }, stage, 'the lights keep what they show');
+
+  // Using them again changes nothing: no new Undo step.
+  assert.equal(await t.command({ type: 'standardSongs' }), null);
+  assert.deepEqual(await layoutOf(rig), after);
+
+  // One Undo takes the standard songs off and the planned service back.
+  assert.equal(await t.command({ type: 'undo' }), null);
+  const back = await layoutOf(rig);
+  assert.deepEqual(back.runningOrder.map((l: any) => l.name), ['Basic lights', 'Sermon', 'Midweek calm', 'Song One', 'Song Two']);
+  assert.deepEqual(back.service, loaded.service);
+  assert.deepEqual(back.songs, loaded.songs);
+  assert.deepEqual({ look: app.state!.look, ...lights(rig) }, stage);
+  t.close();
+}));
+
+test('clearing with no service loaded makes no Undo step', () => withPlanning(async (rig) => {
+  const { app, tablet } = rig;
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'clearService' }), null);
+  assert.equal(app.state!.canUndo, false);
+  t.close();
+}));
+
+test('deleting a song in the Edit list takes it out of the loaded service for good', () => withPlanning(async (rig) => {
+  await enable(rig);
+  const t = await rig.tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  const one = (await layoutOf(rig)).runningOrder.find((l: any) => l.name === 'Song One').id;
+  assert.equal(await t.command({ type: 'deleteItem', id: one }), null);
+  const after = await layoutOf(rig);
+  assert.equal(after.rows.some((r: any) => r.kind === 'item' && r.name === 'Song One'), false);
+  assert.equal(after.songs[one], undefined);
+  t.close();
+}));

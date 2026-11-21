@@ -5,8 +5,11 @@
 import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, liveEffectId, livePresetId, parseLiveEffect, parseLivePreset } from './protocol.ts';
 import { effectKey, isEffectPreset, resolveColour } from './schema.ts';
 import { followQuickLook } from './keys.ts';
-import { anchorOf, rememberKey } from './planning.ts';
-import type { PlannedService } from './planning.ts';
+import { anchorOf, rememberKey, sectionRememberKey } from './planning.ts';
+import type { PlannedService, SectionRef } from './planning.ts';
+import { groupIsWhiteOnly } from './presets.ts';
+import { SECTION_NAMES } from './sections.ts';
+import type { SectionKind } from './sections.ts';
 import type { EffectLayer, Layer, Look, LookEntry, Preset, QuickLook, QuickTab, Show } from './schema.ts';
 
 /** Where the stage is going: preset ids (possibly live ones) and level targets, as in RuntimeState. */
@@ -218,18 +221,18 @@ export function ensureBasicLights(show: Show): Show {
 // schema.ts (which imports it), and these need uniqueId and the look rules from this file.
 
 /**
- * Fits a planned name into a look's 40 characters; `fallback` when nothing is left of it. Song names often carry a
- * second title in brackets ("Tad, Kad Jūra Krāc (Vēlos, Kungs, zem Taviem spārniem būt)"): a name too long loses
- * that first, then is cut at a word with "…" rather than in the middle of one.
+ * Fits a planned name into a look's 40 characters (or `max`); `fallback` when nothing is left of it. Song names often
+ * carry a second title in brackets ("Tad, Kad Jūra Krāc (Vēlos, Kungs, zem Taviem spārniem būt)"): a name too long
+ * loses that first, then is cut at a word with "…" rather than in the middle of one.
  */
-export function planLookName(name: string, fallback: string): string {
+export function planLookName(name: string, fallback: string, max = MAX_NAME): string {
   const whole = name.trim().replace(/\s+/g, ' ');
-  if (whole.length <= MAX_NAME) return whole || fallback;
+  if (whole.length <= max) return whole || fallback;
   const short = whole.replace(/\s*\([^()]*\)?\s*$/, '').trim();
-  if (short && short.length <= MAX_NAME) return short;
-  const cut = whole.slice(0, MAX_NAME - 1);
+  if (short && short.length <= max) return short;
+  const cut = whole.slice(0, max - 1);
   const at = cut.lastIndexOf(' ');
-  return at >= MAX_NAME / 2 ? `${cut.slice(0, at).replace(/[\s,;:(-]+$/, '')}…` : whole.slice(0, MAX_NAME).trim();
+  return at >= max / 2 ? `${cut.slice(0, at).replace(/[\s,;:(-]+$/, '')}…` : whole.slice(0, max).trim();
 }
 
 /** Forgets, in place, everything the planning feature keeps that names a look that is gone. */
@@ -240,7 +243,10 @@ function forgetMissing(show: Show): void {
     for (const [key, look] of Object.entries(op.remembered)) if (!exists.has(look)) delete op.remembered[key];
   }
   if (op.kept) op.kept = op.kept.filter((look) => exists.has(look));
-  for (const item of op.service?.items ?? []) if (item.look !== undefined && !exists.has(item.look)) delete item.look;
+  for (const item of op.service?.items ?? []) {
+    if (item.look !== undefined && !exists.has(item.look)) delete item.look;
+    for (const section of item.sections ?? []) if (section.look !== undefined && !exists.has(section.look)) delete section.look;
+  }
   const planning = show.settings.planning;
   if (planning?.newSongLook !== undefined && !exists.has(planning.newSongLook)) delete planning.newSongLook;
 }
@@ -338,6 +344,12 @@ export function loadService(show: Show, service: PlannedService): Show {
     const item = structuredClone(planned);
     delete item.look;
     const key = rememberKey(item);
+    // A section has a look of its own only when someone saved one for it (and it is still there); a load makes none.
+    for (const section of item.sections ?? []) {
+      const own = item.songId === undefined ? undefined : remembered[sectionRememberKey(item.songId, section.kind)];
+      if (own !== undefined && out.looks.some((l) => l.id === own)) section.look = own;
+      else delete section.look;
+    }
     let id = key === null ? undefined : remembered[key];
     if (id !== undefined) {
       lookIn(out, id).name = planLookName(item.name, lookIn(out, id).name);
@@ -362,6 +374,126 @@ export function loadService(show: Show, service: PlannedService): Show {
   return out;
 }
 
+/**
+ * Takes the planned service out of the running order: Basic lights, the kept rows and rows added by hand stay, in
+ * order; the songs, parts, slides and pictures that came from the plan leave, and so does the loaded service (its
+ * muted rows, folded verses and date). A plan look that something remembers (a song, a part, a section) stays in the
+ * show, hidden, so a later load brings it back; one nothing remembers goes with its row. With no service loaded the same
+ * show comes back.
+ */
+export function clearService(show: Show): Show {
+  // No service loaded: nothing to take off, so the same show comes back (no Undo step, no backup).
+  if (!show.operator.service) return show;
+  const out = structuredClone(show);
+  const service = out.operator.service!;
+  const planned = new Set(service.items.flatMap((i) => (i.look === undefined ? [] : [i.look])));
+  const safe = out.operator.safeLook;
+  const kept = new Set(out.operator.kept ?? []);
+  const leaving = out.operator.runningOrder.filter((id) => planned.has(id) && id !== safe && !kept.has(id));
+  out.operator.runningOrder = out.operator.runningOrder.filter((id) => !leaving.includes(id));
+  delete out.operator.service;
+  const keep = new Set<string>([...Object.values(out.operator.remembered ?? {}), ...out.operator.quickLooks.map((q) => q.look)]);
+  const forNew = out.settings.planning?.newSongLook;
+  if (forNew !== undefined) keep.add(forNew);
+  const dropped = new Set(leaving.filter((id) => !keep.has(id)));
+  if (dropped.size) {
+    out.looks = out.looks.filter((l) => !dropped.has(l.id));
+    out.operator.looks = out.operator.looks.filter((id) => !dropped.has(id));
+    forgetMissing(out);
+  }
+  return out;
+}
+
+// ---- The standard songs ----
+
+/** The five standard songs: each one's colour, and whether the key lights are warm or cool white. */
+const STANDARD_SONGS = [
+  { colour: 'blue', key: 'warm' },
+  { colour: 'purple', key: 'warm' },
+  { colour: 'orange', key: 'warm' },
+  { colour: 'teal', key: 'cool' },
+  { colour: 'pink', key: 'cool' },
+] as const;
+
+/** Each light: the names of a group's own colour that match it, best first, and the Any colour used when none does. */
+const STANDARD_LIGHTS: Record<string, { names: string[]; hex: string }> = {
+  blue: { names: ['Zils', 'Blue'], hex: '#1f4bff' },
+  purple: { names: ['Violets', 'Violet', 'Purple'], hex: '#8c00ff' },
+  orange: { names: ['Oranžs', 'Orange'], hex: '#ff6a00' },
+  teal: { names: ['Tirkīzs', 'Teal', 'Turquoise', 'Cyan'], hex: '#00c8b4' },
+  pink: { names: ['Rozā', 'Pink', 'Magenta'], hex: '#ff2d8c' },
+  warm: { names: ['Silti balts', 'Warm white', 'Silti 3200K'], hex: '#ffb46b' },
+  cool: { names: ['Vēsi balts', 'Cool white'], hex: '#dcebff' },
+};
+/** A colour with one of these in its name counts as warm or cool white when no name above matches. */
+const STANDARD_WORDS: Record<string, string[]> = { warm: ['warm', 'silti'], cool: ['cool', 'vēsi'] };
+
+/** The remembered key of standard song `n` (1 to 5). */
+const standardKey = (n: number) => `standard:${n}`;
+
+/** The preset of the group that shows `light`, by name, or undefined when the group has none like it. */
+function standardPreset(show: Show, groupId: string, light: string): string | undefined {
+  const own = show.presets.filter((p) => p.group === groupId && !p.custom && !isEffectPreset(p));
+  for (const name of STANDARD_LIGHTS[light]!.names) {
+    const found = own.find((p) => plainName(p.name) === plainName(name));
+    if (found) return found.id;
+  }
+  const words = (STANDARD_WORDS[light] ?? []).map(plainName);
+  return own.find((p) => words.some((w) => plainName(p.name).includes(w)))?.id;
+}
+
+/** The look entries of standard song `n` (1 to 5): every group of the show, smoke machines left out, at full. */
+function standardEntries(show: Show, n: number): LookEntry[] {
+  const song = STANDARD_SONGS[n - 1]!;
+  const groups: Record<string, string> = {};
+  for (const group of show.groups) {
+    if (group.kind === 'smoke') continue;
+    const name = group.name.toLowerCase();
+    const light = name.includes('front') || groupIsWhiteOnly(show, group.id) ? 'warm' : name.includes('key') ? song.key : song.colour;
+    groups[group.id] = standardPreset(show, group.id, light) ?? livePresetId(group.id, STANDARD_LIGHTS[light]!.hex);
+  }
+  return entriesFor(show, { groups, levels: Object.fromEntries(Object.keys(groups).map((g) => [g, 1])) });
+}
+
+/**
+ * Takes the planned service off (as clearService does) and puts Song 1 to Song 5 in the running order, after Basic lights
+ * and the kept rows and before rows added by hand. Each song comes back with the look remembered for it, so one the
+ * person changed and saved stays as they left it; the first time it is made in its own colour and remembered at once.
+ * A row added by hand and named "Song 1" to "Song 5" (the first running order's) leaves, and its look with it unless a
+ * quick look or something remembered uses it. The same show comes back when nothing would change.
+ */
+export function useStandardSongs(show: Show): Show {
+  const out = structuredClone(clearService(show));
+  const op = out.operator;
+  const remembered = (op.remembered ??= {});
+  const safe = op.safeLook;
+  const kept = new Set(op.kept ?? []);
+  const exists = (id: string | undefined): id is string => id !== undefined && out.looks.some((l) => l.id === id);
+  const own = [1, 2, 3, 4, 5].map((n) => remembered[standardKey(n)]).filter(exists);
+
+  // A row added by hand named Song 1 to Song 5 leaves; so does its look when nothing else uses it.
+  const names = new Set([1, 2, 3, 4, 5].map((n) => `Song ${n}`));
+  const old = op.runningOrder.filter((id) => id !== safe && !kept.has(id) && !own.includes(id) && names.has(lookIn(out, id).name));
+  const gone = new Set(old.filter((id) => !op.quickLooks.some((q) => q.look === id) && !Object.values(remembered).includes(id)));
+  out.looks = out.looks.filter((l) => !gone.has(l.id));
+  op.looks = op.looks.filter((id) => !gone.has(id));
+
+  const songs = STANDARD_SONGS.map((_, i) => {
+    const key = standardKey(i + 1);
+    const have = remembered[key];
+    if (exists(have)) return have;
+    const id = addLook(out, `Song ${i + 1}`, standardEntries(out, i + 1));
+    remembered[key] = id;
+    return id;
+  });
+  const leaving = new Set([...old, ...songs]);
+  // A standard song marked Keep stays in the song block (not in the kept rows, and not added twice).
+  const fixed = [safe!, ...keptOf(out).filter((id) => !songs.includes(id))];
+  op.runningOrder = [...fixed, ...songs, ...op.runningOrder.filter((id) => !fixed.includes(id) && !leaving.has(id))];
+  forgetMissing(out);
+  return JSON.stringify(out) === JSON.stringify(show) ? show : out;
+}
+
 /** True when the stage preset is an effect: a live one (`fx:`) or a preset of the show with an effect in it. */
 function isEffect(show: Show, preset: string): boolean {
   if (parseLiveEffect(preset)) return true;
@@ -373,8 +505,9 @@ function isEffect(show: Show, preset: string): boolean {
  * Replaces what a look holds with the stage as it is going; the look keeps its id, name and place.
  * Basic lights keeps no dimmer levels: it stores every group at full, as it always resets them.
  * Basic lights is always still too: a group running an effect keeps what Basic lights had for it.
+ * `keep`: groups the look keeps as it has them (the ones a running timeline drives).
  */
-export function saveItem(show: Show, lookId: string, stage: Stage): Show {
+export function saveItem(show: Show, lookId: string, stage: Stage, keep: string[] = []): Show {
   const out = structuredClone(show);
   const target = lookIn(out, lookId);
   if (lookId === out.operator.safeLook) {
@@ -385,10 +518,16 @@ export function saveItem(show: Show, lookId: string, stage: Stage): Show {
     const order = Object.keys(stage.groups);
     target.groups = [...fresh, ...kept].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
     for (const entry of target.groups) entry.level = 1;
+  } else if (keep.length > 0) {
+    const kept = target.groups.filter((e) => keep.includes(e.group));
+    const order = Object.keys(stage.groups);
+    target.groups = [...entriesFor(out, stage, Object.keys(stage.groups).filter((g) => !keep.includes(g))), ...kept]
+      .sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
   } else {
     target.groups = entriesFor(out, stage);
   }
-  if (stage.tempo !== undefined) target.tempo = stage.tempo;
+  // The tempo belongs to the song: a section's own look keeps colours and levels only.
+  if (stage.tempo !== undefined && !isSectionLook(out, lookId)) target.tempo = stage.tempo;
   return out;
 }
 
@@ -418,6 +557,84 @@ export function saveServiceItem(show: Show, key: string, stage: Stage): Show {
   return out;
 }
 
+// ---- A song's sections ----
+
+/** The loaded service's song whose look is `songLook`. */
+function songItem(show: Show, songLook: string) {
+  return show.operator.service?.items.find((i) => i.kind === 'song' && i.look === songLook && i.songId !== undefined);
+}
+
+/** The sections of a loaded song, each with its own look or null; none for a look that is not a loaded song. */
+export function sectionsOf(show: Show, songLook: string): { kind: SectionKind; look: string | null }[] {
+  const item = songItem(show, songLook);
+  return (item?.sections ?? []).map((s) => ({ kind: s.kind, look: s.look ?? null }));
+}
+
+function sectionIn(show: Show, ref: SectionRef) {
+  const item = songItem(show, ref.song);
+  if (!item) throw new Error("That isn't a song of the loaded service.");
+  const section = item.sections?.find((s) => s.kind === ref.kind);
+  if (!section) throw new Error(`${item.name} has no ${SECTION_NAMES[ref.kind].toLowerCase()}.`);
+  return { item, section };
+}
+
+/** The look a section plays: its own when it has one, else the song's. */
+export function sectionLookOf(show: Show, ref: SectionRef): string {
+  return sectionIn(show, ref).section.look ?? ref.song;
+}
+
+/**
+ * A section's own look: the one it has, else a new one made from the song's colours and levels (no tempo, no
+ * timeline), named "<song> · Chorus" and remembered for the next load. It is never a row of the running order.
+ */
+export function ensureSectionLook(show: Show, ref: SectionRef): { show: Show; id: string } {
+  const out = structuredClone(show);
+  const { item, section } = sectionIn(out, ref);
+  if (section.look !== undefined) return { show: out, id: section.look };
+  const song = lookIn(out, ref.song);
+  // A long song name is shortened, never " · Chorus": each section's look keeps a name of its own.
+  const tail = ` · ${SECTION_NAMES[ref.kind]}`;
+  const songPart = planLookName(song.name, '', MAX_NAME - tail.length);
+  const id = addLook(out, songPart ? `${songPart}${tail}` : SECTION_NAMES[ref.kind], structuredClone(song.groups));
+  (out.operator.remembered ??= {})[sectionRememberKey(item.songId!, ref.kind)] = id;
+  // A song planned twice shows the same sections twice.
+  for (const same of out.operator.service!.items) {
+    if (same.look === ref.song) for (const s of same.sections ?? []) if (s.kind === ref.kind) s.look = id;
+  }
+  return { show: out, id };
+}
+
+/**
+ * Saves what the stage shows differently from a section's look (its own, else the song's): only the groups whose
+ * preset or level differ, or that the look doesn't list. `section`: into the section's own look (made first).
+ * `song`: into the song's look and every own look its sections have; a section without one follows the song.
+ * `only`: just these groups (those the section sets, not the ones a timeline drives). Nothing differs: the show as it is.
+ */
+export function saveSectionChange(show: Show, stage: Stage, ref: SectionRef, scope: 'section' | 'song', only?: string[]): Show {
+  const current = lookIn(show, sectionLookOf(show, ref));
+  const changed = Object.entries(stage.groups).filter(([group, preset]) => {
+    if (!preset || (only && !only.includes(group))) return false;
+    if (show.groups.find((g) => g.id === group)?.kind === 'smoke') return false;
+    const had = current.groups.find((e) => e.group === group);
+    return !had || had.preset !== preset || Math.abs((had.level ?? 1) - (stage.levels[group] ?? 1)) > 1e-9;
+  }).map(([group]) => group);
+  if (changed.length === 0) return show;
+  let out = structuredClone(show);
+  const targets: string[] = [];
+  if (scope === 'section') {
+    const made = ensureSectionLook(out, ref);
+    out = made.show;
+    targets.push(made.id);
+  } else {
+    targets.push(ref.song);
+    for (const s of sectionsOf(out, ref.song)) if (s.look !== null && !targets.includes(s.look)) targets.push(s.look);
+  }
+  // The entries are made once, so a colour picked by hand becomes one preset all the looks share.
+  const entries = entriesFor(out, stage, changed);
+  for (const id of targets) for (const entry of entries) putEntry(out, lookIn(out, id), { ...entry });
+  return out;
+}
+
 /** A new "Song N" holding the stage, placed right after `afterId` (or last). */
 export function addSong(show: Show, afterId: string, stage: Stage): { show: Show; id: string } {
   const out = structuredClone(show);
@@ -444,15 +661,28 @@ export function renameItem(show: Show, id: string, name: string): Show {
   return out;
 }
 
-/** Removes an item from the running order, and its look too unless a quick look uses it. */
+/**
+ * Removes an item from the running order, and its look too unless a quick look uses it. A song (or part, slides or
+ * picture) of the loaded service leaves the service with its row: every item that has the look.
+ */
 export function deleteItem(show: Show, id: string): Show {
   if (id === show.operator.safeLook) throw new Error("Basic lights can't be deleted");
   const out = structuredClone(show);
   inOrder(out, id);
   out.operator.runningOrder = out.operator.runningOrder.filter((x) => x !== id);
-  if (!out.operator.quickLooks.some((q) => q.look === id)) {
-    out.looks = out.looks.filter((l) => l.id !== id);
-    out.operator.looks = out.operator.looks.filter((x) => x !== id);
+  const gone = new Set<string>();
+  if (!out.operator.quickLooks.some((q) => q.look === id)) gone.add(id);
+  // A song's sections' own looks go with the song (they are only ever reached through it).
+  const songId = out.operator.service?.items.find((i) => i.look === id)?.songId;
+  if (songId !== undefined) {
+    for (const [key, look] of Object.entries(out.operator.remembered ?? {})) {
+      if (key.startsWith(`song:${songId}#`)) gone.add(look);
+    }
+  }
+  if (out.operator.service) out.operator.service.items = out.operator.service.items.filter((i) => i.look !== id);
+  if (gone.size) {
+    out.looks = out.looks.filter((l) => !gone.has(l.id));
+    out.operator.looks = out.operator.looks.filter((x) => !gone.has(x));
     // A song's look that was remembered for the planned service is forgotten with it.
     forgetMissing(out);
   }
@@ -596,9 +826,14 @@ export interface ItemGroupEdit {
   level?: number;
 }
 
-/** The item's look, if it is in the running order. Only those can be changed from the operator page. */
-function itemLook(show: Show, itemId: string): Look {
-  if (!show.operator.runningOrder.includes(itemId)) throw new Error('only running-order items can be changed here');
+/** True when the look is a section's own look in the loaded service. */
+export function isSectionLook(show: Show, id: string): boolean {
+  return !!show.operator.service?.items.some((i) => i.sections?.some((s) => s.look === id));
+}
+
+/** The item's look, if it is in the running order. Only those can be changed from the operator page; a section's own look too when `section` says so (colours and levels only). */
+function itemLook(show: Show, itemId: string, section = false): Look {
+  if (!show.operator.runningOrder.includes(itemId) && !(section && isSectionLook(show, itemId))) throw new Error('only running-order items can be changed here');
   return lookIn(show, itemId);
 }
 
@@ -618,7 +853,7 @@ function putEntry(show: Show, target: Look, entry: LookEntry): void {
  */
 export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): Show {
   const out = structuredClone(show);
-  const target = itemLook(out, itemId);
+  const target = itemLook(out, itemId, true);
   const group = out.groups.find((g) => g.id === edit.group);
   if (!group) throw new Error(`the show has no group "${edit.group}"`);
   if (group.kind === 'smoke') throw new Error("smoke machines aren't part of a song");
@@ -656,10 +891,13 @@ export function setItemGroup(show: Show, itemId: string, edit: ItemGroupEdit): S
   return out;
 }
 
+const NO_TEMPO = 'A part of a song has no tempo or timeline of its own.';
+
 /** Sets a running-order item's tempo (beats per minute), without touching the stage. */
 export function setItemTempo(show: Show, itemId: string, bpm: number): Show {
   if (!(bpm >= MIN_TEMPO && bpm <= MAX_TEMPO)) throw new Error(`the tempo is ${MIN_TEMPO} to ${MAX_TEMPO} beats per minute`);
   const out = structuredClone(show);
+  if (isSectionLook(out, itemId)) throw new Error(NO_TEMPO);
   itemLook(out, itemId).tempo = bpm;
   return out;
 }
@@ -668,6 +906,7 @@ export function setItemTempo(show: Show, itemId: string, bpm: number): Show {
 export function setItemTimeline(show: Show, itemId: string, timelineId: string | null): Show {
   const out = structuredClone(show);
   if (itemId === out.operator.safeLook) throw new Error('Basic lights never runs a timeline.');
+  if (isSectionLook(out, itemId)) throw new Error(NO_TEMPO);
   const target = itemLook(out, itemId);
   if (timelineId === null) delete target.timeline;
   else if (!out.timelines.some((t) => t.id === timelineId)) throw new Error(`There is no timeline "${timelineId}" in the show.`);
