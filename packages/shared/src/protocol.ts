@@ -192,6 +192,8 @@ export const Command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('loadService'), id: z.string().min(1).max(64) }),
   /** Take the planned service out of the running order: Basic lights, the kept rows and rows added by hand stay. One Undo step; the lights are never touched. */
   z.object({ type: z.literal('clearService') }),
+  /** Take the planned service off and put Song 1 to Song 5 in the running order, each in its own colour (a look the person saved for one stays). One Undo step; the lights are never touched. */
+  z.object({ type: z.literal('standardSongs') }),
   /** Store the stage (or the tablet's draft) as the look of a loaded service's header, slides or picture, by the item's key; it goes in the running order after the look above it. */
   z.object({ type: z.literal('saveServiceItem'), key: z.string().min(1).max(64) }),
   /** Give a running-order item a copy of another look's groups (and tempo) without touching the stage: "pick another look". */
@@ -225,7 +227,7 @@ export type Command = z.infer<typeof Command>;
 
 const SHOW_EDITS = [
   'saveItem', 'saveSection', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemTimeline', 'itemQuickLook',
-  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'loadService', 'clearService', 'saveServiceItem', 'itemCopyLook', 'keepItem', 'setKey', 'clearKey', 'resetKeys',
+  'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'loadService', 'clearService', 'standardSongs', 'saveServiceItem', 'itemCopyLook', 'keepItem', 'setKey', 'clearKey', 'resetKeys',
 ] as const;
 /** Commands that change the show rather than the stage. */
 export type ShowEdit = Extract<Command, { type: (typeof SHOW_EDITS)[number] }>;

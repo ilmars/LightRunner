@@ -133,6 +133,10 @@ function connect() {
         loadSvc.clearRef = null;
         if (!msg.error) toast('The planned service is cleared. Undo takes it back.', true);
       }
+      if (standard.ref !== null && msg.ref === standard.ref) {
+        standard.ref = null;
+        if (!msg.error) toast('Song 1 to Song 5 are in the running order.', true);
+      }
       // Load service's answer: a problem is shown in its panel, not in a toast.
       if (loadResult(msg)) return;
       // Individual lights' answers say what went wrong in plain words (once for the whole drag).
@@ -766,12 +770,34 @@ function setEditing(on) {
   $('editBtn').classList.toggle('on', on);
   $('editBtn').setAttribute('aria-pressed', String(on));
   renderLoadButton();
+  renderStdFoot();
   if (layout) {
     buildOrder();
     render();
   }
 }
 $('editBtn').addEventListener('click', () => setEditing(!editing));
+
+// The standard songs in the running order's foot: there while Edit list is on, and it asks in place first.
+function renderStdFoot() {
+  if (!editing) standard.footAsking = false;
+  $('stdFoot').hidden = !editing;
+  $('stdOpen').hidden = standard.footAsking;
+  $('stdAsk').hidden = !standard.footAsking;
+}
+$('stdOpen').addEventListener('click', () => {
+  standard.footAsking = true;
+  renderStdFoot();
+});
+$('stdNo').addEventListener('click', () => {
+  standard.footAsking = false;
+  renderStdFoot();
+});
+$('stdYes').addEventListener('click', () => {
+  standard.footAsking = false;
+  standard.ref = send({ type: 'standardSongs' });
+  renderStdFoot();
+});
 
 // ---- Edit list's Look ▾: another look for a song ----
 // The song takes a copy of the picked look's colours and levels (and its tempo); its name and place stay. No PIN.
@@ -920,7 +946,9 @@ const planningOn = () => !!layout?.planning?.enabled;
 
 // The panel: the services as the server listed them, the one picked, the Load waiting for its answer, and a counter
 // so an older list that arrives late is dropped.
-const loadSvc = { open: false, type: '', services: [], pick: null, problem: null, waiting: false, ref: null, ask: 0, clearing: false, clearRef: null };
+const loadSvc = { open: false, type: '', services: [], pick: null, problem: null, waiting: false, ref: null, ask: 0, clearing: false, clearRef: null, std: false };
+/** The standard songs: the tap waiting for its answer, and the ask open in Edit list's foot. */
+const standard = { ref: null, footAsking: false };
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const LONG_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -990,6 +1018,7 @@ function closeLoad() {
   // A Load already sent still loads; the panel just doesn't wait for it.
   loadSvc.ref = null;
   loadSvc.clearing = false;
+  loadSvc.std = false;
   $('loadSvc').hidden = true;
   markEditorOpen();
   renderLoadButton();
@@ -1074,6 +1103,8 @@ function renderLoad() {
   $('lsClear').hidden = !loaded;
   $('lsClearOpen').hidden = loadSvc.clearing;
   $('lsClearAsk').hidden = !loadSvc.clearing;
+  $('lsStdOpen').hidden = loadSvc.std;
+  $('lsStdAsk').hidden = !loadSvc.std;
   const busy = loadSvc.ref !== null;
   $('lsLoad').disabled = !loadSvc.pick || busy;
   $('lsLoad').textContent = busy ? 'Loading …' : 'Load';
@@ -1109,6 +1140,19 @@ $('lsClearNo').addEventListener('click', () => {
 $('lsClearYes').addEventListener('click', () => {
   loadSvc.clearing = false;
   loadSvc.clearRef = send({ type: 'clearService' });
+  closeLoad();
+});
+$('lsStdOpen').addEventListener('click', () => {
+  loadSvc.std = true;
+  renderLoad();
+});
+$('lsStdNo').addEventListener('click', () => {
+  loadSvc.std = false;
+  renderLoad();
+});
+$('lsStdYes').addEventListener('click', () => {
+  loadSvc.std = false;
+  standard.ref = send({ type: 'standardSongs' });
   closeLoad();
 });
 $('lsLoad').addEventListener('click', () => {

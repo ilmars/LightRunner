@@ -778,6 +778,46 @@ test('clearing the service empties the song rows and the layout; one Undo step b
   assert.equal((await call('GET', '/api/layout')).status, 200);
 }));
 
+test('using the standard songs is one Undo step that brings the planned service back, and the lights do not change', () => withPlanning(async (rig) => {
+  const { app, tablet } = rig;
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'loadService', id: 'svc-a' }), null);
+  assert.equal(await t.command({ type: 'look', id: (await orderOf(rig))[1] }), null);
+  await sleep(100);
+  const loaded = await layoutOf(rig);
+  const stage = { look: app.state!.look, ...lights(rig) };
+
+  assert.equal(await t.command({ type: 'standardSongs' }), null);
+  const after = await layoutOf(rig);
+  assert.deepEqual(after.runningOrder.map((l: any) => l.name), ['Basic lights', 'Sermon', 'Midweek calm', 'Song 1', 'Song 2', 'Song 3', 'Song 4', 'Song 5']);
+  assert.equal(after.service, undefined);
+  assert.deepEqual(after.songs, {});
+  assert.deepEqual({ look: app.state!.look, ...lights(rig) }, stage, 'the lights keep what they show');
+
+  // Using them again changes nothing: no new Undo step.
+  assert.equal(await t.command({ type: 'standardSongs' }), null);
+  assert.deepEqual(await layoutOf(rig), after);
+
+  // One Undo takes the standard songs off and the planned service back.
+  assert.equal(await t.command({ type: 'undo' }), null);
+  const back = await layoutOf(rig);
+  assert.deepEqual(back.runningOrder.map((l: any) => l.name), ['Basic lights', 'Sermon', 'Midweek calm', 'Song One', 'Song Two']);
+  assert.deepEqual(back.service, loaded.service);
+  assert.deepEqual(back.songs, loaded.songs);
+  assert.deepEqual({ look: app.state!.look, ...lights(rig) }, stage);
+  t.close();
+}));
+
+test('clearing with no service loaded makes no Undo step', () => withPlanning(async (rig) => {
+  const { app, tablet } = rig;
+  await enable(rig);
+  const t = await tablet();
+  assert.equal(await t.command({ type: 'clearService' }), null);
+  assert.equal(app.state!.canUndo, false);
+  t.close();
+}));
+
 test('deleting a song in the Edit list takes it out of the loaded service for good', () => withPlanning(async (rig) => {
   await enable(rig);
   const t = await rig.tablet();

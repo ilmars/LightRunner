@@ -13,7 +13,7 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, clearService, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
+  BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, clearService, useStandardSongs, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
   applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isSectionLook, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo, setItemTimeline, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
   BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
@@ -1336,7 +1336,15 @@ export class App {
       case 'editEffect': next = editEffect(before, cmd); break;
       // The result goes through operatorSave like any edit, so keys of looks the load took away are freed. Never touches the stage.
       case 'loadService': next = loadService(before, service!); break;
-      case 'clearService': next = clearService(before); break;
+      // Nothing to take off or put back: nothing to save, and no Undo step.
+      case 'clearService':
+        next = clearService(before);
+        if (next === before) return;
+        break;
+      case 'standardSongs':
+        next = useStandardSongs(before);
+        if (next === before) return;
+        break;
       // Controller keys don't look at the stage either.
       case 'setKey': next = assignKey(before, cmd.key, cmd.does).show; break;
       case 'clearKey': next = clearKey(before, cmd.does); break;

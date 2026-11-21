@@ -7,6 +7,7 @@ import { effectKey, isEffectPreset, resolveColour } from './schema.ts';
 import { followQuickLook } from './keys.ts';
 import { anchorOf, rememberKey, sectionRememberKey } from './planning.ts';
 import type { PlannedService, SectionRef } from './planning.ts';
+import { groupIsWhiteOnly } from './presets.ts';
 import { SECTION_NAMES } from './sections.ts';
 import type { SectionKind } from './sections.ts';
 import type { EffectLayer, Layer, Look, LookEntry, Preset, QuickLook, QuickTab, Show } from './schema.ts';
@@ -377,12 +378,14 @@ export function loadService(show: Show, service: PlannedService): Show {
  * Takes the planned service out of the running order: Basic lights, the kept rows and rows added by hand stay, in
  * order; the songs, parts, slides and pictures that came from the plan leave, and so does the loaded service (its
  * muted rows, folded verses and date). A plan look that something remembers (a song, a part, a section) stays in the
- * show, hidden, so a later load brings it back; one nothing remembers goes with its row.
+ * show, hidden, so a later load brings it back; one nothing remembers goes with its row. With no service loaded the same
+ * show comes back.
  */
 export function clearService(show: Show): Show {
+  // No service loaded: nothing to take off, so the same show comes back (no Undo step, no backup).
+  if (!show.operator.service) return show;
   const out = structuredClone(show);
-  const service = out.operator.service;
-  if (!service) return out;
+  const service = out.operator.service!;
   const planned = new Set(service.items.flatMap((i) => (i.look === undefined ? [] : [i.look])));
   const safe = out.operator.safeLook;
   const kept = new Set(out.operator.kept ?? []);
@@ -399,6 +402,95 @@ export function clearService(show: Show): Show {
     forgetMissing(out);
   }
   return out;
+}
+
+// ---- The standard songs ----
+
+/** The five standard songs: each one's colour, and whether the key lights are warm or cool white. */
+const STANDARD_SONGS = [
+  { colour: 'blue', key: 'warm' },
+  { colour: 'purple', key: 'warm' },
+  { colour: 'orange', key: 'warm' },
+  { colour: 'teal', key: 'cool' },
+  { colour: 'pink', key: 'cool' },
+] as const;
+
+/** Each light: the names of a group's own colour that match it, best first, and the Any colour used when none does. */
+const STANDARD_LIGHTS: Record<string, { names: string[]; hex: string }> = {
+  blue: { names: ['Zils', 'Blue'], hex: '#1f4bff' },
+  purple: { names: ['Violets', 'Violet', 'Purple'], hex: '#8c00ff' },
+  orange: { names: ['Oranžs', 'Orange'], hex: '#ff6a00' },
+  teal: { names: ['Tirkīzs', 'Teal', 'Turquoise', 'Cyan'], hex: '#00c8b4' },
+  pink: { names: ['Rozā', 'Pink', 'Magenta'], hex: '#ff2d8c' },
+  warm: { names: ['Silti balts', 'Warm white', 'Silti 3200K'], hex: '#ffb46b' },
+  cool: { names: ['Vēsi balts', 'Cool white'], hex: '#dcebff' },
+};
+/** A colour with one of these in its name counts as warm or cool white when no name above matches. */
+const STANDARD_WORDS: Record<string, string[]> = { warm: ['warm', 'silti'], cool: ['cool', 'vēsi'] };
+
+/** The remembered key of standard song `n` (1 to 5). */
+const standardKey = (n: number) => `standard:${n}`;
+
+/** The preset of the group that shows `light`, by name, or undefined when the group has none like it. */
+function standardPreset(show: Show, groupId: string, light: string): string | undefined {
+  const own = show.presets.filter((p) => p.group === groupId && !p.custom && !isEffectPreset(p));
+  for (const name of STANDARD_LIGHTS[light]!.names) {
+    const found = own.find((p) => plainName(p.name) === plainName(name));
+    if (found) return found.id;
+  }
+  const words = (STANDARD_WORDS[light] ?? []).map(plainName);
+  return own.find((p) => words.some((w) => plainName(p.name).includes(w)))?.id;
+}
+
+/** The look entries of standard song `n` (1 to 5): every group of the show, smoke machines left out, at full. */
+function standardEntries(show: Show, n: number): LookEntry[] {
+  const song = STANDARD_SONGS[n - 1]!;
+  const groups: Record<string, string> = {};
+  for (const group of show.groups) {
+    if (group.kind === 'smoke') continue;
+    const name = group.name.toLowerCase();
+    const light = name.includes('front') || groupIsWhiteOnly(show, group.id) ? 'warm' : name.includes('key') ? song.key : song.colour;
+    groups[group.id] = standardPreset(show, group.id, light) ?? livePresetId(group.id, STANDARD_LIGHTS[light]!.hex);
+  }
+  return entriesFor(show, { groups, levels: Object.fromEntries(Object.keys(groups).map((g) => [g, 1])) });
+}
+
+/**
+ * Takes the planned service off (as clearService does) and puts Song 1 to Song 5 in the running order, after Basic lights
+ * and the kept rows and before rows added by hand. Each song comes back with the look remembered for it, so one the
+ * person changed and saved stays as they left it; the first time it is made in its own colour and remembered at once.
+ * A row added by hand and named "Song 1" to "Song 5" (the first running order's) leaves, and its look with it unless a
+ * quick look or something remembered uses it. The same show comes back when nothing would change.
+ */
+export function useStandardSongs(show: Show): Show {
+  const out = structuredClone(clearService(show));
+  const op = out.operator;
+  const remembered = (op.remembered ??= {});
+  const safe = op.safeLook;
+  const kept = new Set(op.kept ?? []);
+  const exists = (id: string | undefined): id is string => id !== undefined && out.looks.some((l) => l.id === id);
+  const own = [1, 2, 3, 4, 5].map((n) => remembered[standardKey(n)]).filter(exists);
+
+  // A row added by hand named Song 1 to Song 5 leaves; so does its look when nothing else uses it.
+  const names = new Set([1, 2, 3, 4, 5].map((n) => `Song ${n}`));
+  const old = op.runningOrder.filter((id) => id !== safe && !kept.has(id) && !own.includes(id) && names.has(lookIn(out, id).name));
+  const gone = new Set(old.filter((id) => !op.quickLooks.some((q) => q.look === id) && !Object.values(remembered).includes(id)));
+  out.looks = out.looks.filter((l) => !gone.has(l.id));
+  op.looks = op.looks.filter((id) => !gone.has(id));
+
+  const songs = STANDARD_SONGS.map((_, i) => {
+    const key = standardKey(i + 1);
+    const have = remembered[key];
+    if (exists(have)) return have;
+    const id = addLook(out, `Song ${i + 1}`, standardEntries(out, i + 1));
+    remembered[key] = id;
+    return id;
+  });
+  const leaving = new Set([...old, ...songs]);
+  const fixed = [safe!, ...keptOf(out)];
+  op.runningOrder = [...fixed, ...songs, ...op.runningOrder.filter((id) => !fixed.includes(id) && !leaving.has(id))];
+  forgetMissing(out);
+  return JSON.stringify(out) === JSON.stringify(show) ? show : out;
 }
 
 /** True when the stage preset is an effect: a live one (`fx:`) or a preset of the show with an effect in it. */

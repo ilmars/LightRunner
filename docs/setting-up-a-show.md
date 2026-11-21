@@ -246,6 +246,6 @@ On the stage itself the same is quicker: tap the section, change a group, and an
 1. Switch Lightkey's output off, then **Send DMX** on in Settings.
 2. On the operator page, turn **Prepare** on and tap through every song, watching the stage view; then **Live** and tap through them again with the lights in the room.
 3. Look for anything that jumps, flickers or looks wrong. Hold **Flash** for each group to see that it moves the lights you expect; **Identify** in Patch finds a single light.
-4. Press every controller key once. If you use the planning service, press **Load service** for this Sunday and check that every song has a look (see "Before people arrive" in the [service guide](running-a-service.md)). **Clear the planned service** in the same panel takes the plan out again.
+4. Press every controller key once. If you use the planning service, press **Load service** for this Sunday and check that every song has a look (see "Before people arrive" in the [service guide](running-a-service.md)). **Clear the planned service** in the same panel takes the plan out again, and **Use the standard songs** puts back Song 1 to Song 5, each in its own colour, for a service without a plan.
 5. If you made a timeline, play it through once in **Prepare** and once **Live** with the lights in the room, with the recording playing from the computer it will play from on the day.
 6. Set the PIN, check **Who to call**, and **Export show file** again. Keep the file.

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  anchorOf, checkReferences, copyLookToItem, addSong, clearService, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept, setItemGroup, setItemTempo, setItemTimeline, saveItem, sectionRememberKey, sectionsOf, sectionLookOf, ensureSectionLook, saveSectionChange,
+  anchorOf, checkReferences, copyLookToItem, addSong, clearService, useStandardSongs, renameItem, deleteItem, saveServiceItem, ensureBasicLights, ensureKept, ensurePlanning, ensureRunningOrder, itemKind, keptOf, loadService, moveItem, newSongLookOf, parseShow, placeOf, planLookName, plannedCount, rememberKey, setKept, setItemGroup, setItemTempo, setItemTimeline, saveItem, sectionRememberKey, sectionsOf, sectionLookOf, ensureSectionLook, saveSectionChange,
   serviceRows, toPlannedService, type PlannedService, type ServiceItem, type Show,
 } from '../src/index.ts';
 
@@ -944,4 +944,121 @@ test('clearing keeps remembered looks (song, part header, section) in the show, 
 test('clearing a show with no loaded service changes nothing', () => {
   const show = rig();
   assert.deepEqual(clearService(show), show);
+});
+
+// ---- The standard songs ----
+
+const nameOf = (s: Show, id: string) => lookOf(s, id).name;
+const presetOf = (s: Show, lookId: string, group: string) => {
+  const entry = lookOf(s, lookId).groups.find((e) => e.group === group)!;
+  return s.presets.find((p) => p.id === entry.preset)!;
+};
+const songsOf = (s: Show) => [1, 2, 3, 4, 5].map((n) => s.operator.remembered![`standard:${n}`]!);
+
+test('the standard songs take the planned service off and go in after the kept rows, before rows added by hand', () => {
+  const base = keptRig();
+  const loaded = loadService(base, planned([song('a', 'A'), song('b', 'B')]));
+  const a = loaded.operator.service!.items[0]!.look!;
+  const added = addSong(loaded, a, stageOf(loaded, a));
+  const hand = { id: added.id, show: renameItem(added.show, added.id, 'Welcome') };
+  const out = useStandardSongs(hand.show);
+  const songs = songsOf(out);
+  assert.equal(out.operator.service, undefined);
+  assert.deepEqual(out.operator.runningOrder, [safeOf(base), ...keptOf(base), ...songs, hand.id]);
+  assert.deepEqual(songs.map((id) => nameOf(out, id)), ['Song 1', 'Song 2', 'Song 3', 'Song 4', 'Song 5']);
+  assert.deepEqual(checkReferences(out), []);
+  parseShow(out);
+});
+
+test('Song 2 is purple on the background and warm white on the front lights; every song has its colour', () => {
+  const out = useStandardSongs(keptRig());
+  const [one, two, three, four, five] = songsOf(out);
+  assert.equal(presetOf(out, two!, 'background').name, 'Violets');
+  assert.equal(presetOf(out, two!, 'front-lights').name, 'Silti 3200K');
+  assert.equal(presetOf(out, two!, 'key-lights').name, 'Silti balts');
+  assert.deepEqual([one, three, four, five].map((id) => presetOf(out, id!, 'drum-cage').name), ['Zils', 'Oranžs', 'Tirkīzs', 'Rozā']);
+  assert.deepEqual([one, three, four, five].map((id) => presetOf(out, id!, 'b8-side-bar').name), ['Zils', 'Oranžs', 'Tirkīzs', 'Rozā']);
+  assert.deepEqual([one, four, five].map((id) => presetOf(out, id!, 'key-lights').name), ['Silti balts', 'Vēsi balts', 'Vēsi balts']);
+  assert.equal(presetOf(out, five!, 'front-lights').name, 'Silti 3200K');
+  for (const id of songsOf(out)) for (const e of lookOf(out, id).groups) assert.equal(e.level ?? 1, 1);
+  assert.equal(lookOf(out, one!).groups.length, 5);
+});
+
+test('a show with no matching names gets Any colours; a group that only shows white gets warm white', () => {
+  const show = keptRig();
+  // Only the front lights keep their presets, so every other group has nothing to match.
+  show.presets = show.presets.filter((p) => p.group === 'front-lights');
+  const have = new Set(show.presets.map((p) => p.id));
+  for (const l of show.looks) l.groups = l.groups.filter((e) => have.has(e.preset));
+  show.operator.quickLooks = [];
+  const out = useStandardSongs(show);
+  const [one, , , four] = songsOf(out);
+  const hexOf = (p: { layers: any[] }) => p.layers[0].colour.hex;
+  assert.equal(hexOf(presetOf(out, one!, 'background')), '#1f4bff');
+  assert.equal(hexOf(presetOf(out, one!, 'key-lights')), '#ffb46b');
+  assert.equal(hexOf(presetOf(out, four!, 'key-lights')), '#dcebff');
+  assert.equal(hexOf(presetOf(out, four!, 'background')), '#00c8b4');
+  assert.equal(presetOf(out, one!, 'front-lights').name, 'Silti 3200K');
+  assert.equal(presetOf(out, one!, 'background').custom, true);
+  parseShow(out);
+});
+
+test('using the standard songs twice gives one set, and the second time changes nothing', () => {
+  const once = useStandardSongs(keptRig());
+  assert.equal(useStandardSongs(once), once);
+});
+
+test('a standard song the person changed and saved comes back as saved', () => {
+  const once = useStandardSongs(keptRig());
+  const two = songsOf(once)[1]!;
+  const pink = once.presets.find((p) => p.group === 'background' && p.name === 'Rozā')!.id;
+  const changed = setItemGroup(once, two, { group: 'background', preset: pink });
+  // Moved to the end by hand: it still comes back in its place, with its look.
+  const moved = moveItem(changed, two, changed.operator.runningOrder.length - 1);
+  const again = useStandardSongs(moved);
+  assert.deepEqual(songsOf(again), songsOf(once));
+  assert.equal(presetOf(again, two, 'background').name, 'Rozā');
+  assert.deepEqual(again.operator.runningOrder, changed.operator.runningOrder);
+});
+
+test('a hand-added "Song 1" row from the first running order is replaced, and its look goes', () => {
+  const base = keptRig();
+  const old = base.operator.runningOrder.filter((id) => /^Song \d$/.test(nameOf(base, id)));
+  assert.equal(old.length, 5);
+  const out = useStandardSongs(base);
+  assert.equal(out.operator.runningOrder.filter((id) => /^Song \d$/.test(nameOf(out, id))).length, 5);
+  assert.equal(out.looks.filter((l) => l.name === 'Song 1').length, 1);
+  assert.deepEqual(keptOf(out), keptOf(base));
+  assert.deepEqual(checkReferences(out), []);
+  // A row a quick look uses keeps its look in the show.
+  const quick = keptRig();
+  const first = quick.operator.runningOrder.find((id) => nameOf(quick, id) === 'Song 1')!;
+  quick.operator.quickLooks.push({ look: first, tab: 'colours' });
+  const kept = useStandardSongs(quick);
+  assert.ok(kept.looks.some((l) => l.id === first));
+  assert.ok(!kept.operator.runningOrder.includes(first));
+});
+
+test('a kept row named Song 1 stays where it is', () => {
+  const base = keptRig();
+  const song1 = base.operator.runningOrder.find((id) => nameOf(base, id) === 'Song 1')!;
+  base.operator.kept = [...(base.operator.kept ?? []), song1];
+  const out = useStandardSongs(base);
+  assert.ok(keptOf(out).includes(song1));
+  assert.equal(out.operator.runningOrder.filter((id) => nameOf(out, id) === 'Song 1').length, 2);
+});
+
+test('loading a service takes the standard songs off, and using them again brings back the same looks', () => {
+  const once = useStandardSongs(keptRig());
+  const songs = songsOf(once);
+  const loaded = loadService(once, planned([song('a', 'A')]));
+  for (const id of songs) {
+    assert.ok(!loaded.operator.runningOrder.includes(id));
+    assert.ok(loaded.looks.some((l) => l.id === id), 'the look stays: it is remembered');
+  }
+  const back = useStandardSongs(loaded);
+  assert.deepEqual(songsOf(back), songs);
+  assert.equal(back.operator.service, undefined);
+  const at = 1 + keptOf(back).length;
+  assert.deepEqual(back.operator.runningOrder.slice(at, at + 5), songs);
 });
