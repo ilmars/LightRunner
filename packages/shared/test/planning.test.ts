@@ -1062,3 +1062,13 @@ test('loading a service takes the standard songs off, and using them again bring
   const at = 1 + keptOf(back).length;
   assert.deepEqual(back.operator.runningOrder.slice(at, at + 5), songs);
 });
+
+test('a standard song marked Keep is not added twice, and using the songs again changes nothing', () => {
+  const once = useStandardSongs(keptRig());
+  const two = songsOf(once)[1]!;
+  const kept = setKept(once, two, true);
+  const again = useStandardSongs(kept);
+  assert.equal(again, kept);
+  assert.equal(new Set(again.operator.runningOrder).size, again.operator.runningOrder.length);
+  assert.deepEqual(songsOf(again), songsOf(once));
+});

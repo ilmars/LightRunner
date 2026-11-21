@@ -487,7 +487,8 @@ export function useStandardSongs(show: Show): Show {
     return id;
   });
   const leaving = new Set([...old, ...songs]);
-  const fixed = [safe!, ...keptOf(out)];
+  // A standard song marked Keep stays in the song block (not in the kept rows, and not added twice).
+  const fixed = [safe!, ...keptOf(out).filter((id) => !songs.includes(id))];
   op.runningOrder = [...fixed, ...songs, ...op.runningOrder.filter((id) => !fixed.includes(id) && !leaving.has(id))];
   forgetMissing(out);
   return JSON.stringify(out) === JSON.stringify(show) ? show : out;
