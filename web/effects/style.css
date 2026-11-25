@@ -66,3 +66,5 @@
 .fx-group { flex: 1; }
 .fx-actions { border-top: 1px solid var(--ds-edge); padding-top: 12px; }
 .fx-empty { grid-column: 2; }
+.fx-actions .grow { flex: 1; }
+.fx-steps .error:empty { display: none; }

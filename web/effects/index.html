@@ -79,18 +79,18 @@
             <label class="fx-switch"><input id="favourite" type="checkbox"> <span>Add to favourites</span></label>
           </div>
         </div>
-      </div>
-      <div class="fx-preview">
-        <div class="fx-row"><span class="ds-caps">Preview</span><span class="card-desc">only here: the lights don't change</span></div>
-        <canvas id="strip" class="fx-strip" role="img" aria-label="How the effect moves along the lights"></canvas>
-        <div class="fx-row"><span class="label">On</span><select id="group" class="ds-field fx-group" aria-label="Show it on this group"></select></div>
-        <span class="grow"></span>
+        <!-- The end of the steps: Delete on the left (a second tap deletes), Save on the right. -->
         <p id="error" class="error" role="status"></p>
         <div class="fx-row fx-actions">
           <button id="deleteBtn" class="ds-btn ds-btn--quiet" type="button">Delete</button>
           <span class="grow"></span>
           <button id="saveBtn" class="ds-btn ds-btn--primary" type="button">Save</button>
         </div>
+      </div>
+      <div class="fx-preview">
+        <div class="fx-row"><span class="ds-caps">Preview</span><span class="card-desc">only here: the lights don't change</span></div>
+        <canvas id="strip" class="fx-strip" role="img" aria-label="How the effect moves along the lights"></canvas>
+        <div class="fx-row"><span class="label">On</span><select id="group" class="ds-field fx-group" aria-label="Show it on this group"></select></div>
       </div>
     </section>
     <section id="empty" class="card ds-panel fx-empty">
