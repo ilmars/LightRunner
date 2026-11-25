@@ -1,8 +1,13 @@
 // The new operator page (25 Nov 2026 design; docs/user-stories.md and the 25 Nov entries in docs/DECISIONS.md).
-// This first step is the layout: the stage as the audience sees it, your changes, who the pads work on, the pads,
-// the colour square, and the song's steps with Next and Blackout, all drawn from the server's live state. Faders,
-// Prepare, the song list, effects with how long, and each song's own colour square come in later steps.
+// Built so far: the layout (the stage as the audience sees it, your changes, who the pads work on, the pads, the colour
+// square, the song's steps with Next and Blackout) and Prepare. Faders, the song list, effects with how long, and each
+// song's own colour square come in later steps.
 // The server is the single source of truth: every tap becomes a Command and the page only shows the state it gets back.
+//
+// Prepare works on this tablet's own draft of the stage (the server's blindStart, draft, blindGo and blindEnd): a short
+// hold of Prepare peeks, about 1 s keeps it on, and a tap turns it off. While it is on, the pads, the colour square,
+// your changes and the steps go to the draft; Next, Flash, Blackout, Fade and Tempo always go to the real stage.
+// Save keeps the draft in the step being prepared; Go fades the draft onto the stage; Back to live drops it.
 
 import { drawStagePicture } from '/shared/stagedraw.js';
 import { setupPageTabs } from '/shared/pagetabs.js';
@@ -20,6 +25,17 @@ let ref = 0;
 let who = 'all';
 /** Where the colour square was last tapped, for its dot: { u, v, colour }. */
 let puck = null;
+
+/**
+ * Prepare. `state` and `visual` are the draft's (null until the server sends them). `session` counts the times it went on
+ * or off, so a hold that started in one never lands in the other. `startRef`, `goRef` and `saveRef` match the server's
+ * answers to the start, Go and Save.
+ */
+const prep = { on: false, locked: false, session: 0, state: null, visual: null, startRef: null, starting: false, goRef: null, saveRef: null, saveName: '' };
+/** The server's answer to a draft command when it has no draft for this tablet. */
+const PREPARE_OFF = 'Prepare is off.';
+/** The stage the page works on: the draft while Prepare is on, else the live stage. */
+const shown = () => (prep.on ? prep.state ?? state : state);
 
 setupPageTabs($('pageTabs'));
 
@@ -39,7 +55,7 @@ function connect() {
   ws.onmessage = (ev) => {
     if (ev.data instanceof ArrayBuffer) {
       visual = new Uint8Array(ev.data);
-      drawStage();
+      if (!prep.on) drawStage();
       return;
     }
     const msg = JSON.parse(ev.data);
@@ -51,8 +67,22 @@ function connect() {
     } else if (msg.type === 'state') {
       state = msg.state;
       render();
-    } else if (msg.type === 'result' && msg.error) {
-      toast(msg.error);
+    } else if (msg.type === 'draftState') {
+      // Only while Prepare is on here (one may still be on its way after it went off).
+      if (!prep.on) return;
+      prep.state = msg.state;
+      render();
+    } else if (msg.type === 'draftVisual') {
+      if (!prep.on) return;
+      prep.visual = Uint8Array.from(atob(msg.data), (c) => c.charCodeAt(0));
+      drawStage();
+    } else if (msg.type === 'draftEnded') {
+      // The server met a problem in this tablet's draft and dropped it; the lights were not changed.
+      if (!prep.on || prep.starting) return;
+      setPrepare(false, false);
+      toast(msg.reason);
+    } else if (msg.type === 'result') {
+      result(msg);
     }
   };
 }
@@ -60,15 +90,51 @@ function connect() {
 function setConnected(on) {
   connected = on;
   $('banner').hidden = on;
+  // The server drops a tablet's draft when the connection goes.
+  if (!on && prep.on) setPrepare(false, false);
 }
 
-/** Sends a command to the server (the live stage). */
+/** Sends a command; returns its ref (to match the server's answer), or null when not connected. */
 function send(cmd) {
   if (!connected) {
     toast('Not connected. Lights keep running; try again in a moment.');
-    return;
+    return null;
   }
   socket.send(JSON.stringify({ type: 'command', ref: ++ref, cmd }));
+  return ref;
+}
+
+/** Sends a stage command to the stage the page works on: this tablet's draft while Prepare is on. */
+const sendStage = (cmd) => send(prep.on ? { type: 'draft', cmd } : cmd);
+
+/** The server's answer to a command. */
+function result(msg) {
+  if (prep.on && msg.ref !== null) {
+    if (msg.ref === prep.startRef) {
+      prep.starting = false;
+      // No draft was made (too many tablets preparing, a problem): Prepare goes off again; the toast says why.
+      if (msg.error) {
+        setPrepare(false, false);
+        toast(msg.error);
+        return;
+      }
+    }
+    // The server has no draft for this tablet (it ended it): Prepare is off here too.
+    if (msg.error === PREPARE_OFF && !prep.starting && msg.ref > prep.startRef) {
+      setPrepare(false, false);
+      return;
+    }
+    if (msg.ref === prep.goRef) {
+      prep.goRef = null;
+      // On an error the draft stays, to try again.
+      if (!msg.error) setPrepare(false, false);
+    }
+    if (msg.ref === prep.saveRef) {
+      prep.saveRef = null;
+      if (!msg.error) toast(`Saved to ${prep.saveName}`);
+    }
+  }
+  if (msg.error) toast(msg.error);
 }
 
 let toastTimer = 0;
@@ -100,37 +166,47 @@ function presetOf(groupId, presetId) {
   return g.presets.find((p) => p.id === presetId) ?? g.hidden.find((p) => p.id === presetId) ?? null;
 }
 
-/** The colour a group shows now, for its dot. */
-function groupColour(groupId) {
-  const st = state?.groups?.[groupId];
+/** The colour a group shows on stage `s`, for its dot. */
+function groupColour(groupId, s = shown()) {
+  const st = s?.groups?.[groupId];
   if (st?.hold) return st.hold.colour;
   if (st?.live) return st.live.display;
   return presetOf(groupId, st?.preset)?.swatch ?? '#3a3f4b';
 }
 
-/** Index in the running order of what is on stage (Basic lights for Safe); after Blackout, the item before it. */
-function stageIndex() {
+/** Index in the running order of what stage `s` shows (Basic lights for Safe); after Blackout, the item before it. */
+function stageIndex(s) {
   const order = layout?.runningOrder ?? [];
-  if (!state) return -1;
-  if (state.look === 'safe') return order.findIndex(isBasic);
-  let k = order.findIndex((i) => i.id === state.look);
-  if (k < 0 && state.lastLook) k = order.findIndex((i) => i.id === state.lastLook);
+  if (!s) return -1;
+  if (s.look === 'safe') return order.findIndex(isBasic);
+  let k = order.findIndex((i) => i.id === s.look);
+  if (k < 0 && s.lastLook) k = order.findIndex((i) => i.id === s.lastLook);
+  // A section's own look belongs to its song.
+  if (k < 0 && s.section) k = order.findIndex((i) => i.id === s.section.song);
   return k;
 }
 
-/** The song (running-order item) on stage, its sections (when the planned service gives them) and which is on. */
-function songNow() {
+/** The song (running-order item) on stage `s`, its sections (when the planned service gives them) and which is on. */
+function songOf(s) {
   const order = layout?.runningOrder ?? [];
-  const k = stageIndex();
+  const k = stageIndex(s);
   const item = k >= 0 ? order[k] : null;
   const sections = item ? layout?.songs?.[item.id]?.sections ?? [] : [];
-  const sec = state?.section && item && state.section.song === item.id ? sections.findIndex((s) => s.kind === state.section.kind) : -1;
+  const sec = s?.section && item && s.section.song === item.id ? sections.findIndex((x) => x.kind === s.section.kind) : -1;
   return { order, k, item, sections, sec };
 }
 
-/** What Next starts: the song's next section, else the next running-order item (kept rows of a loaded service passed over). */
+/** A step's name: "Song 2", or "Chorus · Song 2" while a section is on. */
+function stepName(s) {
+  if (s?.look === 'blackout') return 'Blackout';
+  const { item, sections, sec } = songOf(s);
+  if (!item) return '—';
+  return sec >= 0 ? `${sections[sec].name} · ${item.name}` : item.name;
+}
+
+/** What Next starts on the real stage: the song's next section, else the next running-order item (kept rows passed over). */
 function nextStep() {
-  const { order, k, item, sections, sec } = songNow();
+  const { order, k, item, sections, sec } = songOf(state);
   if (item && sections.length && sec < sections.length - 1) {
     const s = sections[sec + 1];
     return { name: s.name, look: lookById(s.look ?? item.id), cmd: { type: 'section', song: item.id, kind: s.kind } };
@@ -141,7 +217,14 @@ function nextStep() {
   return { name: next.name, look: next, cmd: isBasic(next) ? { type: 'safe' } : { type: 'look', id: next.id } };
 }
 
-/** In plain words, which groups the look would change from what is on stage now. */
+/** In plain words, a list of group changes ("Background to Violets, Key lights to Zils."). */
+function sayChanges(names, none) {
+  if (!names.length) return none;
+  if (names.length > 3) return `${names.slice(0, 2).join(', ')} and ${names.length - 2} more change.`;
+  return `${names.join(', ')}.`;
+}
+
+/** Which groups the look would change from what is on stage now. */
 function whatChanges(look) {
   if (!look || !state) return '';
   if (isBasic(look)) return 'Every group to Basic lights.';
@@ -151,9 +234,28 @@ function whatChanges(look) {
     if (!entry || g.kind === 'smoke') return;
     if (state.groups?.[g.id]?.preset !== entry.preset) names.push(`${g.name} to ${entry.name}`);
   });
-  if (!names.length) return 'Same colours as now.';
-  if (names.length > 3) return `${names.slice(0, 2).join(', ')} and ${names.length - 2} more change.`;
-  return `${names.join(', ')}.`;
+  return sayChanges(names, 'Same colours as now.');
+}
+
+/** Which groups Go would change: where the draft runs something else than the stage. */
+function whatGoChanges() {
+  if (!prep.state || !state) return '';
+  if (prep.state.look === 'blackout') return 'Every group off.';
+  const names = [];
+  for (const g of lightGroups()) {
+    const to = prep.state.groups?.[g.id];
+    if (!to || to.preset === state.groups?.[g.id]?.preset) continue;
+    const p = presetOf(g.id, to.preset);
+    names.push(`${g.name} to ${changeName(to, p)}`);
+  }
+  return sayChanges(names, 'The same as the stage.');
+}
+
+/** What a group runs, in a word or two: its colour's name, "own colour" for a colour from the square. */
+function changeName(st, p) {
+  if (st.effect) return p?.name && p.name !== 'Custom' ? p.name : 'effect';
+  if (st.live || !p || p.name === 'Custom') return 'own colour';
+  return p.name;
 }
 
 // ---- Drawing ----
@@ -177,44 +279,44 @@ function render() {
 }
 
 function renderTop() {
-  const { item, sections, sec } = songNow();
-  let now = '—';
-  if (state.look === 'blackout') now = 'Blackout';
-  else if (item) now = item.name + (sec >= 0 ? ` · ${sections[sec].name}` : '');
-  $('nowName').textContent = now;
+  $('nowLabel').textContent = prep.on ? "Preparing · the lights don't change" : 'On stage';
+  $('nowName').textContent = prep.on ? `${stepName(shown())}  ·  on stage: ${stepName(state)}` : stepName(state);
   $('fadeValue').textContent = state.fadeTime === null ? 'Auto' : state.fadeTime === 0 ? 'Instant' : `${state.fadeTime} s`;
   $('tempoValue').textContent = String(Math.round(state.tempo));
   $('masterValue').textContent = `${Math.round(state.master * 100)} %`;
-}
-
-/** What a changed group runs, in a word or two: its colour's name, "own colour" for a colour from the square. */
-function changeName(groupId, st, p) {
-  if (st.effect) return p?.name && p.name !== 'Custom' ? p.name : 'effect';
-  if (st.live || !p || p.name === 'Custom') return 'own colour';
-  return p.name;
+  $('liveBtn').classList.toggle('on', !prep.on);
+  $('liveBtn').setAttribute('aria-pressed', String(!prep.on));
+  $('prepBtn').setAttribute('aria-pressed', String(prep.on));
+  $('prepBtn').classList.toggle('locked', prep.locked);
 }
 
 function renderChanges() {
-  const look = lookById(state.look);
+  const s = shown();
+  const look = lookById(s.look);
   const chips = [];
   for (const g of lightGroups()) {
-    const st = state.groups?.[g.id];
+    const st = s.groups?.[g.id];
     if (!st?.changed) continue;
-    const p = presetOf(g.id, st.preset);
     const back = look?.entries?.[groupIndex(g.id)]?.preset ?? null;
-    chips.push(`<span class="chip"><i style="background:${esc(groupColour(g.id))}"></i>${esc(shortName(g.name))} · ${esc(changeName(g.id, st, p))}` +
+    chips.push(`<span class="chip"><i style="background:${esc(groupColour(g.id, s))}"></i>${esc(shortName(g.name))} · ${esc(changeName(st, presetOf(g.id, st.preset)))}` +
       (back ? `<button type="button" data-back="${esc(g.id)}" data-preset="${esc(back)}" aria-label="Back to the saved colour for ${esc(g.name)}">×</button>` : '') + '</span>');
   }
+  // Flash is always the real stage's.
   for (const id of state.flashing ?? []) {
     const g = groupById(id);
     if (g) chips.push(`<span class="chip flash">${esc(g.name)} · Flash</span>`);
   }
   setHtml($('changes'), chips.join(''));
   $('noChanges').hidden = chips.length > 0;
+  $('noChanges').textContent = prep.on ? 'None. The step is as it was saved.' : 'None. The stage is as the cue was saved.';
+  // Save: only in Prepare, with a step to save to.
+  const item = prep.on && prep.state && prep.state.look !== 'blackout' ? songOf(prep.state).item : null;
+  $('saveBtn').hidden = !item;
+  if (item) $('saveText').textContent = `Save to ${stepName(prep.state)}`;
 }
 $('changes').addEventListener('click', (ev) => {
   const b = ev.target.closest('button[data-back]');
-  if (b) send({ type: 'groupPreset', group: b.dataset.back, preset: b.dataset.preset });
+  if (b) sendStage({ type: 'groupPreset', group: b.dataset.back, preset: b.dataset.preset });
 });
 
 function renderWho() {
@@ -240,12 +342,13 @@ function lookFill(look) {
 }
 
 function renderPads() {
+  const s = shown();
   $('padsFor').textContent = `for ${whoName()}`;
   const pads = [];
   // Looks: the quick looks; with a group picked, only those that set it, for that group alone.
   for (const q of layout.quickLooks ?? []) {
     const sets = who === 'all' ? q.groups : q.groups.filter((g) => g === who);
-    const on = sets.length > 0 && sets.every((g) => state.groups?.[g]?.preset === q.entries?.[groupIndex(g)]?.preset);
+    const on = sets.length > 0 && sets.every((g) => s.groups?.[g]?.preset === q.entries?.[groupIndex(g)]?.preset);
     pads.push(`<button type="button" class="pad${on ? ' active' : ''}" data-look="${esc(q.id)}"${sets.length ? '' : ' disabled style="opacity:.35"'}>` +
       `<span class="fill" style="${esc(lookFill(q))}"></span><i>Look</i><b>${esc(q.name)}</b></button>`);
   }
@@ -253,22 +356,22 @@ function renderPads() {
   if (who !== 'all') {
     for (const p of groupById(who)?.presets ?? []) {
       if (!p.effect) continue;
-      const on = state.groups?.[who]?.preset === p.id;
+      const on = s.groups?.[who]?.preset === p.id;
       pads.push(`<button type="button" class="pad effect${on ? ' active' : ''}" data-preset="${esc(p.id)}"><span class="fill"></span><i>${on ? 'Effect · on' : 'Effect'}</i><b>${esc(p.name)}</b></button>`);
     }
   }
   const room = 15;
   if (pads.length > room) pads.splice(room - 1, pads.length, '<button type="button" class="pad more" disabled title="The full list comes in a later step"><i>All</i><b>More…</b></button>');
-  // Hold: Flash, full white while held.
+  // Hold: Flash, full white while held, always on the real stage.
   const down = targets().length > 0 && targets().every((g) => state.flashing?.includes(g));
-  pads.push(`<button type="button" class="pad hold${down ? ' down' : ''}" data-flash="1"><span class="fill" style="background:#ffffff"></span><i>Hold</i><b>Flash</b></button>`);
+  pads.push(`<button type="button" class="pad hold${down ? ' down' : ''}" data-flash="1"><span class="fill" style="background:#ffffff"></span><i>Hold · live</i><b>Flash</b></button>`);
   setHtml($('pads'), pads.join(''));
 }
 $('pads').addEventListener('click', (ev) => {
   const b = ev.target.closest('button');
   if (!b || b.disabled) return;
-  if (b.dataset.look) send({ type: 'quickLook', id: b.dataset.look, ...(who === 'all' ? {} : { only: [who] }) });
-  else if (b.dataset.preset) send({ type: 'groupPreset', group: who, preset: b.dataset.preset });
+  if (b.dataset.look) sendStage({ type: 'quickLook', id: b.dataset.look, ...(who === 'all' ? {} : { only: [who] }) });
+  else if (b.dataset.preset) sendStage({ type: 'groupPreset', group: who, preset: b.dataset.preset });
 });
 // Flash: on while the finger is down, off when it lifts or slides off.
 let flashing = null;
@@ -338,24 +441,34 @@ $('square').addEventListener('click', (ev) => {
   const v = Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height));
   const colour = mix(c, u, v);
   puck = { u, v, colour };
-  for (const g of colourTargets()) send({ type: 'groupColour', group: g, colour });
+  for (const g of colourTargets()) sendStage({ type: 'groupColour', group: g, colour });
   renderSquare();
 });
 
-// ---- Bottom: the song, its steps, Next and Blackout ----
+// ---- Bottom: the song, its steps, Next (in Prepare: Back to live and Go) and Blackout ----
 
 function renderBottom() {
-  const { order, k, item, sections, sec } = songNow();
+  const s = shown();
+  const { order, k, item, sections, sec } = songOf(s);
+  // In Prepare the step on the real stage is marked too.
+  const live = prep.on ? songOf(state) : null;
+  const tag = (here, onStage) => (prep.on && here ? '<small>preparing</small>' : onStage ? '<small>on stage</small>' : '');
   let html;
   if (item && sections.length) {
     $('songOf').textContent = `Song · ${k + 1} of ${order.length}`;
-    html = sections.map((s, i) =>
-      `<button type="button" class="btn${i === sec ? ' here' : i < sec ? ' done' : ''}" data-section="${esc(s.kind)}">${esc(s.name)}</button>`).join('');
+    html = sections.map((x, i) => {
+      const onStage = !!live && live.item?.id === item.id && live.sec === i && i !== sec;
+      const cls = i === sec ? ' here' + (prep.on ? ' stack' : '') : onStage ? ' live-here' : i < sec ? ' done' : '';
+      return `<button type="button" class="btn${cls}" data-section="${esc(x.kind)}"><span>${esc(x.name)}</span>${tag(i === sec, onStage)}</button>`;
+    }).join('');
   } else {
     // No sections (no planned service loaded): the running order itself is the steps.
     $('songOf').textContent = order.length ? `Item · ${k + 1} of ${order.length}` : 'Running order';
-    html = order.map((i, n) =>
-      `<button type="button" class="btn${n === k ? ' here' : n < k ? ' done' : ''}" data-item="${esc(i.id)}">${esc(i.name)}</button>`).join('');
+    html = order.map((x, n) => {
+      const onStage = !!live && live.k === n && n !== k;
+      const cls = n === k ? ' here' + (prep.on ? ' stack' : '') : onStage ? ' live-here' : n < k ? ' done' : '';
+      return `<button type="button" class="btn${cls}" data-item="${esc(x.id)}"><span>${esc(x.name)}</span>${tag(n === k, onStage)}</button>`;
+    }).join('');
   }
   $('songName').textContent = item?.name ?? '—';
   const steps = $('steps');
@@ -363,20 +476,31 @@ function renderBottom() {
   setHtml(steps, html);
   if (steps.dataset.html !== before) steps.querySelector('.here')?.scrollIntoView({ inline: 'center', block: 'nearest' });
 
-  const next = nextStep();
-  $('nextName').textContent = next ? next.name : 'End of list';
-  $('nextWhat').textContent = next ? whatChanges(next.look) : '';
-  $('next').disabled = !next;
+  // Live: Next. Prepare: Back to live and Go, which says what it will change on the stage.
+  $('next').hidden = prep.on;
+  $('backLive').hidden = !prep.on;
+  $('goBtn').hidden = !prep.on;
+  if (prep.on) {
+    $('goName').textContent = prep.state ? stepName(prep.state) : '…';
+    $('goWhat').textContent = prep.state ? whatGoChanges() : 'Getting the draft ready';
+    $('goBtn').disabled = !prep.state || prep.goRef !== null;
+  } else {
+    const next = nextStep();
+    $('nextName').textContent = next ? next.name : 'End of list';
+    $('nextWhat').textContent = next ? whatChanges(next.look) : '';
+    $('next').disabled = !next;
+  }
   $('blackout').classList.toggle('on', state.look === 'blackout');
 }
 $('steps').addEventListener('click', (ev) => {
   const b = ev.target.closest('button');
   if (!b) return;
-  const { item } = songNow();
+  const { item } = songOf(shown());
+  // Not wrapped for the draft: while this tablet has one, the server puts the section into it.
   if (b.dataset.section && item) send({ type: 'section', song: item.id, kind: b.dataset.section });
   else if (b.dataset.item) {
     const i = (layout.runningOrder ?? []).find((x) => x.id === b.dataset.item);
-    if (i) send(isBasic(i) ? { type: 'safe' } : { type: 'look', id: i.id });
+    if (i) sendStage(isBasic(i) ? { type: 'safe' } : { type: 'look', id: i.id });
   }
 });
 $('next').addEventListener('click', () => {
@@ -384,23 +508,116 @@ $('next').addEventListener('click', () => {
   if (next) send(next.cmd);
 });
 
-// Blackout needs a 1 s hold so a stray tap never darkens the room.
-const blackout = $('blackout');
-let holdTimer = 0;
-blackout.addEventListener('pointerdown', (ev) => {
+/** A button that does its thing after a 1 s hold (Blackout, Save), so a stray tap never does it. */
+function holdButton(button, done) {
+  let timer = 0;
+  button.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    button.classList.add('holding');
+    const session = prep.session;
+    timer = setTimeout(() => {
+      button.classList.remove('holding');
+      done(session);
+    }, 1000);
+  });
+  for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
+    button.addEventListener(type, () => {
+      clearTimeout(timer);
+      button.classList.remove('holding');
+    });
+  }
+}
+holdButton($('blackout'), () => send({ type: 'blackout' }));
+
+// ---- Prepare ----
+
+/**
+ * Turns Prepare on (a fresh draft of the stage now) or off (the draft is thrown away).
+ * `tell` false: the server has already ended it (after Go, a refused start, a lost connection).
+ */
+function setPrepare(on, tell = true) {
+  if (on === prep.on) return;
+  if (on) {
+    if (!layout) return;
+    const r = send({ type: 'blindStart' });
+    if (r === null) return;
+    prep.startRef = r;
+    prep.starting = true;
+  } else {
+    // Off before the server made the draft is fine too: a start still on its way then makes none.
+    if (tell && connected) send({ type: 'blindEnd' });
+    prep.startRef = null;
+    prep.starting = false;
+  }
+  prep.on = on;
+  prep.locked = false;
+  prep.session++;
+  prep.state = null;
+  prep.visual = null;
+  prep.goRef = null;
+  prep.saveRef = null;
+  puck = null;
+  document.body.classList.toggle('prepare', on);
+  drawStage();
+  render();
+}
+
+// The Prepare button: a short hold peeks (off again on letting go); about 1 s keeps it on; a tap turns it off.
+const prepBtn = $('prepBtn');
+let lockTimer = 0;
+let turnOff = false;
+prepBtn.addEventListener('pointerdown', (ev) => {
   ev.preventDefault();
-  blackout.classList.add('holding');
-  holdTimer = setTimeout(() => {
-    blackout.classList.remove('holding');
-    send({ type: 'blackout' });
+  try {
+    prepBtn.setPointerCapture(ev.pointerId); // letting go off the button still counts
+  } catch {
+    // no capture here: fine
+  }
+  if (prep.on) {
+    turnOff = true;
+    return;
+  }
+  turnOff = false;
+  setPrepare(true);
+  if (!prep.on) return;
+  prepBtn.classList.add('holding');
+  const session = prep.session;
+  lockTimer = setTimeout(() => {
+    prepBtn.classList.remove('holding');
+    if (prep.on && prep.session === session) {
+      prep.locked = true;
+      render();
+    }
   }, 1000);
 });
-for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
-  blackout.addEventListener(type, () => {
-    clearTimeout(holdTimer);
-    blackout.classList.remove('holding');
-  });
-}
+const prepUp = () => {
+  clearTimeout(lockTimer);
+  prepBtn.classList.remove('holding');
+  if (!prep.on) return;
+  // A tap while it is kept on, or letting go of a peek, turns it off.
+  if (turnOff || !prep.locked) setPrepare(false);
+  turnOff = false;
+};
+prepBtn.addEventListener('pointerup', prepUp);
+prepBtn.addEventListener('pointercancel', prepUp);
+$('liveBtn').addEventListener('click', () => setPrepare(false));
+$('backLive').addEventListener('click', () => setPrepare(false));
+
+// Go: the whole draft fades onto the lights in one change (with the Fade setting); Live again when the server says yes.
+$('goBtn').addEventListener('click', () => {
+  if (!prep.on || !prep.state || prep.goRef !== null) return;
+  prep.goRef = send({ type: 'blindGo' });
+  render();
+});
+
+// Save: keeps the draft in the step being prepared (into the section's own look while a section is prepared).
+holdButton($('saveBtn'), (session) => {
+  if (!prep.on || prep.session !== session || !prep.state) return;
+  const { item } = songOf(prep.state);
+  if (!item) return;
+  prep.saveName = stepName(prep.state);
+  prep.saveRef = send({ type: 'saveItem', id: item.id });
+});
 
 // ---- Top bar: Fade steps through the choices; Tap sets the tempo from the last few taps ----
 
@@ -418,8 +635,9 @@ $('tapBtn').addEventListener('click', () => {
   send({ type: 'tempo', bpm: Math.max(40, Math.min(240, bpm)) });
 });
 
-// ---- The stage, as the audience sees it (light beams from each fixture) ----
+// ---- The stage, as the audience sees it (light beams from each fixture); the draft while preparing ----
 
+const NO_VISUAL = new Uint8Array(0);
 const canvas = $('stage');
 const ctx = canvas.getContext('2d');
 function drawStage() {
@@ -432,14 +650,15 @@ function drawStage() {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  drawStagePicture(ctx, w, h, layout, visual, (g) => state?.groups?.[g]?.level ?? 0, { view: 'front' });
-  const off = state?.look === 'blackout';
+  const s = shown();
+  drawStagePicture(ctx, w, h, layout, prep.on ? prep.visual ?? NO_VISUAL : visual, (g) => s?.groups?.[g]?.level ?? 0, { view: 'front' });
+  const off = !prep.on && state?.look === 'blackout';
   ctx.font = '600 10px Inter, system-ui, sans-serif';
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0.9px';
-  ctx.fillStyle = off ? '#ff9a9a' : '#8a8f9c';
+  ctx.fillStyle = prep.on ? '#b9a6ff' : off ? '#ff9a9a' : '#8a8f9c';
   ctx.textAlign = 'right';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(off ? 'OFF' : 'LIVE', w - 10, h - 8);
+  ctx.fillText(prep.on ? 'DRAFT · NOT ON STAGE' : off ? 'OFF' : 'LIVE', w - 10, h - 8);
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 }
 new ResizeObserver(() => drawStage()).observe(canvas);

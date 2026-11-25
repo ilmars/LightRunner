@@ -24,6 +24,8 @@
   --danger: #ff9a9a;
   --danger-edge: rgba(255, 154, 154, 0.22);
   --violet: #b9a6ff;
+  --violet-fill: rgba(185, 166, 255, 0.13);
+  --violet-edge: rgba(185, 166, 255, 0.5);
   --r-panel: 16px;
   --r-tile: 14px;
   --r-btn: 12px;
@@ -319,3 +321,36 @@ button { font: inherit; color: inherit; }
   background: var(--tile-hi);
   box-shadow: inset 0 0 0 1px var(--edge-hi);
 }
+
+/* Prepare: a violet frame round the screen, the label in violet, the step being prepared marked. */
+.seg button.prep { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 6px; touch-action: none; }
+.seg button.prep .lock { display: none; }
+.seg button.prep .hold { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--violet-fill); }
+.seg button.prep.holding .hold { width: 100%; transition: width 1s linear; }
+.seg button.prep span:last-child { position: relative; }
+body.prepare .seg button.prep { background: var(--violet-fill); box-shadow: inset 0 0 0 1px var(--violet-edge); color: var(--text); }
+body.prepare .seg button.prep.locked .lock { display: inline; color: var(--violet); position: relative; }
+body.prepare .seg #liveBtn { background: none; box-shadow: none; color: var(--muted); }
+body.prepare::after {
+  content: '';
+  position: fixed;
+  inset: 3px;
+  border: 2px solid var(--violet-edge);
+  border-radius: 20px;
+  pointer-events: none;
+  z-index: 5;
+}
+body.prepare #nowLabel { color: var(--violet); }
+body.prepare .steps .btn.here { background: var(--violet-fill); box-shadow: inset 0 0 0 1px var(--violet-edge); color: var(--text); }
+.steps .btn.live-here { box-shadow: none; border: 1px dashed rgba(255, 255, 255, 0.2); flex-direction: column; justify-content: center; gap: 0; }
+.steps .btn.live-here small, .steps .btn.here small { font-size: 10px; font-weight: 500; }
+.steps .btn.live-here small { color: var(--muted); }
+body.prepare .steps .btn.here small { color: var(--violet); }
+.steps .btn.here.stack { flex-direction: column; justify-content: center; gap: 0; }
+.back { height: 76px; flex: none; }
+.save { position: relative; overflow: hidden; flex: none; background: var(--violet-fill); box-shadow: inset 0 0 0 1px var(--violet-edge); }
+.save > span, .save > small { position: relative; }
+.save small { font-size: 11px; color: var(--muted); }
+.save .hold { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: rgba(185, 166, 255, 0.18); }
+.save.holding .hold { width: 100%; transition: width 1s linear; }
+.btn[hidden] { display: none; }

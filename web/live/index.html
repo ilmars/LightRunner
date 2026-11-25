@@ -21,7 +21,7 @@
     <!-- Top bar: what is on stage, then Fade, Tempo, Tap, Master, Live / Prepare and the pages. -->
     <header class="bar top">
       <div class="now">
-        <span class="caps">On stage</span>
+        <span id="nowLabel" class="caps">On stage</span>
         <span id="nowName" class="now-name">—</span>
       </div>
       <span class="grow"></span>
@@ -31,7 +31,8 @@
       <button id="masterBtn" class="btn stack" type="button" title="Master"><span class="caps">Master</span><b id="masterValue">100 %</b></button>
       <div class="seg" role="group" aria-label="Live or Prepare">
         <button id="liveBtn" type="button" class="on" aria-pressed="true">Live</button>
-        <button id="prepBtn" type="button" aria-pressed="false" disabled title="Prepare comes in a later step">Prepare</button>
+        <!-- A short hold peeks; about 1 s locks Prepare on; a tap turns it off. -->
+        <button id="prepBtn" type="button" class="prep" aria-pressed="false" title="Hold to peek; hold 1 s to keep Prepare on"><span class="hold"></span><svg class="lock" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span>Prepare</span></button>
       </div>
       <nav id="pageTabs" class="ds-pagetabs" data-page="operator" aria-label="Pages"></nav>
     </header>
@@ -44,6 +45,9 @@
           <span class="caps">Your changes</span>
           <span id="noChanges" class="sub">None. The stage is as the cue was saved.</span>
           <div id="changes" class="chips"></div>
+          <span class="grow"></span>
+          <!-- Prepare only: keep the draft in the step being prepared (hold, so a stray tap never changes the show). -->
+          <button id="saveBtn" class="btn save" type="button" hidden><span class="hold"></span><span id="saveText">Save</span><small>hold</small></button>
         </div>
       </div>
       <div class="panel who">
@@ -76,6 +80,12 @@
         <span id="songOf" class="caps">Song</span><b id="songName">—</b>
       </button>
       <div id="steps" class="steps"></div>
+      <!-- Prepare only: back to live (the draft is dropped), or Go (the draft fades onto the stage). -->
+      <button id="backLive" class="btn back" type="button" hidden>Back to live</button>
+      <button id="goBtn" class="btn next go" type="button" hidden>
+        <span class="caps">Go ▸ <span id="goName">—</span></span>
+        <span id="goWhat" class="next-what"></span>
+      </button>
       <button id="next" class="btn next" type="button">
         <span class="caps">Next ▸ <span id="nextName">—</span></span>
         <span id="nextWhat" class="next-what"></span>
