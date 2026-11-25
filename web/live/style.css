@@ -70,7 +70,7 @@ button { font: inherit; color: inherit; }
   position: relative;
 }
 .bar {
-  grid-column: 1 / 3;
+  grid-column: 1 / -1;
   background: var(--panel);
   border-radius: var(--r-panel);
   box-shadow: inset 0 0 0 1px var(--edge);
@@ -494,3 +494,75 @@ body.prepare .steps .btn.here small { color: var(--violet); }
 /* A white-only group: the square is a warm-to-cool strip. */
 .square.white .corner.bl, .square.white .corner.br { display: none; }
 .square.white { opacity: 1; }
+
+/* The warm-to-cool strip's numbers: kelvin ticks along the bottom, the value at the dot. */
+.ticks { position: absolute; left: 0; right: 0; bottom: 0; height: 30px; pointer-events: none; display: none; }
+.square.white .ticks { display: block; }
+.ticks span { position: absolute; bottom: 6px; transform: translateX(-50%); font-size: 11px; font-weight: 600; color: rgba(236, 238, 243, 0.85); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7); font-variant-numeric: tabular-nums; }
+.ticks span::before { content: ''; position: absolute; left: 50%; bottom: 16px; width: 1px; height: 8px; background: rgba(236, 238, 243, 0.45); }
+.ticks span.edge-l { transform: none; }
+.ticks span.edge-r { transform: translateX(-100%); }
+.puck-k { position: absolute; transform: translate(-50%, -38px); white-space: nowrap; padding: 2px 8px; border-radius: 8px; background: rgba(12, 13, 17, 0.85); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; pointer-events: none; }
+.puck-k[hidden] { display: none; }
+
+/* The exact value field in the colour panel's head. */
+.colour-head { align-items: center; }
+.colour-head .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cin { display: inline-flex; align-items: center; gap: 4px; height: 36px; padding: 0 10px; border-radius: 10px; background: var(--tile); box-shadow: inset 0 0 0 1px var(--edge); flex: none; }
+.cin:focus-within { box-shadow: inset 0 0 0 1px var(--picked-edge); }
+.cin input { width: 74px; border: 0; background: none; color: var(--text); font: 600 14px Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; outline: none; text-align: right; padding: 0; }
+.cin span { font-size: 12px; color: var(--muted); }
+.cin.bad { box-shadow: inset 0 0 0 1px var(--danger-edge); }
+
+/* The iPad held upright: one column. Stage and who on top, the pads with the colour panel beside them under it. */
+@media (orientation: portrait) and (min-width: 600px) {
+  .page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 64px minmax(0, 1fr) minmax(0, 1.05fr) 100px;
+  }
+  .right { flex-direction: row; }
+  .pads-panel { flex: 1.45; min-width: 0; }
+  .colour-panel { flex: 1; height: auto; min-width: 0; }
+  .colour-head { flex-wrap: wrap; }
+  .now-name { font-size: 16px; }
+}
+
+/* A phone: no stage picture (the stage is in the room). The top bar keeps what's on stage, Master and Live / Prepare;
+   then your changes, who, the pads (scrolling), the colour panel, and the song's steps with Next and Blackout.
+   The faders and the song list open over the whole screen. */
+@media (max-width: 599px) {
+  .page {
+    padding: 8px;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+  .top { padding: 6px 8px 6px 12px; flex-wrap: wrap; row-gap: 6px; }
+  .now { flex: 1 1 100%; }
+  .now-name { font-size: 16px; }
+  #fadeBtn, #tempoBtn, #tapBtn, #pageTabs { display: none; }
+  .top .grow { display: none; }
+  .left { gap: 8px; }
+  .stage-panel { flex: none; padding: 4px 8px; overflow: visible; }
+  .stage-wrap { display: none; }
+  .changes { min-height: 34px; }
+  .changes > .caps { display: none; }
+  .who { height: 60px; padding: 0 8px; }
+  .right { gap: 8px; }
+  .pads-panel { padding: 10px; }
+  .pads-head { flex-wrap: wrap; row-gap: 6px; }
+  .pads { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: none; grid-auto-rows: 64px; overflow-y: auto; }
+  .colour-panel { height: 170px; padding: 10px; }
+  .colour-head .sub { display: none; }
+  .bottom { flex-wrap: wrap; padding: 8px; row-gap: 8px; }
+  .song { height: 52px; min-width: 0; flex: 1; }
+  .steps { flex: 1 1 100%; order: 3; }
+  .steps .btn { height: 44px; }
+  .next, .go { height: 52px; width: auto; flex: 1.4; }
+  .back { height: 52px; }
+  .blackout { height: 52px; }
+  .faders, .songs { position: fixed; inset: 8px; z-index: 20; height: auto; }
+  .s-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .s-pick { max-height: 45vh; }
+  .toast { bottom: 150px; }
+}

@@ -12,7 +12,6 @@
 
 import { drawStagePicture } from '/shared/stagedraw.js';
 import { setupPageTabs } from '/shared/pagetabs.js';
-import { WHITE_STOPS, stripColour } from '/shared/colour.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -483,6 +482,59 @@ for (const type of ['pointerup', 'pointercancel', 'pointerleave']) $('pads').add
 // For now its corners are the picked group's first four colours (with All, the first colour group's). Each song's own
 // four corners, set on the Timeline page, come in a later step.
 
+// ---- Colour temperature: the warm-to-cool strip's numbers ----
+// The engine turns a white into a colour temperature by its blue-to-red ratio (kelvinOf in packages/engine/src/output.ts,
+// with this table). The strip runs evenly in kelvin over the group's own range, and each spot sends the white the
+// engine reads as exactly that temperature.
+
+const KELVIN_BY_RATIO = [[0.2, 2000], [0.34, 2700], [0.45, 3200], [0.64, 4000], [0.87, 5600], [1.0, 6500], [1.27, 10000]];
+/** The range the strip covers for a group: its CCT channels' range, else 2700–6500 K. */
+const kelvinRangeOf = (g) => g?.kelvin ?? { min: 2700, max: 6500 };
+
+/** The blue-to-red ratio of a white at `k` kelvin. */
+function ratioOf(k) {
+  const T = KELVIN_BY_RATIO;
+  if (k <= T[0][1]) return T[0][0];
+  for (let i = 1; i < T.length; i++) {
+    if (k <= T[i][1]) return T[i - 1][0] + ((k - T[i - 1][1]) / (T[i][1] - T[i - 1][1])) * (T[i][0] - T[i - 1][0]);
+  }
+  // Past the table: carry on along its last step.
+  const [r0, k0] = T[T.length - 2], [r1, k1] = T[T.length - 1];
+  return r1 + ((k - k1) / (k1 - k0)) * (r1 - r0);
+}
+
+/** A white of `k` kelvin as #rrggbb: red and blue in its ratio (the brighter one full), green between them. */
+function whiteOfKelvin(k) {
+  const ratio = ratioOf(k);
+  const r = ratio <= 1 ? 255 : 255 / ratio;
+  const b = ratio <= 1 ? 255 * ratio : 255;
+  return hex([r, Math.sqrt(r * b) * 0.97 + 6, b].map((x) => Math.min(255, x)));
+}
+
+/** The colour temperature the engine reads from a colour (kelvinOf), in kelvin. */
+function kelvinOfHex(h) {
+  const [r, , b] = rgb(h).map((x) => x / 255);
+  const T = KELVIN_BY_RATIO;
+  if (r <= 0) return T[T.length - 1][1];
+  const ratio = b / r;
+  if (ratio <= T[0][0]) return T[0][1];
+  for (let i = 1; i < T.length; i++) {
+    if (ratio <= T[i][0]) return T[i - 1][1] + ((ratio - T[i - 1][0]) / (T[i][0] - T[i - 1][0])) * (T[i][1] - T[i - 1][1]);
+  }
+  return T[T.length - 1][1];
+}
+
+/** Kelvin rounded for reading: to 50 K. */
+const roundK = (k) => Math.round(k / 50) * 50;
+
+/** The picked white-only group's colour temperature now (on the stage the page works on), or null. */
+function kelvinNow() {
+  const st = shown()?.groups?.[who];
+  if (!st) return null;
+  const colour = st.live?.colour ?? presetOf(who, st.preset)?.colour ?? null;
+  return colour ? kelvinOfHex(colour) : null;
+}
+
 /** A white-only group is picked: the square is a warm-to-cool strip. */
 const whiteMode = () => who !== 'all' && !!groupById(who)?.whiteOnly;
 /** The groups a square tap colours: white-only groups are left out (they have their own strip). */
@@ -504,21 +556,68 @@ function mix(c, u, v) {
   return hex([0, 1, 2].map((k) => w[0] * C[0][k] + w[1] * C[1][k] + w[2] * C[2][k] + w[3] * C[3][k]));
 }
 
+/** The square, the strip and their dot are dimmed alike, so the dot matches the spot under it and nothing lights the operator's face. */
+const DIM = 'linear-gradient(rgba(12,13,17,.42),rgba(12,13,17,.42))';
+
+/** The square as a small picture of the four corners mixed exactly as a tap mixes them (cached per set of corners). */
+const squareImages = new Map();
+function squareImage(c) {
+  const key = c.map((p) => p.hex).join();
+  let url = squareImages.get(key);
+  if (url) return url;
+  const W = 64, H = 32;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const cx = cv.getContext('2d');
+  const img = cx.createImageData(W, H);
+  const C = c.map((p) => rgb(p.hex));
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const u = x / (W - 1), v = y / (H - 1);
+      const w = [(1 - u) * (1 - v), u * (1 - v), (1 - u) * v, u * v];
+      const o = (y * W + x) * 4;
+      for (let k = 0; k < 3; k++) img.data[o + k] = w[0] * C[0][k] + w[1] * C[1][k] + w[2] * C[2][k] + w[3] * C[3][k];
+      img.data[o + 3] = 255;
+    }
+  }
+  cx.putImageData(img, 0, 0);
+  url = cv.toDataURL();
+  squareImages.set(key, url);
+  return url;
+}
+
 function renderSquare() {
   const sq = $('square');
   const white = whiteMode();
   sq.classList.toggle('white', white);
   if (white) {
     sq.disabled = false;
-    $('squareFor').textContent = `warm to cool, tap for ${whoName()}`;
-    // Dimmed, so the strip never lights the operator's face.
-    const bg = `linear-gradient(rgba(12,13,17,.58),rgba(12,13,17,.58)),linear-gradient(90deg,${WHITE_STOPS.join(',')})`;
+    const range = kelvinRangeOf(groupById(who));
+    const now = kelvinNow();
+    $('squareFor').textContent = now !== null ? `warm to cool · now ${roundK(now)} K` : `warm to cool, tap for ${whoName()}`;
+    // Evenly in kelvin, in the colours the lights make; dimmed, so the strip never lights the operator's face.
+    const stops = [0, 0.2, 0.4, 0.6, 0.8, 1].map((u) => whiteOfKelvin(range.min + u * (range.max - range.min)));
+    const bg = `${DIM},linear-gradient(90deg,${stops.join(',')})`;
     if (sq.dataset.bg !== bg) {
       sq.style.background = bg;
       sq.dataset.bg = bg;
     }
     $('cTL').textContent = 'Warm';
     $('cTR').textContent = 'Cool';
+    // Ticks every 1000 K (every 500 K on a narrow range).
+    const step = range.max - range.min > 3000 ? 1000 : 500;
+    const ticks = [];
+    for (let k = Math.ceil(range.min / step) * step; k <= range.max; k += step) {
+      const u = (k - range.min) / (range.max - range.min);
+      const edge = u < 0.04 ? ' class="edge-l"' : u > 0.96 ? ' class="edge-r"' : '';
+      ticks.push(`<span${edge} style="left:${(u * 100).toFixed(2)}%">${k}</span>`);
+    }
+    setHtml($('ticks'), ticks.join(''));
+    // The dot sits at the group's temperature now (or where it was last tapped, while that is on its way).
+    if (now !== null && (!puck || puck.k === undefined || Math.abs(puck.k - now) < 60)) {
+      puck = { u: Math.max(0, Math.min(1, (now - range.min) / (range.max - range.min))), v: 0.45, colour: whiteOfKelvin(now), k: now };
+    }
     showPuck();
     return;
   }
@@ -526,8 +625,8 @@ function renderSquare() {
   const ok = c.length === 4 && colourTargets().length > 0;
   sq.disabled = !ok;
   $('squareFor').textContent = ok ? `tap for ${whoName()}` : 'no colour lights here';
-  const at = ['0 0', '100% 0', '0 100%', '100% 100%'];
-  const bg = ok ? c.map((p, i) => `radial-gradient(circle at ${at[i]},${p.hex}cc,${p.hex}00 72%)`).join(',') + ',#1a1730' : '#1a1730';
+  // Drawn from the same mix a tap sends, so every spot shows the colour the lights get there.
+  const bg = ok ? `${DIM}, center / 100% 100% no-repeat url(${squareImage(c)})` : '#1a1730';
   if (sq.dataset.bg !== bg) {
     sq.style.background = bg;
     sq.dataset.bg = bg;
@@ -536,13 +635,94 @@ function renderSquare() {
   showPuck();
 }
 
+/** A spot on the square in words: the corner colours it mixes, biggest first ("Zils 70 % · Rozā 30 %"); small shares left out. */
+function mixLabel(c, u, v) {
+  const w = [(1 - u) * (1 - v), u * (1 - v), (1 - u) * v, u * v];
+  const by = new Map();
+  c.forEach((p, i) => by.set(p.name, (by.get(p.name) ?? 0) + w[i]));
+  const parts = [...by].filter(([, x]) => x >= 0.1).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const total = parts.reduce((s, [, x]) => s + x, 0) || 1;
+  return parts.map(([name, x]) => `${name} ${Math.round((x / total) * 100)} %`).join(' · ');
+}
+
+/** The picked group's colour now (#rrggbb, on the stage the page works on), or null (All, or no plain colour). */
+function colourNow() {
+  if (who === 'all') return null;
+  const st = shown()?.groups?.[who];
+  if (!st || st.effect) return null;
+  return st.live?.colour ?? presetOf(who, st.preset)?.colour ?? null;
+}
+
+/** The exact value field: kelvin for a white-only group, a colour code otherwise; it shows the value now unless typed in. */
+function renderColourIn() {
+  const input = $('colourIn');
+  const white = whiteMode();
+  $('colourUnit').textContent = white ? 'K' : '';
+  input.inputMode = white ? 'numeric' : 'text';
+  input.placeholder = white ? `${kelvinRangeOf(groupById(who)).min}` : '#rrggbb';
+  if (document.activeElement === input) return;
+  const now = white ? kelvinNow() : colourNow();
+  input.value = now === null ? '' : white ? String(roundK(now)) : now;
+  input.parentElement.classList.remove('bad');
+}
+
+/** Sends the typed value to the picked lights (with how long it lasts); a value it can't use is marked and kept. */
+function sendColourIn() {
+  const input = $('colourIn');
+  const text = input.value.trim();
+  let colour;
+  if (whiteMode()) {
+    const range = kelvinRangeOf(groupById(who));
+    const k = Number(text.replace(/\s|k$/gi, ''));
+    if (!Number.isFinite(k) || k <= 0) return input.parentElement.classList.add('bad');
+    // The lights can't go past their own range: a value outside it is taken to the nearest end.
+    const kk = Math.max(range.min, Math.min(range.max, k));
+    if (kk !== k) toast(`These lights go from ${range.min} to ${range.max} K.`);
+    colour = whiteOfKelvin(kk);
+    puck = { u: (kk - range.min) / (range.max - range.min), v: 0.45, colour, k: kk };
+  } else {
+    const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(text);
+    if (!m) return input.parentElement.classList.add('bad');
+    const h = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1];
+    colour = `#${h.toLowerCase()}`;
+    puck = null;
+  }
+  input.parentElement.classList.remove('bad');
+  const groups = colourTargets();
+  if (!groups.length) return toast('Pick a group that has colour.');
+  for (const g of groups) sendStage({ type: 'groupColour', group: g, colour, ...lastsNow() });
+  input.blur();
+  renderSquare();
+}
+$('colourIn').addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') sendColourIn();
+  if (ev.key === 'Escape') ev.currentTarget.blur();
+});
+$('colourIn').addEventListener('blur', () => setTimeout(renderColourIn, 0));
+$('colourIn').addEventListener('input', () => $('colourIn').parentElement.classList.remove('bad'));
+
 function showPuck() {
+  renderColourIn();
+  const k = $('puckK');
+  // The value at the dot: kelvin on the warm-to-cool strip, the corner colours' mix on the square.
+  const text = !puck ? '' : whiteMode() ? (puck.k !== undefined ? `${roundK(puck.k)} K` : '') : puck.label ?? '';
+  k.hidden = !text;
+  if (!k.hidden) {
+    k.textContent = text;
+    // Centred over the dot but kept inside the square; near the top it sits under the dot.
+    const sq = $('square');
+    const w = k.offsetWidth;
+    const left = Math.max(6, Math.min(sq.clientWidth - w - 6, puck.u * sq.clientWidth - w / 2));
+    k.style.left = `${left}px`;
+    k.style.top = `${puck.v * 100}%`;
+    k.style.transform = `translateY(${puck.v < 0.3 ? '20px' : '-38px'})`;
+  }
   const p = $('puck');
   p.hidden = !puck;
   if (puck) {
     p.style.left = `${puck.u * 100}%`;
     p.style.top = `${puck.v * 100}%`;
-    p.style.background = puck.colour;
+    p.style.background = `${DIM}, ${puck.colour}`;
   }
 }
 $('square').addEventListener('click', (ev) => {
@@ -551,14 +731,16 @@ $('square').addEventListener('click', (ev) => {
   const v = Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height));
   let colour;
   if (whiteMode()) {
-    // Warm (left) to cool (right), as the colour editor's strip for white-only groups.
-    colour = stripColour(WHITE_STOPS, u);
-    puck = { u, v: 0.5, colour };
+    // Warm (left) to cool (right), evenly in kelvin over the group's range.
+    const range = kelvinRangeOf(groupById(who));
+    const k = range.min + u * (range.max - range.min);
+    colour = whiteOfKelvin(k);
+    puck = { u, v: 0.45, colour, k };
   } else {
     const c = corners();
     if (c.length !== 4) return;
     colour = mix(c, u, v);
-    puck = { u, v, colour };
+    puck = { u, v, colour, label: mixLabel(c, u, v) };
   }
   for (const g of colourTargets()) sendStage({ type: 'groupColour', group: g, colour, ...lastsNow() });
   renderSquare();

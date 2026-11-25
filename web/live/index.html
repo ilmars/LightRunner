@@ -114,11 +114,18 @@
         <div id="pads" class="pads"></div>
       </div>
       <div class="panel colour-panel">
-        <div class="head"><span class="title">Colour</span><span id="squareFor" class="sub">tap for all lights</span></div>
+        <div class="head colour-head">
+          <span class="title">Colour</span><span id="squareFor" class="sub">tap for all lights</span>
+          <span class="grow"></span>
+          <!-- Type an exact value: kelvin on the warm-to-cool strip, a colour code (#rrggbb) on the square. Enter sends it. -->
+          <label class="cin"><input id="colourIn" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done" aria-label="Exact colour"><span id="colourUnit"></span></label>
+        </div>
         <button id="square" class="square" type="button" aria-label="Colour square: tap a spot to colour the picked lights">
           <span id="cTL" class="corner tl"></span><span id="cTR" class="corner tr"></span>
           <span id="cBL" class="corner bl"></span><span id="cBR" class="corner br"></span>
+          <span id="ticks" class="ticks" aria-hidden="true"></span>
           <span id="puck" class="puck" hidden></span>
+          <span id="puckK" class="puck-k" hidden></span>
         </button>
       </div>
     </section>

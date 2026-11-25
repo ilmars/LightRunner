@@ -41,6 +41,11 @@ export interface OperatorGroup {
   kind: GroupKind;
   /** True when no fixture in the group can make colour, so the colour picker has nothing to do. */
   whiteOnly: boolean;
+  /**
+   * The colour temperatures the group's lights can make (their CCT channels' range, widest of them), for the warm-to-cool
+   * strip's numbers; null when none of its lights has a CCT channel.
+   */
+  kelvin: { min: number; max: number } | null;
   /** The group's light type (`groupLightType`: its colour channels, "red,green,blue" for RGB), null with no lights yet. Groups of one type share new colours. */
   lightType: string | null;
   /** Which extra channels some fixture in the group has, for the White, Amber and UV sliders. */
@@ -186,6 +191,21 @@ export interface KeyName {
   name: string;
 }
 
+/** The widest colour-temperature range of the CCT channels of these fixtures (2700–6500 K where a channel doesn't say), or null. */
+function kelvinRange(show: Show, fixtures: readonly string[]): { min: number; max: number } | null {
+  let min = Infinity, max = -Infinity;
+  for (const id of fixtures) {
+    const fixture = show.fixtures.find((f) => f.id === id);
+    const profile = fixture ? findProfile(show, fixture.profile) : undefined;
+    for (const ch of profile?.channels ?? []) {
+      if (ch.role !== 'cct') continue;
+      min = Math.min(min, ch.kelvin?.min ?? 2700);
+      max = Math.max(max, ch.kelvin?.max ?? 6500);
+    }
+  }
+  return min < max ? { min, max } : null;
+}
+
 /** The layout's `planning`: off is only `{ enabled: false }`. */
 function planningOf(show: Show): NonNullable<OperatorLayout['planning']> {
   if (!show.settings.planning?.enabled) return { enabled: false };
@@ -271,7 +291,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
         }));
       const any = (roles: ChannelRole[]) => g.fixtures.some((f) => hasRole(f, roles));
       return [{
-        id: g.id, name: g.name, kind: g.kind, whiteOnly: groupIsWhiteOnly(show, g.id), lightType: groupLightType(show, g.id),
+        id: g.id, name: g.name, kind: g.kind, whiteOnly: groupIsWhiteOnly(show, g.id), kelvin: kelvinRange(show, g.fixtures), lightType: groupLightType(show, g.id),
         extras: { white: any(['white']), amber: any(['amber']), uv: any(['uv']) },
         segments: groupSegments(show, g.id),
         presets,
