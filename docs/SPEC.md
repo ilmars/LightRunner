@@ -46,6 +46,8 @@ The operator page needs no login and opens straight from a bookmark on the table
 
 ## Volunteer interface
 
+> **Being replaced (25 Nov 2026):** a new operator page is designed; see [user-stories.md](user-stories.md) and the 25 Nov entries in [DECISIONS.md](DECISIONS.md). This section describes the page as first specified.
+
 One screen, no menus, no scrolling on an iPad in landscape. Everything is reachable with a thumb and readable in a dark room.
 
 **Layout, top to bottom:**

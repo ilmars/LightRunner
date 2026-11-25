@@ -37,10 +37,11 @@ Tests: 1180 (`npm test`, 21 Nov): 1179 pass, 1 is skipped (the Lightkey project 
 
 **Auto-follow, still to do:** try it at the church ([the check list](notes/auto-follow-church-check.md)) before anyone switches it on for a Sunday; read the chords of each song once it is known where the song library keeps them (they are on the check list), so planning can use them; a timeline across a whole song, or a planned order of sections, was left out on purpose (nobody writes that order down).
 
-1. **Test on the real iPad**: add to home screen, Auto-Lock Never (Wake Lock needs HTTPS), check sizes in the dark room, short volunteer trial.
-2. **Spec Phase 2b**: layered effects (several effects on one group, with blend modes) and a fuller effect library and editor. **Lightkey effect import**: bring the church's Lightkey effects across with the importer, once the project file can be looked at.
-3. **Programmer niceties from the spec**: channel test view (raw 0–255 faders; Patch's read-only channel view is built), manual tab with raw values, stage photo background, operator layout editor.
-4. **The quick-look sheet (Edit looks) in the restyle's panel look**: it works, but still has the look from before the restyle.
+1. **New operator page** (see [user-stories.md](user-stories.md) and the 25 Nov decisions): build the whole main page to match the design, layout first, then what each part does; then effects (build, favourites, how long, freeze), arranging panels, and controller learning.
+2. **Test on the real iPad**: add to home screen, Auto-Lock Never (Wake Lock needs HTTPS), check sizes in the dark room, short volunteer trial.
+3. **Spec Phase 2b**: layered effects (several effects on one group, with blend modes) and a fuller effect library and editor. **Lightkey effect import**: bring the church's Lightkey effects across with the importer, once the project file can be looked at.
+4. **Programmer niceties from the spec**: channel test view (raw 0–255 faders; Patch's read-only channel view is built), manual tab with raw values, stage photo background, operator layout editor.
+5. **The quick-look sheet (Edit looks) in the restyle's panel look**: it works, but still has the look from before the restyle.
 
 ## Known issues
 
