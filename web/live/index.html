@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="theme-color" content="#0c0d11">
+  <title>Light Runner · Live</title>
+  <link rel="icon" href="/shared/icon-16.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/shared/icon-180.png">
+  <link rel="stylesheet" href="/shared/theme.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- The new operator page (25 Nov 2026 design, docs/user-stories.md). Built beside /operator/ until it does everything. -->
+  <div id="banner" class="banner" hidden>Connection lost. Lights keep running. Reconnecting…</div>
+
+  <div class="page">
+    <!-- Top bar: what is on stage, then Fade, Tempo, Tap, Master, Live / Prepare and the pages. -->
+    <header class="bar top">
+      <div class="now">
+        <span class="caps">On stage</span>
+        <span id="nowName" class="now-name">—</span>
+      </div>
+      <span class="grow"></span>
+      <button id="fadeBtn" class="btn stack" type="button" title="Fade time for every change"><span class="caps">Fade</span><b id="fadeValue">Auto</b></button>
+      <button id="tempoBtn" class="btn stack" type="button" title="Stage tempo"><span class="caps">Tempo</span><b><span id="tempoValue">120</span> bpm</b></button>
+      <button id="tapBtn" class="btn" type="button" title="Tap along with the band">Tap</button>
+      <button id="masterBtn" class="btn stack" type="button" title="Master"><span class="caps">Master</span><b id="masterValue">100 %</b></button>
+      <div class="seg" role="group" aria-label="Live or Prepare">
+        <button id="liveBtn" type="button" class="on" aria-pressed="true">Live</button>
+        <button id="prepBtn" type="button" aria-pressed="false" disabled title="Prepare comes in a later step">Prepare</button>
+      </div>
+      <nav id="pageTabs" class="ds-pagetabs" data-page="operator" aria-label="Pages"></nav>
+    </header>
+
+    <!-- Left: the stage as the audience sees it, your changes under it, then who the pads work on. -->
+    <section class="left">
+      <div class="panel stage-panel">
+        <div id="stageWrap" class="stage-wrap"><canvas id="stage" class="stage" aria-label="The stage"></canvas></div>
+        <div class="changes">
+          <span class="caps">Your changes</span>
+          <span id="noChanges" class="sub">None. The stage is as the cue was saved.</span>
+          <div id="changes" class="chips"></div>
+        </div>
+      </div>
+      <div class="panel who">
+        <div id="who" class="who-list" role="radiogroup" aria-label="Who the pads work on"></div>
+        <button id="fadersBtn" class="btn icon" type="button" disabled aria-label="Faders" title="Faders (they come in a later step)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 4v16M12 4v16M18 4v16"/><path d="M4 14h4M10 8h4M16 12h4"/></svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- Right: the pads and the song's colour square. -->
+    <section class="right">
+      <div class="panel pads-panel">
+        <div class="head"><span class="title">Pads</span><span id="padsFor" class="sub">for all lights</span></div>
+        <div id="pads" class="pads"></div>
+      </div>
+      <div class="panel colour-panel">
+        <div class="head"><span class="title">Colour</span><span id="squareFor" class="sub">tap for all lights</span></div>
+        <button id="square" class="square" type="button" aria-label="Colour square: tap a spot to colour the picked lights">
+          <span id="cTL" class="corner tl"></span><span id="cTR" class="corner tr"></span>
+          <span id="cBL" class="corner bl"></span><span id="cBR" class="corner br"></span>
+          <span id="puck" class="puck" hidden></span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Bottom: the song, its steps, Next (and what it changes) and Blackout. Always here. -->
+    <footer class="bar bottom">
+      <button id="songBtn" class="btn song" type="button" disabled title="The song list comes in a later step">
+        <span id="songOf" class="caps">Song</span><b id="songName">—</b>
+      </button>
+      <div id="steps" class="steps"></div>
+      <button id="next" class="btn next" type="button">
+        <span class="caps">Next ▸ <span id="nextName">—</span></span>
+        <span id="nextWhat" class="next-what"></span>
+      </button>
+      <button id="blackout" class="btn blackout" type="button"><span class="hold"></span><b>Blackout</b><small>hold 1 s</small></button>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
