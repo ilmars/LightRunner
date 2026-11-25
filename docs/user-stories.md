@@ -36,6 +36,7 @@ All new pages at iPad size, in Home A's style, toned down for a dark room: [Ligh
 | Building effects | App · Patchbay | Colours → movement → speed → name |
 | Running effects | Weather | Pick from a short list, set speed, freeze |
 | Later, maybe | Orbit + Pads beat strip | Choosing the beats an effect fires on |
+| Later, maybe | App · Patchbay | An Advanced view on the Effects page: wire inputs (beat, a slow swing, a controller fader) into an effect and mix two effects; the four steps stay the normal way |
 | Not wanted | Orbit colour wheel; anything Lightkey-like | |
 
 ## Stories
