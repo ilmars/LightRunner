@@ -28,7 +28,7 @@
       <button id="fadeBtn" class="btn stack" type="button" title="Fade time for every change"><span class="caps">Fade</span><b id="fadeValue">Auto</b></button>
       <button id="tempoBtn" class="btn stack" type="button" title="Stage tempo"><span class="caps">Tempo</span><b><span id="tempoValue">120</span> bpm</b></button>
       <button id="tapBtn" class="btn" type="button" title="Tap along with the band">Tap</button>
-      <button id="masterBtn" class="btn stack" type="button" title="Master"><span class="caps">Master</span><b id="masterValue">100 %</b></button>
+      <button id="masterBtn" class="btn stack" type="button" title="Master: opens the faders" aria-controls="faders"><span class="caps">Master</span><b id="masterValue">100 %</b></button>
       <div class="seg" role="group" aria-label="Live or Prepare">
         <button id="liveBtn" type="button" class="on" aria-pressed="true">Live</button>
         <!-- A short hold peeks; about 1 s locks Prepare on; a tap turns it off. -->
@@ -41,6 +41,18 @@
     <section class="left">
       <div class="panel stage-panel">
         <div id="stageWrap" class="stage-wrap"><canvas id="stage" class="stage" aria-label="The stage"></canvas></div>
+        <!-- Faders: slide up over the lower part of the stage; a tap elsewhere closes them. -->
+        <div id="faders" class="faders" role="dialog" aria-label="Faders" hidden>
+          <div class="f-head">
+            <button id="fBack" class="btn f-back" type="button" hidden>‹ All groups</button>
+            <span id="fTitle" class="title">Faders</span>
+            <span id="fSub" class="sub"></span>
+            <span class="grow"></span>
+            <button id="fRelease" class="btn" type="button" hidden>Let go of all</button>
+            <button id="fClose" class="btn icon" type="button" aria-label="Close the faders">×</button>
+          </div>
+          <div id="faderRow" class="fader-row"></div>
+        </div>
         <div class="changes">
           <span class="caps">Your changes</span>
           <span id="noChanges" class="sub">None. The stage is as the cue was saved.</span>
@@ -52,7 +64,7 @@
       </div>
       <div class="panel who">
         <div id="who" class="who-list" role="radiogroup" aria-label="Who the pads work on"></div>
-        <button id="fadersBtn" class="btn icon" type="button" disabled aria-label="Faders" title="Faders (they come in a later step)">
+        <button id="fadersBtn" class="btn icon" type="button" aria-label="Faders" title="Faders" aria-expanded="false" aria-controls="faders">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 4v16M12 4v16M18 4v16"/><path d="M4 14h4M10 8h4M16 12h4"/></svg>
         </button>
       </div>

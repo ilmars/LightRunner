@@ -1,7 +1,7 @@
 // The new operator page (25 Nov 2026 design; docs/user-stories.md and the 25 Nov entries in docs/DECISIONS.md).
 // Built so far: the layout (the stage as the audience sees it, your changes, who the pads work on, the pads, the colour
-// square, the song's steps with Next and Blackout) and Prepare. Faders, the song list, effects with how long, and each
-// song's own colour square come in later steps.
+// square, the song's steps with Next and Blackout), Prepare, and the faders with Master. The song list, effects with how
+// long, and each song's own colour square come in later steps.
 // The server is the single source of truth: every tap becomes a Command and the page only shows the state it gets back.
 //
 // Prepare works on this tablet's own draft of the stage (the server's blindStart, draft, blindGo and blindEnd): a short
@@ -276,6 +276,7 @@ function render() {
   renderPads();
   renderSquare();
   renderBottom();
+  renderFaders();
 }
 
 function renderTop() {
@@ -617,6 +618,168 @@ holdButton($('saveBtn'), (session) => {
   if (!item) return;
   prep.saveName = stepName(prep.state);
   prep.saveRef = send({ type: 'saveItem', id: item.id });
+});
+
+// ---- Faders: Master and one per group; a group's arrow opens a fader per light ----
+// A drag moves the level from where the finger lands, so touching a fader never makes the lights jump. Master always
+// goes to the real stage; a group's level goes where the page works (the draft in Prepare). A single light is held by
+// manual control until let go, live only, and only when Settings lets operators use single lights.
+
+/** Open or not, and the group whose single lights show (null: all the groups). */
+const faders = { open: false, group: null };
+/** Levels being dragged, by fader key, so the state coming back mid-drag doesn't pull the fader. */
+const dragging = new Map();
+
+function openFaders(open, group = null) {
+  faders.open = open;
+  faders.group = open ? group : null;
+  $('faders').hidden = !open;
+  $('fadersBtn').setAttribute('aria-expanded', String(open));
+  $('fadersBtn').classList.toggle('on', open);
+  renderFaders();
+}
+$('fadersBtn').addEventListener('click', () => openFaders(!faders.open));
+$('masterBtn').addEventListener('click', () => openFaders(!faders.open));
+$('fClose').addEventListener('click', () => openFaders(false));
+$('fBack').addEventListener('click', () => openFaders(true));
+// A tap anywhere else closes them.
+document.addEventListener('pointerdown', (ev) => {
+  if (!faders.open || !(ev.target instanceof Element)) return;
+  if (ev.target.closest('#faders, #fadersBtn, #masterBtn')) return;
+  openFaders(false);
+}, true);
+
+const pct = (v) => `${Math.round(v * 100)} %`;
+const fixtureById = (id) => (layout?.fixtures ?? []).find((f) => f.id === id);
+/** A light's hold as a whole fixture (HeldLight with no segment), or null. */
+const heldOf = (fixture) => (state?.held ?? []).find((h) => h.fixture === fixture && h.segment === null) ?? null;
+const singleLightsOk = () => !!layout?.manualForOperators;
+
+/** The faders to show: { key, kind, id, name, title?, value, dot?, held?, open? }. */
+function faderList() {
+  const s = shown();
+  if (faders.group) {
+    const g = groupById(faders.group);
+    const level = s.groups?.[faders.group]?.level ?? 0;
+    return (layout.members?.[faders.group] ?? []).map((id) => {
+      const h = heldOf(id);
+      return { key: `light:${id}`, kind: 'light', id, name: fixtureById(id)?.name ?? id, value: h ? h.level : level, held: !!h, dot: h ? h.colour : groupColour(g.id, s) };
+    });
+  }
+  const list = [{ key: 'master', kind: 'master', id: 'master', name: 'Master', value: state.master }];
+  for (const g of lightGroups()) {
+    const members = layout.members?.[g.id] ?? [];
+    list.push({ key: `group:${g.id}`, kind: 'group', id: g.id, name: shortName(g.name), title: g.name, value: s.groups?.[g.id]?.level ?? 0, dot: groupColour(g.id, s), open: members.length > 1 });
+  }
+  return list;
+}
+
+function renderFaders() {
+  if (!faders.open || !layout || !state) return;
+  const g = faders.group ? groupById(faders.group) : null;
+  if (faders.group && !g) return openFaders(true);
+  $('fBack').hidden = !g;
+  $('fTitle').textContent = g ? g.name : 'Faders';
+  const heldHere = g ? (layout.members?.[g.id] ?? []).filter((id) => heldOf(id)) : [];
+  $('fRelease').hidden = !heldHere.length || prep.on;
+  $('fRelease').textContent = `Let go of all · ${heldHere.length}`;
+  $('fSub').textContent = g
+    ? (prep.on ? 'Single lights work live only' : 'A light you move leaves its group until you let go')
+    : prep.on ? 'Groups change the draft; Master is live' : '';
+  // While a finger is on a fader only its fill and number move, so the element under the finger stays.
+  if (dragging.size) {
+    for (const el of $('faderRow').querySelectorAll('.fader')) {
+      const v = dragging.get(el.dataset.key);
+      if (v === undefined) continue;
+      el.querySelector('.f-fill').style.height = `${(v * 100).toFixed(1)}%`;
+      el.querySelector('.f-val').textContent = pct(v);
+    }
+    return;
+  }
+  const lightsOff = !!g && prep.on;
+  const html = faderList().map((f) => {
+    const v = f.value;
+    const cls = `fader${f.kind === 'master' ? ' master' : ''}${f.held ? ' held' : ''}${f.kind === 'light' && lightsOff ? ' off' : ''}`;
+    const dot = f.dot ? `<span class="dot" style="background:${esc(f.dot)}"></span>` : '';
+    const name = f.title ?? f.name;
+    const open = f.kind === 'group'
+      ? `<button type="button" class="btn f-open" data-open="${esc(f.id)}"${f.open && singleLightsOk() ? '' : ' disabled'} title="${singleLightsOk() ? 'Single lights' : 'Single lights are switched off in Settings'}" aria-label="Single lights of ${esc(name)}">Lights ›</button>`
+      : '';
+    return `<div class="${cls}" data-key="${esc(f.key)}"><span class="f-name" title="${esc(name)}">${dot}${esc(f.name)}</span>` +
+      `<div class="f-track" role="slider" aria-label="${esc(name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(v * 100)}" data-kind="${f.kind}" data-id="${esc(f.id)}"><div class="f-fill" style="height:${(v * 100).toFixed(1)}%"></div></div>` +
+      `<span class="f-val">${f.held ? 'held · ' : ''}${pct(v)}</span>${open}</div>`;
+  }).join('');
+  setHtml($('faderRow'), html);
+}
+
+$('faderRow').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-open]');
+  if (b && !b.disabled) openFaders(true, b.dataset.open);
+});
+$('fRelease').addEventListener('click', () => {
+  const ids = (layout.members?.[faders.group] ?? []).filter((id) => heldOf(id));
+  if (ids.length) send({ type: 'release', targets: ids.map((fixture) => ({ fixture })), releaseSegments: true });
+});
+
+/** Sends a fader's level: Master live, a group to the stage the page works on, a light as a live manual hold. */
+function sendLevel(kind, id, value, session) {
+  if (kind === 'master') send({ type: 'master', value });
+  else if (kind === 'group') {
+    if (prep.session === session) sendStage({ type: 'groupLevel', group: id, value });
+  } else if (!prep.on) send({ type: 'manual', target: { fixture: id }, intensity: value });
+}
+
+$('faderRow').addEventListener('pointerdown', (ev) => {
+  const track = ev.target.closest('.f-track');
+  if (!track) return;
+  const { kind, id } = track.dataset;
+  if (kind === 'light' && prep.on) return;
+  ev.preventDefault();
+  const key = track.closest('.fader').dataset.key;
+  const f = faderList().find((x) => x.key === key);
+  if (!f) return;
+  try { track.setPointerCapture(ev.pointerId); } catch { /* pointer already gone */ }
+  track.classList.add('dragging');
+  const session = prep.session;
+  const startY = ev.clientY;
+  const startV = f.value;
+  const height = track.getBoundingClientRect().height || 1;
+  let last = 0, pending = null, timer = 0;
+  dragging.set(key, startV);
+  const flush = () => {
+    timer = 0;
+    if (pending === null) return;
+    sendLevel(kind, id, pending, session);
+    last = performance.now();
+    pending = null;
+  };
+  const move = (e) => {
+    const v = Math.max(0, Math.min(1, startV + (startY - e.clientY) / height));
+    dragging.set(key, v);
+    renderFaders();
+    pending = Math.round(v * 1000) / 1000;
+    // At most 20 sends a second; the engine smooths in between.
+    const wait = 50 - (performance.now() - last);
+    if (wait <= 0) flush();
+    else if (!timer) timer = setTimeout(flush, wait);
+  };
+  const up = () => {
+    track.removeEventListener('pointermove', move);
+    track.removeEventListener('pointerup', up);
+    track.removeEventListener('pointercancel', up);
+    clearTimeout(timer);
+    flush();
+    track.classList.remove('dragging');
+    // Keep showing the dragged value until the state has had a moment to catch up.
+    setTimeout(() => {
+      dragging.delete(key);
+      $('faderRow').dataset.html = '';
+      renderFaders();
+    }, 300);
+  };
+  track.addEventListener('pointermove', move);
+  track.addEventListener('pointerup', up);
+  track.addEventListener('pointercancel', up);
 });
 
 // ---- Top bar: Fade steps through the choices; Tap sets the tempo from the last few taps ----
