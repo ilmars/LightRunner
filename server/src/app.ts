@@ -14,7 +14,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
   BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, StandardSongsSettings, applyStandardSettings, standardChoices, standardSettingsOf, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, clearService, useStandardSongs, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
-  applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isSectionLook, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo, setItemTimeline, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
+  applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isSectionLook, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setColourSquare, setItemGroup, setItemTempo, setItemTimeline, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
   BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
   pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
@@ -1325,6 +1325,7 @@ export class App {
       // Preview edits never look at the stage, so they are fine during Blackout.
       case 'itemGroup': next = setItemGroup(before, cmd.item, cmd); break;
       case 'itemTempo': next = setItemTempo(before, cmd.item, cmd.bpm); break;
+      case 'colourSquare': next = setColourSquare(before, cmd.item, cmd.corners); break;
       case 'itemTimeline': next = setItemTimeline(before, cmd.item, cmd.timeline); break;
       case 'itemQuickLook': next = applyQuickLookToItem(before, cmd.item, cmd.look); break;
       case 'itemCopyLook': next = copyLookToItem(before, cmd.item, cmd.from); break;

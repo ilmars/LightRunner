@@ -1,7 +1,7 @@
 // What the operator page needs to draw its buttons and mini visualiser.
 
 import { SAFE_LIGHT, SECTION_NAMES, canRecolour, findProfile, fixtureShape, groupIsWhiteOnly, groupLightType, groupSegments, keptOf, newSongLookOf, paletteEntryOf, placeOf, presetUsers, presetsUsingPaletteEntry, resolveColour, resolveEffect, sectionsOf, serviceRows } from '../../packages/shared/src/index.ts';
-import type { ChannelRole, FixtureShape, GroupKind, Hangs, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, SectionKind, ServiceRow, Show } from '../../packages/shared/src/index.ts';
+import type { ColourSquare, ChannelRole, FixtureShape, GroupKind, Hangs, LiveEffectLayer, Palette, PaletteColour, Preset, QuickTab, SectionKind, ServiceRow, Show } from '../../packages/shared/src/index.ts';
 import { planChannels } from '../../packages/engine/src/index.ts';
 import { keyLabel, keyPlace, keyShort } from './keynames.ts';
 
@@ -14,6 +14,8 @@ export interface OperatorLook {
   tempo: number | null;
   /** The timeline the song starts with it (an id in the layout's `timelines`), or null. */
   timeline: string | null;
+  /** The song's own colour square, or null (it uses the layout's `square`). */
+  square: ColourSquare | null;
   /** Colour this look gives each operator group (same order as `groups`); null = left alone (always for smoke groups). */
   colours: (string | null)[];
   /** Level this look gives each operator group (same order as `groups`); null = no level of its own (always for smoke groups). */
@@ -129,6 +131,8 @@ export interface OperatorLayout {
   quickLooks: (OperatorLook & { tab: QuickTab; groups: string[] })[];
   /** Id of the safe look (Basic lights), or null when the show has none. */
   basicLights: string | null;
+  /** The show's colour square for songs without their own, or null (the page makes one from the groups' colours). */
+  square: ColourSquare | null;
   /** The kept rows (a load never replaces them), Basic lights left out: it always stays. */
   kept: string[];
   /** Running-order items Next passes over: the kept rows while Planning is on and a service is loaded. */
@@ -247,7 +251,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
       if (!entry || !preset) return null;
       return { preset: preset.id, name: preset.name, swatch: colours[k]!, light: presetLight(preset, palettes), effect: presetEffect(preset, palettes) };
     });
-    return [{ id: l.id, name: l.name, swatch: l.swatch ?? null, section: l.section ?? null, tempo: l.tempo ?? null, timeline: l.timeline && show.timelines.some((t) => t.id === l.timeline) ? l.timeline : null, colours, levels, entries }];
+    return [{ id: l.id, name: l.name, swatch: l.swatch ?? null, section: l.section ?? null, tempo: l.tempo ?? null, timeline: l.timeline && show.timelines.some((t) => t.id === l.timeline) ? l.timeline : null, square: l.square ?? null, colours, levels, entries }];
   };
 
   const hasRole = (fixtureId: string, roles: ChannelRole[]): boolean => {
@@ -273,6 +277,7 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
       ...l, tab: q.tab, groups: groupIds.filter((gid, k) => !smoke.has(gid) && l.entries[k] !== null),
     }))),
     basicLights: show.operator.safeLook ?? null,
+    square: show.operator.square ?? null,
     kept: keptOf(show),
     skip: planning && show.operator.service ? keptOf(show) : [],
     fromPlan: [...new Set((show.operator.service?.items ?? []).flatMap((i) => (i.look !== undefined && show.operator.runningOrder.includes(i.look) ? [i.look] : [])))],

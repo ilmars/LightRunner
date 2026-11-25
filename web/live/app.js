@@ -479,8 +479,8 @@ const flashOff = () => {
 for (const type of ['pointerup', 'pointercancel', 'pointerleave']) $('pads').addEventListener(type, flashOff);
 
 // ---- The colour square ----
-// For now its corners are the picked group's first four colours (with All, the first colour group's). Each song's own
-// four corners, set on the Timeline page, come in a later step.
+// Its corners are the song's own square, else the show's (for songs without their own), else the picked group's
+// first four colours (with All, the first colour group's). ✎ changes the corners, for this song or every song.
 
 // ---- Colour temperature: the warm-to-cool strip's numbers ----
 // The engine turns a white into a colour temperature by its blue-to-red ratio (kelvinOf in packages/engine/src/output.ts,
@@ -540,7 +540,29 @@ const whiteMode = () => who !== 'all' && !!groupById(who)?.whiteOnly;
 /** The groups a square tap colours: white-only groups are left out (they have their own strip). */
 const colourTargets = () => (whiteMode() ? [who] : targets().filter((g) => !groupById(g)?.whiteOnly));
 
+/** The song on the stage the page works on, as the layout gives it (with its `square`), or null. */
+function squareSong() {
+  const item = songOf(shown()).item;
+  return item ? (layout?.runningOrder ?? []).find((l) => l.id === item.id) ?? null : null;
+}
+
+/** Where the corners come from now: 'song', 'show', or 'groups' (made from the picked group's colours). */
+function cornerSource() {
+  if (sqEdit.on) return 'edit';
+  if (squareSong()?.square) return 'song';
+  if (layout?.square) return 'show';
+  return 'groups';
+}
+
 function corners() {
+  if (sqEdit.on) return sqEdit.draft;
+  const own = squareSong()?.square ?? layout?.square ?? null;
+  if (own) return own.map((c) => ({ name: c.name, hex: c.colour.hex }));
+  return groupCorners();
+}
+
+/** Four corners made from the picked group's first colours (with All, the first colour group's). */
+function groupCorners() {
   const from = who === 'all' ? lightGroups().find((g) => !g.whiteOnly) : groupById(who);
   if (!from || from.whiteOnly) return [];
   const cols = from.presets.filter((p) => !p.effect && p.colour && p.canRecolour).slice(0, 4);
@@ -591,7 +613,10 @@ function renderSquare() {
   const sq = $('square');
   const white = whiteMode();
   sq.classList.toggle('white', white);
+  $('sqEdit').hidden = white;
   if (white) {
+    // A white-only group has the strip, not corners.
+    if (sqEdit.on) endSquareEdit();
     sq.disabled = false;
     const range = kelvinRangeOf(groupById(who));
     const now = kelvinNow();
@@ -622,9 +647,14 @@ function renderSquare() {
     return;
   }
   const c = corners();
-  const ok = c.length === 4 && colourTargets().length > 0;
+  const editing = sqEdit.on;
+  sq.classList.toggle('editing', editing);
+  const ok = c.length === 4 && (editing || colourTargets().length > 0);
   sq.disabled = !ok;
-  $('squareFor').textContent = ok ? `tap for ${whoName()}` : 'no colour lights here';
+  const song = squareSong();
+  const whose = { song: `${song?.name ?? 'the song'}'s square`, show: "the show's square", groups: "the group's colours" }[cornerSource()] ?? '';
+  $('squareFor').textContent = editing ? 'tap a corner to change it' : ok ? `${whose} · tap for ${whoName()}` : 'no colour lights here';
+  renderSquareEdit();
   // Drawn from the same mix a tap sends, so every spot shows the colour the lights get there.
   const bg = ok ? `${DIM}, center / 100% 100% no-repeat url(${squareImage(c)})` : '#1a1730';
   if (sq.dataset.bg !== bg) {
@@ -729,6 +759,11 @@ $('square').addEventListener('click', (ev) => {
   const r = ev.currentTarget.getBoundingClientRect();
   const u = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
   const v = Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height));
+  // Changing the corners: a tap picks the nearest corner and opens the colours for it.
+  if (sqEdit.on) {
+    openPalette((v < 0.5 ? 0 : 2) + (u < 0.5 ? 0 : 1));
+    return;
+  }
   let colour;
   if (whiteMode()) {
     // Warm (left) to cool (right), evenly in kelvin over the group's range.
@@ -743,6 +778,102 @@ $('square').addEventListener('click', (ev) => {
     puck = { u, v, colour, label: mixLabel(c, u, v) };
   }
   for (const g of colourTargets()) sendStage({ type: 'groupColour', group: g, colour, ...lastsNow() });
+  renderSquare();
+});
+
+// ---- Changing the square's corners (✎) ----
+
+/** Edit mode: a draft of the four corners, whose square it is ('song' or 'show'), and the corner being picked. */
+const sqEdit = { on: false, draft: [], scope: 'song', picking: null };
+const CORNER_NAMES = ['top left', 'top right', 'bottom left', 'bottom right'];
+
+/** The show's named colours to pick from: every colour group's plain colours, once per name. */
+function showColours() {
+  const seen = new Map();
+  for (const g of lightGroups()) {
+    if (g.whiteOnly) continue;
+    for (const p of g.presets) {
+      if (p.effect || !p.colour || !p.canRecolour || seen.has(p.name)) continue;
+      seen.set(p.name, { name: p.name, hex: p.colour });
+    }
+  }
+  return [...seen.values()];
+}
+
+function startSquareEdit() {
+  const c = corners();
+  if (c.length !== 4) return toast('There are no colours to make a square from.');
+  const song = squareSong();
+  sqEdit.on = true;
+  sqEdit.draft = c.map((x) => ({ ...x }));
+  // A song with its own square edits that; otherwise the show's, unless there is a song to give one.
+  sqEdit.scope = song?.square ? 'song' : layout.square || !song ? 'show' : 'song';
+  sqEdit.picking = null;
+  render();
+}
+function endSquareEdit() {
+  sqEdit.on = false;
+  sqEdit.picking = null;
+  $('sqPalette').hidden = true;
+  render();
+}
+$('sqEdit').addEventListener('click', () => (sqEdit.on ? endSquareEdit() : startSquareEdit()));
+$('sqCancel').addEventListener('click', endSquareEdit);
+$('sqScope').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-scope]');
+  if (!b || b.disabled) return;
+  sqEdit.scope = b.dataset.scope;
+  render();
+});
+$('sqSave').addEventListener('click', () => {
+  const song = squareSong();
+  const item = sqEdit.scope === 'song' ? song?.id ?? null : null;
+  if (sqEdit.scope === 'song' && !item) return toast('There is no song on stage to give the square to.');
+  send({ type: 'colourSquare', item, corners: sqEdit.draft.map((c) => ({ name: c.name, colour: { hex: c.hex } })) });
+  toast(item ? `Saved: ${song.name}'s square` : "Saved: the show's square, for songs without their own");
+  endSquareEdit();
+});
+$('sqClear').addEventListener('click', () => {
+  const song = squareSong();
+  if (!song?.square) return;
+  send({ type: 'colourSquare', item: song.id, corners: null });
+  toast(`${song.name} uses the show's square again`);
+  endSquareEdit();
+});
+
+function renderSquareEdit() {
+  $('sqEdit').setAttribute('aria-pressed', String(sqEdit.on));
+  $('sqEditBar').hidden = !sqEdit.on;
+  if (!sqEdit.on) return;
+  const song = squareSong();
+  $('sqSong').disabled = !song;
+  $('sqSong').textContent = song ? song.name : 'This song';
+  $('sqSong').title = song ? `Only ${song.name} gets this square` : '';
+  for (const b of $('sqScope').querySelectorAll('button')) b.classList.toggle('on', b.dataset.scope === sqEdit.scope);
+  $('sqClear').hidden = !(sqEdit.scope === 'song' && song?.square);
+  ['cTL', 'cTR', 'cBL', 'cBR'].forEach((id, i) => $(id).classList.toggle('picking', sqEdit.picking === i));
+}
+
+function openPalette(corner) {
+  sqEdit.picking = corner;
+  $('sqPalTitle').textContent = `Colour for the ${CORNER_NAMES[corner]} corner`;
+  const now = sqEdit.draft[corner];
+  $('sqColours').innerHTML = showColours().map((c) =>
+    `<button type="button" data-name="${esc(c.name)}" data-hex="${esc(c.hex)}" class="${now && now.name === c.name ? 'on' : ''}"><i style="background:${esc(c.hex)}"></i>${esc(c.name)}</button>`).join('');
+  $('sqPalette').hidden = false;
+  renderSquare();
+}
+$('sqColours').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-hex]');
+  if (!b || sqEdit.picking === null) return;
+  sqEdit.draft[sqEdit.picking] = { name: b.dataset.name, hex: b.dataset.hex };
+  sqEdit.picking = null;
+  $('sqPalette').hidden = true;
+  renderSquare();
+});
+$('sqPalClose').addEventListener('click', () => {
+  sqEdit.picking = null;
+  $('sqPalette').hidden = true;
   renderSquare();
 });
 

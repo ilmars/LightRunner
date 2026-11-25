@@ -1316,6 +1316,22 @@ test('Save stores the stage tempo in the song, and itemTempo changes the song an
   await waitFor(() => t.state()?.tempo === 88, 2000, 'the song\'s tempo');
 }));
 
+test('colourSquare gives a song its own square and the show one for the rest; the layout shows both and Undo takes it back', () => withApp(async (app, dir) => {
+  const t = await tablet(app);
+  await waitFor(t.layout);
+  const [, song] = t.order();
+  const corners = ['Zils', 'Violets', 'Silti balts', 'Rozā'].map((name, i) => ({ name, colour: { hex: ['#2b4dff', '#8f4dff', '#ffd9a8', '#ff4fa0'][i] } }));
+  assert.equal(await t.send({ type: 'colourSquare', item: song, corners }), null);
+  assert.deepEqual(savedLook(dir, song!)!.square, corners);
+  await waitFor(() => t.layout().runningOrder.find((l: any) => l.id === song).square?.[0]?.name === 'Zils', 2000, "the layout to show the song's square");
+  assert.equal(t.layout().square, null);
+  assert.equal(await t.send({ type: 'colourSquare', item: null, corners }), null);
+  await waitFor(() => t.layout().square?.length === 4, 2000, "the layout to show the show's square");
+  assert.equal(await t.send({ type: 'undo' }), null);
+  await waitFor(() => t.layout().square === null, 2000, "Undo to take the show's square back");
+  assert.match(await t.send({ type: 'colourSquare', item: 'nope', corners }) ?? '', /no song "nope"/);
+}));
+
 test('itemTempo edits of one song within 3 s are one Undo step; another song or another edit splits them', () => withApp(async (app, dir) => {
   const t = await tablet(app);
   await waitFor(t.layout);

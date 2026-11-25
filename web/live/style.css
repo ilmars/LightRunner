@@ -566,3 +566,39 @@ body.prepare .steps .btn.here small { color: var(--violet); }
   .s-pick { max-height: 45vh; }
   .toast { bottom: 150px; }
 }
+
+/* Changing the square's corners. */
+.sq-editbtn { min-height: 36px; height: 36px; width: 36px; font-size: 15px; }
+.sq-editbtn[aria-pressed="true"] { background: var(--picked-fill); box-shadow: inset 0 0 0 1px var(--picked-edge); }
+.sq-edit { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-width: 0; }
+.sq-edit .seg button { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sq-edit[hidden] { display: none; }
+.sq-edit .btn { min-height: 36px; height: 36px; padding: 0 12px; font-size: 13px; }
+.sq-save { background: var(--go-fill); box-shadow: inset 0 0 0 1px var(--go-edge); color: var(--go-text); font-weight: 600; }
+.square.editing { cursor: pointer; }
+.square.editing .corner {
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(12, 13, 17, 0.75);
+  box-shadow: inset 0 0 0 1px var(--picked-edge);
+  text-shadow: none;
+}
+.square.editing .corner.picking { box-shadow: inset 0 0 0 2px var(--go-edge); color: var(--go-text); }
+.square.editing .corner.bl, .square.editing .corner.br { display: block; }
+.sq-palette {
+  position: absolute;
+  inset: 8px;
+  z-index: 3;
+  border-radius: 12px;
+  background: rgba(21, 23, 29, 0.98);
+  box-shadow: inset 0 0 0 1px var(--edge-hi), 0 -12px 40px rgba(0, 0, 0, 0.5);
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sq-palette[hidden] { display: none; }
+.sq-colours { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; align-content: start; }
+.sq-colours button { min-height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 0; border-radius: 10px; background: var(--tile); box-shadow: inset 0 0 0 1px var(--edge); cursor: pointer; text-align: left; font-size: 13px; }
+.sq-colours button i { width: 18px; height: 18px; border-radius: 6px; flex: none; opacity: 0.8; }
+.sq-colours button.on { box-shadow: inset 0 0 0 1px var(--picked-edge); background: var(--picked-fill); }

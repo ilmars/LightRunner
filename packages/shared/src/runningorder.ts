@@ -3,7 +3,7 @@
 // Error with a plain message the page can show as it is.
 
 import { BLACKOUT_PRESET, SAFE_LIGHT, SAFE_PRESET, displayColour, liveEffectId, livePresetId, parseLiveEffect, parseLivePreset } from './protocol.ts';
-import { dropMissingFaceGroups, effectKey, isEffectPreset, resolveColour } from './schema.ts';
+import { ColourSquare, dropMissingFaceGroups, effectKey, isEffectPreset, resolveColour } from './schema.ts';
 import { followQuickLook } from './keys.ts';
 import { anchorOf, rememberKey, sectionRememberKey } from './planning.ts';
 import type { PlannedService, SectionRef } from './planning.ts';
@@ -1011,6 +1011,25 @@ export function setItemTempo(show: Show, itemId: string, bpm: number): Show {
   const out = structuredClone(show);
   if (isSectionLook(out, itemId)) throw new Error(NO_TEMPO);
   itemLook(out, itemId).tempo = bpm;
+  return out;
+}
+
+/**
+ * Sets a song's colour square, or the show's (`itemId` null) that songs without their own use. `corners` null takes it
+ * away: the song then uses the show's, and the show's goes back to the one the page makes from the groups' colours.
+ */
+export function setColourSquare(show: Show, itemId: string | null, corners: ColourSquare | null): Show {
+  const out = structuredClone(show);
+  const square = corners ? ColourSquare.parse(corners.map((c) => ({ name: c.name.trim().slice(0, 40), colour: c.colour }))) : null;
+  if (itemId === null) {
+    if (square) out.operator.square = square;
+    else delete out.operator.square;
+    return out;
+  }
+  const target = out.looks.find((l) => l.id === itemId);
+  if (!target) throw new Error(`There is no song "${itemId}" in the show.`);
+  if (square) target.square = square;
+  else delete target.square;
   return out;
 }
 

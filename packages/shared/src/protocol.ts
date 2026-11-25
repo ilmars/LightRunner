@@ -2,7 +2,7 @@
 // state every device receives back. The server is the single source of truth.
 
 import { z } from 'zod';
-import { ControlKey, EffectLayer, KeyTarget, PaletteColour, QuickTab } from './schema.ts';
+import { ColourSquare, ControlKey, EffectLayer, KeyTarget, PaletteColour, QuickTab } from './schema.ts';
 import { SectionKind } from './sections.ts';
 import type { FollowNote, LiveStatus } from './follow.ts';
 import type { SectionRef } from './planning.ts';
@@ -174,6 +174,8 @@ export const Command = z.discriminatedUnion('type', [
   }),
   /** Set a running-order item's tempo without touching the stage. */
   z.object({ type: z.literal('itemTempo'), item: id, bpm }),
+  /** A song's colour square (`item` null: the show's, for songs without their own); `corners` null takes it away. */
+  z.object({ type: z.literal('colourSquare'), item: id.nullable(), corners: ColourSquare.nullable() }),
   /** Give a running-order item a timeline that starts with it (null: none), without touching the stage. */
   z.object({ type: z.literal('itemTimeline'), item: id, timeline: id.nullable() }),
   /** Copy a quick look's groups into a running-order item without touching the stage. */
@@ -240,7 +242,7 @@ export const Command = z.discriminatedUnion('type', [
 export type Command = z.infer<typeof Command>;
 
 const SHOW_EDITS = [
-  'saveItem', 'saveSection', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemTimeline', 'itemQuickLook',
+  'saveItem', 'saveSection', 'addSong', 'renameItem', 'deleteItem', 'moveItem', 'saveQuickLook', 'editQuickLook', 'deleteQuickLook', 'moveQuickLook', 'itemGroup', 'itemTempo', 'itemTimeline', 'itemQuickLook', 'colourSquare',
   'addColour', 'editColour', 'deleteColour', 'addEffect', 'editEffect', 'loadService', 'clearService', 'standardSongs', 'saveServiceItem', 'itemCopyLook', 'keepItem', 'setKey', 'clearKey', 'resetKeys',
 ] as const;
 /** Commands that change the show rather than the stage. */

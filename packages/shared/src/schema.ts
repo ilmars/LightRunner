@@ -230,6 +230,13 @@ export const LookEntry = z.object({
 });
 export type LookEntry = z.infer<typeof LookEntry>;
 
+/** One corner of a colour square: a colour and the name the operator page shows for it. */
+export const SquareCorner = z.object({ name: z.string().max(40), colour: PaletteColour });
+export type SquareCorner = z.infer<typeof SquareCorner>;
+/** A colour square: four corners, top left, top right, bottom left, bottom right. A spot in it mixes them. */
+export const ColourSquare = z.array(SquareCorner).length(4);
+export type ColourSquare = z.infer<typeof ColourSquare>;
+
 export const Look = z.object({
   id,
   name: z.string(),
@@ -243,6 +250,8 @@ export const Look = z.object({
    * timeline is set to Loop. One that is no longer in the show is passed over.
    */
   timeline: id.optional(),
+  /** A song's own colour square on the operator page; absent: the show's (operator.square). */
+  square: ColourSquare.optional(),
 });
 export type Look = z.infer<typeof Look>;
 
@@ -331,6 +340,8 @@ export const OperatorLayout = z.object({
   service: PlannedService.optional(),
   /** Looks kept for items of loaded services (key from `rememberKey` to look id), so a song has its look again next week. */
   remembered: z.record(z.string().max(300), id).optional(),
+  /** The colour square for songs without their own; absent: the page makes one from the groups' colours. */
+  square: ColourSquare.optional(),
 });
 export type OperatorLayout = z.infer<typeof OperatorLayout>;
 

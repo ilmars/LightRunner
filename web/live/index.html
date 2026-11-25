@@ -118,6 +118,7 @@
           <span class="title">Colour</span><span id="squareFor" class="sub">tap for all lights</span>
           <span class="grow"></span>
           <!-- Type an exact value: kelvin on the warm-to-cool strip, a colour code (#rrggbb) on the square. Enter sends it. -->
+          <button id="sqEdit" class="btn icon sq-editbtn" type="button" aria-pressed="false" title="Change the corner colours" aria-label="Change the corner colours">✎</button>
           <label class="cin"><input id="colourIn" type="text" autocomplete="off" spellcheck="false" enterkeyhint="done" aria-label="Exact colour"><span id="colourUnit"></span></label>
         </div>
         <button id="square" class="square" type="button" aria-label="Colour square: tap a spot to colour the picked lights">
@@ -127,6 +128,21 @@
           <span id="puck" class="puck" hidden></span>
           <span id="puckK" class="puck-k" hidden></span>
         </button>
+        <!-- Changing the corners: tap a corner, pick a colour; for this song or every song; Save. -->
+        <div id="sqEditBar" class="sq-edit" hidden>
+          <div id="sqScope" class="seg small" role="radiogroup" aria-label="Whose square">
+            <button type="button" data-scope="song" id="sqSong">This song</button>
+            <button type="button" data-scope="show">Every song</button>
+          </div>
+          <button id="sqClear" class="btn" type="button" hidden>Use the show's</button>
+          <span class="grow"></span>
+          <button id="sqCancel" class="btn" type="button">Cancel</button>
+          <button id="sqSave" class="btn sq-save" type="button">Save</button>
+        </div>
+        <div id="sqPalette" class="sq-palette" role="dialog" aria-label="Pick a colour for the corner" hidden>
+          <div class="f-head"><span id="sqPalTitle" class="title"></span><span class="grow"></span><button id="sqPalClose" class="btn icon" type="button" aria-label="Close">×</button></div>
+          <div id="sqColours" class="sq-colours"></div>
+        </div>
       </div>
     </section>
 
