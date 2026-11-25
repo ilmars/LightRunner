@@ -1223,7 +1223,9 @@ async function showOflModes(loadInfo, makeProfile) {
       b.append(el('span', null, `${m.name} · ${m.channels} ch`), el('br'), el('small', null, m.roles.length ? m.roles.join(', ') : 'no colour or dimmer channels'));
       b.addEventListener('click', async () => {
         try {
-          addProfile(await makeProfile(m.index), info.manufacturer);
+          // A built-in light's mode is a built-in type already: pick it, nothing to add.
+          if (m.profile && profileById.has(m.profile)) pickType(profileById.get(m.profile), info.manufacturer);
+          else addProfile(await makeProfile(m.index), info.manufacturer);
         } catch (err) {
           toast(err.message, true);
         }
@@ -1271,14 +1273,20 @@ function addProfile(incoming, manufacturer = '') {
     profile = { ...incoming, id: before ? before.id : newTypeId(incoming.name, takenTypeIds()) };
   }
   const entry = putProfile(profile);
+  pickType(entry, manufacturer);
+  changed();
+}
+
+/** Make a type the one to add, with the fixture's suggested name: the type's without its maker (or the maker's first word). */
+function pickType(entry, manufacturer = '') {
   fillAddForm(false);
-  $('addProfile').value = profile.id;
+  $('addProfile').value = entry.id;
   renderTypeSheet();
   const label = typeLabel(entry);
-  $('addName').value = manufacturer && label.startsWith(`${manufacturer} `) ? label.slice(manufacturer.length + 1) : label;
+  const maker = [manufacturer, manufacturer.split(' ')[0]].find((m) => m && label.startsWith(`${m} `));
+  $('addName').value = maker ? label.slice(maker.length + 1) : label;
   suggestAddress();
-  changed();
-  toast(`${profile.name} is in the library. Drag it onto the map, then save.`);
+  toast(`${entry.name} is in the library. Drag it onto the map, then save.`);
 }
 
 $('oflFile').addEventListener('change', async (e) => {
