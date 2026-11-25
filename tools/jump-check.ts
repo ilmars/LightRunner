@@ -110,7 +110,15 @@ function manualTargets(): { target: ManualTarget } | { targets: ManualTarget[]; 
   return { targets: Array.from({ length: 1 + Math.floor(rand() * 4) }, manualTarget), releaseSegments: rand() < 0.5 };
 }
 
+/** How long an operator's change lasts (the new operator page): mostly until the next cue, else pinned or a few beats. */
+const lasts = (): { lasts?: 'pin' | number } => (rand() < 0.6 ? {} : rand() < 0.4 ? { lasts: 'pin' } : { lasts: pick([1, 2, 4, 8, 16, 32]) });
+
 function randomCommand(): { cmd: StageCommand; fast: boolean } {
+  // Pin or freeze what a group runs (pins make looks leave a group alone; a frozen effect stands still).
+  if (rand() < 0.04) {
+    const group = pick(lightGroupIds);
+    return { cmd: { type: rand() < 0.5 ? 'pin' : 'freeze', group, on: rand() < 0.6 }, fast: false };
+  }
   // Tempo and the speed dial change how fast effects run; neither may make one jump.
   if (rand() < 0.05) {
     if (rand() < 0.7) return { cmd: { type: 'tempo', bpm: 60 + Math.round(rand() * 140) }, fast: false };
@@ -128,11 +136,12 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
   const r = rand();
   if (r < 0.35) {
     const fade = rand() < 0.3 ? 1 + rand() * 5 : undefined;
-    return { cmd: { type: rand() < 0.2 ? 'quickLook' : 'look', id: pick(show.looks).id, fade }, fast: false };
+    if (rand() < 0.2) return { cmd: { type: 'quickLook', id: pick(show.looks).id, fade, keepPinned: rand() < 0.5 }, fast: false };
+    return { cmd: { type: 'look', id: pick(show.looks).id, fade }, fast: false };
   }
   if (r < 0.55) {
     const p = pick(show.presets);
-    return { cmd: { type: 'groupPreset', group: p.group, preset: p.id }, fast: false };
+    return { cmd: { type: 'groupPreset', group: p.group, preset: p.id, ...lasts() }, fast: false };
   }
   if (r < 0.6 && rand() < 0.4) {
     // A live effect from the Effects tab; a third are later sends of a slider drag, which carry the pattern on.
@@ -145,7 +154,7 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
     const effect = { ...layer, colours: layer.colours.map(plain), size: rand(), base: under };
     const cmd = { type: 'groupEffect' as const, group: base.group, effect };
     if (rand() < 0.33) return { cmd: { ...cmd, fade: 0.2, continues: true }, fast: true };
-    return { cmd, fast: false };
+    return { cmd: { ...cmd, ...lasts() }, fast: false };
   }
   if (r < 0.6) {
     // Half of the Any colour picks carry white, amber or UV (each one sometimes).
@@ -154,7 +163,7 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
     const cmd = { type: 'groupColour' as const, group: pick(show.groups).id, colour: hex(), ...extras };
     // A third are later sends of a drag on the operator page: they follow the finger in 0.2 s, like manual.
     if (rand() < 0.33) return { cmd: { ...cmd, fade: 0.2, continues: true }, fast: true };
-    return { cmd, fast: false };
+    return { cmd: { ...cmd, ...lasts() }, fast: false };
   }
   if (r < 0.68) {
     // As on the page: half the held colours carry white, amber or UV, and some sends are a level alone (Level on held lights).

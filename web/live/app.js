@@ -1,7 +1,8 @@
 // The new operator page (25 Nov 2026 design; docs/user-stories.md and the 25 Nov entries in docs/DECISIONS.md).
 // Built so far: the layout (the stage as the audience sees it, your changes, who the pads work on, the pads, the colour
-// square, the song's steps with Next and Blackout), Prepare, the faders with Master, and the song list. Effects with how
-// long, and each song's own colour square come in later steps.
+// square, the song's steps with Next and Blackout), Prepare, the faders with Master, the song list, and how long a
+// change lasts (stay, pin, a few beats) with a running effect's speed, Pin, Freeze and Stop. Favourite effects (from
+// the Effects tab) and each song's own colour square come in later steps.
 // The server is the single source of truth: every tap becomes a Command and the page only shows the state it gets back.
 //
 // Prepare works on this tablet's own draft of the stage (the server's blindStart, draft, blindGo and blindEnd): a short
@@ -11,6 +12,7 @@
 
 import { drawStagePicture } from '/shared/stagedraw.js';
 import { setupPageTabs } from '/shared/pagetabs.js';
+import { WHITE_STOPS, stripColour } from '/shared/colour.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -25,6 +27,12 @@ let ref = 0;
 let who = 'all';
 /** Where the colour square was last tapped, for its dot: { u, v, colour }. */
 let puck = null;
+/** How long a colour or effect started from the pads or the square lasts: 'stay', 'pin' or 'beats' (whileBeats of them). */
+let how = 'stay';
+let whileBeats = 8;
+const BEAT_STEPS = [4, 8, 16, 32];
+/** The `lasts` a command carries for the choice (see Lasts in protocol.ts); nothing for Stay. */
+const lastsNow = () => (how === 'pin' ? { lasts: 'pin' } : how === 'beats' ? { lasts: whileBeats } : {});
 
 /**
  * Prepare. `state` and `visual` are the draft's (null until the server sends them). `session` counts the times it went on
@@ -292,6 +300,18 @@ function renderTop() {
   $('prepBtn').classList.toggle('locked', prep.locked);
 }
 
+/** How long a group's change lasts, in a word: "pinned", "6 beats left", "frozen" (or nothing for until Next). */
+function lastingTag(st) {
+  const words = [];
+  if (st.pinned) words.push('pinned');
+  if (st.beatsLeft !== null && st.beatsLeft !== undefined) {
+    const n = Math.max(1, Math.ceil(st.beatsLeft));
+    words.push(`${n} beat${n === 1 ? '' : 's'} left`);
+  }
+  if (st.frozen) words.push('frozen');
+  return words.join(' · ');
+}
+
 function renderChanges() {
   const s = shown();
   const look = lookById(s.look);
@@ -300,7 +320,10 @@ function renderChanges() {
     const st = s.groups?.[g.id];
     if (!st?.changed) continue;
     const back = look?.entries?.[groupIndex(g.id)]?.preset ?? null;
-    chips.push(`<span class="chip"><i style="background:${esc(groupColour(g.id, s))}"></i>${esc(shortName(g.name))} · ${esc(changeName(st, presetOf(g.id, st.preset)))}` +
+    const tag = lastingTag(st);
+    const what = g.whiteOnly && (st.live || presetOf(g.id, st.preset)?.name === 'Custom') ? 'own white' : changeName(st, presetOf(g.id, st.preset));
+    chips.push(`<span class="chip${st.pinned ? ' pinned' : ''}"><i style="background:${esc(groupColour(g.id, s))}"></i>${esc(shortName(g.name))} · ${esc(what)}` +
+      (tag ? ` <span class="tag">· ${esc(tag)}</span>` : '') +
       (back ? `<button type="button" data-back="${esc(g.id)}" data-preset="${esc(back)}" aria-label="Back to the saved colour for ${esc(g.name)}">×</button>` : '') + '</span>');
   }
   // Flash is always the real stage's.
@@ -346,6 +369,12 @@ function lookFill(look) {
 function renderPads() {
   const s = shown();
   $('padsFor').textContent = `for ${whoName()}`;
+  for (const b of $('hows').querySelectorAll('button')) {
+    b.classList.toggle('on', b.dataset.how === how);
+    b.setAttribute('aria-checked', String(b.dataset.how === how));
+  }
+  $('howBeats').textContent = `${whileBeats} beats`;
+  renderFxBar(s);
   const pads = [];
   // Looks: the quick looks; with a group picked, only those that set it, for that group alone.
   for (const q of layout.quickLooks ?? []) {
@@ -358,7 +387,8 @@ function renderPads() {
   if (who !== 'all') {
     for (const p of groupById(who)?.presets ?? []) {
       if (!p.effect) continue;
-      const on = s.groups?.[who]?.preset === p.id;
+      const st = s.groups?.[who];
+      const on = st?.preset === p.id;
       pads.push(`<button type="button" class="pad effect${on ? ' active' : ''}" data-preset="${esc(p.id)}"><span class="fill"></span><i>${on ? 'Effect · on' : 'Effect'}</i><b>${esc(p.name)}</b></button>`);
     }
   }
@@ -373,7 +403,65 @@ $('pads').addEventListener('click', (ev) => {
   const b = ev.target.closest('button');
   if (!b || b.disabled) return;
   if (b.dataset.look) sendStage({ type: 'quickLook', id: b.dataset.look, ...(who === 'all' ? {} : { only: [who] }) });
-  else if (b.dataset.preset) sendStage({ type: 'groupPreset', group: who, preset: b.dataset.preset });
+  else if (b.dataset.preset) sendStage({ type: 'groupPreset', group: who, preset: b.dataset.preset, ...lastsNow() });
+});
+
+// How long: Stay, Pin, or a few beats (tapping the beats again takes the next step: 4, 8, 16, 32).
+$('hows').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-how]');
+  if (!b) return;
+  if (b.dataset.how === 'beats' && how === 'beats') whileBeats = BEAT_STEPS[(BEAT_STEPS.indexOf(whileBeats) + 1) % BEAT_STEPS.length];
+  how = b.dataset.how;
+  render();
+});
+
+// ---- The picked group's running effect: speed (beats for one round), Pin, Freeze and Stop ----
+
+/** The effect the picked group runs on stage `s`, with its name, or null. */
+function runningEffect(s) {
+  if (who === 'all') return null;
+  const st = s?.groups?.[who];
+  if (!st?.preset) return null;
+  const p = presetOf(who, st.preset);
+  const effect = st.effect ?? p?.effect ?? null;
+  if (!effect) return null;
+  return { st, effect, name: p?.name && p.name !== 'Custom' ? p.name : 'Effect' };
+}
+
+const SPEEDS = [1, 2, 4, 8, 16];
+function renderFxBar(s) {
+  const fx = runningEffect(s);
+  $('fxBar').hidden = !fx;
+  if (!fx) return;
+  $('fxName').textContent = `${shortName(groupById(who)?.name ?? '')} · ${fx.name}`;
+  $('fxNote').textContent = lastingTag(fx.st) || 'until Next';
+  const beats = fx.effect.speed && 'beats' in fx.effect.speed ? fx.effect.speed.beats : null;
+  setHtml($('fxSpeed'), SPEEDS.map((n) =>
+    `<button type="button" data-beats="${n}" class="${beats === n ? 'on' : ''}" title="One round every ${n} beat${n > 1 ? 's' : ''}">${n}</button>`).join(''));
+  $('fxPin').setAttribute('aria-pressed', String(fx.st.pinned));
+  $('fxFreeze').setAttribute('aria-pressed', String(fx.st.frozen));
+}
+$('fxSpeed').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-beats]');
+  const fx = runningEffect(shown());
+  if (!b || !fx) return;
+  // A copy of the effect at the new speed, carrying on from where its pattern is; it keeps its pin or its beats.
+  sendStage({ type: 'groupEffect', group: who, effect: { ...fx.effect, speed: { beats: Number(b.dataset.beats) } }, fade: 0.5, continues: true });
+});
+$('fxPin').addEventListener('click', () => {
+  const fx = runningEffect(shown());
+  if (fx) sendStage({ type: 'pin', group: who, on: !fx.st.pinned });
+});
+$('fxFreeze').addEventListener('click', () => {
+  const fx = runningEffect(shown());
+  if (fx) sendStage({ type: 'freeze', group: who, on: !fx.st.frozen });
+});
+// Stop: back to what the cue gives the group.
+$('fxStop').addEventListener('click', () => {
+  const s = shown();
+  const back = lookById(s.look)?.entries?.[groupIndex(who)]?.preset;
+  if (back) sendStage({ type: 'groupPreset', group: who, preset: back });
+  else toast('The cue on stage gives this group nothing to go back to.');
 });
 // Flash: on while the finger is down, off when it lifts or slides off.
 let flashing = null;
@@ -395,8 +483,10 @@ for (const type of ['pointerup', 'pointercancel', 'pointerleave']) $('pads').add
 // For now its corners are the picked group's first four colours (with All, the first colour group's). Each song's own
 // four corners, set on the Timeline page, come in a later step.
 
-/** The groups a square tap colours: white-only groups are left out. */
-const colourTargets = () => targets().filter((g) => !groupById(g)?.whiteOnly);
+/** A white-only group is picked: the square is a warm-to-cool strip. */
+const whiteMode = () => who !== 'all' && !!groupById(who)?.whiteOnly;
+/** The groups a square tap colours: white-only groups are left out (they have their own strip). */
+const colourTargets = () => (whiteMode() ? [who] : targets().filter((g) => !groupById(g)?.whiteOnly));
 
 function corners() {
   const from = who === 'all' ? lightGroups().find((g) => !g.whiteOnly) : groupById(who);
@@ -415,11 +505,27 @@ function mix(c, u, v) {
 }
 
 function renderSquare() {
-  const c = corners();
   const sq = $('square');
+  const white = whiteMode();
+  sq.classList.toggle('white', white);
+  if (white) {
+    sq.disabled = false;
+    $('squareFor').textContent = `warm to cool, tap for ${whoName()}`;
+    // Dimmed, so the strip never lights the operator's face.
+    const bg = `linear-gradient(rgba(12,13,17,.58),rgba(12,13,17,.58)),linear-gradient(90deg,${WHITE_STOPS.join(',')})`;
+    if (sq.dataset.bg !== bg) {
+      sq.style.background = bg;
+      sq.dataset.bg = bg;
+    }
+    $('cTL').textContent = 'Warm';
+    $('cTR').textContent = 'Cool';
+    showPuck();
+    return;
+  }
+  const c = corners();
   const ok = c.length === 4 && colourTargets().length > 0;
   sq.disabled = !ok;
-  $('squareFor').textContent = ok ? `tap for ${whoName()}` : 'this group only has white';
+  $('squareFor').textContent = ok ? `tap for ${whoName()}` : 'no colour lights here';
   const at = ['0 0', '100% 0', '0 100%', '100% 100%'];
   const bg = ok ? c.map((p, i) => `radial-gradient(circle at ${at[i]},${p.hex}cc,${p.hex}00 72%)`).join(',') + ',#1a1730' : '#1a1730';
   if (sq.dataset.bg !== bg) {
@@ -427,6 +533,10 @@ function renderSquare() {
     sq.dataset.bg = bg;
   }
   ['cTL', 'cTR', 'cBL', 'cBR'].forEach((id, i) => { $(id).textContent = ok ? c[i].name : ''; });
+  showPuck();
+}
+
+function showPuck() {
   const p = $('puck');
   p.hidden = !puck;
   if (puck) {
@@ -436,14 +546,21 @@ function renderSquare() {
   }
 }
 $('square').addEventListener('click', (ev) => {
-  const c = corners();
-  if (c.length !== 4) return;
   const r = ev.currentTarget.getBoundingClientRect();
   const u = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
   const v = Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height));
-  const colour = mix(c, u, v);
-  puck = { u, v, colour };
-  for (const g of colourTargets()) sendStage({ type: 'groupColour', group: g, colour });
+  let colour;
+  if (whiteMode()) {
+    // Warm (left) to cool (right), as the colour editor's strip for white-only groups.
+    colour = stripColour(WHITE_STOPS, u);
+    puck = { u, v: 0.5, colour };
+  } else {
+    const c = corners();
+    if (c.length !== 4) return;
+    colour = mix(c, u, v);
+    puck = { u, v, colour };
+  }
+  for (const g of colourTargets()) sendStage({ type: 'groupColour', group: g, colour, ...lastsNow() });
   renderSquare();
 });
 

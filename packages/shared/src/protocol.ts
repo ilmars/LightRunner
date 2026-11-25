@@ -23,6 +23,15 @@ export type LiveEffectLayer = z.infer<typeof LiveEffectLayer>;
 
 const bpm = z.number().min(40).max(240);
 
+/**
+ * How long a colour or effect the operator starts on a group lasts. Absent: until it is changed or the next cue (Next
+ * gives the group the cue's colour). 'pin': through Next and song parts too, until the group is given something else
+ * by hand. A number: that many beats at the stage tempo, then the group fades back to the cue's colour.
+ */
+export const Lasts = z.union([z.literal('pin'), z.number().int().min(1).max(256)]);
+export type Lasts = z.infer<typeof Lasts>;
+const lasts = Lasts.optional();
+
 /** A preset id as the stage names it: a show preset, an Any colour (`live:`), a live effect (`fx:`) or Safe/Blackout's own. */
 const stagePreset = z.string().min(1).max(256);
 
@@ -72,8 +81,9 @@ const STAGE_COMMANDS = [
    * Set only the groups a look lists, leaving the current look, the tempo and the other groups alone. `only`: just
    * these of the look's groups (a song's section, which leaves the groups a running timeline drives to it).
    */
-  z.object({ type: z.literal('quickLook'), id, fade, only: z.array(id).max(64).optional() }),
-  z.object({ type: z.literal('groupPreset'), group: id, preset: id, fade }),
+  /** `keepPinned`: groups with a pinned effect keep it (a song's part); a quick look tapped by hand takes them too. */
+  z.object({ type: z.literal('quickLook'), id, fade, only: z.array(id).max(64).optional(), keepPinned: z.boolean().optional() }),
+  z.object({ type: z.literal('groupPreset'), group: id, preset: id, fade, lasts }),
   /**
    * Any colour: run this exact colour (with optional white, amber and UV) on a group, as a live preset.
    * `continues`: a later send of the same drag, which adds no Undo step of its own.
@@ -81,13 +91,17 @@ const STAGE_COMMANDS = [
   z.object({
     type: z.literal('groupColour'), group: id, colour: hex,
     white: unit.optional(), amber: unit.optional(), uv: unit.optional(), fade,
-    continues: z.boolean().optional(),
+    continues: z.boolean().optional(), lasts,
   }),
   /**
    * Run this exact effect on a group, as a live preset (`fx:<group>:<n>`).
    * `continues`: a later send of the same drag, which adds no Undo step of its own and carries on from where the pattern is.
    */
-  z.object({ type: z.literal('groupEffect'), group: id, effect: LiveEffectLayer, fade, continues: z.boolean().optional() }),
+  z.object({ type: z.literal('groupEffect'), group: id, effect: LiveEffectLayer, fade, continues: z.boolean().optional(), lasts }),
+  /** Pin (or unpin) what a group runs now, so it carries on through Next and song parts. Not an Undo step. */
+  z.object({ type: z.literal('pin'), group: id, on: z.boolean() }),
+  /** Hold a group's effect still at this moment (or let it carry on from there). Not an Undo step. */
+  z.object({ type: z.literal('freeze'), group: id, on: z.boolean() }),
   /** Hold the groups at full white while `on`; snaps, and is not saved or undone. */
   z.object({ type: z.literal('flash'), groups: z.array(id).max(64), on: z.boolean() }),
   /**
@@ -269,6 +283,12 @@ export interface GroupStatus {
   slowed: boolean;
   /** How long one round of that effect really takes, in seconds (light safety's slowing included); null when the group runs no effect. */
   round: number | null;
+  /** What the group runs is pinned: Next and song parts leave it alone. */
+  pinned: boolean;
+  /** The group's effect is held still (freeze). */
+  frozen: boolean;
+  /** Beats left before what the group runs ends by itself (a "for a while"), or null when it doesn't. */
+  beatsLeft: number | null;
 }
 
 /** A fixture, or one segment of it, held by manual control. */
@@ -399,6 +419,8 @@ export interface RuntimeState {
   effects?: Record<string, EffectLayer>;
   /** Auto-follow is on (the server's, not the engine's). Absent: off, which is how it starts everywhere. */
   autoFollow?: boolean;
+  /** Groups whose colour or effect is pinned (it carries on through Next). Absent: none. */
+  pinned?: string[];
   /** The song's section on stage and the groups it set (the server's, not the engine's). Absent: none. */
   section?: SectionRef & { groups: string[] };
 }

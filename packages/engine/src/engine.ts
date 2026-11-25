@@ -6,7 +6,7 @@ import {
   BLACKOUT, BLACKOUT_PRESET, HEX_COLOUR, LiveEffectLayer, SAFE, SAFE_LIGHT as SAFE_COLOUR, SAFE_PRESET, displayColour, effectKey, findProfile,
   liveEffectId, livePresetId, parseLiveEffect, parseLivePreset, resolvedLayers,
   type PresetPin, type StageCommand, type EffectLayer, type LiveState, type Look, type LookEntry, type ManualTarget, type OutputStatus,
-  type GroupStatus, type HeldLight, type Palette, type Preset, type RuntimeState, type Show, type StageState,
+  type GroupStatus, type HeldLight, type Lasts, type Palette, type Preset, type RuntimeState, type Show, type StageState,
 } from '../../shared/src/index.ts';
 import { SafeRates, cyclesPerSecond, safeRate } from './effects.ts';
 import { Crossfade, Ramp } from './fade.ts';
@@ -167,6 +167,12 @@ class GroupRun {
   out: Light[] = [];
   /** For each segment of its line: the largest change any of its running presets made by itself this frame. */
   motion: number[] = [];
+  /** What it runs is pinned: Next (a look) and song parts (a quick look with keepPinned) leave it alone. */
+  pinned = false;
+  /** A "for a while": the stage beat (stageBeats) at which what it runs ends, back to the look's colour; null for none. */
+  untilBeat: number | null = null;
+  /** Its effects are held still: their clocks don't move. */
+  frozen = false;
 
   constructor(id: string) {
     this.id = id;
@@ -709,6 +715,7 @@ export class Engine {
       // A group that had no preset yet was dark.
       const preset = this.presetFor(prev.groups[group.id] ?? BLACKOUT_ID, group.id);
       if (preset && group.presets.currentKey !== preset.id) {
+        this.clearLasting(group);
         this.setPreset(group, preset, UNDO_FADE, now, preset.id !== SAFE_ID && preset.id !== BLACKOUT_ID);
       }
       const level = prev.levels[group.id] ?? 1;
@@ -776,7 +783,7 @@ export class Engine {
     switch (cmd.type) {
       case 'undo': return this.undo(now);
       case 'look': return this.goLook(cmd.id, cmd.fade, now);
-      case 'quickLook': return this.quickLook(cmd.id, cmd.fade, now, cmd.only);
+      case 'quickLook': return this.quickLook(cmd.id, cmd.fade, now, cmd.only, cmd.keepPinned);
       case 'groupPreset': {
         const group = this.groups.get(cmd.group);
         const preset = this.presets.get(cmd.preset);
@@ -784,6 +791,7 @@ export class Engine {
         if (group.smoke) return smokeRefusal(cmd.group);
         if (!preset || preset.group !== cmd.group) return `unknown preset "${cmd.preset}" for group "${cmd.group}"`;
         this.setPreset(group, preset, cmd.fade ?? this.fadeTime ?? preset.fade, now);
+        this.startLasting(group, cmd.lasts);
         return null;
       }
       case 'groupColour': {
@@ -794,6 +802,8 @@ export class Engine {
         const extras = { white: cmd.white, amber: cmd.amber, uv: cmd.uv };
         const preset = this.presetFor(livePresetId(cmd.group, cmd.colour, extras), cmd.group)!;
         this.setPreset(group, preset, cmd.fade ?? this.fadeTime ?? preset.fade, now);
+        // A later send of a drag keeps how long the drag's start said it lasts.
+        if (!cmd.continues || cmd.lasts !== undefined) this.startLasting(group, cmd.lasts);
         return null;
       }
       case 'groupEffect': {
@@ -811,6 +821,23 @@ export class Engine {
           started.beats = was.beats;
           started.cycles = [was.cycles[was.preset.layers.length - 1] ?? 0];
         }
+        if (!cmd.continues || cmd.lasts !== undefined) this.startLasting(group, cmd.lasts);
+        return null;
+      }
+      case 'pin': {
+        const group = this.groups.get(cmd.group);
+        if (!group) return `unknown group "${cmd.group}"`;
+        if (group.smoke) return smokeRefusal(cmd.group);
+        group.pinned = cmd.on;
+        // Pinned lasts until it is changed by hand: a "for a while" no longer ends it.
+        if (cmd.on) group.untilBeat = null;
+        return null;
+      }
+      case 'freeze': {
+        const group = this.groups.get(cmd.group);
+        if (!group) return `unknown group "${cmd.group}"`;
+        if (group.smoke) return smokeRefusal(cmd.group);
+        group.frozen = cmd.on;
         return null;
       }
       case 'flash': {
@@ -854,7 +881,7 @@ export class Engine {
     const look = this.looks.get(id);
     if (!look) return `unknown look "${id}"`;
     const listed = new Set<string>();
-    let longest = this.applyEntries(look.groups, fade, now, listed);
+    let longest = this.applyEntries(look.groups, fade, now, listed, true);
     // Coming out of Blackout, groups the look leaves alone return to what they ran before.
     if (this.beforeBlackout) {
       for (const [gid, pid] of Object.entries(this.beforeBlackout)) {
@@ -875,25 +902,28 @@ export class Engine {
   }
 
   /** Like a look, but only for the groups it lists (and of those, only the ones in `only`, when given); the current look and the tempo stay. */
-  private quickLook(id: string, fade: number | undefined, now: number, only?: readonly string[]): string | null {
+  private quickLook(id: string, fade: number | undefined, now: number, only?: readonly string[], keepPinned = false): string | null {
     const look = this.looks.get(id);
     if (!look) return `unknown look "${id}"`;
     const entries = only ? look.groups.filter((e) => only.includes(e.group)) : look.groups;
-    this.applyEntries(entries, fade, now);
+    this.applyEntries(entries, fade, now, undefined, keepPinned);
     return null;
   }
 
   /**
    * Set each listed group to its preset and level, both over the same fade.
-   * Returns the longest fade used. `listed` collects the groups that were set.
+   * Returns the longest fade used. `listed` collects the groups that were set. `skipPinned`: groups with a pinned
+   * colour or effect keep it (Next, a song's part); every group set starts afresh (not pinned, frozen or for a while).
    */
-  private applyEntries(entries: readonly LookEntry[], fade: number | undefined, now: number, listed?: Set<string>): number {
+  private applyEntries(entries: readonly LookEntry[], fade: number | undefined, now: number, listed?: Set<string>, skipPinned = false): number {
     let longest = 0;
     for (const entry of entries) {
       const group = this.groups.get(entry.group);
       const preset = this.presets.get(entry.preset);
       // Looks never touch smoke, even an imported look that lists a smoke group.
       if (!group || group.smoke || !preset) continue;
+      if (skipPinned && group.pinned) continue;
+      this.clearLasting(group);
       const t = fade ?? this.fadeTime ?? entry.fade ?? preset.fade;
       this.setPreset(group, preset, t, now);
       group.level.set(entry.level ?? 1, now, t * LEVEL_FADE_FACTOR);
@@ -906,6 +936,7 @@ export class Engine {
   private goSafe(now: number): void {
     for (const group of this.groups.values()) {
       if (group.smoke) continue;
+      this.clearLasting(group);
       const { preset } = this.safeTarget(group);
       this.setPreset(group, preset, SAFE_FADE, now, false);
     }
@@ -942,7 +973,10 @@ export class Engine {
     }
     for (const group of this.groups.values()) {
       if (group.smoke) group.level.set(0, now, SMOKE_OFF);
-      else this.setPreset(group, fixedPreset(BLACKOUT_ID, group.id, dark(), BLACKOUT_FADE), BLACKOUT_FADE, now, false);
+      else {
+        this.clearLasting(group);
+        this.setPreset(group, fixedPreset(BLACKOUT_ID, group.id, dark(), BLACKOUT_FADE), BLACKOUT_FADE, now, false);
+      }
     }
     this.releaseAll(now);
     this.letGoOfFollows();
@@ -964,6 +998,7 @@ export class Engine {
           continue;
         }
         const { preset, level, fade } = this.safeTarget(group);
+        this.clearLasting(group);
         const t = preset.id === SAFE_ID ? fade : this.fadeTime ?? fade;
         this.setPreset(group, preset, t, now, false);
         group.level.set(level, now, t * LEVEL_FADE_FACTOR);
@@ -1000,6 +1035,7 @@ export class Engine {
       const level = stage.levels[group.id] ?? 1;
       // Only what changes moves: a group already there keeps its run (an effect carries on) and its fixtures.
       if (group.presets.currentKey !== preset.id) {
+        this.clearLasting(group);
         this.setPreset(group, preset, t, now, preset.id !== SAFE_ID && preset.id !== BLACKOUT_ID);
         longest = Math.max(longest, t);
       }
@@ -1030,6 +1066,38 @@ export class Engine {
       if (fx.group === group && layer.success) preset = this.presetFor(this.liveEffectFor(group, layer.data), group);
     } else preset = this.presetFor(pid, group);
     return preset?.group === group ? preset : undefined;
+  }
+
+  /** What the operator just started on a group lasts this long (see Lasts); absent: until changed or Next. */
+  private startLasting(group: GroupRun, lasts: Lasts | undefined): void {
+    this.clearLasting(group);
+    if (lasts === 'pin') group.pinned = true;
+    else if (typeof lasts === 'number') group.untilBeat = this.stageBeats + lasts;
+  }
+
+  /** The group's pin, "for a while" and freeze end (it is given something else). */
+  private clearLasting(group: GroupRun): void {
+    group.pinned = false;
+    group.untilBeat = null;
+    group.frozen = false;
+  }
+
+  /**
+   * A "for a while" has run its beats: the group fades back to what the look on stage gives it (Basic lights' on
+   * Basic lights). With no look on stage it keeps what it runs.
+   */
+  private endWhile(group: GroupRun, now: number): void {
+    this.clearLasting(group);
+    if (this.look === SAFE) {
+      const { preset, fade } = this.safeTarget(group);
+      this.setPreset(group, preset, preset.id === SAFE_ID ? fade : this.fadeTime ?? fade, now, preset.id !== SAFE_ID);
+      return;
+    }
+    const look = this.look ? this.looks.get(this.look) : undefined;
+    const entry = look?.groups.find((e) => e.group === group.id);
+    const preset = entry ? this.presets.get(entry.preset) : undefined;
+    if (!entry || !preset) return;
+    this.setPreset(group, preset, this.fadeTime ?? entry.fade ?? preset.fade, now);
   }
 
   private setLook(id: string, now: number, dur: number): void {
@@ -1209,13 +1277,17 @@ export class Engine {
         group.smokeOut = this.flash.has(group.id) && !blackedOut ? PUFF_LEVEL : group.level.value(now);
         continue;
       }
+      if (group.untilBeat !== null && this.stageBeats >= group.untilBeat) this.endWhile(group, now);
       const mix0 = group.presets.weights(now);
       const length = group.line.length;
       for (const w of mix0) {
         const item = w.item;
-        item.time += dt * speed;
-        item.beats += dt * beatsPerSecond;
-        advancePhases(item.cycles, item.preset, dt, beatsPerSecond, speed);
+        // Frozen: the effect holds this moment (a fade into or out of it still runs).
+        if (!group.frozen) {
+          item.time += dt * speed;
+          item.beats += dt * beatsPerSecond;
+          advancePhases(item.cycles, item.preset, dt, beatsPerSecond, speed);
+        }
         // A preset that moves remembers each segment's level, to tell its own motion from fades.
         if (moves(item.preset) && item.levels.length !== length) item.levels = new Array<number>(length).fill(NaN);
       }
@@ -1441,6 +1513,9 @@ export class Engine {
         live: liveView(preset),
         effect: (preset ? this.liveEffects.get(preset) : undefined) ?? null,
         ...this.effectRate(g),
+        pinned: g.pinned,
+        frozen: g.frozen,
+        beatsLeft: g.untilBeat === null ? null : Math.max(0, g.untilBeat - this.stageBeats),
       };
     }
     return {
@@ -1544,7 +1619,14 @@ export class Engine {
       fadeTime: this.fadeTime,
       ...(this.beforeBlackout ? { beforeBlackout: { ...this.beforeBlackout } } : {}),
       ...this.namedEffects(groups),
+      ...this.pinnedGroups(),
     };
+  }
+
+  /** The groups whose colour or effect is pinned, for the runtime state. */
+  private pinnedGroups(): { pinned?: string[] } {
+    const pinned = [...this.groups.values()].filter((g) => g.pinned && !g.smoke).map((g) => g.id);
+    return pinned.length ? { pinned } : {};
   }
 
   /** The live effects the stage (or Blackout's memory) names, for the runtime state. */
@@ -1578,6 +1660,8 @@ export class Engine {
       const preset = this.presetFor(rt.groups[group.id] ?? null, group.id);
       if (preset) this.setPreset(group, preset, 0, now);
       group.level.set(rt.levels[group.id] ?? 1, now, 0);
+      this.clearLasting(group);
+      group.pinned = !!preset && (rt.pinned ?? []).includes(group.id);
     }
     this.master.set(rt.master, now, 0);
     this.speed.set(rt.speed, now, 0);

@@ -93,7 +93,24 @@
     <!-- Right: the pads and the song's colour square. -->
     <section class="right">
       <div class="panel pads-panel">
-        <div class="head"><span class="title">Pads</span><span id="padsFor" class="sub">for all lights</span></div>
+        <div class="head pads-head">
+          <span class="title">Pads</span><span id="padsFor" class="sub">for all lights</span>
+          <span class="grow"></span>
+          <!-- How long a colour or effect started from here lasts: until the next cue, pinned, or a few beats. -->
+          <div id="hows" class="seg small" role="radiogroup" aria-label="How long it lasts">
+            <button type="button" data-how="stay" title="Until you change it or press Next">Stay</button>
+            <button type="button" data-how="pin" title="Keeps going through Next until you turn it off">Pin</button>
+            <button type="button" data-how="beats" id="howBeats" title="For a few beats, then back to the cue. Tap again for more beats.">8 beats</button>
+          </div>
+        </div>
+        <!-- While the picked group runs an effect: its speed, Pin, Freeze and Stop. -->
+        <div id="fxBar" class="fx-bar" hidden>
+          <div class="fx-name"><span id="fxName" class="title"></span><span id="fxNote" class="sub"></span></div>
+          <div id="fxSpeed" class="seg small" role="radiogroup" aria-label="Speed: beats for one round"></div>
+          <button id="fxPin" class="btn" type="button" aria-pressed="false">Pin</button>
+          <button id="fxFreeze" class="btn" type="button" aria-pressed="false">Freeze</button>
+          <button id="fxStop" class="btn" type="button">Stop</button>
+        </div>
         <div id="pads" class="pads"></div>
       </div>
       <div class="panel colour-panel">

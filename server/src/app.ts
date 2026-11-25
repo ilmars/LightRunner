@@ -836,7 +836,8 @@ export class App {
       for (const g of this.timelineGroups(live?.id)) driven.add(g);
     }
     const only = this.sectionGroups(look, driven);
-    const reply = await this.stageCommand({ type: 'quickLook', id: look, only });
+    // A pinned colour or effect carries on through the song's parts.
+    const reply = await this.stageCommand({ type: 'quickLook', id: look, only, keepPinned: true });
     if (reply.error) return reply.error;
     this.setStageSection({ ref: { song: ref.song, kind: ref.kind }, groups: only, fresh: false });
     return null;
@@ -907,7 +908,7 @@ export class App {
         driven = this.timelineGroups(this.prepareTimelines.get(tablet)?.id);
       }
       const only = this.sectionGroups(look, driven);
-      const error = session.apply({ type: 'quickLook', id: look, only }, now, smoke);
+      const error = session.apply({ type: 'quickLook', id: look, only, keepPinned: true }, now, smoke);
       if (error) return error;
       session.section = { ref: { song: ref.song, kind: ref.kind }, groups: only };
     } catch (err) {
