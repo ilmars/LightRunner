@@ -4068,7 +4068,7 @@ function finishEdit(error) {
 
 const EFFECT_NAMES = [
   ['colourFade', 'Colour fade'], ['wave', 'Wave'], ['chase', 'Chase'], ['sparkle', 'Sparkle'],
-  ['breathe', 'Breathe'], ['meteor', 'Meteor'], ['fill', 'Fill'], ['yoyo', 'Yo-yo'], ['stripes', 'Stripes'],
+  ['breathe', 'Breathe'], ['meteor', 'Meteor'], ['fill', 'Fill'], ['yoyo', 'Yo-yo'], ['stripes', 'Stripes'], ['grow', 'Grow'],
 ];
 
 /** A colour as one string: its hex and White, Amber and UV levels, so the same colour always matches. */

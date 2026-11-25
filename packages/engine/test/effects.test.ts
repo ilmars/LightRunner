@@ -254,8 +254,8 @@ test('without a base every effect renders exactly as before (one-colour sparkle 
     const s = (Math.round(v * 1e9) / 1e9).toString();
     for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
   };
-  // The effects there were then (Stripes came later and has its own tests).
-  for (const effect of EffectLayer.shape.effect.options.filter((k) => k !== 'stripes')) {
+  // The effects there were then (Stripes and Grow came later and have their own tests).
+  for (const effect of EffectLayer.shape.effect.options.filter((k) => k !== 'stripes' && k !== 'grow')) {
     for (const edge of ['soft', 'hard'] as const) {
       for (const direction of ['ltr', 'rtl', 'centreOut'] as const) {
         for (const colours of [[RED], [RED, BLUE, DIM], [WARM, RED]]) {

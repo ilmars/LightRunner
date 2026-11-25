@@ -134,7 +134,7 @@ export const StaticLayer = z.object({
 export type StaticLayer = z.infer<typeof StaticLayer>;
 
 /** The patterns an effect layer can run. Stripes holds still: its colours side by side along the line, each `parts` wide. */
-export const EffectKind = z.enum(['colourFade', 'wave', 'chase', 'sparkle', 'breathe', 'meteor', 'fill', 'yoyo', 'stripes']);
+export const EffectKind = z.enum(['colourFade', 'wave', 'chase', 'sparkle', 'breathe', 'meteor', 'fill', 'yoyo', 'stripes', 'grow']);
 export type EffectKind = z.infer<typeof EffectKind>;
 
 /** How long one cycle takes: in beats of the stage tempo, or free-running in seconds. */

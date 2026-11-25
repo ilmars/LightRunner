@@ -22,6 +22,7 @@ const KINDS = [
   ['meteor', 'Meteor', 'a bright head with a fading tail'],
   ['fill', 'Fill', 'a colour fills the line, then the next'],
   ['yoyo', 'Yo-yo', 'there and back again'],
+  ['grow', 'Grow', 'lights fade up one after another, so the colour grows'],
   ['stripes', 'Stripes', 'bands of colour that slide'],
 ];
 const DIRS = [['ltr', 'Left to right'], ['rtl', 'Right to left'], ['centreOut', 'From the middle'], ['outsideIn', 'From the sides']];

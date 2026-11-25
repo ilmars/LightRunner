@@ -198,6 +198,8 @@ function fastestSafeRate(fx: CompiledEffect): number {
     case 'meteor': return deep(first) ? perCycle(2) : Infinity;
     case 'fill': return deep(top) ? perCycle(2) - (soft && !same ? 0.5 : 0) : Infinity;
     case 'yoyo': return deep(first) && fx.size < 1 ? perCycle(4) : Infinity;
+    // Grow fades each segment once a cycle (into the next colour), or up and back down with one colour.
+    case 'grow': return deep(top) || n > 1 ? perCycle(2) : Infinity;
     // Stripes never move.
     case 'stripes': return Infinity;
   }
@@ -446,6 +448,23 @@ function renderAnimation(out: Light, fx: CompiledEffect, ctx: Pick<LayerContext,
       const end = -e / 2 + filled * (1 + e);
       const level = soft ? smooth((end - xp) / e + 0.5) : xp < end ? 1 : 0;
       lit(out, colourAt(fx, k), level);
+      break;
+    }
+    case 'grow': {
+      // A mix of fill and fade: a soft front moves along the line and each segment fades up as it passes, so the lit
+      // part grows steadily. With several colours each cycle's colour grows over the last one; with one it grows
+      // out over the first half and fades back over the second. The front's fade is `size` of the line long (at least
+      // a segment), so a small size is close to fill and a large one a slow, even swell.
+      const k = Math.floor(phase);
+      const t = phase - k;
+      const ramp = Math.max(fx.size, e);
+      const grown = n > 1 ? t : t < 0.5 ? t * 2 : 2 - t * 2;
+      // The front runs from just before the line to a ramp past its end, so the far end ends fully lit.
+      const front = -e / 2 + grown * (1 + e + ramp);
+      const level = Math.max(0, Math.min(1, (front - xp) / ramp + 0.5 * (e / ramp)));
+      const g = soft ? smooth(level) : level;
+      if (n > 1) blend(out, colourAt(fx, k - 1), colourAt(fx, k), g);
+      else lit(out, first, g);
       break;
     }
     case 'yoyo': {

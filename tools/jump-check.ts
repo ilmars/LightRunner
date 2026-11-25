@@ -151,7 +151,9 @@ function randomCommand(): { cmd: StageCommand; fast: boolean } {
     // Half keep the preset's base; the others get a new one or none.
     const under = rand() < 0.5 ? layer.base && { colour: plain(layer.base.colour), level: layer.base.level }
       : rand() < 0.5 ? { colour: { hex: hex() }, level: rand() } : undefined;
-    const effect = { ...layer, colours: layer.colours.map(plain), size: rand(), base: under };
+    // A fifth switch to another kind (Grow among them), as the Effects page can.
+    const kind = rand() < 0.2 ? pick(['wave', 'chase', 'colourFade', 'breathe', 'sparkle', 'meteor', 'fill', 'yoyo', 'grow'] as const) : layer.effect;
+    const effect = { ...layer, effect: kind, colours: layer.colours.map(plain), size: rand(), base: under };
     const cmd = { type: 'groupEffect' as const, group: base.group, effect };
     if (rand() < 0.33) return { cmd: { ...cmd, fade: 0.2, continues: true }, fast: true };
     return { cmd: { ...cmd, ...lasts() }, fast: false };
