@@ -103,7 +103,7 @@ test('the church rig: the guess alone is right for most lights, and the show say
   const layout = operatorLayout(show, show.fixtures.map((f) => f.id));
   const explicit: Record<string, string> = {
     p1: 'stand', p2: 'stand', p3: 'stand', p4: 'stand', b1: 'truss', b2: 'truss',
-    b3: 'wall', b4: 'wall', b5: 'wall', b6: 'wall', l1: 'riser', b8: 'side',
+    b3: 'wall', b4: 'wall', b5: 'wall', b6: 'wall', l1: 'riser', b8: 'side', m1: 'stand',
   };
   assert.deepEqual(layout.fixtures.map((f) => f.id), Object.keys(explicit));
   for (const f of layout.fixtures) {

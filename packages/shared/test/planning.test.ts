@@ -983,7 +983,7 @@ test('Song 2 is purple on the background and warm white on the front lights; eve
   assert.equal(presetOf(out, one!, 'front-lights').name, 'Silti 3200K');
   assert.equal(presetOf(out, five!, 'front-lights').name, 'Vēsi 6500K');
   for (const id of songsOf(out)) for (const e of lookOf(out, id).groups) assert.equal(e.level ?? 1, 1);
-  assert.equal(lookOf(out, one!).groups.length, 5);
+  assert.equal(lookOf(out, one!).groups.length, 6);
 });
 
 test('a show with no matching names gets Any colours; a group that only shows white gets warm white', () => {
@@ -1226,6 +1226,6 @@ test('the choices for the card: the show\'s colour names once each with a swatch
   assert.ok(!names.includes('Silti 3200K'), 'only groups that show colour');
   for (const c of choices.colours) assert.match(c.swatch, /^#[0-9a-f]{6}$/i);
   assert.deepEqual(choices.groups.map((g) => [g.id, g.face, g.whiteOnly]), [
-    ['front-lights', true, true], ['key-lights', true, false], ['background', false, false], ['drum-cage', false, false], ['b8-side-bar', false, false],
+    ['front-lights', true, true], ['key-lights', true, false], ['background', false, false], ['drum-cage', false, false], ['b8-side-bar', false, false], ['p1-mini', false, false],
   ]);
 });

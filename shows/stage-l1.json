@@ -522,6 +522,16 @@
       "w": 0.012,
       "h": 0.38,
       "hangs": "side"
+    },
+    {
+      "id": "m1",
+      "name": "M1 Portman P1 Mini",
+      "profile": "portman-p1-mini-pixel",
+      "universe": 1,
+      "address": 250,
+      "x": 0.3,
+      "y": 0.892,
+      "hangs": "stand"
     }
   ],
   "groups": [
@@ -565,6 +575,13 @@
       "name": "B8 side bar",
       "fixtures": [
         "b8"
+      ]
+    },
+    {
+      "id": "p1-mini",
+      "name": "P1 Mini",
+      "fixtures": [
+        "m1"
       ]
     }
   ],
@@ -1430,6 +1447,38 @@
       ],
       "fade": 3,
       "swatch": "#000000"
+    },
+    {
+      "id": "p1-mini-warm-white",
+      "name": "Warm white",
+      "group": "p1-mini",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "hex": "#ffb46b"
+          },
+          "intensity": 1
+        }
+      ],
+      "fade": 3,
+      "swatch": "#ffb46b"
+    },
+    {
+      "id": "p1-mini-off",
+      "name": "Off",
+      "group": "p1-mini",
+      "layers": [
+        {
+          "kind": "static",
+          "colour": {
+            "hex": "#000000"
+          },
+          "intensity": 0
+        }
+      ],
+      "fade": 3,
+      "swatch": "#000000"
     }
   ],
   "looks": [
@@ -1616,7 +1665,8 @@
       "key-lights",
       "background",
       "drum-cage",
-      "b8-side-bar"
+      "b8-side-bar",
+      "p1-mini"
     ],
     "manualForOperators": false
   },

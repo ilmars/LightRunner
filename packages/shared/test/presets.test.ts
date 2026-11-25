@@ -9,7 +9,7 @@ import {
 
 const rig = (): Show => parseShow(JSON.parse(readFileSync(new URL('../../../shows/stage-l1.json', import.meta.url), 'utf8')));
 const names = (s: Show, group: string) => s.presets.filter((p) => p.group === group && !p.custom).map((p) => p.name);
-const COLOUR_GROUPS = ['key-lights', 'background', 'drum-cage', 'b8-side-bar'];
+const COLOUR_GROUPS = ['key-lights', 'background', 'drum-cage', 'b8-side-bar', 'p1-mini'];
 
 test('white-only means no fixture with a red, green or blue channel', () => {
   const s = rig();
@@ -140,7 +140,7 @@ test('with every group and no name, the whole set shares one "Colour N"', () => 
   let s = addColour(rig(), { group: 'key-lights', colour: '#111111', name: '', allGroups: false }).show; // Colour 1 in the key lights only
   s = addColour(s, { group: 'background', colour: '#222222', name: '', allGroups: true }).show;
   const made = s.presets.filter((p) => p.swatch === '#222222');
-  assert.equal(made.length, 4);
+  assert.equal(made.length, COLOUR_GROUPS.length);
   assert.deepEqual([...new Set(made.map((p) => p.name))], ['Colour 2']);
 });
 
