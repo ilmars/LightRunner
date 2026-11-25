@@ -41,6 +41,26 @@
     <section class="left">
       <div class="panel stage-panel">
         <div id="stageWrap" class="stage-wrap"><canvas id="stage" class="stage" aria-label="The stage"></canvas></div>
+        <!-- The song list: the service's order on the left, the picked song's parts and Start on the right. -->
+        <div id="songs" class="songs" role="dialog" aria-label="Song list" hidden>
+          <div class="f-head">
+            <span class="title">Songs</span>
+            <span id="sSub" class="sub"></span>
+            <span class="grow"></span>
+            <button id="sClose" class="btn icon" type="button" aria-label="Close the song list">×</button>
+          </div>
+          <div class="s-body">
+            <div id="songList" class="s-list"></div>
+            <div class="s-pick">
+              <span id="sName" class="s-name">—</span>
+              <span id="sFacts" class="sub"></span>
+              <span class="caps">Parts · tap to jump</span>
+              <div id="sParts" class="s-parts"></div>
+              <span class="grow"></span>
+              <button id="sStart" class="btn next s-start" type="button" hidden></button>
+            </div>
+          </div>
+        </div>
         <!-- Faders: slide up over the lower part of the stage; a tap elsewhere closes them. -->
         <div id="faders" class="faders" role="dialog" aria-label="Faders" hidden>
           <div class="f-head">
@@ -88,8 +108,8 @@
 
     <!-- Bottom: the song, its steps, Next (and what it changes) and Blackout. Always here. -->
     <footer class="bar bottom">
-      <button id="songBtn" class="btn song" type="button" disabled title="The song list comes in a later step">
-        <span id="songOf" class="caps">Song</span><b id="songName">—</b>
+      <button id="songBtn" class="btn song" type="button" title="Song list" aria-expanded="false" aria-controls="songs">
+        <span id="songOf" class="caps">Song</span><b><span id="songName">—</span> ▾</b>
       </button>
       <div id="steps" class="steps"></div>
       <!-- Prepare only: back to live (the draft is dropped), or Go (the draft fades onto the stage). -->

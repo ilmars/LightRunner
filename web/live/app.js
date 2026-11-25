@@ -1,6 +1,6 @@
 // The new operator page (25 Nov 2026 design; docs/user-stories.md and the 25 Nov entries in docs/DECISIONS.md).
 // Built so far: the layout (the stage as the audience sees it, your changes, who the pads work on, the pads, the colour
-// square, the song's steps with Next and Blackout), Prepare, and the faders with Master. The song list, effects with how
+// square, the song's steps with Next and Blackout), Prepare, the faders with Master, and the song list. Effects with how
 // long, and each song's own colour square come in later steps.
 // The server is the single source of truth: every tap becomes a Command and the page only shows the state it gets back.
 //
@@ -277,6 +277,7 @@ function render() {
   renderSquare();
   renderBottom();
   renderFaders();
+  renderSongs();
 }
 
 function renderTop() {
@@ -780,6 +781,101 @@ $('faderRow').addEventListener('pointerdown', (ev) => {
   track.addEventListener('pointermove', move);
   track.addEventListener('pointerup', up);
   track.addEventListener('pointercancel', up);
+});
+
+// ---- The song list: the service's order to jump anywhere, opened from the song button ----
+// Tapping a song shows its parts (from the planned service) and a Start button, so a stray tap never changes the stage.
+// Starting goes where the page works: the stage, or this tablet's draft in Prepare.
+
+/** Open or not, and the running-order item picked in the list. */
+const songs = { open: false, pick: null };
+
+function openSongs(open) {
+  songs.open = open;
+  $('songs').hidden = !open;
+  $('songBtn').setAttribute('aria-expanded', String(open));
+  if (open) {
+    openFaders(false);
+    songs.pick = songOf(shown()).item?.id ?? (layout?.runningOrder ?? [])[0]?.id ?? null;
+  }
+  renderSongs();
+  if (open) $('songList').querySelector('.picked')?.scrollIntoView({ block: 'center' });
+}
+$('songBtn').addEventListener('click', () => openSongs(!songs.open));
+$('sClose').addEventListener('click', () => openSongs(false));
+document.addEventListener('pointerdown', (ev) => {
+  if (!songs.open || !(ev.target instanceof Element)) return;
+  if (ev.target.closest('#songs, #songBtn')) return;
+  openSongs(false);
+}, true);
+
+/** The rows to list: the service's rows when a service is loaded, else the running order. */
+function songRows() {
+  const order = layout?.runningOrder ?? [];
+  const rows = layout?.rows?.length ? layout.rows : order.map((l) => ({ kind: 'look', look: l.id, header: false }));
+  return rows;
+}
+
+function renderSongs() {
+  if (!songs.open || !layout || !state) return;
+  const order = layout.runningOrder ?? [];
+  const liveK = songOf(state).k;
+  const prepK = prep.on && prep.state ? songOf(prep.state).k : -1;
+  const next = nextStep();
+  const nextId = next?.cmd.type === 'look' ? next.cmd.id : next?.cmd.type === 'safe' ? layout.basicLights : null;
+  const svc = layout.service;
+  $('sSub').textContent = svc ? [svc.title, svc.start, svc.place].filter(Boolean).join(' · ') : 'The running order';
+  const html = songRows().map((r) => {
+    if (r.kind === 'header') return `<div class="s-head caps">${esc(r.name)}</div>`;
+    if (r.kind === 'verses') return `<div class="s-row s-other"><span>${esc(r.names.join(', '))}</span><small>no lights of its own</small></div>`;
+    if (r.kind === 'item') return `<div class="s-row s-other"><span>${esc(r.name)}</span><small>${r.look ? 'again' : 'no lights of its own'}</small></div>`;
+    const k = order.findIndex((l) => l.id === r.look);
+    const item = order[k];
+    if (!item) return '';
+    if (r.header) return `<button type="button" class="s-head caps s-headbtn${songs.pick === item.id ? ' picked' : ''}" data-pick="${esc(item.id)}">${esc(item.name)}</button>`;
+    const tag = k === prepK && prep.on ? '<small class="prep">preparing</small>'
+      : k === liveK ? '<small class="here">on stage</small>'
+      : item.id === nextId && !prep.on ? '<small>next</small>'
+      : k < liveK ? '<small>done</small>' : '';
+    const cls = `s-row s-song${songs.pick === item.id ? ' picked' : ''}${k < liveK && k !== prepK ? ' done' : ''}`;
+    return `<button type="button" class="${cls}" data-pick="${esc(item.id)}"><span class="s-sw" style="${esc(lookFill(item))}"></span><span>${esc(item.name)}</span>${tag}</button>`;
+  }).join('');
+  setHtml($('songList'), html);
+
+  // The picked song: what the planned service says about it, its parts, and Start.
+  const item = order.find((l) => l.id === songs.pick) ?? null;
+  const song = item ? layout.songs?.[item.id] : null;
+  $('sName').textContent = item?.name ?? '—';
+  const facts = song ? [song.key && `Key ${song.key}`, song.tempo && `${song.tempo} bpm`, song.timeSignature, song.artist].filter(Boolean) : [];
+  $('sFacts').textContent = facts.join(' · ');
+  const s = shown();
+  const onThis = item && songOf(s).item?.id === item.id ? songOf(s).sec : -2;
+  const parts = song?.sections ?? [];
+  setHtml($('sParts'), parts.length
+    ? parts.map((x, i) => `<button type="button" class="btn${i === onThis ? ' here' : ''}" data-part="${esc(x.kind)}">${esc(x.name)}${x.look ? '' : '<small>song\'s look</small>'}</button>`).join('')
+    : '<span class="sub">No parts: the song has one look.</span>');
+  $('sStart').hidden = !item;
+  $('sStart').textContent = item ? `${prep.on ? 'Prepare' : 'Start'} ${item.name}` : '';
+}
+
+$('songList').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-pick]');
+  if (!b) return;
+  songs.pick = b.dataset.pick;
+  renderSongs();
+});
+$('sParts').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-part]');
+  if (!b || !songs.pick) return;
+  // Not wrapped for the draft: while this tablet has one, the server puts the section into it.
+  send({ type: 'section', song: songs.pick, kind: b.dataset.part });
+  openSongs(false);
+});
+$('sStart').addEventListener('click', () => {
+  const item = (layout?.runningOrder ?? []).find((l) => l.id === songs.pick);
+  if (!item) return;
+  sendStage(isBasic(item) ? { type: 'safe' } : { type: 'look', id: item.id });
+  openSongs(false);
 });
 
 // ---- Top bar: Fade steps through the choices; Tap sets the tempo from the last few taps ----
