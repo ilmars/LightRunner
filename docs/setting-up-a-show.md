@@ -65,7 +65,7 @@ Open **Patch**. Changes stay in the page until you press **Save patch** in the b
 Other routes:
 
 - Use one of the built-in **Generic** types if the light's channels are in the same order: Generic dimmer (1 ch), RGB (3), RGBW (4), RGBA (4), dimmer + RGB (4), dimmer + RGBW + strobe (6) and 16-bit dimmer + RGBW (6). It works only when the light's own channels really are those, in that order; otherwise colours will be wrong.
-- The **Portman P1 Mini** (not in the Open Fixture Library) is built in, one type per DMX mode: Simple (19 ch), Standard (43), Standard fine (50), Pixel (42) and Pixel fine (49). Pick the one set on the light's menu. Each of its seven bulbs is a segment: the warm filament answers to **amber**, the glow behind it to the colour and white. The glow dimmer stays at full, the strobes open and the macros off.
+- The **Portman P1 Mini** (not in the Open Fixture Library) is built in, one type per DMX mode: Simple (19 ch), Standard (43), Standard fine (50), Pixel (42) and Pixel fine (49). Pick the one set on the light's menu, from the Fixture library list or under **Portman Lights** in **Browse by manufacturer** (also when there is no internet). Each of its seven bulbs is a segment: the warm filament answers to **amber**, the glow behind it to the colour and white. The glow dimmer stays at full, the strobes open and the macros off.
 - If the light is in a Lightkey project, use **Compare with a file…** (step 1); the type comes from Lightkey.
 - Describe it in the Open Fixture Library's online fixture editor (open-fixture-library.org, "Add fixture"), download the file it makes, and bring it in with **Import fixture file…**. Someone may also simply give you such a file.
 

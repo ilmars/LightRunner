@@ -13,7 +13,7 @@ import { Worker } from 'node:worker_threads';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z, ZodError } from 'zod';
 import {
-  BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, StandardSongsSettings, applyStandardSettings, standardChoices, standardSettingsOf, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, clearService, useStandardSongs, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
+  BUILT_IN_PROFILES, builtInHitsOf, builtInMakers, builtInModes, searchBuiltIns, Command, OscSettings, PlanningSettings, StandardSongsSettings, applyStandardSettings, standardChoices, standardSettingsOf, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, clearService, useStandardSongs, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
   applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isSectionLook, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setItemGroup, setItemTempo, setItemTimeline, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
   BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
@@ -2393,18 +2393,47 @@ export class App {
         this.ofl.discardUpdate();
         json(res, 200, this.oflStatus());
         return true;
-      case 'GET /api/ofl/manufacturers':
-        json(res, 200, await this.oflCall(() => this.ofl.manufacturerList()));
+      // The built-in real lights (P1 Mini ...) are listed with the library's, under their maker; without internet they still are.
+      case 'GET /api/ofl/manufacturers': {
+        const own = builtInMakers();
+        const library = await this.oflCall(() => this.ofl.manufacturerList()).catch((err) => {
+          if (!own.length) throw err;
+          return [];
+        });
+        const all = new Map(library.map((m) => [m.key, { ...m }]));
+        for (const m of own) {
+          const there = all.get(m.key);
+          if (there) there.count += m.count;
+          else all.set(m.key, m);
+        }
+        json(res, 200, [...all.values()].sort((a, b) => a.name.localeCompare(b.name)));
         return true;
-      case 'GET /api/ofl/manufacturer':
-        json(res, 200, await this.oflCall(() => this.ofl.manufacturerFixtures(url.searchParams.get('key') ?? '')));
+      }
+      case 'GET /api/ofl/manufacturer': {
+        const key = url.searchParams.get('key') ?? '';
+        const own = builtInHitsOf(key);
+        const library = await this.oflCall(() => this.ofl.manufacturerFixtures(key)).catch((err) => {
+          if (!own.length) throw err;
+          return [];
+        });
+        json(res, 200, [...own, ...library]);
         return true;
-      case 'GET /api/ofl/search':
-        json(res, 200, await this.oflCall(() => this.ofl.search(url.searchParams.get('q') ?? '')));
+      }
+      case 'GET /api/ofl/search': {
+        const q = url.searchParams.get('q') ?? '';
+        const own = searchBuiltIns(q);
+        const found = await this.oflCall(() => this.ofl.search(q)).catch((err) => {
+          if (!own.length) throw err;
+          return { hits: [], offline: true, local: false };
+        });
+        json(res, 200, { ...found, hits: [...own, ...found.hits] });
         return true;
-      case 'GET /api/ofl/fixture':
-        json(res, 200, await this.oflCall(() => this.ofl.modes(url.searchParams.get('key') ?? '')));
+      }
+      case 'GET /api/ofl/fixture': {
+        const key = url.searchParams.get('key') ?? '';
+        json(res, 200, builtInModes(key) ?? await this.oflCall(() => this.ofl.modes(key)));
         return true;
+      }
       case 'POST /api/ofl/profile': {
         // Returns the type; the patch page adds it to the show when the patch is saved.
         const { key, mode } = (await readJson(req)) as { key?: unknown; mode?: unknown };

@@ -90,3 +90,78 @@ export const BUILT_IN_PROFILES: Profile[] = [
   },
   ...PORTMAN_P1_MINI,
 ];
+
+// ---- Built-in lights by maker ----
+// Real lights among the built-in types, so Patch can list them under their maker
+// in "Browse by manufacturer" and find them in the library search, next to the
+// Open Fixture Library's. Picking a mode picks the built-in type.
+
+/** Keys of built-in lights start with this, so they never clash with the library's "maker/fixture" keys. */
+export const BUILT_IN_KEY = 'built-in:';
+
+export interface BuiltInFixture {
+  /** "built-in:maker/fixture". */
+  key: string;
+  /** The maker's key, as the library would spell it. */
+  manufacturerKey: string;
+  manufacturer: string;
+  name: string;
+  categories: string[];
+  modes: { name: string; profile: Profile }[];
+}
+
+export const BUILT_IN_FIXTURES: BuiltInFixture[] = [
+  {
+    key: `${BUILT_IN_KEY}portman-lights/p1-mini-led`,
+    manufacturerKey: 'portman-lights',
+    manufacturer: 'Portman Lights',
+    name: 'P1 Mini LED',
+    categories: ['Color Changer', 'Dimmer'],
+    modes: PORTMAN_P1_MINI.map((profile, k) => ({ name: ['Simple', 'Standard', 'Standard fine', 'Pixel', 'Pixel fine'][k], profile })),
+  },
+];
+
+/** Makers of built-in lights with how many each has, like the library's manufacturer list. */
+export function builtInMakers(): { key: string; name: string; count: number }[] {
+  const out = new Map<string, { key: string; name: string; count: number }>();
+  for (const f of BUILT_IN_FIXTURES) {
+    const m = out.get(f.manufacturerKey) ?? { key: f.manufacturerKey, name: f.manufacturer, count: 0 };
+    m.count++;
+    out.set(f.manufacturerKey, m);
+  }
+  return [...out.values()];
+}
+
+const hitOf = (f: BuiltInFixture) => ({ key: f.key, manufacturer: f.manufacturer, name: f.name, categories: f.categories });
+
+/** One maker's built-in lights, as library search hits. */
+export function builtInHitsOf(manufacturerKey: string) {
+  return BUILT_IN_FIXTURES.filter((f) => f.manufacturerKey === manufacturerKey).map(hitOf);
+}
+
+/** Built-in lights whose maker, name or category has every word of the query. */
+export function searchBuiltIns(query: string) {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length || query.trim().length < 2) return [];
+  return BUILT_IN_FIXTURES.filter((f) => {
+    const hay = `${f.manufacturer} ${f.name} ${f.key} ${f.categories.join(' ')}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  }).map(hitOf);
+}
+
+/**
+ * A built-in light's modes, shaped like the library's (index, name, channels, roles), plus `profile`:
+ * the id of the built-in type that mode is. Undefined for a key that is not a built-in light.
+ */
+export function builtInModes(key: string) {
+  const f = BUILT_IN_FIXTURES.find((x) => x.key === key);
+  if (!f) return undefined;
+  return {
+    key: f.key, name: f.name, manufacturer: f.manufacturer,
+    modes: f.modes.map((m, index) => ({
+      index, name: m.name, shortName: null, channels: m.profile.channels.length,
+      roles: [...new Set(m.profile.channels.filter((c) => c.role !== 'other' && c.role !== 'strobe').map((c) => c.role))],
+      profile: m.profile.id,
+    })),
+  };
+}
