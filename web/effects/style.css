@@ -1,0 +1,68 @@
+/* The Effects page: the library on the left, the effect being built on the right. Programmer page: the design system. */
+
+.fx-page {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: var(--ds-gap);
+  align-items: start;
+}
+.fx-page > .fx-editor, .fx-page > .fx-empty { grid-column: 2; grid-row: 1; }
+@media (max-width: 760px) {
+  .fx-page { grid-template-columns: minmax(0, 1fr); }
+  .fx-page > .fx-editor, .fx-page > .fx-empty { grid-column: 1; grid-row: auto; }
+}
+
+.fx-list { display: flex; flex-direction: column; gap: 6px; }
+.fx-item { display: flex; align-items: center; gap: 6px; }
+.fx-item.on .fx-open { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.fx-star {
+  width: 44px; height: 44px; flex: none; border: 0; border-radius: var(--ds-r-small);
+  background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low); color: var(--ds-mark); font-size: 18px; cursor: pointer;
+}
+.fx-star.fav { color: var(--ds-warn); }
+.fx-open {
+  flex: 1; min-width: 0; min-height: 52px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px;
+  padding: 6px 12px; border: 0; border-radius: var(--ds-r-tile); background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low);
+  color: var(--ds-text); font: inherit; text-align: left; cursor: pointer;
+}
+.fx-open b { font-weight: 600; }
+.fx-sw { display: flex; gap: 4px; align-items: center; }
+.fx-sw i { width: 14px; height: 14px; border-radius: 4px; opacity: 0.85; }
+.fx-sw em { font-style: normal; font-size: 11px; color: var(--ds-muted); margin-left: 4px; }
+
+.fx-editor { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr); gap: 18px; }
+@media (max-width: 1000px) { .fx-editor { grid-template-columns: minmax(0, 1fr); } }
+.fx-steps { display: flex; flex-direction: column; gap: 18px; }
+.fx-step h3 { margin: 0 0 10px; font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+.fx-step .num {
+  width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on);
+}
+.fx-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fx-row .label { color: var(--ds-muted); font-size: 14px; }
+.fx-switch { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; }
+.fx-switch input { width: 20px; height: 20px; }
+.fx-switch small { color: var(--ds-muted); }
+.fx-chosen, .fx-palette { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.fx-chosen.muted { opacity: 0.5; }
+.fx-chip {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border: 0; border-radius: var(--ds-r-small);
+  background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low); color: var(--ds-text); font: inherit; font-size: 14px; cursor: pointer;
+}
+.fx-chip i { width: 16px; height: 16px; border-radius: 5px; opacity: 0.85; }
+.fx-chip:disabled { opacity: 0.45; cursor: default; }
+.fx-kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin-bottom: 10px; }
+.fx-kind {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 60px; padding: 8px 12px; border: 0;
+  border-radius: var(--ds-r-tile); background: var(--ds-tile-fill); box-shadow: var(--ds-shadow-low); color: var(--ds-text);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.fx-kind span { font-size: 12px; color: var(--ds-muted); }
+.fx-kind[aria-checked="true"] { background: var(--ds-tile-fill-on); box-shadow: inset 0 0 0 1px var(--ds-edge-on); }
+.fx-name { flex: 1; min-width: 180px; }
+
+.fx-preview { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 88px; align-self: start; }
+.fx-strip { width: 100%; height: 64px; border-radius: var(--ds-r-small); background: #04070d; }
+.fx-group { flex: 1; }
+.fx-actions { border-top: 1px solid var(--ds-edge); padding-top: 12px; }
+.fx-empty { grid-column: 2; }

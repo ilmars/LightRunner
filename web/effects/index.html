@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="theme-color" content="#090F1C">
+  <title>Light Runner Effects</title>
+  <link rel="icon" href="/shared/icon-16.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/shared/icon-180.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/shared/theme.css">
+  <link rel="stylesheet" href="/shared/programmer.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="appbar-wrap">
+    <header class="appbar">
+      <h1 class="appbar-title"><img src="/shared/icon.svg" alt="" width="26" height="26"><span class="appbar-name"><span class="ds-caps">Light Runner</span><b>Effects</b></span></h1>
+      <span id="offline" class="ds-pill offline" role="status" hidden>● Not connected</span>
+      <span class="grow"></span>
+      <button id="logout" class="ds-btn ds-btn--quiet" type="button" hidden>Log out</button>
+      <!-- Full screen: only where the browser can do it and the page is not already an app (see /shared/fullscreen.js). -->
+      <button id="fsBtn" class="ds-iconbtn" type="button" aria-label="Full screen" title="Full screen" aria-pressed="false" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg></button>
+      <!-- The pages, the same icons on every page (/shared/pagetabs.js). -->
+      <nav class="ds-pagetabs" data-page="effects" aria-label="Pages"></nav>
+    </header>
+  </div>
+
+  <!-- PIN entry when a PIN is set -->
+  <section id="login" class="login ds-panel" hidden>
+    <h2 class="ds-caps">Programmer PIN</h2>
+    <p class="card-desc">Effects are set up behind the PIN; the operator page runs them.</p>
+    <form id="loginForm">
+      <input id="pin" class="ds-field" type="password" inputmode="numeric" autocomplete="current-password" pattern="\d{4,6}" maxlength="6" placeholder="••••" required>
+      <button class="ds-btn ds-btn--primary">Unlock</button>
+    </form>
+    <p id="loginError" class="error"></p>
+  </section>
+
+  <main id="main" class="page fx-page" hidden>
+    <!-- The library: ★ puts an effect on the operator page's pads. -->
+    <section class="card ds-panel fx-list-card">
+      <div class="card-head">
+        <div class="card-title">
+          <h2 class="ds-caps">Effects</h2>
+          <p class="card-desc">★ puts an effect on the operator page's pads. The rest are under More.</p>
+        </div>
+        <button id="newBtn" class="ds-add" type="button">＋ New effect</button>
+      </div>
+      <div id="list" class="fx-list" role="list"></div>
+    </section>
+
+    <!-- Building one effect: colours, movement, speed, name. Nothing here changes the lights. -->
+    <section id="editor" class="card ds-panel fx-editor" hidden>
+      <div class="fx-steps">
+        <div class="fx-step">
+          <h3><span class="num">1</span>Colours</h3>
+          <label class="fx-switch"><input id="songColours" type="checkbox"> <span>Use the song's colours <small>(its colour square's four corners)</small></span></label>
+          <div id="chosen" class="fx-chosen" aria-label="The effect's colours, in order"></div>
+          <p id="chosenNote" class="card-desc"></p>
+          <div id="palette" class="fx-palette" aria-label="Add a colour"></div>
+        </div>
+        <div class="fx-step">
+          <h3><span class="num">2</span>Movement</h3>
+          <div id="kinds" class="fx-kinds" role="radiogroup" aria-label="Movement"></div>
+          <div class="fx-row"><span class="label">Across the lights</span><div id="dirs" class="ds-seg" role="radiogroup" aria-label="Across the lights"></div></div>
+        </div>
+        <div class="fx-step">
+          <h3><span class="num">3</span>Speed</h3>
+          <div class="fx-row"><span class="label">One round every</span><div id="speeds" class="ds-seg" role="radiogroup" aria-label="Beats for one round"></div><span class="label">beats</span></div>
+        </div>
+        <div class="fx-step">
+          <h3><span class="num">4</span>Name</h3>
+          <div class="fx-row">
+            <input id="name" class="ds-field fx-name" type="text" maxlength="40" placeholder="e.g. Slow tide" autocomplete="off" spellcheck="false">
+            <label class="fx-switch"><input id="favourite" type="checkbox"> <span>Add to favourites</span></label>
+          </div>
+        </div>
+      </div>
+      <div class="fx-preview">
+        <div class="fx-row"><span class="ds-caps">Preview</span><span class="card-desc">only here: the lights don't change</span></div>
+        <canvas id="strip" class="fx-strip" role="img" aria-label="How the effect moves along the lights"></canvas>
+        <div class="fx-row"><span class="label">On</span><select id="group" class="ds-field fx-group" aria-label="Show it on this group"></select></div>
+        <span class="grow"></span>
+        <p id="error" class="error" role="status"></p>
+        <div class="fx-row fx-actions">
+          <button id="deleteBtn" class="ds-btn ds-btn--quiet" type="button">Delete</button>
+          <span class="grow"></span>
+          <button id="saveBtn" class="ds-btn ds-btn--primary" type="button">Save</button>
+        </div>
+      </div>
+    </section>
+    <section id="empty" class="card ds-panel fx-empty">
+      <p class="card-desc">Pick an effect, or make one with ＋ New effect.</p>
+    </section>
+  </main>
+
+  <script type="module" src="/shared/pwa.js"></script>
+  <script type="module" src="effects.js"></script>
+</body>
+</html>

@@ -258,9 +258,15 @@ function whatGoChanges() {
   return sayChanges(names, 'The same as the stage.');
 }
 
+/** The library effect a running effect is (the same movement, speed and colours), by name; null when none is. */
+function libraryName(layer) {
+  const key = effectKey(layer);
+  return (layout?.effects ?? []).find((e) => effectKey(libraryLayer(e)) === key)?.name ?? null;
+}
+
 /** What a group runs, in a word or two: its colour's name, "own colour" for a colour from the square. */
 function changeName(st, p) {
-  if (st.effect) return p?.name && p.name !== 'Custom' ? p.name : 'effect';
+  if (st.effect) return p?.name && p.name !== 'Custom' ? p.name : libraryName(st.effect) ?? 'effect';
   if (st.live || !p || p.name === 'Custom') return 'own colour';
   return p.name;
 }
@@ -365,6 +371,32 @@ function lookFill(look) {
   return `background:linear-gradient(135deg,${cols.join(',')})`;
 }
 
+/** Showing every effect (More) instead of the favourites. */
+let padsAll = false;
+
+/** The groups a library effect runs on: the picked ones that have colour (white-only groups can't run one). */
+const effectTargets = () => targets().filter((g) => !groupById(g)?.whiteOnly);
+
+/** A library effect as it runs now: in the song's square's colours when it is set to, else its own. */
+function libraryLayer(e) {
+  const square = squareSong()?.square ?? layout?.square ?? null;
+  if (!e.songColours || !square) return e.layer;
+  const seen = new Set();
+  const colours = square.map((c) => c.colour).filter((c) => !seen.has(c.hex.toLowerCase()) && seen.add(c.hex.toLowerCase()));
+  return { ...e.layer, colours };
+}
+
+/** What makes two effects the same on the pads: the movement, its direction, speed and colours. */
+const effectKey = (l) => JSON.stringify([l.effect, l.direction ?? 'ltr', l.speed, (l.colours ?? []).map((c) => (c.hex ?? '').toLowerCase())]);
+
+/** Runs a library effect on the picked groups that have colour, lasting as the Stay / Pin / beats switch says. */
+function runLibraryEffect(id) {
+  const e = (layout.effects ?? []).find((x) => x.id === id);
+  if (!e) return;
+  const layer = libraryLayer(e);
+  for (const g of effectTargets()) sendStage({ type: 'groupEffect', group: g, effect: layer, ...lastsNow() });
+}
+
 function renderPads() {
   const s = shown();
   $('padsFor').textContent = `for ${whoName()}`;
@@ -382,17 +414,29 @@ function renderPads() {
     pads.push(`<button type="button" class="pad${on ? ' active' : ''}" data-look="${esc(q.id)}"${sets.length ? '' : ' disabled style="opacity:.35"'}>` +
       `<span class="fill" style="${esc(lookFill(q))}"></span><i>Look</i><b>${esc(q.name)}</b></button>`);
   }
-  // Effects: the picked group's own.
-  if (who !== 'all') {
-    for (const p of groupById(who)?.presets ?? []) {
-      if (!p.effect) continue;
-      const st = s.groups?.[who];
-      const on = st?.preset === p.id;
-      pads.push(`<button type="button" class="pad effect${on ? ' active' : ''}" data-preset="${esc(p.id)}"><span class="fill"></span><i>${on ? 'Effect · on' : 'Effect'}</i><b>${esc(p.name)}</b></button>`);
+  // Effects from the library (the Effects page): the favourites; More shows the rest and the group's own effects.
+  const lib = layout.effects ?? [];
+  const fxGroups = effectTargets();
+  for (const e of lib) {
+    if (!e.favourite && !padsAll) continue;
+    const layer = libraryLayer(e);
+    const key = effectKey(layer);
+    const on = fxGroups.length > 0 && fxGroups.every((g) => s.groups?.[g]?.effect && effectKey(s.groups[g].effect) === key);
+    const stripe = `linear-gradient(90deg,${layer.colours.map((c) => c.hex).join(',')}${layer.colours.length < 2 ? ',' + layer.colours[0].hex : ''})`;
+    pads.push(`<button type="button" class="pad effect${on ? ' active' : ''}" data-lib="${esc(e.id)}"${fxGroups.length ? '' : ' disabled style="opacity:.35"'}>` +
+      `<span class="fill"></span><span class="stripe" style="background:${esc(stripe)}"></span><i>${on ? 'Effect · on' : e.favourite ? 'Effect ★' : 'Effect'}</i><b>${esc(e.name)}</b></button>`);
+  }
+  const own = who === 'all' ? [] : (groupById(who)?.presets ?? []).filter((p) => p.effect);
+  if (padsAll) {
+    for (const p of own) {
+      const on = s.groups?.[who]?.preset === p.id;
+      pads.push(`<button type="button" class="pad effect${on ? ' active' : ''}" data-preset="${esc(p.id)}"><span class="fill"></span><i>${on ? 'Effect · on' : 'Group'}</i><b>${esc(p.name)}</b></button>`);
     }
   }
-  const room = 15;
-  if (pads.length > room) pads.splice(room - 1, pads.length, '<button type="button" class="pad more" disabled title="The full list comes in a later step"><i>All</i><b>More…</b></button>');
+  const more = lib.some((e) => !e.favourite) || own.length > 0;
+  if (padsAll) pads.push('<button type="button" class="pad more" data-more="0"><i>Back to</i><b>Favourites</b></button>');
+  else if (more) pads.push(`<button type="button" class="pad more" data-more="1"><i>${lib.filter((e) => !e.favourite).length + own.length} more</i><b>More…</b></button>`);
+  $('pads').classList.toggle('all', padsAll);
   // Hold: Flash, full white while held, always on the real stage.
   const down = targets().length > 0 && targets().every((g) => state.flashing?.includes(g));
   pads.push(`<button type="button" class="pad hold${down ? ' down' : ''}" data-flash="1"><span class="fill" style="background:#ffffff"></span><i>Hold · live</i><b>Flash</b></button>`);
@@ -403,6 +447,11 @@ $('pads').addEventListener('click', (ev) => {
   if (!b || b.disabled) return;
   if (b.dataset.look) sendStage({ type: 'quickLook', id: b.dataset.look, ...(who === 'all' ? {} : { only: [who] }) });
   else if (b.dataset.preset) sendStage({ type: 'groupPreset', group: who, preset: b.dataset.preset, ...lastsNow() });
+  else if (b.dataset.lib) runLibraryEffect(b.dataset.lib);
+  else if (b.dataset.more) {
+    padsAll = b.dataset.more === '1';
+    render();
+  }
 });
 
 // How long: Stay, Pin, or a few beats (tapping the beats again takes the next step: 4, 8, 16, 32).
@@ -424,7 +473,7 @@ function runningEffect(s) {
   const p = presetOf(who, st.preset);
   const effect = st.effect ?? p?.effect ?? null;
   if (!effect) return null;
-  return { st, effect, name: p?.name && p.name !== 'Custom' ? p.name : 'Effect' };
+  return { st, effect, name: p?.name && p.name !== 'Custom' ? p.name : libraryName(effect) ?? 'Effect' };
 }
 
 const SPEEDS = [1, 2, 4, 8, 16];

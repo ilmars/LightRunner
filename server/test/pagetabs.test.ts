@@ -1,4 +1,4 @@
-// The page tabs on every page's top bar (web/shared/pagetabs.js): the same four links everywhere, the open page marked.
+// The page tabs on every page's top bar (web/shared/pagetabs.js): the same five links everywhere, the open page marked.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,14 +8,14 @@ import { PAGES, setupPageTabs } from '../../web/shared/pagetabs.js';
 
 const web = fileURLToPath(new URL('../../web/', import.meta.url));
 
-test('the tabs link the four pages in order and mark only the open one', () => {
+test('the tabs link the five pages in order and mark only the open one', () => {
   const nav = { dataset: { page: 'settings' }, innerHTML: '' };
   setupPageTabs(nav);
   const links = [...nav.innerHTML.matchAll(/<a href="([^"]+)" aria-label="([^"]+)"[^>]*?( aria-current="page")?>/g)];
-  assert.deepEqual(links.map((m) => m[1]), ['/operator/', '/patch/', '/settings/', '/timeline/']);
-  assert.deepEqual(links.map((m) => m[2]), ['Operator', 'Patch', 'Settings', 'Timeline']);
-  assert.deepEqual(links.map((m) => Boolean(m[3])), [false, false, true, false]);
-  assert.equal((nav.innerHTML.match(/<svg /g) ?? []).length, 4, 'an icon each');
+  assert.deepEqual(links.map((m) => m[1]), ['/operator/', '/patch/', '/settings/', '/timeline/', '/effects/']);
+  assert.deepEqual(links.map((m) => m[2]), ['Operator', 'Patch', 'Settings', 'Timeline', 'Effects']);
+  assert.deepEqual(links.map((m) => Boolean(m[3])), [false, false, true, false, false]);
+  assert.equal((nav.innerHTML.match(/<svg /g) ?? []).length, 5, 'an icon each');
 });
 
 test('every page has the tabs, naming itself, and a Full screen button', () => {

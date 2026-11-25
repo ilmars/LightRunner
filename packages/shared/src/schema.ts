@@ -166,6 +166,20 @@ export const EffectLayer = z.object({
 });
 export type EffectLayer = z.infer<typeof EffectLayer>;
 
+/**
+ * An effect in the show's library (the Effects page): built once, run on any group from the operator page. A favourite
+ * is on the operator page's pads; the rest are under More. `songColours`: it runs in the song's colour square's corners
+ * (the colours in `layer` are kept for when it doesn't).
+ */
+export const LibraryEffect = z.object({
+  id,
+  name: z.string().min(1).max(40),
+  favourite: z.boolean().default(false),
+  songColours: z.boolean().default(false),
+  layer: EffectLayer,
+});
+export type LibraryEffect = z.infer<typeof LibraryEffect>;
+
 /** The width of each stripe of an effect, one per colour: its `parts`, or 1 each when they don't match its colours. */
 export function stripeParts(l: Pick<EffectLayer, 'colours' | 'parts'>): number[] {
   return l.parts && l.parts.length === l.colours.length ? [...l.parts] : l.colours.map(() => 1);
@@ -548,6 +562,8 @@ export const Show = z.object({
   settings: Settings.default({ output: { kind: 'artnet', host: '2.255.255.255' }, outputEnabled: true, frameRate: 40, gamma: 2.2 }),
   stage: StagePlan.default({ grid: 10 }),
   timelines: z.array(Timeline).default([]),
+  /** The effect library (the Effects page). */
+  effects: z.array(LibraryEffect).default([]),
 });
 export type Show = z.infer<typeof Show>;
 

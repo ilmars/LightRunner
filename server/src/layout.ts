@@ -133,6 +133,8 @@ export interface OperatorLayout {
   basicLights: string | null;
   /** The show's colour square for songs without their own, or null (the page makes one from the groups' colours). */
   square: ColourSquare | null;
+  /** The effect library, colours as plain colours: favourites go on the pads, the rest under More. */
+  effects: { id: string; name: string; favourite: boolean; songColours: boolean; layer: LiveEffectLayer }[];
   /** The kept rows (a load never replaces them), Basic lights left out: it always stays. */
   kept: string[];
   /** Running-order items Next passes over: the kept rows while Planning is on and a service is loaded. */
@@ -278,6 +280,10 @@ export function operatorLayout(show: Show, fixtureOrder: string[], midi = false,
     }))),
     basicLights: show.operator.safeLook ?? null,
     square: show.operator.square ?? null,
+    effects: show.effects.map((e) => ({
+      id: e.id, name: e.name, favourite: e.favourite, songColours: e.songColours,
+      layer: resolveEffect(e.layer, palettes),
+    })),
     kept: keptOf(show),
     skip: planning && show.operator.service ? keptOf(show) : [],
     fromPlan: [...new Set((show.operator.service?.items ?? []).flatMap((i) => (i.look !== undefined && show.operator.runningOrder.includes(i.look) ? [i.look] : [])))],

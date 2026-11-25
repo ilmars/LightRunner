@@ -15,7 +15,7 @@ import { z, ZodError } from 'zod';
 import {
   BUILT_IN_PROFILES, Command, OscSettings, PlanningSettings, StandardSongsSettings, applyStandardSettings, standardChoices, standardSettingsOf, contactOf, OutputRoute, OutputSettings, addColour, addEffect, addSong, deleteColour, editColour, editEffect, keepLitPresets, applyPicks, clearService, useStandardSongs, deleteItem, describeMode, diffShows, ensureBasicLights, ensureEffects, ensureGroupColours, ensureKept, ensurePlanning, ensureRunningOrder, isManualCommand, loadService, plannedCount, rememberKey,
   applyQuickLookToItem, copyLookToItem, saveServiceItem, deleteQuickLook, editQuickLook, isBlindCommand, isEffectPreset, isSectionLook, isShowEdit, moveItem, moveQuickLook, oflToProfile, outputAddressProblem, parseShow, planRoutes, profileSegments, renameItem, saveItem, saveQuickLook, setColourSquare, setItemGroup, setItemTempo, setItemTimeline, setKept, type OflFixture, type Pick, type PlannedService, type Scope,
-  BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, Timeline,
+  BLACKOUT, LiveEffectLayer, TimelineMessage, commandFor, type TimelineEnded, type TimelineEndReason, lightGroups, nextItemId, stageIndexOf, type BlindCommand, type DeviceAction, type LiveState, type PresetPin, type RuntimeState, type Show, type ShowEdit, type StageCommand, LibraryEffect, Timeline,
   FADE_STEPS, KeyTarget, TapTempo, assignKey, bindingOf, clearKey, controllerOf, isApcMini, isLevelTarget, isOperatorKeyTarget, keepControllerKeys, keyOf, keyTargetProblem,
   pruneKeys, resetApcKeys, sameTarget, targetName, type ControlKey,
   drivenGroups, ensureSectionLook, saveSectionChange, sectionLookOf, type FollowStart, type LiveSlide, type SectionRef,
@@ -1082,6 +1082,15 @@ export class App {
    * drafts or the devices, and with no new layout for the pages: none of them use timelines. The runners read
    * this.show's timelines on every tick.
    */
+  /** The Effects page's saves: like a timeline's (no Undo step), and the operator page hears of them at once. */
+  private effectsSave(effects: LibraryEffect[], backup = false): void {
+    const show: Show = { ...this.show, effects };
+    this.store.saveShow(show, { backup: backup || !this.operatorBackedUp });
+    this.show = show;
+    this.operatorBackedUp = true;
+    if (this.layout) this.refreshLayout();
+  }
+
   private timelinesSave(timelines: Timeline[], backup = false): void {
     // The operator page lists the timelines (Edit list's Timeline ▾): it hears of a new name, a Loop or a delete.
     const listed = (list: Timeline[]) => JSON.stringify(list.map((t) => [t.id, t.name, !!t.loop]));
@@ -2137,6 +2146,7 @@ export class App {
       'PUT /api/controller', 'POST /api/keys/reset',
       'GET /api/recordings', 'POST /api/recordings', 'GET /api/recordings/file', 'DELETE /api/recordings',
       'PUT /api/timeline', 'DELETE /api/timeline',
+      'PUT /api/effect', 'DELETE /api/effect',
       'GET /api/planning', 'PUT /api/planning/login',
     ];
     if (!routes.includes(route)) return false;
@@ -2344,6 +2354,29 @@ export class App {
         // on its next tick.
         this.timelinesSave(timelines);
         json(res, 200, timeline);
+        return true;
+      }
+      case 'PUT /api/effect': {
+        // The Effects page saves one effect at a time: replaced by id, or added at the end.
+        const parsed = LibraryEffect.safeParse(await readJson(req));
+        if (!parsed.success) throw new HttpError(400, `That isn't an effect: ${parsed.error.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ')}`);
+        const effect = { ...parsed.data, name: parsed.data.name.trim() };
+        if (!effect.name) throw new HttpError(400, 'Give the effect a name.');
+        if (this.show.effects.some((e) => e.id !== effect.id && e.name.toLowerCase() === effect.name.toLowerCase())) throw new HttpError(409, `There is already an effect called "${effect.name}".`);
+        const effects = [...this.show.effects];
+        const at = effects.findIndex((e) => e.id === effect.id);
+        if (at >= 0) effects[at] = effect;
+        else effects.push(effect);
+        this.effectsSave(effects);
+        json(res, 200, effect);
+        return true;
+      }
+      case 'DELETE /api/effect': {
+        const id = url.searchParams.get('id') ?? '';
+        if (!this.show.effects.some((e) => e.id === id)) throw new HttpError(404, 'There is no such effect.');
+        // Groups running it on stage carry on: what they run is their own copy.
+        this.effectsSave(this.show.effects.filter((e) => e.id !== id), true);
+        json(res, 200, { ok: true });
         return true;
       }
       case 'DELETE /api/timeline': {
