@@ -404,7 +404,9 @@ function renderPads() {
     b.classList.toggle('on', b.dataset.how === how);
     b.setAttribute('aria-checked', String(b.dataset.how === how));
   }
-  $('howBeats').textContent = `${whileBeats} beats`;
+  $('howBeats').textContent = `For ${whileBeats} beats`;
+  // A while is on: the switch says so in amber, as the changes it makes are marked.
+  $('hows').classList.toggle('while', how === 'beats');
   renderFxBar(s);
   const pads = [];
   // Looks: the quick looks; with a group picked, only those that set it, for that group alone.
