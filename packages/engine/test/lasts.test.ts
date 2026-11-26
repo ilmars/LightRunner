@@ -153,3 +153,27 @@ test('a restart keeps pins', () => {
   again.apply({ type: 'look', id: 'response', fade: 0 }, 1);
   assert.equal(group(again, 1).preset, saved.groups[G]);
 });
+
+test('a pin made in a Prepare draft goes live with Go, and Next then leaves that group alone', () => {
+  const live = new Engine(demoShow());
+  live.apply({ type: 'look', id: 'worship', fade: 0 }, 0);
+  // The draft: a copy of the stage, where the effect is started pinned.
+  const draft = new Engine(demoShow());
+  draft.restore(live.runtime(), 0);
+  draft.apply(effect({ lasts: 'pin' }), 1);
+  const stage = draft.runtime();
+  assert.deepEqual(stage.pinned, [G]);
+  // Go.
+  assert.equal(live.apply({ type: 'applyStage', stage, fade: 0 }, 2), null);
+  assert.equal(group(live, 2).pinned, true);
+  const fx = group(live, 2).preset;
+  live.apply({ type: 'look', id: 'response', fade: 0 }, 3);
+  assert.equal(group(live, 3).preset, fx);
+  // A draft without pins takes a live pin away with Go: the stage becomes the draft.
+  const plain = new Engine(demoShow());
+  plain.restore(live.runtime(), 0);
+  plain.apply({ type: 'pin', group: G, on: false }, 0);
+  // (Go always sends the draft's pins, none included.)
+  live.apply({ type: 'applyStage', stage: { ...plain.runtime(), pinned: plain.runtime().pinned ?? [] }, fade: 0 }, 4);
+  assert.equal(group(live, 4).pinned, false);
+});

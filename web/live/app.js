@@ -297,6 +297,8 @@ function renderTop() {
   $('nowName').textContent = prep.on ? `${stepName(shown())}  ·  on stage: ${stepName(state)}` : stepName(state);
   $('fadeValue').textContent = state.fadeTime === null ? 'Auto' : state.fadeTime === 0 ? 'Instant' : `${state.fadeTime} s`;
   $('tempoValue').textContent = String(Math.round(state.tempo));
+  if (menuOpen?.menu === $('tempoMenu') && document.activeElement !== $('tempoField')) $('tempoField').value = String(Math.round(state.tempo));
+  if (menuOpen?.menu === $('fadeMenu')) renderFadeMenu();
   $('masterValue').textContent = `${Math.round(state.master * 100)} %`;
   $('liveBtn').classList.toggle('on', !prep.on);
   $('liveBtn').setAttribute('aria-pressed', String(!prep.on));
@@ -494,8 +496,16 @@ function runningEffect(s) {
 
 function renderFxBar(s) {
   const fx = runningEffect(s);
-  $('fxBar').hidden = !fx;
-  if (!fx) return;
+  // The bar keeps its place with nothing running, so the pads never move when an effect starts or stops.
+  $('fxBar').classList.toggle('idle', !fx);
+  for (const id of ['fxPin', 'fxFreeze', 'fxStop']) $(id).disabled = !fx;
+  if (!fx) {
+    $('fxName').textContent = who === 'all' ? 'Effects' : `${shortName(groupById(who)?.name ?? '')} · no effect`;
+    $('fxNote').textContent = who === 'all' ? 'pick a group to pin, freeze or stop its effect' : 'start one from the pads';
+    $('fxPin').setAttribute('aria-pressed', 'false');
+    $('fxFreeze').setAttribute('aria-pressed', 'false');
+    return;
+  }
   $('fxName').textContent = `${shortName(groupById(who)?.name ?? '')} · ${fx.name}`;
   $('fxNote').textContent = lastingTag(fx.st) || 'until Next';
   $('fxPin').setAttribute('aria-pressed', String(fx.st.pinned));
@@ -1364,10 +1374,72 @@ $('sStart').addEventListener('click', () => {
 
 // ---- Top bar: Fade steps through the choices; Tap sets the tempo from the last few taps ----
 
-const FADES = [null, 0, 1, 2, 3, 5, 10];
+// The Fade and Tempo menus open under their button; a tap anywhere else closes them. Fade and Tempo always change the
+// real stage (Prepare too), as on today's operator page.
+const FADES = [[null, 'Auto', "each look's own"], [0, 'Instant'], [1, '1 s'], [2, '2 s'], [3, '3 s'], [5, '5 s'], [10, '10 s']];
+let menuOpen = null;
+function openMenu(id, button) {
+  closeMenu();
+  const menu = $(id);
+  menu.hidden = false;
+  const r = button.getBoundingClientRect();
+  const w = menu.offsetWidth;
+  menu.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
+  menu.style.top = `${r.bottom + 8}px`;
+  button.classList.add('open');
+  menuOpen = { menu, button };
+}
+function closeMenu() {
+  if (!menuOpen) return;
+  menuOpen.menu.hidden = true;
+  menuOpen.button.classList.remove('open');
+  menuOpen = null;
+}
+document.addEventListener('pointerdown', (ev) => {
+  if (!menuOpen || !(ev.target instanceof Element)) return;
+  if (menuOpen.menu.contains(ev.target) || menuOpen.button.contains(ev.target)) return;
+  closeMenu();
+}, true);
+
+function renderFadeMenu() {
+  const now = state?.fadeTime ?? null;
+  setHtml($('fadeChoices'), FADES.map(([v, label, note]) =>
+    `<button type="button" role="menuitemradio" aria-checked="${v === now}" class="${v === now ? 'on' : ''}" data-fade="${v === null ? 'auto' : v}">${label}${note ? `<small>${note}</small>` : ''}</button>`).join(''));
+}
 $('fadeBtn').addEventListener('click', () => {
-  const i = FADES.indexOf(state?.fadeTime ?? null);
-  send({ type: 'fadeTime', value: FADES[(i + 1) % FADES.length] });
+  if (menuOpen?.menu === $('fadeMenu')) return closeMenu();
+  renderFadeMenu();
+  openMenu('fadeMenu', $('fadeBtn'));
+});
+$('fadeChoices').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-fade]');
+  if (!b) return;
+  send({ type: 'fadeTime', value: b.dataset.fade === 'auto' ? null : Number(b.dataset.fade) });
+  closeMenu();
+});
+
+const clampBpm = (v) => Math.max(40, Math.min(240, Math.round(v)));
+$('tempoBtn').addEventListener('click', () => {
+  if (menuOpen?.menu === $('tempoMenu')) return closeMenu();
+  $('tempoField').value = String(Math.round(state?.tempo ?? 120));
+  openMenu('tempoMenu', $('tempoBtn'));
+});
+$('tempoMenu').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-step]');
+  if (!b || !state) return;
+  const now = state.tempo;
+  const step = b.dataset.step;
+  const bpm = clampBpm(step === 'half' ? now / 2 : step === 'double' ? now * 2 : now + Number(step));
+  if ((step === 'half' && now / 2 < 40) || (step === 'double' && now * 2 > 240)) toast('The tempo goes from 40 to 240 bpm.');
+  send({ type: 'tempo', bpm });
+  $('tempoField').value = String(bpm);
+});
+$('tempoField').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter') return;
+  const v = Number($('tempoField').value);
+  if (!Number.isFinite(v) || v <= 0) return toast('Type the tempo in beats per minute, 40 to 240.');
+  send({ type: 'tempo', bpm: clampBpm(v) });
+  closeMenu();
 });
 let taps = [];
 $('tapBtn').addEventListener('click', () => {

@@ -103,7 +103,7 @@
           <span class="caps how-label">beats</span></span>
         </div>
         <!-- While the picked group runs an effect: Pin, Freeze and Stop (its speed is at the top of the pads). -->
-        <div id="fxBar" class="fx-bar" hidden>
+        <div id="fxBar" class="fx-bar idle">
           <div class="fx-name"><span id="fxName" class="title"></span><span id="fxNote" class="sub"></span></div>
           <button id="fxPin" class="btn" type="button" aria-pressed="false">Pin</button>
           <button id="fxFreeze" class="btn" type="button" aria-pressed="false">Freeze</button>
@@ -164,6 +164,23 @@
     </footer>
   </div>
 
+  <!-- Fade: the fade for every change (Auto: each look's own). -->
+  <div id="fadeMenu" class="menu" role="menu" aria-label="Fade time" hidden>
+    <span class="caps">Fade for every change</span>
+    <div id="fadeChoices" class="menu-grid"></div>
+  </div>
+  <!-- Tempo: type it, or step it; Tap stays in the top bar. -->
+  <div id="tempoMenu" class="menu" role="dialog" aria-label="Tempo" hidden>
+    <span class="caps">Tempo</span>
+    <label class="menu-field"><input id="tempoField" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" enterkeyhint="done" autocomplete="off" aria-label="Tempo in beats per minute"><span>bpm</span></label>
+    <div class="menu-grid four">
+      <button type="button" data-step="half" aria-label="Half the tempo">÷2</button>
+      <button type="button" data-step="-1" aria-label="One beat per minute slower">−</button>
+      <button type="button" data-step="1" aria-label="One beat per minute faster">+</button>
+      <button type="button" data-step="double" aria-label="Double the tempo">×2</button>
+    </div>
+    <span id="tempoNote" class="sub">40 to 240 bpm. Effects count their speed in beats.</span>
+  </div>
   <div id="toast" class="toast" hidden></div>
   <script type="module" src="app.js"></script>
 </body>

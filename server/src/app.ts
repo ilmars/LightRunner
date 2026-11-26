@@ -1176,7 +1176,9 @@ export class App {
         if (!session) return done(BLIND_OFF);
         let stage: RuntimeState;
         try {
-          stage = session.engine.runtime();
+          // The draft's pins go too, none included: after Go the stage is the draft.
+          const drafted = session.engine.runtime();
+          stage = { ...drafted, pinned: drafted.pinned ?? [] };
         } catch (err) {
           return done(this.draftProblem(tablet, err));
         }

@@ -47,6 +47,8 @@ export const StageState = z.object({
   /** The live effects `groups` names. */
   effects: z.record(stagePreset, EffectLayer).optional(),
   lastLook: id.nullable().optional(),
+  /** Groups whose colour or effect is pinned (a draft's pins go live with Go). Absent: pins are left as they are. */
+  pinned: z.array(id).optional(),
 });
 export type StageState = z.infer<typeof StageState>;
 

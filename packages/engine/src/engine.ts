@@ -1045,6 +1045,11 @@ export class Engine {
       }
     }
     this.beforeBlackout = null;
+    // The stage's pins (a Prepare draft's, with Go): each light group pinned as the stage has it.
+    if (stage.pinned) {
+      const pinned = new Set(stage.pinned);
+      for (const group of this.groups.values()) if (!group.smoke) group.pinned = pinned.has(group.id);
+    }
     if (stage.tempo !== undefined) this.bpm = stage.tempo;
     if (stage.look && this.looks.has(stage.look)) this.lastLook = stage.look;
     else if (stage.lastLook) this.lastLook = stage.lastLook;
