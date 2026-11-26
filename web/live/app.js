@@ -26,12 +26,11 @@ let ref = 0;
 let who = 'all';
 /** Where the colour square was last tapped, for its dot: { u, v, colour }. */
 let puck = null;
-/** How long a colour or effect started from the pads or the square lasts: 'stay', 'pin' or 'beats' (whileBeats of them). */
-let how = 'stay';
-let whileBeats = 8;
-const BEAT_STEPS = [4, 8, 16, 32];
+// What the pads and the square start lasts until it is changed or the next cue; the effect bar's Pin keeps an effect
+// through Next. (The engine can also end a change after some beats, `lasts`; the page doesn't offer it now: next to the
+// pads a beats control reads as the effect's speed.)
 /** The `lasts` a command carries for the choice (see Lasts in protocol.ts); nothing for Stay. */
-const lastsNow = () => (how === 'pin' ? { lasts: 'pin' } : how === 'beats' ? { lasts: whileBeats } : {});
+const lastsNow = () => ({});
 
 /**
  * Prepare. `state` and `visual` are the draft's (null until the server sends them). `session` counts the times it went on
@@ -386,8 +385,8 @@ function libraryLayer(e) {
   return { ...e.layer, colours };
 }
 
-/** What makes two effects the same on the pads: the movement, its direction, speed and colours. */
-const effectKey = (l) => JSON.stringify([l.effect, l.direction ?? 'ltr', l.speed, (l.colours ?? []).map((c) => (c.hex ?? '').toLowerCase())]);
+/** What makes two effects the same on the pads: the movement, its direction and colours (not the speed: Speed changes it). */
+const effectKey = (l) => JSON.stringify([l.effect, l.direction ?? 'ltr', (l.colours ?? []).map((c) => (c.hex ?? '').toLowerCase())]);
 
 /** Runs a library effect on the picked groups that have colour, lasting as the Stay / Pin / beats switch says. */
 function runLibraryEffect(id) {
@@ -400,13 +399,7 @@ function runLibraryEffect(id) {
 function renderPads() {
   const s = shown();
   $('padsFor').textContent = `for ${whoName()}`;
-  for (const b of $('hows').querySelectorAll('button')) {
-    b.classList.toggle('on', b.dataset.how === how);
-    b.setAttribute('aria-checked', String(b.dataset.how === how));
-  }
-  $('howBeats').textContent = `For ${whileBeats} beats`;
-  // A while is on: the switch says so in amber, as the changes it makes are marked.
-  $('hows').classList.toggle('while', how === 'beats');
+  renderSpeed(s);
   renderFxBar(s);
   const pads = [];
   // Looks: the quick looks; with a group picked, only those that set it, for that group alone.
@@ -456,16 +449,37 @@ $('pads').addEventListener('click', (ev) => {
   }
 });
 
-// How long: Stay, Pin, or a few beats (tapping the beats again takes the next step: 4, 8, 16, 32).
-$('hows').addEventListener('click', (ev) => {
-  const b = ev.target.closest('button[data-how]');
-  if (!b) return;
-  if (b.dataset.how === 'beats' && how === 'beats') whileBeats = BEAT_STEPS[(BEAT_STEPS.indexOf(whileBeats) + 1) % BEAT_STEPS.length];
-  how = b.dataset.how;
-  render();
+// ---- Speed: one round of the running effect every 1 to 16 beats, on every picked group that runs one ----
+
+const SPEEDS = [1, 2, 4, 8, 16];
+
+/** The effect group `g` runs on stage `s` (a live effect, or a preset that is one), or null. */
+function effectOf(g, s) {
+  const st = s?.groups?.[g];
+  if (!st?.preset) return null;
+  return st.effect ?? presetOf(g, st.preset)?.effect ?? null;
+}
+
+function renderSpeed(s) {
+  const running = targets().map((g) => effectOf(g, s)).filter(Boolean);
+  const beats = new Set(running.map((e) => (e.speed && 'beats' in e.speed ? e.speed.beats : null)));
+  const now = beats.size === 1 ? [...beats][0] : null;
+  const none = running.length === 0;
+  setHtml($('padSpeed'), SPEEDS.map((n) =>
+    `<button type="button" data-beats="${n}" class="${now === n ? 'on' : ''}"${none ? ' disabled' : ''} title="${none ? 'Start an effect first' : `One round every ${n} beat${n > 1 ? 's' : ''}`}">${n}</button>`).join(''));
+}
+$('padSpeed').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-beats]');
+  if (!b || b.disabled) return;
+  const s = shown();
+  for (const g of targets()) {
+    const effect = effectOf(g, s);
+    // A copy at the new speed, carrying on from where its pattern is, in the same colours; a pin stays.
+    if (effect) sendStage({ type: 'groupEffect', group: g, effect: { ...effect, speed: { beats: Number(b.dataset.beats) } }, fade: 0.5, continues: true });
+  }
 });
 
-// ---- The picked group's running effect: speed (beats for one round), Pin, Freeze and Stop ----
+// ---- The picked group's running effect: Pin, Freeze and Stop ----
 
 /** The effect the picked group runs on stage `s`, with its name, or null. */
 function runningEffect(s) {
@@ -478,26 +492,15 @@ function runningEffect(s) {
   return { st, effect, name: p?.name && p.name !== 'Custom' ? p.name : libraryName(effect) ?? 'Effect' };
 }
 
-const SPEEDS = [1, 2, 4, 8, 16];
 function renderFxBar(s) {
   const fx = runningEffect(s);
   $('fxBar').hidden = !fx;
   if (!fx) return;
   $('fxName').textContent = `${shortName(groupById(who)?.name ?? '')} · ${fx.name}`;
   $('fxNote').textContent = lastingTag(fx.st) || 'until Next';
-  const beats = fx.effect.speed && 'beats' in fx.effect.speed ? fx.effect.speed.beats : null;
-  setHtml($('fxSpeed'), SPEEDS.map((n) =>
-    `<button type="button" data-beats="${n}" class="${beats === n ? 'on' : ''}" title="One round every ${n} beat${n > 1 ? 's' : ''}">${n}</button>`).join(''));
   $('fxPin').setAttribute('aria-pressed', String(fx.st.pinned));
   $('fxFreeze').setAttribute('aria-pressed', String(fx.st.frozen));
 }
-$('fxSpeed').addEventListener('click', (ev) => {
-  const b = ev.target.closest('button[data-beats]');
-  const fx = runningEffect(shown());
-  if (!b || !fx) return;
-  // A copy of the effect at the new speed, carrying on from where its pattern is; it keeps its pin or its beats.
-  sendStage({ type: 'groupEffect', group: who, effect: { ...fx.effect, speed: { beats: Number(b.dataset.beats) } }, fade: 0.5, continues: true });
-});
 $('fxPin').addEventListener('click', () => {
   const fx = runningEffect(shown());
   if (fx) sendStage({ type: 'pin', group: who, on: !fx.st.pinned });

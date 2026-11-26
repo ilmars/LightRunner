@@ -97,17 +97,14 @@
           <span class="title">Pads</span><span id="padsFor" class="sub">for all lights</span>
           <span class="grow"></span>
           <!-- How long a colour or effect started from here lasts: until the next cue, pinned, or a few beats. -->
-          <span class="how-wrap"><span class="caps how-label">How long</span>
-          <div id="hows" class="seg small" role="radiogroup" aria-label="How long a colour or effect lasts">
-            <button type="button" data-how="stay" title="Until you change it or press Next">Stay</button>
-            <button type="button" data-how="pin" title="Keeps going through Next until you turn it off">Pin</button>
-            <button type="button" data-how="beats" id="howBeats" title="Only for this many beats, then back to the cue's colours. Tap again for more beats.">For 8 beats</button>
-          </div></span>
+          <!-- Speed: one round of the running effect every 1 to 16 beats, on the picked groups. Its colours and pattern carry on. -->
+          <span class="how-wrap"><span class="caps how-label">Speed</span>
+          <div id="padSpeed" class="seg small" role="radiogroup" aria-label="Speed: beats for one round of the running effect"></div>
+          <span class="caps how-label">beats</span></span>
         </div>
-        <!-- While the picked group runs an effect: its speed, Pin, Freeze and Stop. -->
+        <!-- While the picked group runs an effect: Pin, Freeze and Stop (its speed is at the top of the pads). -->
         <div id="fxBar" class="fx-bar" hidden>
           <div class="fx-name"><span id="fxName" class="title"></span><span id="fxNote" class="sub"></span></div>
-          <div id="fxSpeed" class="seg small" role="radiogroup" aria-label="Speed: beats for one round"></div>
           <button id="fxPin" class="btn" type="button" aria-pressed="false">Pin</button>
           <button id="fxFreeze" class="btn" type="button" aria-pressed="false">Freeze</button>
           <button id="fxStop" class="btn" type="button">Stop</button>
