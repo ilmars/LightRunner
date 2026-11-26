@@ -143,3 +143,22 @@ What the restyle fixed, from a read-through of all three pages before the work:
 - **Held states** (Save, Blackout, Flash) each looked different.
 - **Some operator targets were under 44 px:** the dimmers (40 px, now 44 px), the rename field (40 px, now 44 px) and the Master track (28 px, now 32 px inside a 58 px strip).
 - **The operator toast was always red,** even for "Saved".
+
+## The stage look (the new operator page)
+
+The new operator page (`/live/`) has its own look, from the design talk of 25 Nov 2026 (Home A's style, toned down for
+a dark room; see the 25 Nov entries in [DECISIONS.md](DECISIONS.md)). It lives in `web/shared/theme.css` beside the
+design system above: a page takes it with `<body class="ds-stage">`, and its tokens are `--st-*`. Pages without the
+class (Patch, Settings, Timeline, Effects, the old operator page) keep the tokens above.
+
+- **Ground and surfaces:** near-black `--st-bg`, flat panels `--st-panel`, tiles `--st-tile`, with a faint white edge
+  (`--st-edge`, `--st-edge-hi`). No glass, no navy.
+- **Type:** Inter Tight (`--st-font`, Inter while it loads), bundled in `web/shared/fonts` so it works offline.
+- **Picked:** a faint light fill and edge (`--st-picked-fill`, `--st-picked-edge`), never a solid white pill.
+- **Go, Next and the step on stage:** a dim orange tint, edge and text (`--st-go-*`), never solid orange.
+- **Changed and pinned:** amber (`--st-changed*`). **Prepare:** violet (`--st-violet*`), with a frame round the screen.
+  **Blackout:** red text and edge (`--st-danger*`).
+- **Shapes:** pill-shaped group buttons and switches; panels `--st-r-panel` (16 px), pads `--st-r-tile` (14 px),
+  buttons `--st-r-btn` (12 px); gaps `--st-gap` (10 px). Touch targets stay at least 44 px.
+- **Brightness:** the colour square, the warm-to-cool strip and their dot are dimmed alike (so the dot matches the spot
+  under it); look pads show their colours at about 40 % (60 % for the one on stage). Nothing large is bright.

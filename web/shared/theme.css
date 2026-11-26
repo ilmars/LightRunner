@@ -27,6 +27,25 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+/* Inter Tight (variable, weights 100–900), the stage look's face (below); Inter stands in while it loads. Inter Tight
+   5.2.7 from @fontsource-variable/inter-tight, under the SIL Open Font License (fonts/OFL-InterTight.txt). */
+@font-face {
+  font-family: 'Inter Tight';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(fonts/inter-tight-latin-ext-wght-normal.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter Tight';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(fonts/inter-tight-latin-wght-normal.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
   /* Page and panels, darkest to lightest (the designer's restyle, 20 Oct 2026). */
   --ds-bg: #090F1C;
@@ -395,4 +414,41 @@ select.ds-field option { background: var(--ds-surface); color: var(--ds-text); }
 }
 .ds-stage-grip--corner:hover::after, .ds-stage-grip--corner.dragging::after {
   background: linear-gradient(135deg, transparent 52%, rgba(148, 163, 184, 0.55) 52% 60%, transparent 60% 76%, rgba(148, 163, 184, 0.55) 76% 84%, transparent 84%);
+}
+
+/* ---- The stage look: the new operator page (web/live/), Home A's style toned down for a dark room ----
+   Near-black ground, flat dark panels, pill buttons, Inter Tight. Picked things get a faint light fill and edge; Go,
+   Next and the step on stage a dim orange; amber marks a change, violet Prepare, red Blackout. Nothing bright.
+   A page takes it with <body class="ds-stage">; pages without the class keep the tokens above. See
+   docs/design-system.md, "The stage look". */
+.ds-stage {
+  --st-bg: #0c0d11;
+  --st-panel: #15171d;
+  --st-tile: #1d2028;
+  --st-tile-hi: #23262f;
+  --st-edge: rgba(255, 255, 255, 0.06);
+  --st-edge-hi: rgba(255, 255, 255, 0.1);
+  --st-text: #eceef3;
+  --st-muted: #8a8f9c;
+  --st-dim: #5b606c;
+  --st-picked-fill: rgba(236, 238, 243, 0.12);
+  --st-picked-edge: rgba(236, 238, 243, 0.32);
+  --st-go-fill: rgba(255, 138, 92, 0.15);
+  --st-go-edge: rgba(255, 138, 92, 0.5);
+  --st-go-text: #f2b49a;
+  --st-go-sub: #c99a87;
+  --st-changed: #ffb35a;
+  --st-changed-fill: rgba(255, 179, 90, 0.12);
+  --st-changed-edge: rgba(255, 179, 90, 0.38);
+  --st-danger: #ff9a9a;
+  --st-danger-edge: rgba(255, 154, 154, 0.22);
+  --st-violet: #b9a6ff;
+  --st-violet-fill: rgba(185, 166, 255, 0.13);
+  --st-violet-edge: rgba(185, 166, 255, 0.5);
+  --st-r-panel: 16px;
+  --st-r-tile: 14px;
+  --st-r-btn: 12px;
+  --st-gap: 10px;
+  --st-font: 'Inter Tight', Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
 }

@@ -501,7 +501,7 @@ function renderFxBar(s) {
   for (const id of ['fxPin', 'fxFreeze', 'fxStop']) $(id).disabled = !fx;
   if (!fx) {
     $('fxName').textContent = who === 'all' ? 'Effects' : `${shortName(groupById(who)?.name ?? '')} · no effect`;
-    $('fxNote').textContent = who === 'all' ? 'pick a group to pin, freeze or stop its effect' : 'start one from the pads';
+    $('fxNote').textContent = who === 'all' ? 'pick one group' : 'start one from the pads';
     $('fxPin').setAttribute('aria-pressed', 'false');
     $('fxFreeze').setAttribute('aria-pressed', 'false');
     return;
@@ -1468,7 +1468,7 @@ function drawStage() {
   const s = shown();
   drawStagePicture(ctx, w, h, layout, prep.on ? prep.visual ?? NO_VISUAL : visual, (g) => s?.groups?.[g]?.level ?? 0, { view: 'front' });
   const off = !prep.on && state?.look === 'blackout';
-  ctx.font = '600 10px Inter, system-ui, sans-serif';
+  ctx.font = "600 10px 'Inter Tight', Inter, system-ui, sans-serif";
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0.9px';
   ctx.fillStyle = prep.on ? '#b9a6ff' : off ? '#ff9a9a' : '#8a8f9c';
   ctx.textAlign = 'right';
